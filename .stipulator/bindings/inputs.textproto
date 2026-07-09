@@ -1,0 +1,38 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-inputs-guard"
+  content_hash: "feaf1294b403172663503222c9f5ed8b8f90ae6a88b12e38532578494f06c907"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFileDigestChanges"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "500a4e97c91ac3f9723d1720197835bbcabe57600e1dbdafb1c46eaa7830d794"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "84ccbdba2d8d978a3dd0d4a0383f02dbf4fd222442899bb765450b0fb39aff71"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestUncommitted"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "91a024bf81ce5241e0567ecaa0fc69a9bf36449da08d9b0bd54deebc74f471ac"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-unbounded"
+  content_hash: "95f459dea6c43d3dd67ef04749f0fa7e9215665fb46b9a43a098e8c9cb75c48b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservationIsUnverifiable"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "513d03ed2866534de7883a54fb7946515c8812b15b6b7f6cf4c7f9450f448e48"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-evidence-not-proof"
+  content_hash: "4102aad1d3fc588cb5682208ad24a8aa4fe43efe21f30ef6b76bdd0bc9add802"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservationIsUnverifiable"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "513d03ed2866534de7883a54fb7946515c8812b15b6b7f6cf4c7f9450f448e48"
+}

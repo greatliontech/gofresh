@@ -1,0 +1,47 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-fresh-verdict"
+  content_hash: "0e7e9a34100b7a28592100cabcb282cc6227b384f8ffc0b1650e4b45eabfd973"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestDecide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-guard-set"
+  content_hash: "3cc9f2aef254fcd0735ddacce6ab5ee9da3656c1a2dbd82c6baf65cb48343706"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCompareCodeVsMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bb6679a91ffd1ca133bb44aa134ab758d31b39b4ddd90a279eb71563651a22dd"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-compose"
+  content_hash: "7b6f0e4988f8f94d36ae69f7672ef1c84f3cb1ef1819a236913dcfac1a4260bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCaptureCheckRoundTrip"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d10c9a76161acc3dfc13138178b4e3c98008f8e377ccce244aece5ba4ddf9d3a"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-sound"
+  content_hash: "a3f67afbbccdd0cb9205c6d7d37957dc35de3fbf217102dfa90ba7805cfad9b4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestDecide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-commit-independent"
+  content_hash: "7bb3360450f8a60923a5cf060035d19a351f448c25de60d99a264f728ac2bcd4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestDecide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
+}

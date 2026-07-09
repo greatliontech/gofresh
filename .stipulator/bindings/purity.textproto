@@ -1,0 +1,20 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-purity-override"
+  content_hash: "76d09c9f7ca741505196313245486f8a0bc0f91aa708736cbb9982ea82868bdb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAssumePureOverride"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9d3d28f1447abe398cdb2a0ac69cb8c36e8aed06975891beb69d87958ed6acce"
+}
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "1429dce63f2b13a644b67cd4d03d3ab2272b460218ab67159f9d42099d9294f3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestScanPureDirectives"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ab7aae3000bf7e820e9a44d73295ca0765eae18246677d5db1705be5a9c9202c"
+}

@@ -1,0 +1,83 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-guard-equality"
+  content_hash: "114b41ed47a35bfad20be93bd6ec6350294c20043eb03102f49912ecdf1da052"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCompareCodeVsMeasurement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bb6679a91ffd1ca133bb44aa134ab758d31b39b4ddd90a279eb71563651a22dd"
+}
+
+bindings {
+  requirement_id: "REQ-guard-toolchain"
+  content_hash: "4878944eaa8854468410b553faa044714eea7000dd924a322ca7103962a9c478"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureNonEmpty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6fd92d138f851e41e5372b38dd70954dafd4b65165448c1c3badf435f6b34323"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "12702f52a007642945e80aeabdddfa7d0bc0ed121a95b2384a6248c998a775e4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestBuildConfigDigestsBuildInputs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b6c186652874a38c81196a8f511d05841a5e8bda2fd75f6d84427da9b7f624ca"
+}
+
+bindings {
+  requirement_id: "REQ-guard-machine"
+  content_hash: "e8703aa4fb99888639025983bcb8ec92e3ff4eec77caa201e99815a82eaa746b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestFingerprintStableAndSensitive"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4703347557a4aceba751b660f491ac307c646a11866274c607214fdaf98f7070"
+}
+
+bindings {
+  requirement_id: "REQ-guard-machine-transient"
+  content_hash: "d7f9bc7537a14d536c70c3e85232f98d7cd39d2bc941b91d8eba2bcf5aaf0e02"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestMachineFactsExcludesTransient"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e7fde07af9c0e0ec2efe7f409aeeed38643309a4787e6a7865fc3eb40f5512f5"
+}
+
+bindings {
+  requirement_id: "REQ-guard-runtimeconfig"
+  content_hash: "368d93d23b51c1981f972acc8a8d0eea91451771064cfe65f8b104522d245932"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestRuntimeConfigSensitive"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "000a555b7cb2b149f29147628c1a25439c88b302cf67ca691f573ca963169adb"
+}
+
+bindings {
+  requirement_id: "REQ-guard-recompute"
+  content_hash: "40e8f70c7afd121a5a4d4dff8a2105b319e154ef611a53c498cce5eb323e6383"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCaptureCheckRoundTrip"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d10c9a76161acc3dfc13138178b4e3c98008f8e377ccce244aece5ba4ddf9d3a"
+}
+
+bindings {
+  requirement_id: "REQ-guard-cache"
+  content_hash: "9faf2c00c6e199dc47ffa03c5eba6b3ac80063777fe4564d05ae073d740b03ca"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureCacheMemoizes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b393482359f48a370acdc8b0c8ba3b53f4d8eac7b07b40d72d1e7a70a00c0f7a"
+}
+
+bindings {
+  requirement_id: "REQ-guard-completeness"
+  content_hash: "24dffdef598935c994705e9fa18a173362996b86a195241a3f0dad1fde1eea03"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCompareCompleteness"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "663b185ec6805e62430d4705d490343c8eb35b33f9e7b17af10323f0889cb59a"
+}

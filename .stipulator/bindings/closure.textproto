@@ -1,0 +1,65 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-closure-stdlib-cut"
+  content_hash: "735f68b281e505fd2541a874d5cb7f440d78b33baaafae84188ed434c73e2396"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestContribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "40ef05eae1e6e584c8abf3d81f5daebf6f9d7967a3d71ddee45cbbf7ec725f09"
+}
+
+bindings {
+  requirement_id: "REQ-closure-blindspot"
+  content_hash: "6affdbbf6a72c0228c656d6e4137e3edfb31016b3ad8a43426b6fff08da5807c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestContributionCgoMacroIncludeFailsClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "806a955b3fa07a7373e723abaa7e4a3b5140372092d2f08545508438a5839912"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "73f39e9ae62aa0688fcde6e585e71d848beaae988092953e2db176e716d97587"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeRootsAnySubject"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "82667cee4674f3a27f2fc3fbbfab9e13ba2531228e791f71e40c8f51eaddc5a5"
+}
+
+bindings {
+  requirement_id: "REQ-closure-coverage"
+  content_hash: "6e505fa0fdd66abef005bc41d6200c8de8589542aba9a76dd2cf67dd326d784d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestContribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "40ef05eae1e6e584c8abf3d81f5daebf6f9d7967a3d71ddee45cbbf7ec725f09"
+}
+
+bindings {
+  requirement_id: "REQ-closure-floor"
+  content_hash: "93c1bbc09607827deb37566fff306bce8e0feff8be56411052dc72bffd07a5a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestMaximalHashReal"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0a960c2e86bc1caa73058034fd7b5eb5a852a3e3d24a430c7e8209ddeb144c5f"
+}
+
+bindings {
+  requirement_id: "REQ-closure-mutable-local"
+  content_hash: "6bd7c54e4e255009c4b7c4af09c7ac46c69647e3a7bb62227161057772ae7046"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestUnderCache"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "de0d7d330849efc8e64798ede8be6efb25c2a53b5c18f0a55f7cad407b9155a5"
+}
+
+bindings {
+  requirement_id: "REQ-closure-pinned-dep"
+  content_hash: "3c84a49746c68a6456353c407a1f43026173d3aa7c982e43d44eb79b7952c813"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestUnderCache"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "de0d7d330849efc8e64798ede8be6efb25c2a53b5c18f0a55f7cad407b9155a5"
+}
