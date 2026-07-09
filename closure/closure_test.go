@@ -1129,6 +1129,32 @@ func TestComputeRootsMethods(t *testing.T) {
 	}
 }
 
+// TestComputeRootsGenericMethods pins that method subjects on a generic receiver
+// type resolve — the pointer star and generics are dropped from the type name
+// (Box[T] → "Box"), and each method roots at its own closure. SSA materializes the
+// receiver, so no deferral is needed.
+func TestComputeRootsGenericMethods(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericmethod"
+	get, err := h.Compute(pkg, "Box.Get") // value receiver on Box[T]
+	if err != nil {
+		t.Fatalf("Compute Box.Get: %v", err)
+	}
+	set, err := h.Compute(pkg, "Box.Set") // pointer receiver on Box[T]
+	if err != nil {
+		t.Fatalf("Compute Box.Set: %v", err)
+	}
+	if get.Hash == "" || set.Hash == "" {
+		t.Fatal("empty closure hash for a generic-receiver method")
+	}
+	if get.Hash == set.Hash {
+		t.Error("Box.Get and Box.Set hash identically; not rooting at the specific method")
+	}
+}
+
 // TestTestMainRootedOnlyForTestSubjects pins the harness-root design call
 // (REQ-closure-analysis): the test main is a root of a subject's closure only when
 // the subject runs through the test harness. A benchmark runs after TestMain setup,
