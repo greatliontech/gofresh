@@ -51,12 +51,16 @@ func TestDecide(t *testing.T) {
 			c.Unverifiable = true
 			c.Reason = "reaches os.Open"
 		}, Measurement, false, Unverifiable, "reaches os.Open"},
-		{"closure unverifiable, pure overrides", func(_ *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) { c.Unverifiable = true }, Measurement, true, Valid, ""},
+		{"closure unverifiable, pure overrides", func(_ *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.Unverifiable = true
+		}, Measurement, true, Valid, ""},
 		{"runtime unverifiable, not pure", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) {
 			r.Unverifiable = true
 			r.Reason = "unbounded input"
 		}, Measurement, false, Unverifiable, "unbounded input"},
-		{"runtime unverifiable, pure overrides", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) { r.Unverifiable = true }, Measurement, true, Valid, ""},
+		{"runtime unverifiable, pure overrides", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) {
+			r.Unverifiable = true
+		}, Measurement, true, Valid, ""},
 		// An absent manifest is the caller's assertion that the run observed no
 		// runtime inputs (REQ-inputs-absent-asserted) — the guard holds vacuously.
 		{"no manifest, clean", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {

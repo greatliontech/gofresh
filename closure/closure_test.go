@@ -902,7 +902,7 @@ func TestBatchLoadMatchesPerPackage(t *testing.T) {
 		base + "initregistry/bench",
 		base + "initfile",
 		base + "external",
-		base + "externalbench", // benchmark lives in the external (package X_test) test package
+		base + "externalbench",       // benchmark lives in the external (package X_test) test package
 		base + "rootcollision/bench", // imports rootcollision/dep, also primed (cross-prime-import shape)
 		base + "rootcollision/dep",
 		base + "testmainroot",
@@ -979,7 +979,7 @@ func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
 	pkgs := []string{
 		base + "initregistry/bench",
 		base + "external",
-		base + "externalbench", // exercises the ForTest clause: a distinct package X_test root
+		base + "externalbench",       // exercises the ForTest clause: a distinct package X_test root
 		base + "rootcollision/bench", // primed alongside its own dependency rootcollision/dep
 		base + "rootcollision/dep",
 		base + "testmainroot",

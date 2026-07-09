@@ -240,7 +240,6 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	return &program{prog: prog, pkgs: all, roots: funcRoots, testMain: testMain}, nil
 }
 
-
 // subjectRunsThroughHarness reports whether fn executes through the Go test harness
 // — after TestMain setup — which is true exactly when fn is declared in a _test.go
 // file. A production function (any non-test file) never runs through TestMain, so
