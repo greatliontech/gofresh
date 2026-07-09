@@ -99,6 +99,35 @@ func TestBuildConfigKeysIncludeTargetPlatform(t *testing.T) {
 	}
 }
 
+// TestBuildConfigDigestsBuildInputs pins that caller-supplied build inputs (CLI
+// flags outside GOFLAGS, PGO profile content) move the buildconfig digest — closing
+// the false-valid hole where a build-invocation change gofresh cannot observe left
+// the guard unmoved (REQ-guard-buildconfig).
+func TestBuildConfigDigestsBuildInputs(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	dir := t.TempDir()
+	base, err := buildConfig(dir, nil)
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	withFlags, err := buildConfig(dir, []string{"-tags=integration"})
+	if err != nil {
+		t.Fatalf("buildConfig (flags): %v", err)
+	}
+	if withFlags == base {
+		t.Error("a caller build input did not move buildconfig")
+	}
+	withPGO, err := buildConfig(dir, []string{"pgo:deadbeef"})
+	if err != nil {
+		t.Fatalf("buildConfig (pgo): %v", err)
+	}
+	if withPGO == withFlags {
+		t.Error("distinct build inputs collide in the digest")
+	}
+}
+
 // TestBuildConfigSensitive is the behavioral sanity that buildConfig digests its
 // keys at all: a GOFLAGS change (an isolated build-flag key) moves the digest.
 func TestBuildConfigSensitive(t *testing.T) {
@@ -106,12 +135,12 @@ func TestBuildConfigSensitive(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	dir := t.TempDir()
-	base, err := buildConfig(dir)
+	base, err := buildConfig(dir, nil)
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
 	t.Setenv("GOFLAGS", "-tags=integration")
-	changed, err := buildConfig(dir)
+	changed, err := buildConfig(dir, nil)
 	if err != nil {
 		t.Fatalf("buildConfig (changed): %v", err)
 	}

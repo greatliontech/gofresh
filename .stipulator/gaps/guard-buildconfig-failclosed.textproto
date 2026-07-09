@@ -1,6 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-guard-buildconfig-failclosed"
-reason: "PGO profile content and build-affecting CLI pass-throughs outside GOFLAGS are not yet detected or digested, so a change to either is currently invisible (a false-valid path). Known keys are digested; unbounded build inputs do not yet fail closed."
-lands { manual { condition: "PGO benchmarks or out-of-GOFLAGS build flags see real use" } }

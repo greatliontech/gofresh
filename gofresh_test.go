@@ -115,6 +115,36 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBuildInputsAffectVerdict pins that WithBuildInputs threads into the buildconfig
+// guard end to end: a fingerprint captured with no build inputs is stale on
+// buildconfig when checked by an engine that used a build flag, so a build-invocation
+// change is caught.
+func TestBuildInputsAffectVerdict(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	subj := Subject{Package: methodPkg, Symbol: "Adder.Value"}
+	plain, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	fp, err := plain.Capture(subj, ".") // captured with no build inputs
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	tagged, err := New(WithBuildInputs("-tags=integration"))
+	if err != nil {
+		t.Fatalf("New tagged: %v", err)
+	}
+	v, err := tagged.Check(fp, subj, ".", CodeResult)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if v.Status != Stale || v.Reason != "buildconfig" {
+		t.Errorf("build-input change: got {%s %q}, want {stale buildconfig}", v.Status, v.Reason)
+	}
+}
+
 // TestAssumePureOverride pins REQ-purity-override end to end: a subject whose closure
 // reaches an unverifiable dependence is Unverifiable by default, and Valid when the
 // engine is given a purity predicate that asserts it.

@@ -61,13 +61,23 @@ type Verdict struct {
 // Engine composes the closure hasher, guard capture, and purity policy. The hasher
 // caches loaded programs for the process; the guard cache memoizes per module dir.
 type Engine struct {
-	hasher     *closure.Hasher
-	guards     *guard.Cache
-	assumePure func(Subject) bool
+	hasher      *closure.Hasher
+	guards      *guard.Cache
+	assumePure  func(Subject) bool
+	buildInputs []string
 }
 
 // Option configures an Engine.
 type Option func(*Engine)
+
+// WithBuildInputs supplies the build-affecting parts of the caller's invocation that
+// gofresh cannot observe from `go env` — CLI flags outside GOFLAGS (-tags, -gcflags,
+// -ldflags, -pgo) and PGO profile content (as a content digest). They are folded into
+// the buildconfig guard so a change to them is caught (REQ-guard-buildconfig). The
+// caller keeps them stable across the run that captures and the run that checks.
+func WithBuildInputs(inputs ...string) Option {
+	return func(e *Engine) { e.buildInputs = inputs }
+}
 
 // WithAssumePure supplies the purity predicate: a subject for which it returns true
 // has all of its unverifiability suppressed (REQ-purity-input, REQ-purity-override).
@@ -104,7 +114,7 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	g, err := e.guards.Capture(moduleDir)
+	g, err := e.guards.Capture(moduleDir, e.buildInputs...)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -120,7 +130,7 @@ func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, 
 	if err != nil {
 		return Verdict{}, err
 	}
-	g, err := e.guards.Capture(moduleDir)
+	g, err := e.guards.Capture(moduleDir, e.buildInputs...)
 	if err != nil {
 		return Verdict{}, err
 	}

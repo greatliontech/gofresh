@@ -49,12 +49,19 @@ const (
 // and GOTOOLCHAIN are relative to it, so it must be the directory the result is
 // produced in — while the machine and runtime-config guards are host and process
 // facts independent of it.
-func Capture(moduleDir string) (Guards, error) {
+// buildInputs are the build-affecting parts of the caller's invocation that gofresh
+// cannot observe from `go env`: CLI flags passed to `go test`/`go build` outside
+// GOFLAGS (-tags, -gcflags, -ldflags, -pgo) and PGO profile content (the caller
+// passes a content digest, not the path). The caller supplies what it used, the same
+// way it supplies commit/dirty; digesting them closes the false-valid hole where a
+// build-input change leaves buildconfig unmoved (REQ-guard-buildconfig,
+// REQ-guard-buildconfig-failclosed). None used ⇒ pass none.
+func Capture(moduleDir string, buildInputs ...string) (Guards, error) {
 	tc, err := toolchain(moduleDir)
 	if err != nil {
 		return Guards{}, err
 	}
-	bc, err := buildConfig(moduleDir)
+	bc, err := buildConfig(moduleDir, buildInputs)
 	if err != nil {
 		return Guards{}, err
 	}
@@ -111,14 +118,15 @@ type captureResult struct {
 // NewCache returns an empty capture cache for one command invocation.
 func NewCache() *Cache { return &Cache{entries: map[string]captureResult{}} }
 
-// Capture returns the guards for moduleDir, computing them once and reusing the
-// result (or error) on later calls with the same dir.
-func (c *Cache) Capture(moduleDir string) (Guards, error) {
-	if r, ok := c.entries[moduleDir]; ok {
+// Capture returns the guards for moduleDir and buildInputs, computing them once and
+// reusing the result (or error) on later calls with the same dir and inputs.
+func (c *Cache) Capture(moduleDir string, buildInputs ...string) (Guards, error) {
+	key := moduleDir + "\x00" + strings.Join(buildInputs, "\x00")
+	if r, ok := c.entries[key]; ok {
 		return r.guards, r.err
 	}
-	g, err := Capture(moduleDir)
-	c.entries[moduleDir] = captureResult{guards: g, err: err}
+	g, err := Capture(moduleDir, buildInputs...)
+	c.entries[key] = captureResult{guards: g, err: err}
 	return g, err
 }
 
@@ -151,11 +159,12 @@ var buildConfigGoEnvKeys = []string{
 var buildConfigOSEnvKeys = []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"}
 
 // buildConfig digests the build-affecting settings that can change generated code
-// without moving the toolchain, machine, or source guards. Not yet digested: PGO
-// profile content and build-affecting CLI pass-throughs supplied outside GOFLAGS —
-// a change to either is currently invisible (a known gap in REQ-guard-buildconfig-
-// failclosed, tracked by coverage).
-func buildConfig(dir string) (string, error) {
+// without moving the toolchain, machine, or source guards: the observable `go env`
+// settings and OS pkg-config vars, plus the caller-supplied buildInputs (its CLI
+// build flags and PGO profile content — the parts of the build invocation gofresh
+// cannot observe). An unparseable `go env` output fails closed
+// (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
+func buildConfig(dir string, buildInputs []string) (string, error) {
 	out, err := gotool.RunIn(dir, "env", "-json")
 	if err != nil {
 		return "", err
@@ -179,6 +188,11 @@ func buildConfig(dir string) (string, error) {
 	var b strings.Builder
 	for _, k := range keys {
 		fmt.Fprintf(&b, "%s=%s\n", k, vals[k])
+	}
+	// Caller-supplied build invocation, in the order given (the caller keeps it
+	// stable across capture and check).
+	for _, in := range buildInputs {
+		fmt.Fprintf(&b, "buildinput=%s\n", in)
 	}
 	return digest(b.String()), nil
 }

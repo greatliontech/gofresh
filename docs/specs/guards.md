@@ -40,10 +40,15 @@ build-affecting input that can change generated code without moving the toolchai
 the source closure — the target platform `GOOS` and `GOARCH`, the codegen feature
 level (`GOAMD64`, `GOARM`, `GOARM64`, `GO386`, `GOEXPERIMENT`), the cgo toolchain
 environment (`CGO_ENABLED`, the `CGO_*FLAGS`, `CC`, `CXX`, the `PKG_CONFIG*`
-variables), and the build flags (`GOFLAGS` and build-affecting pass-throughs) —
+variables), the `GOFLAGS` build flags, and the build inputs the caller supplies —
 because each changes the compiled binary, and so any result about it, independently
 of the timing environment; the target platform lives here rather than in the machine
-guard precisely so it is still checked when measurement guards are off.
+guard precisely so it is still checked when measurement guards are off. The build
+inputs are the build-affecting parts of the invocation the engine cannot observe from
+`go env` — CLI flags passed outside `GOFLAGS` (`-tags`, `-gcflags`, `-ldflags`,
+`-pgo`) and PGO profile content — which the caller supplies as it does the commit,
+since only the caller knows how it built; a caller that passes none asserts it used
+none.
 
 > Placing `GOOS`/`GOARCH` in the code-guard digest, not the machine fingerprint, is
 > deliberate: a non-timing consumer (a mutation kill-sheet) runs with measurement
@@ -51,12 +56,13 @@ guard precisely so it is still checked when measurement guards are off.
 > result. A code-determining input must be a code guard, or it is a false-valid hole
 > for exactly the consumers that drop measurement guards.
 
-**REQ-guard-buildconfig-failclosed** (behavior, refines REQ-guard-buildconfig): A
-build-affecting input the build-configuration guard cannot parse or bound MUST fail
-closed, the recording refused, rather than digest to a value that could stay stable
-across different generated code — a guard that silently misses a build input is a
-false valid, so an unrepresentable input is a hard capture error, never a best-effort
-digest.
+**REQ-guard-buildconfig-failclosed** (behavior, refines REQ-guard-buildconfig): An
+observable build input the build-configuration guard cannot parse — a malformed
+`go env` output — MUST fail closed, the capture refused, rather than digest to a
+value that could stay stable across different generated code, since a guard that
+silently misses a build input is a false valid. A build input the engine cannot
+observe — a CLI pass-through or PGO content — is not silently dropped either: it is
+the caller's to supply, and the guard digests exactly what is supplied.
 
 ## Measurement guards
 
