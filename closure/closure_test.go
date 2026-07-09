@@ -1053,6 +1053,50 @@ func TestListMemoizes(t *testing.T) {
 	}
 }
 
+// TestComputeRootsAnySubject pins the generalized root seam: Compute resolves any
+// top-level function as a subject — a production function, not only a Benchmark* —
+// through both the test-variant package (a package that also has tests) and the
+// plain-package fallback (a package with no test files), and errors clearly on a
+// name that resolves to no function. Before generalization the root index held only
+// Benchmark*/TestMain, so a production symbol was reported "not found".
+func TestComputeRootsAnySubject(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// (a) A production function in a package that also has tests: resolved via the
+	// test-variant package, which compiles the package WITH its test files and so
+	// holds production and test symbols alike.
+	const withTests = "github.com/greatliontech/gofresh/internal/gotool"
+	a, err := h.Compute(withTests, "RunIn")
+	if err != nil {
+		t.Fatalf("Compute production func RunIn: %v", err)
+	}
+	if a.Hash == "" {
+		t.Fatal("empty closure hash for a resolvable production subject")
+	}
+	if again, err := h.Compute(withTests, "RunIn"); err != nil || again.Hash != a.Hash {
+		t.Errorf("nondeterministic: %q vs %q (err %v)", again.Hash, a.Hash, err)
+	}
+
+	// (b) A function in a package with NO test files: resolved via the plain-package
+	// fallback (no ForTest variant exists).
+	const noTests = "github.com/greatliontech/gofresh/closure/fixtures/rootcollision/dep"
+	b, err := h.Compute(noTests, "BenchmarkSame")
+	if err != nil {
+		t.Fatalf("Compute func in a no-test package: %v", err)
+	}
+	if b.Hash == "" {
+		t.Fatal("empty closure hash via the plain-package fallback")
+	}
+
+	// A name that resolves to no function is a clear error, not a silent empty root.
+	if _, err := h.Compute(withTests, "NoSuchFunction"); err == nil {
+		t.Error("a name resolving to no function: want error, got nil")
+	}
+}
+
 // TestComputeIncludesInitRegisteredSideEffectPackage pins INV-1 for registry
 // patterns: a side-effect import's init can register an implementation that the
 // benchmark later observes through package-level state and interface dispatch.

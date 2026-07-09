@@ -156,60 +156,69 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	prog, _ := ssautil.AllPackages(roots, ssa.InstantiateGenerics)
 	prog.Build()
 
-	benchRoots := map[string]*ssa.Function{}
+	// Index every top-level function as a candidate root, keyed by name, so any
+	// subject — a benchmark, a test, or a production function — is rootable by name
+	// (§ closure REQ-closure-analysis). Collect from the test-variant packages
+	// (ForTest == pkgPath): each compiles the package WITH its test files, so it
+	// holds both the production symbols and the test/benchmark symbols. Fall back to
+	// the plain package only when no test variant exists — collecting a production
+	// symbol from both the plain package and its test variant would key one name to
+	// two distinct ssa.Functions and read as an ambiguous root.
+	funcRoots := map[string]*ssa.Function{}
 	var testMain *ssa.Function
+	var rootPkgs []*packages.Package
 	for _, p := range all {
-		if !benchmarkRootPackage(p, pkgPath) {
-			continue
+		if p.ForTest == pkgPath {
+			rootPkgs = append(rootPkgs, p)
 		}
+	}
+	if len(rootPkgs) == 0 {
+		for _, p := range all {
+			if p.PkgPath == pkgPath {
+				rootPkgs = append(rootPkgs, p)
+			}
+		}
+	}
+	for _, p := range rootPkgs {
 		if p.Types == nil {
 			continue
 		}
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
-			if !strings.HasPrefix(name, "Benchmark") && name != "TestMain" {
-				continue
-			}
 			fn, ok := scope.Lookup(name).(*types.Func)
 			if !ok {
 				continue
 			}
-			if f := prog.FuncValue(fn); f != nil {
-				if name == "TestMain" {
-					if testMain != nil && testMain != f {
-						rootErrs = append(rootErrs, name)
-						continue
-					}
-					testMain = f
-					continue
-				}
-				if prev := benchRoots[name]; prev != nil && prev != f {
+			f := prog.FuncValue(fn)
+			if f == nil {
+				continue
+			}
+			if name == "TestMain" {
+				if testMain != nil && testMain != f {
 					rootErrs = append(rootErrs, name)
 					continue
 				}
-				benchRoots[name] = f
+				testMain = f
+				continue
 			}
+			if prev := funcRoots[name]; prev != nil && prev != f {
+				rootErrs = append(rootErrs, name)
+				continue
+			}
+			funcRoots[name] = f
 		}
 	}
 	if len(rootErrs) > 0 {
-		return nil, fmt.Errorf("closure: duplicate benchmark roots in %s: %s", pkgPath, strings.Join(rootErrs, ", "))
+		return nil, fmt.Errorf("closure: ambiguous subject roots in %s: %s", pkgPath, strings.Join(rootErrs, ", "))
 	}
-	return &program{prog: prog, pkgs: all, roots: benchRoots, testMain: testMain}, nil
+	return &program{prog: prog, pkgs: all, roots: funcRoots, testMain: testMain}, nil
 }
 
-func benchmarkRootPackage(p *packages.Package, pkgPath string) bool {
-	if p == nil {
-		return false
-	}
-	if p.PkgPath == pkgPath || p.ForTest == pkgPath {
-		return true
-	}
-	return p.Types != nil && p.Types.Path() == pkgPath
-}
 
-// Compute returns the closure for one benchmark of pkgPath (spec §7).
-func (h *Hasher) Compute(pkgPath, bench string) (Closure, error) {
-	tr, err := h.tier2(pkgPath, bench)
+// Compute returns the source closure for one subject of pkgPath — a top-level
+// function named by symbol, whether a benchmark, a test, or a production function.
+func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
+	tr, err := h.tier2(pkgPath, symbol)
 	if err != nil {
 		return Closure{}, err
 	}
@@ -248,7 +257,7 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 	}
 	root := prog.roots[bench]
 	if root == nil {
-		return tier2Result{}, fmt.Errorf("closure: benchmark %s not found in %s", bench, pkgPath)
+		return tier2Result{}, fmt.Errorf("closure: subject %s not found in %s", bench, pkgPath)
 	}
 	metas, err := h.list(pkgPath)
 	if err != nil {
