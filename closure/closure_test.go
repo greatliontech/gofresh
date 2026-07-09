@@ -1097,6 +1097,38 @@ func TestComputeRootsAnySubject(t *testing.T) {
 	}
 }
 
+// TestComputeRootsMethods pins method-subject resolution: a method is named
+// "Type.Method" (matching the consumer symbol grammar with the package prefix
+// stripped), resolves through both value- and pointer-receiver method sets, roots
+// at that specific method, and errors on a missing method name.
+func TestComputeRootsMethods(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
+
+	val, err := h.Compute(pkg, "Adder.Value") // value receiver
+	if err != nil {
+		t.Fatalf("Compute value-receiver method Adder.Value: %v", err)
+	}
+	if val.Hash == "" {
+		t.Fatal("empty closure hash for a method subject")
+	}
+	ptr, err := h.Compute(pkg, "Adder.Ptr") // pointer receiver
+	if err != nil {
+		t.Fatalf("Compute pointer-receiver method Adder.Ptr: %v", err)
+	}
+	// The two methods reach distinct helpers, so rooting at the specific method (not
+	// the whole type or package) yields distinct closures.
+	if ptr.Hash == val.Hash {
+		t.Error("Adder.Value and Adder.Ptr hash identically; not rooting at the specific method")
+	}
+	if _, err := h.Compute(pkg, "Adder.Missing"); err == nil {
+		t.Error("a missing method name: want error, got nil")
+	}
+}
+
 // TestTestMainRootedOnlyForTestSubjects pins the harness-root design call
 // (REQ-closure-analysis): the test main is a root of a subject's closure only when
 // the subject runs through the test harness. A benchmark runs after TestMain setup,

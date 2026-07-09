@@ -179,33 +179,59 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 			}
 		}
 	}
+	addRoot := func(key string, f *ssa.Function) {
+		if prev := funcRoots[key]; prev != nil && prev != f {
+			rootErrs = append(rootErrs, key)
+			return
+		}
+		funcRoots[key] = f
+	}
 	for _, p := range rootPkgs {
 		if p.Types == nil {
 			continue
 		}
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
-			fn, ok := scope.Lookup(name).(*types.Func)
-			if !ok {
-				continue
-			}
-			f := prog.FuncValue(fn)
-			if f == nil {
-				continue
-			}
-			if name == "TestMain" {
-				if testMain != nil && testMain != f {
-					rootErrs = append(rootErrs, name)
+			switch obj := scope.Lookup(name).(type) {
+			case *types.Func:
+				f := prog.FuncValue(obj)
+				if f == nil {
 					continue
 				}
-				testMain = f
-				continue
+				if name == "TestMain" {
+					if testMain != nil && testMain != f {
+						rootErrs = append(rootErrs, name)
+						continue
+					}
+					testMain = f
+					continue
+				}
+				addRoot(name, f)
+			case *types.TypeName:
+				// Index this type's methods as subjects keyed "Type.Method", matching
+				// the consumer symbol grammar (stipulator's Go backend): the receiver
+				// generics and pointer star are dropped from the type name, and the
+				// pointer method set — value and pointer receivers, plus promoted
+				// methods — is preferred, falling back to the value set for interfaces.
+				// A value-receiver method appears in both sets with the same
+				// ssa.Function, which addRoot treats as one root, not a collision.
+				for _, ms := range []*types.MethodSet{
+					types.NewMethodSet(types.NewPointer(obj.Type())),
+					types.NewMethodSet(obj.Type()),
+				} {
+					for i := 0; i < ms.Len(); i++ {
+						m, ok := ms.At(i).Obj().(*types.Func)
+						if !ok {
+							continue
+						}
+						f := prog.FuncValue(m)
+						if f == nil {
+							continue
+						}
+						addRoot(name+"."+m.Name(), f)
+					}
+				}
 			}
-			if prev := funcRoots[name]; prev != nil && prev != f {
-				rootErrs = append(rootErrs, name)
-				continue
-			}
-			funcRoots[name] = f
 		}
 	}
 	if len(rootErrs) > 0 {
