@@ -25,6 +25,11 @@ func TestScanPureDirectives(t *testing.T) {
 		{"NotAsserted", false},
 		{"T.Asserted", true},
 		{"T.NotAsserted", false},
+		// Declared in the external test package ("pkg_test"): the directive must
+		// key under the package under test's import path, the path the engine
+		// roots the subject under (REQ-purity-directive).
+		{"BenchmarkXAsserted", true},
+		{"BenchmarkXNotAsserted", false},
 	}
 	for _, tc := range cases {
 		if got := pred(Subject{Package: pkg, Symbol: tc.symbol}); got != tc.want {

@@ -18,7 +18,7 @@ import (
 // method as "Type.Method" with the receiver's pointer star and generics dropped.
 func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
+		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedForTest,
 		Tests: true,
 	}
 	pkgs, err := packages.Load(cfg, pkgPaths...)
@@ -27,6 +27,15 @@ func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
 	}
 	pure := map[Subject]bool{}
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		// A subject's package is the import path the engine resolves it under. A
+		// test variant (in-package or external "pkg_test") declares subjects of the
+		// package under test, so key by ForTest there — keying by the variant's own
+		// PkgPath would silently drop a directive on an external-test-file subject
+		// (REQ-purity-directive).
+		pkgPath := p.PkgPath
+		if p.ForTest != "" {
+			pkgPath = p.ForTest
+		}
 		for _, f := range p.Syntax {
 			for _, decl := range f.Decls {
 				fd, ok := decl.(*ast.FuncDecl)
@@ -37,7 +46,7 @@ func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
 				if recv := recvTypeName(fd); recv != "" {
 					sym = recv + "." + sym
 				}
-				pure[Subject{Package: p.PkgPath, Symbol: sym}] = true
+				pure[Subject{Package: pkgPath, Symbol: sym}] = true
 			}
 		}
 	})
