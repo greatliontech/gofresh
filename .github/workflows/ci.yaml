@@ -23,4 +23,11 @@ jobs:
         run: go mod tidy -diff
 
       - name: Test
-        run: go test -race -timeout 30m github.com/greatliontech/gofresh/...
+        # The closure package builds whole-program SSA (stdlib bodies
+        # included) per fixture; under -race that triples memory and the
+        # runner kills the job. The analysis is single-goroutine, so the race
+        # detector runs on everything else - including the root-package tests
+        # that drive the engine end to end.
+        run: |
+          go test -race -timeout 30m $(go list ./... | grep -v '/closure')
+          go test -timeout 30m ./closure
