@@ -28,7 +28,7 @@ type asmMacro struct {
 }
 
 // program is the loaded whole-program SSA for one package's test binary, cached
-// so per-benchmark Compute calls amortize the dominant load cost (§7.4).
+// so per-benchmark Compute calls amortize the dominant load cost (REQ-closure-analysis).
 type program struct {
 	prog     *ssa.Program
 	pkgs     []*packages.Package
@@ -50,7 +50,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 }
 
 // loadConfig is the shared packages.Config for both the single-package load and
-// the batched Prime: all-dependency syntax (stdlib bodies included, §7.4) with the
+// the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
 // ForTest linkage needed to distinguish a package's test-binary variants.
 func loadConfig() *packages.Config {
 	return &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true}
@@ -60,7 +60,7 @@ func loadConfig() *packages.Config {
 // packages.Load. It is the fallback path (and the exact behavior Prime reproduces
 // per package); Prime shares one Load across many packages but each still gets its
 // own program from only its own roots. A load error is fatal — analyzing a partial
-// program could miss reachable code and report a stale result valid (INV-1).
+// program could miss reachable code and report a stale result valid (REQ-fresh-sound).
 func load(pkgPath string) (*program, error) {
 	roots, err := packages.Load(loadConfig(), pkgPath)
 	if err != nil {
@@ -71,8 +71,8 @@ func load(pkgPath string) (*program, error) {
 
 // Prime warms the per-package SSA cache for pkgPaths with one shared
 // packages.Load, so the stdlib and shared dependencies are parsed and
-// type-checked once for the whole set rather than once per package (§7.4 — the
-// dominant residual cost of a multi-package `pew status`). Each package still gets
+// type-checked once for the whole set rather than once per package (REQ-closure-analysis — the
+// dominant residual cost of a a multi-package run). Each package still gets
 // its own ssa.Program built from only its own test-binary roots (rootsForBinary),
 // so the analysis — including the per-binary init-root set RTA depends on (see the
 // roots loop in tier2) — is byte-identical to the single-package load; Prime
@@ -117,7 +117,7 @@ func (h *Hasher) Prime(pkgPaths []string) {
 // test-main (PkgPath==pkgPath+".test"). Feeding exactly these to
 // ssautil.AllPackages reproduces the per-package program's package set, so RTA's
 // per-binary init roots (tier2) are unchanged. Selecting too few would shrink that
-// set and under-cover the closure (INV-1) — this must match the single-load root
+// set and under-cover the closure (REQ-fresh-sound) — this must match the single-load root
 // set exactly, which TestBatchLoadMatchesPerPackage pins over real fixtures.
 func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package {
 	var rs []*packages.Package
@@ -133,7 +133,7 @@ func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package
 // root packages (generics instantiated, so RTA traverses real edges through std
 // and dispatches generic instantiations concretely). A load error is fatal — a
 // partial program could miss reachable code and report a stale result valid
-// (INV-1).
+// (REQ-fresh-sound).
 func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	var errs []string
 	var rootErrs []string
@@ -315,7 +315,7 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 	// rooting it there would over-include test setup it cannot observe; a test subject
 	// runs after TestMain setup, so omitting it would be a false-valid hole. File I/O
 	// reached anywhere in this closure is Class-B `unverifiable` regardless of when it
-	// runs (§7.3-B, §7.8): the runtime-input manifest is evidence, never a completeness
+	// runs (REQ-closure-blindspot, REQ-inputs-guard): the runtime-input manifest is evidence, never a completeness
 	// proof, so the closure never promotes observed file I/O to `valid`.
 	roots := []*ssa.Function{root}
 	if prog.testMain != nil && subjectRunsThroughHarness(prog, root) {
@@ -1607,7 +1607,7 @@ func hasExternalCgo(flags []string) bool {
 // carries multiple linker arguments in one comma-joined token (`-Wl,-Bstatic,-lfoo,
 // -Bdynamic`), so a `-l` element can hide inside a single whitespace token; without
 // expanding it, an external library links unseen and the closure reports `valid`
-// while that library changes (§7.3-B, INV-2). `-Xlinker <arg>` needs no expansion —
+// while that library changes (REQ-closure-blindspot, REQ-fresh-verdict). `-Xlinker <arg>` needs no expansion —
 // go list already emits its argument as a separate token.
 func expandLinkerFlag(f string) []string {
 	if rest, ok := strings.CutPrefix(f, "-Wl,"); ok {
@@ -1768,7 +1768,7 @@ func asmTargetFromFields(fields []string, labels map[string]bool) (string, bool,
 		// Register/computed-target call or jump (e.g. riscv64 `JALR RA, 0(T0)`,
 		// mips `JR R5`): the callee is a runtime register value, never a parseable
 		// symbol, so it is a computed call → widen to the maximal closure
-		// (§7.3-A′). Without this, a ≥3-field indirect mnemonic falls through
+		// (REQ-closure-blindspot). Without this, a ≥3-field indirect mnemonic falls through
 		// asmUnknownOpMayHideCall's leaf return and its Go-function-pointer target
 		// changes unhashed → false-valid.
 		return "", true, false
@@ -1936,7 +1936,7 @@ func isASMCallOp(op string) bool {
 // isASMIndirectCallOp reports whether op transfers control through a register or
 // otherwise computed target across Go's target architectures. Such a mnemonic's
 // callee is never a parseable symbol, so any occurrence is a computed call that
-// must widen to the maximal closure (§7.3-A′) — listing them explicitly keeps
+// must widen to the maximal closure (REQ-closure-blindspot) — listing them explicitly keeps
 // ordinary data-processing instructions (which also carry register operands)
 // precise instead of blanket-widening on every register operand.
 func isASMIndirectCallOp(op string) bool {

@@ -1,11 +1,11 @@
-// Package closure computes the pew-closure hash (spec §7): a sound fingerprint
+// Package closure computes the closure hash (REQ-closure-coverage): a sound fingerprint
 // of the source a benchmark exercises, used to decide whether a stored result is
 // still valid for HEAD.
 //
 // Compute is the Tier-2 entry point: reachable mutable-local declarations are
 // hashed by source, linked cache modules are pinned by module version, stdlib is
 // cut by the toolchain guard, and unresolved source blind spots widen to the
-// Tier-1 maximal closure. Soundness (INV-1): the hashed set is always a superset
+// Tier-1 maximal closure. Soundness (REQ-fresh-sound): the hashed set is always a superset
 // of the source able to affect the benchmark — never false-valid.
 package closure
 
@@ -25,11 +25,11 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
-// Closure is the result of analyzing one benchmark (spec §7): the hash of its
+// Closure is the result of analyzing one benchmark (spec REQ-fresh-sound): the hash of its
 // closure, and whether that closure reaches an unhashable external dependence
-// (Class B, §7.3) which makes validity unprovable — `unverifiable` rather than
+// (Class B, REQ-closure-blindspot) which makes validity unprovable — `unverifiable` rather than
 // `valid`/`stale`. Unverifiable is a check-time verdict; the hash is always
-// computed (and recorded at run time, §7.6) regardless.
+// computed (and recorded at run time, REQ-guard-recompute) regardless.
 type Closure struct {
 	Hash         string
 	Unverifiable bool
@@ -38,7 +38,7 @@ type Closure struct {
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
 // cache-vs-mutable classification; loaded whole-program SSA is cached per package
-// (the dominant cost, §7.4) so repeated per-benchmark Compute calls amortize it.
+// (the dominant cost, REQ-closure-analysis) so repeated per-benchmark Compute calls amortize it.
 type Hasher struct {
 	modCache string
 	progs    map[string]*program  // by package import path
@@ -95,7 +95,7 @@ type listErr struct {
 }
 
 // sourceFiles is every compiled/linked input of the package: a change to any of
-// these can move the benchmark's behavior, so all must be hashed (INV-1). Keep
+// these can move the benchmark's behavior, so all must be hashed (REQ-fresh-sound). Keep
 // this in lockstep with go list's file-kind fields (TestSourceFilesComplete).
 func (p listPkg) sourceFiles() []string {
 	var f []string
@@ -110,7 +110,7 @@ func (p listPkg) sourceFiles() []string {
 
 // maximalHash returns the Tier-1 closure hash for the test binary of pkgPath:
 // every non-std reachable package hashed whole. This is the maximal sound closure
-// (§7.2) and the target every blind spot widens to (§7.3-A′). It needs no SSA, so
+// (REQ-closure-floor) and the target every blind spot widens to (REQ-closure-blindspot). It needs no SSA, so
 // it also serves as the analysis-failure-free floor.
 func (h *Hasher) maximalHash(pkgPath string) (string, error) {
 	contribs, err := h.maximalContributions(pkgPath)
@@ -154,22 +154,22 @@ func hashContributions(pkgPath string, contribs []string) (string, error) {
 // is excluded (stdlib, a pseudo-package, or the synthesized test-main).
 func (h *Hasher) contribution(p listPkg) (string, error) {
 	if p.Standard || p.Module == nil || strings.HasSuffix(p.ImportPath, ".test") {
-		// stdlib cut (§7.1); pseudo-package ("C", whose C source rides in the
+		// stdlib cut (REQ-closure-coverage); pseudo-package ("C", whose C source rides in the
 		// importing package); or the toolchain-generated test main (boilerplate
 		// in a transient dir — deterministic, carries no source information).
 		return "", nil
 	}
 	if !p.Module.Main && h.underCache(p.Dir) {
 		// Immutable, version-locked cache dep (classified on the package Dir per
-		// §7.7): pin once by the module's content dir (modpath@version,
+		// REQ-closure-mutable-local): pin once by the module's content dir (modpath@version,
 		// replace-correct via Module.Dir), never read its source. p.Dir and
 		// Module.Dir agree on under-cache classification for every reachable config;
-		// §7.7 names the package Dir, so we use it.
+		// REQ-closure-mutable-local names the package Dir, so we use it.
 		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator))
 		return "cache:" + filepath.ToSlash(rel), nil
 	}
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
-	// so a silent edit moves the hash (INV-8).
+	// so a silent edit moves the hash (REQ-closure-mutable-local).
 	files := p.sourceFiles()
 	if hasCgoCallbackBlindspot(&p) {
 		if root := cgoIncludeRootOutsideDir(&p, h.modCache); root != "" {
@@ -261,8 +261,8 @@ func resolveReal(path string) string {
 // closed on because it can pull in-tree headers the package-dir hash would miss.
 // A root is safe only when it is under the package dir (hashed by allPackageFiles)
 // or under the module cache (a version-pinned dependency whose C headers ride the
-// cache guard, §7.7). Any other root — an in-module sibling, a local `replace`/
-// `go.work` sibling module, or a directory pew cannot prove is a pinned dependency —
+// cache guard, REQ-closure-mutable-local). Any other root — an in-module sibling, a local `replace`/
+// `go.work` sibling module, or a directory the analysis cannot prove is a pinned dependency —
 // is mutable in-tree source and fails closed. A genuine system `-I` root is
 // indistinguishable from a mutable local one, so it fails closed too; system headers
 // reached by the C compiler's *default* search (no in-tree `-I`) are still skipped
@@ -284,7 +284,7 @@ func cgoIncludeRootOutsideDir(p *listPkg, modCache string) string {
 			continue // under the package dir → hashed by allPackageFiles
 		}
 		if modCache != "" && pathWithin(real, resolveReal(modCache)) {
-			// Module-cache dependency → version-pinned (§7.7); its C headers ride the
+			// Module-cache dependency → version-pinned (REQ-closure-mutable-local); its C headers ride the
 			// cache guard. We trust the cached tree whole: the module cache is immutable
 			// and module zips carry no symlinks, so a header inside it cannot symlink
 			// back out to mutable in-tree source.
@@ -389,7 +389,7 @@ func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
 			if !quoted {
 				// `#include <name>` is an angle-bracket header: resolve it like a
 				// quoted include; if it is not found in-tree it is a system/toolchain
-				// header (skipped below, §7.1). A bare token that is neither quoted nor
+				// header (skipped below, REQ-closure-coverage). A bare token that is neither quoted nor
 				// angle-bracketed is an opaque macro/computed include whose expansion
 				// could reach in-tree source, so fail closed.
 				if !strings.HasPrefix(include, "<") || !strings.HasSuffix(include, ">") {
@@ -438,7 +438,7 @@ func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
 			if !found {
 				// Not found under the package or its in-package `-I` roots → a
 				// system/toolchain header found by the C compiler's default search
-				// path (§7.1). Skip; build environment, not hashed. cgoIncludeRootOutsideDir
+				// path (REQ-closure-coverage). Skip; build environment, not hashed. cgoIncludeRootOutsideDir
 				// has already refused any in-module `-I` root, so no in-tree source hides here.
 				continue
 			}
@@ -745,7 +745,7 @@ func parseList(r io.Reader) ([]listPkg, error) {
 		if p.Error != nil {
 			// go list -deps -test exits 0 but reports an unloadable package via
 			// its Error field. Hashing the surviving packages would silently
-			// under-cover the closure → false-valid. Fail loud (INV-1).
+			// under-cover the closure → false-valid. Fail loud (REQ-fresh-sound).
 			return nil, fmt.Errorf("closure: package %s failed to load: %s", p.ImportPath, p.Error.Err)
 		}
 		pkgs = append(pkgs, p)

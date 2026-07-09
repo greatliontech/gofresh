@@ -38,7 +38,7 @@ func TestHashFiles(t *testing.T) {
 		t.Errorf("hash not order-insensitive: %q vs %q", h1, h2)
 	}
 
-	// Content change ⇒ different hash (INV-8 / INV-7 at the file level).
+	// Content change ⇒ different hash (REQ-closure-mutable-local / REQ-closure-coverage at the file level).
 	write("b.go", "package p\nvar X = 2\n")
 	if h3, _ := hashFiles(dir, []string{"a.go", "b.go"}); h3 == h1 {
 		t.Error("hash insensitive to content change")
@@ -80,7 +80,7 @@ func TestContribution(t *testing.T) {
 	}
 
 	// Vendored dep (Dir outside the cache, Module.Dir empty, not Main) is
-	// mutable-local → hashed by content (INV-8), not pinned.
+	// mutable-local → hashed by content (REQ-closure-mutable-local), not pinned.
 	vdir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(vdir, "v.go"), []byte("package v\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -255,8 +255,8 @@ func TestContributionCgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
 }
 
 // TestContributionCgoSystemIncludeSkipped: a system/toolchain header not found in
-// the package's in-tree search space is build environment (§7.1) — covered by the
-// toolchain and machine guards within pew's single-machine scope — so it is skipped
+// the package's in-tree search space is build environment (REQ-closure-coverage) — covered by the
+// toolchain and machine guards within the single-machine scope — so it is skipped
 // rather than failing closed, both for quoted (`"stdio.h"`) and angle-bracket
 // (`<stdio.h>`, `<sys/types.h>`) forms. The package's own C source is still hashed.
 func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
@@ -294,10 +294,10 @@ func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
 }
 
 // TestContributionCgoNonPackageIncludeRootFailsClosed: a `-I` root outside the
-// package and outside the module cache holds mutable first-party C source pew cannot
+// package and outside the module cache holds mutable first-party C source the analysis cannot
 // prove is version-pinned — a local `replace => ../sibling` header, a `go.work`
 // sibling, or an unidentifiable system dir. Editing such a header changes the
-// benchmark, so the root must fail closed rather than be skipped (pew cannot
+// benchmark, so the root must fail closed rather than be skipped (the analysis cannot
 // distinguish it from a genuine system root; system headers reached by the
 // compiler's default search fail-closed-free via the not-found path). Regression for
 // the local-replace false-valid: without it, `#include "api.h"` via the outside-
@@ -331,7 +331,7 @@ func TestContributionCgoNonPackageIncludeRootFailsClosed(t *testing.T) {
 }
 
 // TestContributionCgoCacheIncludeRootAllowed: a `-I` root under GOMODCACHE is a
-// version-pinned dependency (§7.7) whose C headers ride the cache guard, so it is
+// version-pinned dependency (REQ-closure-mutable-local) whose C headers ride the cache guard, so it is
 // allowed rather than failing closed.
 func TestContributionCgoCacheIncludeRootAllowed(t *testing.T) {
 	cache := t.TempDir()
@@ -856,7 +856,7 @@ func TestSourceFilesComplete(t *testing.T) {
 }
 
 // TestParseListError: a package reporting a load Error must fail the parse, never
-// be silently dropped from the closure (INV-1).
+// be silently dropped from the closure (REQ-fresh-sound).
 func TestParseListError(t *testing.T) {
 	const stream = `{"ImportPath":"ok/pkg","Dir":"/x","Module":{"Main":true}}
 {"ImportPath":"bad/pkg","Error":{"Err":"cannot find package"}}`
@@ -868,7 +868,7 @@ func TestParseListError(t *testing.T) {
 // TestMaximalHashReal exercises the Tier-1 maximal pipeline against a real
 // package (store, which pulls in the benchfmt cache dep), validating determinism
 // and cross-module classification (a src: contribution for the main module,
-// cache: for benchfmt). maximalHash is the A′ widening target (§7.3).
+// cache: for benchfmt). maximalHash is the A′ widening target (REQ-closure-blindspot).
 func TestMaximalHashReal(t *testing.T) {
 	h, err := New()
 	if err != nil {
@@ -892,7 +892,7 @@ func TestMaximalHashReal(t *testing.T) {
 // output (hash, unverifiable, reason) to the per-package single load. This is what
 // makes Prime a sound optimization rather than a behavior change — an under-scoped
 // rootsForBinary would shrink a program's package set, drop a registering init
-// from RTA's roots, and under-cover the closure (false-valid, INV-1); that shows
+// from RTA's roots, and under-cover the closure (false-valid, REQ-fresh-sound); that shows
 // up here as a hash mismatch. The fixtures span the soundness-sensitive paths:
 // cross-package init-side-effect registration, init file I/O, an external test
 // package, a TestMain root, and reflection.
@@ -1160,7 +1160,7 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 	}
 }
 
-// TestComputeIncludesInitRegisteredSideEffectPackage pins INV-1 for registry
+// TestComputeIncludesInitRegisteredSideEffectPackage pins REQ-fresh-sound for registry
 // patterns: a side-effect import's init can register an implementation that the
 // benchmark later observes through package-level state and interface dispatch.
 // Tier-2 roots linked startup code so the registering package source is hashed
@@ -1189,7 +1189,7 @@ func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	// is the *registered method* body: the benchmark dispatches gz.Decode through
 	// registry state and an interface without naming codec, so gz.Decode is reached
 	// only because all package inits are RTA roots. Hashing only the init would
-	// leave a gz.Decode body change unhashed (§7.1 reference/side-effect closure).
+	// leave a gz.Decode body change unhashed (REQ-closure-coverage reference/side-effect closure).
 	if !contribHasAll(contribs, codecPkg, "codec.go", ":init=") {
 		t.Fatalf("init-registered side-effect package %s init body missing from closure contributions: %v", codecPkg, contribs)
 	}
@@ -1373,11 +1373,11 @@ func TestComputeReachesUnverifiable(t *testing.T) {
 	// Every benchmark here reaches a Class-B external dependence in its closure
 	// (file I/O, filesystem/path mutation, or network), so the closure is
 	// unverifiable with the matching reason — and still carries a computed hash
-	// (unverifiable is a verdict; the hash is always recorded, §7.6). File I/O is
+	// (unverifiable is a verdict; the hash is always recorded, REQ-guard-recompute). File I/O is
 	// unverifiable regardless of when it runs relative to the testlog stream: the
 	// runtime-input manifest is evidence of observed identities, never a proof
 	// that every reachable file-I/O path was covered, so the closure never
-	// promotes observed file I/O to valid (§7.3-B, §7.8). The fixtures span the
+	// promotes observed file I/O to valid (REQ-closure-blindspot, REQ-inputs-guard). The fixtures span the
 	// pre-testlog window (init/TestMain/CWD-relative) and post-testlog reads, plus
 	// path/filesystem mutations and mixed file+network dependence.
 	h, err := New()
@@ -1621,7 +1621,7 @@ func TestASMCallTargetsExpandsParamMacro(t *testing.T) {
 
 func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
 	// Every register/computed-target call or jump across Go's arches must widen
-	// (computed) so the Go function it dispatches cannot change unhashed (§7.3-A′).
+	// (computed) so the Go function it dispatches cannot change unhashed (REQ-closure-blindspot).
 	// The ≥3-field forms (JALR/JIRL) are the ones only isASMIndirectCallOp catches
 	// (asmUnknownOpMayHideCall's 2-field and single-op rules miss them); the rest are
 	// belt-and-suspenders. Each mnemonic is the sole computed trigger — no (SB)
@@ -2529,7 +2529,7 @@ func TestTier2CgoExternalLibraryUnverifiable(t *testing.T) {
 	// markUnverifiable), not just the hasExternalCgo predicate: a plain `-lm` and a
 	// grouped linker flag `-Wl,-Bstatic,-lfoo,-Bdynamic` (which hides the `-l` inside
 	// one whitespace token) must both mark the closure unverifiable, else the external
-	// library could change while the benchmark reports valid (§7.3-B).
+	// library could change while the benchmark reports valid (REQ-closure-blindspot).
 	for _, ldflags := range [][]string{
 		{"-lm"},
 		{"-Wl,-Bstatic,-lfoo,-Bdynamic"},
