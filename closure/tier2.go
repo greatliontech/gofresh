@@ -215,6 +215,19 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 }
 
 
+// subjectRunsThroughHarness reports whether fn executes through the Go test harness
+// — after TestMain setup — which is true exactly when fn is declared in a _test.go
+// file. A production function (any non-test file) never runs through TestMain, so
+// the test main is not part of its closure (REQ-closure-analysis); a test subject
+// runs after TestMain setup, so it is. On an unknown source position the safe
+// over-approximation is to include the test main.
+func subjectRunsThroughHarness(prog *program, fn *ssa.Function) bool {
+	if fn == nil || fn.Pos() == token.NoPos {
+		return true
+	}
+	return strings.HasSuffix(prog.prog.Fset.Position(fn.Pos()).Filename, "_test.go")
+}
+
 // Compute returns the source closure for one subject of pkgPath — a top-level
 // function named by symbol, whether a benchmark, a test, or a production function.
 func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
@@ -269,14 +282,17 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 		return tier2Result{}, err
 	}
 
-	// RTA is rooted at the benchmark plus TestMain and every package init, so
-	// startup/global side effects a benchmark observes without naming the
-	// registering package are covered (§7.4). File I/O reached anywhere in this
-	// closure is Class-B `unverifiable` regardless of when it runs (§7.3-B, §7.8):
-	// the runtime-input manifest is evidence, never a completeness proof, so the
-	// closure never promotes observed file I/O to `valid`.
+	// RTA is rooted at the subject, every package init, and — only for a subject that
+	// runs through the test harness — the test main, so startup/global side effects
+	// the subject observes without naming the registering package are covered
+	// (REQ-closure-analysis). A production subject never executes through TestMain, so
+	// rooting it there would over-include test setup it cannot observe; a test subject
+	// runs after TestMain setup, so omitting it would be a false-valid hole. File I/O
+	// reached anywhere in this closure is Class-B `unverifiable` regardless of when it
+	// runs (§7.3-B, §7.8): the runtime-input manifest is evidence, never a completeness
+	// proof, so the closure never promotes observed file I/O to `valid`.
 	roots := []*ssa.Function{root}
-	if prog.testMain != nil {
+	if prog.testMain != nil && subjectRunsThroughHarness(prog, root) {
 		roots = append(roots, prog.testMain)
 	}
 	for _, p := range prog.prog.AllPackages() {

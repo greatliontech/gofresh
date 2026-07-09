@@ -71,13 +71,16 @@ proven, it widens.
 
 **REQ-closure-analysis** (behavior): Reachability analysis MUST build whole-program
 SSA with standard-library bodies present and generic instantiations materialized, and
-root the reachability walk at the subject together with every linked package
-initializer — bodies present so a user method dispatched inside a standard-library
+root the reachability walk at the subject, every linked package initializer, and — for
+a subject that executes through the test harness (one declared in a test file) — the
+test main — bodies present so a user method dispatched inside a standard-library
 function stays visible, generics materialized so each instantiation dispatches
 concretely, initializer roots included so a concrete type registered in `init` and
 later observed through global state and interface dispatch is covered even when the
-subject never names the registering package; a narrower root or edge set is taken only
-when proven to preserve the same startup and global-flow coverage.
+subject never names the registering package, the test main rooted for a test subject
+so setup it runs before the subject (state a production subject never sees) is in the
+closure; a narrower root or edge set is taken only when proven to preserve the same
+startup and global-flow coverage.
 
 ## Cross-module dependencies
 

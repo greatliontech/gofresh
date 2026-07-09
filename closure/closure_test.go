@@ -1097,6 +1097,37 @@ func TestComputeRootsAnySubject(t *testing.T) {
 	}
 }
 
+// TestTestMainRootedOnlyForTestSubjects pins the harness-root design call
+// (REQ-closure-analysis): the test main is a root of a subject's closure only when
+// the subject runs through the test harness. A benchmark runs after TestMain setup,
+// so file I/O that setup reaches makes the benchmark's closure unverifiable; a
+// production function never executes through TestMain, so the same setup is not in
+// its closure and it stays verifiable. Rooting the test main unconditionally (the
+// prior behavior) would wrongly mark the production subject unverifiable.
+func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/harnessroot"
+
+	bench, err := h.Compute(pkg, "BenchmarkProd")
+	if err != nil {
+		t.Fatalf("Compute BenchmarkProd: %v", err)
+	}
+	if !bench.Unverifiable {
+		t.Error("test subject: want unverifiable (its closure reaches TestMain's file I/O), got verifiable")
+	}
+
+	prod, err := h.Compute(pkg, "Prod")
+	if err != nil {
+		t.Fatalf("Compute Prod: %v", err)
+	}
+	if prod.Unverifiable {
+		t.Errorf("production subject: want verifiable (TestMain not in its closure), got unverifiable: %s", prod.Reason)
+	}
+}
+
 // TestComputeIncludesInitRegisteredSideEffectPackage pins INV-1 for registry
 // patterns: a side-effect import's init can register an implementation that the
 // benchmark later observes through package-level state and interface dispatch.
