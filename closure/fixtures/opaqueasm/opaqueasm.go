@@ -1,0 +1,3 @@
+package opaqueasm
+
+func asmEntry()
