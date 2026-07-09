@@ -36,6 +36,16 @@ stale, but can never on its own promote a subject's closure-level file dependenc
 valid; absent an explicit completeness proof, a subject reaching an unobserved
 unverifiable dependence stays unverifiable.
 
+**REQ-inputs-absent-asserted** (behavior): A fingerprint carrying no runtime-input
+manifest MUST be read as the caller's assertion that the subject's run observed no
+runtime inputs, the guard holding vacuously — the engine never runs the subject and
+cannot see what a run observed, so the manifest is the caller's to supply exactly as
+the build inputs and the commit are, and a caller that attaches none takes
+responsibility the same way. An observation-free run still encodes as an empty
+manifest distinct from no manifest at all, so absence is always a deliberate
+assertion, never a capture accident; a caller that runs subjects through the test
+harness attaches what the testlog yields.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input absent at
 its recorded commit — gitignored, untracked, or created during the run — MUST be
 marked as a dirty recording, because such an input is not reproducible from that

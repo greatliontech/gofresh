@@ -104,6 +104,14 @@ func New(opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
+// Prime batch-loads the packages a caller is about to Capture or Check subjects
+// from, so one whole-program analysis is shared across them instead of one load per
+// package (the dominant cost — REQ-closure-analysis). Optional: an unprimed package
+// loads on first use.
+func (e *Engine) Prime(pkgPaths []string) {
+	e.hasher.Prime(pkgPaths)
+}
+
 // Capture records the closure hash and guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
 // inputs, when a run observed them, are added by the caller from the run's testlog
@@ -136,9 +144,15 @@ func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, 
 	}
 	var rt runtimeinput.State
 	if recorded.RuntimeInputs != "" {
-		rt, err = runtimeinput.Current(recorded.RuntimeInputs, moduleDir)
-		if err != nil {
-			return Verdict{}, err
+		// A manifest that cannot be re-evaluated — malformed, or naming a path
+		// identity that cannot be materialized against the current tree — is an
+		// unevaluable applicable guard: absence of proof, so Stale, never valid
+		// (REQ-guard-completeness). Operational failures (e.g. an unresolvable
+		// moduleDir) fold into the same conservative Stale rather than erroring —
+		// over-approximation is always safe. decide maps !rt.OK to
+		// Stale{runtimeinputs}.
+		if rt, err = runtimeinput.Current(recorded.RuntimeInputs, moduleDir); err != nil {
+			rt = runtimeinput.State{}
 		}
 	}
 	return decide(recorded, cl, g, rt, kind, e.assumePure(subject)), nil
@@ -148,12 +162,20 @@ func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, 
 // the first failing guard; unverifiable when the guards hold but the closure or
 // runtime inputs reach an unhashable dependence and no purity override applies;
 // valid otherwise. A missing recorded value is a mismatch, never valid
-// (REQ-guard-completeness). commit/dirty are never consulted
+// (REQ-guard-completeness) — except an absent runtime-input manifest, which is the
+// caller's assertion that the run observed no runtime inputs
+// (REQ-inputs-absent-asserted). commit/dirty are never consulted
 // (REQ-fresh-commit-independent).
 func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
 	// Closure guard: the recorded hash must equal the recomputed current hash.
 	if rec.Closure == "" || rec.Closure != cl.Hash {
 		return Verdict{Stale, "closure"}
+	}
+	// A recorded runtime digest without its manifest is a corrupted recording, not
+	// an absence assertion: the digest proves the guard applied, and the missing
+	// manifest makes it unevaluable — Stale, never valid (REQ-guard-completeness).
+	if rec.RuntimeInputs == "" && rec.RuntimeDigest != "" {
+		return Verdict{Stale, "runtimeinputs"}
 	}
 	// Runtime-input guard, when the recording carries a manifest.
 	if rec.RuntimeInputs != "" {

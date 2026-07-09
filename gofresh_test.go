@@ -57,10 +57,18 @@ func TestDecide(t *testing.T) {
 			r.Reason = "unbounded input"
 		}, Measurement, false, Unverifiable, "unbounded input"},
 		{"runtime unverifiable, pure overrides", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) { r.Unverifiable = true }, Measurement, true, Valid, ""},
+		// An absent manifest is the caller's assertion that the run observed no
+		// runtime inputs (REQ-inputs-absent-asserted) — the guard holds vacuously.
 		{"no manifest, clean", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			f.RuntimeInputs = ""
 			f.RuntimeDigest = ""
 		}, Measurement, false, Valid, ""},
+		// A digest without its manifest is corruption, not absence: the digest
+		// proves the guard applied, so the recording is unevaluable — stale
+		// (REQ-guard-completeness), never the vacuous hold above.
+		{"digest without manifest", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			f.RuntimeInputs = ""
+		}, Measurement, false, Stale, "runtimeinputs"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,6 +157,18 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	}
 	if v2.Status != Stale || v2.Reason != "closure" {
 		t.Errorf("cross-subject: got {%s %q}, want {stale closure}", v2.Status, v2.Reason)
+	}
+	// A recorded manifest that cannot be re-evaluated is an unevaluable applicable
+	// guard — Stale, never an error and never valid (REQ-guard-completeness).
+	bad := fp
+	bad.RuntimeInputs = "not a manifest"
+	bad.RuntimeDigest = "D"
+	v3, err := e.Check(bad, subj, ".", CodeResult)
+	if err != nil {
+		t.Fatalf("Check malformed manifest: %v", err)
+	}
+	if v3.Status != Stale || v3.Reason != "runtimeinputs" {
+		t.Errorf("malformed manifest: got {%s %q}, want {stale runtimeinputs}", v3.Status, v3.Reason)
 	}
 }
 
