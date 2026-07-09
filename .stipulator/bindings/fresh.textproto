@@ -45,3 +45,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-sound"
+  content_hash: "a3f67afbbccdd0cb9205c6d7d37957dc35de3fbf217102dfa90ba7805cfad9b4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
+}

@@ -99,6 +99,40 @@ func TestBuildConfigKeysIncludeTargetPlatform(t *testing.T) {
 	}
 }
 
+// TestBuildConfigFailsClosed pins REQ-guard-buildconfig-failclosed: an unparseable
+// go env output is refused with an error, never digested to a partial value that
+// could stay stable across different generated code.
+func TestBuildConfigFailsClosed(t *testing.T) {
+	if _, err := buildConfigDigest([]byte("{not valid json"), nil); err == nil {
+		t.Error("malformed go env: want error (fail closed), got nil")
+	}
+	if _, err := buildConfigDigest([]byte(`{"GOOS":"linux"}`), nil); err != nil {
+		t.Errorf("well-formed env: unexpected error %v", err)
+	}
+}
+
+// FuzzCompareCompleteness is a property witness for REQ-guard-completeness: for any
+// guards, if an applicable recorded guard value is empty, Compare reports a mismatch
+// — an unevaluable guard is never read as valid.
+func FuzzCompareCompleteness(f *testing.F) {
+	f.Add("tc", "bc", "m", "rc", "tc", "bc", "m", "rc", true)
+	f.Add("", "bc", "m", "rc", "tc", "bc", "m", "rc", false)
+	f.Fuzz(func(t *testing.T, rTc, rBc, rM, rRc, cTc, cBc, cM, cRc string, measurement bool) {
+		rec := Guards{Toolchain: rTc, BuildConfig: rBc, Machine: rM, RuntimeConfig: rRc}
+		cur := Guards{Toolchain: cTc, BuildConfig: cBc, Machine: cM, RuntimeConfig: cRc}
+		kind := CodeResult
+		if measurement {
+			kind = Measurement
+		}
+		mismatch := Compare(rec, cur, kind)
+		emptyApplicable := rec.Toolchain == "" || rec.BuildConfig == "" ||
+			(kind == Measurement && (rec.Machine == "" || rec.RuntimeConfig == ""))
+		if emptyApplicable && mismatch == "" {
+			t.Fatalf("empty applicable guard read as valid: rec=%+v kind=%v", rec, kind)
+		}
+	})
+}
+
 // TestBuildConfigDigestsBuildInputs pins that caller-supplied build inputs (CLI
 // flags outside GOFLAGS, PGO profile content) move the buildconfig digest — closing
 // the false-valid hole where a build-invocation change gofresh cannot observe left

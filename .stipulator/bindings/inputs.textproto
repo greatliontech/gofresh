@@ -36,3 +36,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "513d03ed2866534de7883a54fb7946515c8812b15b6b7f6cf4c7f9450f448e48"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-evidence-not-proof"
+  content_hash: "4102aad1d3fc588cb5682208ad24a8aa4fe43efe21f30ef6b76bdd0bc9add802"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
+}

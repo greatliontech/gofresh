@@ -169,8 +169,15 @@ func buildConfig(dir string, buildInputs []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return buildConfigDigest(out, buildInputs)
+}
+
+// buildConfigDigest parses the `go env -json` output and digests the build-affecting
+// settings plus buildInputs. A malformed env output fails closed with an error
+// (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
+func buildConfigDigest(envJSON []byte, buildInputs []string) (string, error) {
 	var env map[string]string
-	if err := json.Unmarshal(out, &env); err != nil {
+	if err := json.Unmarshal(envJSON, &env); err != nil {
 		return "", fmt.Errorf("guard: parse go env: %w", err)
 	}
 	vals := map[string]string{}

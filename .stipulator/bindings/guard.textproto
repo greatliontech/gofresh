@@ -81,3 +81,21 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "663b185ec6805e62430d4705d490343c8eb35b33f9e7b17af10323f0889cb59a"
 }
+
+bindings {
+  requirement_id: "REQ-guard-completeness"
+  content_hash: "24dffdef598935c994705e9fa18a173362996b86a195241a3f0dad1fde1eea03"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.FuzzCompareCompleteness"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "314768e87d4c1dbfdeba1782177a2254d9dc01f298aa1f660cbde05202767d43"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig-failclosed"
+  content_hash: "d18eed109d4af7172ff30c3c2106ae6cbc2d3f61d8e7c4e7ecb3a9dd174c7060"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestBuildConfigFailsClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e95aa9a3fc376cc54029a6039b619353eba7333db51900978b042e6ff0f6d7cf"
+}

@@ -76,6 +76,43 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// FuzzDecideSound is a property witness for REQ-fresh-sound and
+// REQ-inputs-evidence-not-proof: with the code guards holding and the closure hash
+// matching, decide never returns Valid when the closure or the runtime inputs reach
+// an unverifiable dependence and no purity override applies. Guards are fixed equal
+// and non-empty so the property exercises the unverifiability branch, not a guard
+// mismatch.
+func FuzzDecideSound(f *testing.F) {
+	f.Add("C", "C", true, false, "", false)
+	f.Add("C", "C", false, false, "M", true)
+	f.Fuzz(func(t *testing.T, recCl, curCl string, clUnver, pure bool, manifest string, rtUnver bool) {
+		g := guard.Guards{Toolchain: "t", BuildConfig: "b"}
+		rec := Fingerprint{Closure: recCl, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
+		cl := closure.Closure{Hash: curCl, Unverifiable: clUnver}
+		rt := runtimeinput.State{Digest: "D", Unverifiable: rtUnver, OK: true}
+		v := decide(rec, cl, g, rt, CodeResult, pure)
+		if v.Status == Valid && !pure {
+			if cl.Unverifiable || (rec.RuntimeInputs != "" && rt.Unverifiable) {
+				t.Fatalf("sound violated: valid with an unverifiable dependence and no purity override (rec=%+v cl=%+v rt=%+v)", rec, cl, rt)
+			}
+		}
+	})
+}
+
+// TestEngineNeverInfersPurity pins REQ-purity-responsibility: a default engine treats
+// no subject as pure — purity is only ever an explicit input, never inferred.
+func TestEngineNeverInfersPurity(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, s := range []Subject{{Package: "p", Symbol: "F"}, {Package: "p", Symbol: "T.M"}, {}} {
+		if e.assumePure(s) {
+			t.Errorf("default engine inferred purity for %+v", s)
+		}
+	}
+}
+
 const methodPkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
 
 // TestCaptureCheckRoundTrip pins the happy path end to end: a fingerprint captured

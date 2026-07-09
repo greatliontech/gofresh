@@ -18,3 +18,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "ab7aae3000bf7e820e9a44d73295ca0765eae18246677d5db1705be5a9c9202c"
 }
+
+bindings {
+  requirement_id: "REQ-purity-responsibility"
+  content_hash: "104aff1f0423698a247d2195d7ef031913ccfa2420f8815887c8d36e5c42413c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestEngineNeverInfersPurity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb6bc58097f384f3588666f21bd17e1b4682f5948cb055c2e3216d738a7280e7"
+}
