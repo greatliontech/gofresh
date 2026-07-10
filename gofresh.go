@@ -8,10 +8,12 @@
 package gofresh
 
 import (
+	"fmt"
+	"path/filepath"
+
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"path/filepath"
 )
 
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set): a
