@@ -40,13 +40,22 @@ type Closure struct {
 // cache-vs-mutable classification; loaded whole-program SSA is cached per package
 // (the dominant cost, REQ-closure-analysis) so repeated per-benchmark Compute calls amortize it.
 type Hasher struct {
+	// dir roots every package load and go invocation; "" = the process
+	// working directory. The analyzed tree is an explicit input.
+	dir      string
 	modCache string
 	progs    map[string]*program  // by package import path
 	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
 }
 
-func New() (*Hasher, error) {
-	out, err := gotool.Run("env", "GOMODCACHE")
+func New() (*Hasher, error) { return NewAt("") }
+
+// NewAt builds a Hasher rooted at dir ("" = the process working directory):
+// every package load and go invocation resolves there, so a caller can
+// fingerprint a tree it does not run inside — the analyzed tree is an
+// explicit input, never an implicit cwd coupling (REQ-closure-analysis).
+func NewAt(dir string) (*Hasher, error) {
+	out, err := gotool.RunIn(dir, "env", "GOMODCACHE")
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +63,7 @@ func New() (*Hasher, error) {
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
-	return &Hasher{modCache: filepath.Clean(mc), progs: map[string]*program{}, lists: map[string][]listPkg{}}, nil
+	return &Hasher{dir: dir, modCache: filepath.Clean(mc), progs: map[string]*program{}, lists: map[string][]listPkg{}}, nil
 }
 
 type listPkg struct {
@@ -722,7 +731,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
 	}
-	out, err := gotool.Run("list", "-json", "-deps", "-test", pkgPath)
+	out, err := gotool.RunIn(h.dir, "list", "-json", "-deps", "-test", pkgPath)
 	if err != nil {
 		return nil, err
 	}

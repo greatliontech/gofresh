@@ -1,7 +1,9 @@
 package gofresh
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -237,5 +239,46 @@ func TestAssumePureOverride(t *testing.T) {
 		t.Fatalf("Check pure: %v", err)
 	} else if v.Status != Valid {
 		t.Errorf("assume-pure: got %s (%s), want valid", v.Status, v.Reason)
+	}
+}
+
+// TestWithDirOutOfTree pins the explicit tree root: an engine rooted at a
+// directory the process does not run inside fingerprints that tree's
+// subjects — the analyzed tree is an input, never a cwd coupling.
+func TestWithDirOutOfTree(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/tiny\n\ngo 1.26\n")
+	write("tiny.go", "package tiny\n\n//gofresh:pure\nfunc Add(a, b int) int { return a + b }\n")
+	write("tiny_test.go", "package tiny\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n")
+
+	e, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	subj := Subject{Package: "example.com/tiny", Symbol: "TestAdd"}
+	fp, err := e.Capture(subj, tmp)
+	if err != nil {
+		t.Fatalf("Capture out of tree: %v", err)
+	}
+	v, err := e.Check(fp, subj, tmp, CodeResult)
+	if err != nil || v.Status != Valid {
+		t.Fatalf("round trip = %+v, %v", v, err)
+	}
+	// The directive scanner honors the same root.
+	pred, err := ScanPureDirectivesIn(tmp, "example.com/tiny")
+	if err != nil {
+		t.Fatalf("ScanPureDirectivesIn: %v", err)
+	}
+	if !pred(Subject{Package: "example.com/tiny", Symbol: "Add"}) {
+		t.Fatal("out-of-tree directive not honored")
 	}
 }

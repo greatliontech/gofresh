@@ -65,6 +65,7 @@ type Engine struct {
 	guards      *guard.Cache
 	assumePure  func(Subject) bool
 	buildInputs []string
+	dir         string
 }
 
 // Option configures an Engine.
@@ -91,16 +92,24 @@ func WithAssumePure(pred func(Subject) bool) Option {
 	}
 }
 
+// WithDir roots the engine at dir: every package load and go invocation
+// resolves there, so a caller can fingerprint a tree it does not run inside.
+// The default is the process working directory.
+func WithDir(dir string) Option {
+	return func(e *Engine) { e.dir = dir }
+}
+
 // New builds an Engine.
 func New(opts ...Option) (*Engine, error) {
-	h, err := closure.New()
-	if err != nil {
-		return nil, err
-	}
-	e := &Engine{hasher: h, guards: guard.NewCache(), assumePure: func(Subject) bool { return false }}
+	e := &Engine{guards: guard.NewCache(), assumePure: func(Subject) bool { return false }}
 	for _, o := range opts {
 		o(e)
 	}
+	h, err := closure.NewAt(e.dir)
+	if err != nil {
+		return nil, err
+	}
+	e.hasher = h
 	return e, nil
 }
 

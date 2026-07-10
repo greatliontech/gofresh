@@ -985,7 +985,7 @@ func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
 		base + "testmainroot",
 		base + "initfile",
 	}
-	batch, err := packages.Load(loadConfig(), pkgs...)
+	batch, err := packages.Load(loadConfig(""), pkgs...)
 	if err != nil {
 		t.Fatalf("batch load: %v", err)
 	}
@@ -997,7 +997,7 @@ func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
 		return m
 	}
 	for _, pkg := range pkgs {
-		single, err := packages.Load(loadConfig(), pkg)
+		single, err := packages.Load(loadConfig(""), pkg)
 		if err != nil {
 			t.Fatalf("single load %s: %v", pkg, err)
 		}

@@ -17,9 +17,17 @@ import (
 // A symbol is named as the closure engine resolves it: a function by its name, a
 // method as "Type.Method" with the receiver's pointer star and generics dropped.
 func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
+	return ScanPureDirectivesIn("", pkgPaths...)
+}
+
+// ScanPureDirectivesIn scans under an explicit tree root ("" = the process
+// working directory), for callers fingerprinting a tree they do not run
+// inside.
+func ScanPureDirectivesIn(dir string, pkgPaths ...string) (func(Subject) bool, error) {
 	cfg := &packages.Config{
 		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedForTest,
 		Tests: true,
+		Dir:   dir,
 	}
 	pkgs, err := packages.Load(cfg, pkgPaths...)
 	if err != nil {

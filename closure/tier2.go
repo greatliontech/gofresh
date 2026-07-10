@@ -41,7 +41,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
-	p, err := load(pkgPath)
+	p, err := load(h.dir, pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +52,8 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 // loadConfig is the shared packages.Config for both the single-package load and
 // the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
 // ForTest linkage needed to distinguish a package's test-binary variants.
-func loadConfig() *packages.Config {
-	return &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true}
+func loadConfig(dir string) *packages.Config {
+	return &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true, Dir: dir}
 }
 
 // load builds whole-program SSA for pkgPath's test binary from a single-package
@@ -61,8 +61,8 @@ func loadConfig() *packages.Config {
 // per package); Prime shares one Load across many packages but each still gets its
 // own program from only its own roots. A load error is fatal — analyzing a partial
 // program could miss reachable code and report a stale result valid (REQ-fresh-sound).
-func load(pkgPath string) (*program, error) {
-	roots, err := packages.Load(loadConfig(), pkgPath)
+func load(dir, pkgPath string) (*program, error) {
+	roots, err := packages.Load(loadConfig(dir), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
@@ -98,7 +98,7 @@ func (h *Hasher) Prime(pkgPaths []string) {
 	if len(need) == 0 {
 		return
 	}
-	roots, err := packages.Load(loadConfig(), need...)
+	roots, err := packages.Load(loadConfig(h.dir), need...)
 	if err != nil {
 		return // fall back to lazy single loads; the error resurfaces there
 	}
