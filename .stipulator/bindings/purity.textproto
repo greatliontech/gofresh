@@ -12,7 +12,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "1429dce63f2b13a644b67cd4d03d3ab2272b460218ab67159f9d42099d9294f3"
+  content_hash: "7ed1aa6ca09fc93ae3c7b66a926a11b282cd4fe46bb868674e9e197f2e8877ed"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanPureDirectives"
   role: BINDING_ROLE_TESTS
@@ -26,4 +26,13 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestEngineNeverInfersPurity"
   role: BINDING_ROLE_TESTS
   shape_hash: "fb6bc58097f384f3588666f21bd17e1b4682f5948cb055c2e3216d738a7280e7"
+}
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "7ed1aa6ca09fc93ae3c7b66a926a11b282cd4fe46bb868674e9e197f2e8877ed"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "20715489f5707cc60d66a18690c67ba4324f2d7dec420606f96d8fcff8a797de"
 }

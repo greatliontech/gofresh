@@ -28,6 +28,9 @@ symbol MUST be honored as a purity assertion for that subject by every consumer 
 engine — so purity is a property of the code, written once and respected by every tool
 that shares the engine, rather than a per-tool invocation flag re-applied for each,
 with a caller's global assertion remaining available for a whole-run override.
+Directive discovery uses the same executable build flags as closure analysis: a
+directive in a mutually exclusive file not selected into the recorded build cannot
+confer purity on the selected declaration.
 
 **REQ-purity-responsibility** (behavior): A purity assertion MUST be recorded as an
 explicit, attributable act, gofresh never silently assuming purity — so overriding an

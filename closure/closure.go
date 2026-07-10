@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
@@ -44,17 +45,23 @@ type Hasher struct {
 	// working directory. The analyzed tree is an explicit input.
 	dir      string
 	modCache string
-	progs    map[string]*program  // by package import path
-	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	// buildFlags are the producing go command's executable flags. They select
+	// every package and dependency load used to construct this closure.
+	buildFlags []string
+	progs      map[string]*program  // by package import path
+	lists      map[string][]listPkg // parsed `go list -deps -test`, by package import path
 }
 
 func New() (*Hasher, error) { return NewAt("") }
 
-// NewAt builds a Hasher rooted at dir ("" = the process working directory):
-// every package load and go invocation resolves there, so a caller can
-// fingerprint a tree it does not run inside — the analyzed tree is an
-// explicit input, never an implicit cwd coupling (REQ-closure-analysis).
-func NewAt(dir string) (*Hasher, error) {
+// NewAt builds a Hasher rooted at dir ("" = the process working directory) and
+// the producing build's executable flags: every package load and go invocation
+// resolves under both, so the analyzed tree and build selection are explicit
+// inputs, never implicit cwd or default-build coupling (REQ-closure-analysis).
+func NewAt(dir string, buildFlags ...string) (*Hasher, error) {
+	if err := buildflags.Validate(dir, buildFlags); err != nil {
+		return nil, err
+	}
 	out, err := gotool.RunIn(dir, "env", "GOMODCACHE")
 	if err != nil {
 		return nil, err
@@ -63,7 +70,10 @@ func NewAt(dir string) (*Hasher, error) {
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
-	return &Hasher{dir: dir, modCache: filepath.Clean(mc), progs: map[string]*program{}, lists: map[string][]listPkg{}}, nil
+	return &Hasher{
+		dir: dir, modCache: filepath.Clean(mc), buildFlags: append([]string(nil), buildFlags...),
+		progs: map[string]*program{}, lists: map[string][]listPkg{},
+	}, nil
 }
 
 type listPkg struct {
@@ -196,7 +206,7 @@ func (h *Hasher) contribution(p listPkg) (string, error) {
 		}
 	}
 	if len(p.SFiles) > 0 {
-		_, _, opaque, includes, err := asmCallTargets(p.Dir, p.SFiles)
+		_, _, opaque, includes, err := asmCallTargets(p.Dir, p.SFiles, h.buildFlags...)
 		if err != nil {
 			return "", err
 		}
@@ -731,7 +741,10 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
 	}
-	out, err := gotool.RunIn(h.dir, "list", "-json", "-deps", "-test", pkgPath)
+	args := []string{"list", "-json", "-deps", "-test"}
+	args = append(args, h.buildFlags...)
+	args = append(args, pkgPath)
+	out, err := gotool.RunIn(h.dir, args...)
 	if err != nil {
 		return nil, err
 	}

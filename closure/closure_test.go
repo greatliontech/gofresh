@@ -1053,6 +1053,104 @@ func TestListMemoizes(t *testing.T) {
 	}
 }
 
+func TestListUsesBuildFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/tagged\n\ngo 1.26\n")
+	writeFile(t, dir, "selected_default.go", "//go:build !special\n\npackage tagged\n\nfunc Selected() int { return 1 }\n")
+	writeFile(t, dir, "selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 2 }\n")
+
+	h, err := NewAt(dir, "-tags=special")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkgs, err := h.list("example.com/tagged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pkgs {
+		if p.ImportPath != "example.com/tagged" {
+			continue
+		}
+		if !stringSliceContains(p.GoFiles, "selected_special.go") || stringSliceContains(p.GoFiles, "selected_default.go") {
+			t.Fatalf("selected Go files = %v, want only special variant", p.GoFiles)
+		}
+		return
+	}
+	t.Fatal("go list omitted the tagged package")
+}
+
+func TestPrimeUsesBuildFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/tagged\n\ngo 1.26\n")
+	writeFile(t, dir, "selected_default.go", "//go:build !special\n\npackage tagged\n\nfunc Selected() int { return 1 }\n")
+	writeFile(t, dir, "selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 2 }\n")
+
+	const pkg = "example.com/tagged"
+	primed, err := NewAt(dir, "-tags=special")
+	if err != nil {
+		t.Fatal(err)
+	}
+	primed.Prime([]string{pkg})
+	if _, ok := primed.progs[pkg]; !ok {
+		t.Fatal("Prime did not cache the tagged package")
+	}
+	got, err := primed.Compute(pkg, "Selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lazy, err := NewAt(dir, "-tags=special")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := lazy.Compute(pkg, "Selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("primed tagged closure = %+v, lazy tagged closure = %+v", got, want)
+	}
+}
+
+func TestBuildFlagsDriveASMClosure(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/asmflag\n\ngo 1.26\n")
+	writeFile(t, dir, "asmflag.go", "package asmflag\n\nfunc asmEntry()\nfunc Subject() { asmEntry() }\nfunc hook() {}\nfunc helper() {}\n")
+	writeFile(t, dir, "asm.s", "#include \"textflag.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
+
+	const pkg = "example.com/asmflag"
+	plain, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainClosure, err := plain.Compute(pkg, "Subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainMax, err := plain.maximalHash(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plainClosure.Hash == plainMax {
+		t.Fatal("plain assembly closure widened; flagged comparison would be vacuous")
+	}
+
+	flagged, err := NewAt(dir, "-asmflags=all=-D=hook=helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flaggedClosure, err := flagged.Compute(pkg, "Subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flaggedMax, err := flagged.maximalHash(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flaggedClosure.Hash != flaggedMax {
+		t.Fatalf("assembly define closure = %s, want maximal %s", flaggedClosure.Hash, flaggedMax)
+	}
+}
+
 // TestComputeRootsAnySubject pins the generalized root seam: Compute resolves any
 // top-level function as a subject — a production function, not only a Benchmark* —
 // through both the test-variant package (a package that also has tests) and the
@@ -2204,6 +2302,56 @@ func TestASMCallTargetsExternalLowercaseDefineComputed(t *testing.T) {
 	}
 	if !computed {
 		t.Fatalf("computed = false, want true for external lowercase symbol define")
+	}
+	if opaque {
+		t.Fatalf("opaque = true, want false")
+	}
+	if len(targets) != 0 {
+		t.Fatalf("targets = %v, want none", targets)
+	}
+}
+
+func TestASMCallTargetsCallerLowercaseDefineComputed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
+	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"}, "-asmflags=all=-D=hook=helper")
+	if err != nil {
+		t.Fatalf("asmCallTargets: %v", err)
+	}
+	if !computed {
+		t.Fatalf("computed = false, want true for caller-supplied lowercase symbol define")
+	}
+	if opaque {
+		t.Fatalf("opaque = true, want false")
+	}
+	if len(targets) != 0 {
+		t.Fatalf("targets = %v, want none", targets)
+	}
+}
+
+func TestASMCallTargetsPersistentAndCallerFlags(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "goenv", "GOFLAGS=-asmflags=all=-D=hook=helper\n")
+	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
+	t.Setenv("GOENV", filepath.Join(dir, "goenv"))
+	oldFlags, hadFlags := os.LookupEnv("GOFLAGS")
+	if err := os.Unsetenv("GOFLAGS"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadFlags {
+			_ = os.Setenv("GOFLAGS", oldFlags)
+		} else {
+			_ = os.Unsetenv("GOFLAGS")
+		}
+	})
+
+	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"}, "-tags=special")
+	if err != nil {
+		t.Fatalf("asmCallTargets: %v", err)
+	}
+	if !computed {
+		t.Fatalf("computed = false, want true with persistent asm flag and explicit tag")
 	}
 	if opaque {
 		t.Fatalf("opaque = true, want false")

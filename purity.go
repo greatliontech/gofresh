@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"strings"
 
+	"github.com/greatliontech/gofresh/internal/buildflags"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -17,17 +18,35 @@ import (
 // A symbol is named as the closure engine resolves it: a function by its name, a
 // method as "Type.Method" with the receiver's pointer star and generics dropped.
 func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectivesIn("", pkgPaths...)
+	return ScanPureDirectivesInWithBuildFlags("", nil, pkgPaths...)
 }
 
 // ScanPureDirectivesIn scans under an explicit tree root ("" = the process
 // working directory), for callers fingerprinting a tree they do not run
 // inside.
 func ScanPureDirectivesIn(dir string, pkgPaths ...string) (func(Subject) bool, error) {
+	return ScanPureDirectivesInWithBuildFlags(dir, nil, pkgPaths...)
+}
+
+// ScanPureDirectivesWithBuildFlags scans the packages selected by buildFlags under
+// the process working directory. The flags must match the producing build, so a
+// directive in a mutually exclusive unselected file cannot confer purity on the
+// selected declaration (REQ-purity-directive, REQ-guard-buildconfig).
+func ScanPureDirectivesWithBuildFlags(buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
+	return ScanPureDirectivesInWithBuildFlags("", buildFlags, pkgPaths...)
+}
+
+// ScanPureDirectivesInWithBuildFlags scans under an explicit tree root and the
+// producing build's executable flags.
+func ScanPureDirectivesInWithBuildFlags(dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
+	if err := buildflags.Validate(dir, buildFlags); err != nil {
+		return nil, err
+	}
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedForTest,
-		Tests: true,
-		Dir:   dir,
+		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedForTest,
+		Tests:      true,
+		Dir:        dir,
+		BuildFlags: append([]string(nil), buildFlags...),
 	}
 	pkgs, err := packages.Load(cfg, pkgPaths...)
 	if err != nil {

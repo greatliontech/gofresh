@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/buildflags"
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -41,7 +41,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
-	p, err := load(h.dir, pkgPath)
+	p, err := load(h.dir, h.buildFlags, pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +52,13 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 // loadConfig is the shared packages.Config for both the single-package load and
 // the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
 // ForTest linkage needed to distinguish a package's test-binary variants.
-func loadConfig(dir string) *packages.Config {
-	return &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedForTest, Tests: true, Dir: dir}
+func loadConfig(dir string, buildFlags ...string) *packages.Config {
+	return &packages.Config{
+		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
+		Tests:      true,
+		Dir:        dir,
+		BuildFlags: append([]string(nil), buildFlags...),
+	}
 }
 
 // load builds whole-program SSA for pkgPath's test binary from a single-package
@@ -61,8 +66,8 @@ func loadConfig(dir string) *packages.Config {
 // per package); Prime shares one Load across many packages but each still gets its
 // own program from only its own roots. A load error is fatal — analyzing a partial
 // program could miss reachable code and report a stale result valid (REQ-fresh-sound).
-func load(dir, pkgPath string) (*program, error) {
-	roots, err := packages.Load(loadConfig(dir), pkgPath)
+func load(dir string, buildFlags []string, pkgPath string) (*program, error) {
+	roots, err := packages.Load(loadConfig(dir, buildFlags...), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
@@ -98,7 +103,7 @@ func (h *Hasher) Prime(pkgPaths []string) {
 	if len(need) == 0 {
 		return
 	}
-	roots, err := packages.Load(loadConfig(h.dir), need...)
+	roots, err := packages.Load(loadConfig(h.dir, h.buildFlags...), need...)
 	if err != nil {
 		return // fall back to lazy single loads; the error resurfaces there
 	}
@@ -376,6 +381,7 @@ type pkgIndex struct {
 
 type tier2Analyzer struct {
 	h                *Hasher
+	buildFlags       []string
 	prog             *program
 	metas            []listPkg
 	metaByPath       map[string]*listPkg
@@ -404,6 +410,7 @@ type tier2Analyzer struct {
 func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer {
 	a := &tier2Analyzer{
 		h:                h,
+		buildFlags:       append([]string(nil), h.buildFlags...),
 		prog:             prog,
 		metas:            metas,
 		metaByPath:       map[string]*listPkg{},
@@ -1153,7 +1160,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				}
 			}
 		}
-		asmCalls, computed, opaque, includes, err := asmCallTargets(idx.meta.Dir, idx.meta.SFiles)
+		asmCalls, computed, opaque, includes, err := asmCallTargets(idx.meta.Dir, idx.meta.SFiles, a.buildFlags...)
 		if err != nil {
 			return err
 		}
@@ -1638,11 +1645,16 @@ func hasCgoCallbackBlindspot(p *listPkg) bool {
 	return false
 }
 
-func asmCallTargets(dir string, files []string) ([]string, bool, bool, []string, error) {
+func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
 	var targets []string
 	var includes []string
 	computed := false
 	opaque := false
+	goFlags, err := buildflags.EffectiveGOFLAGS(dir)
+	if err != nil {
+		return nil, false, false, nil, err
+	}
+	externalDefines := asmExternalDefinesMayRewriteSymbols(buildFlags, goFlags)
 	for _, f := range files {
 		content, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
@@ -1688,7 +1700,7 @@ func asmCallTargets(dir string, files []string) ([]string, bool, bool, []string,
 						continue
 					}
 					for _, stmt := range asmStatements(strings.Join(fields, " ")) {
-						target, isComputed, ok := asmTargetFromFields(strings.Fields(stmt), labels)
+						target, isComputed, ok := asmTargetFromFields(strings.Fields(stmt), labels, externalDefines)
 						computed = computed || isComputed
 						if ok {
 							targets = append(targets, target)
@@ -1755,7 +1767,7 @@ func asmIncludeOperandQuoted(fields []string) bool {
 	return len(fields) >= 2 && strings.HasPrefix(fields[1], "\"") && strings.HasSuffix(fields[1], "\"")
 }
 
-func asmTargetFromFields(fields []string, labels map[string]bool) (string, bool, bool) {
+func asmTargetFromFields(fields []string, labels map[string]bool, externalDefines bool) (string, bool, bool) {
 	fields = trimASMLabels(fields)
 	if len(fields) < 2 {
 		if asmSingleOpMayHideCall(fields) {
@@ -1790,33 +1802,28 @@ func asmTargetFromFields(fields []string, labels map[string]bool) (string, bool,
 	if strings.Contains(target, "+") {
 		return "", true, false
 	}
-	if asmSymbolHasMacroLikeComponent(target) {
+	if asmSymbolHasMacroLikeComponent(target, externalDefines) {
 		return "", true, false
 	}
 	return target, false, true
 }
 
-func asmSymbolHasMacroLikeComponent(target string) bool {
+func asmSymbolHasMacroLikeComponent(target string, externalDefines bool) bool {
 	if i := strings.LastIndex(target, "·"); i >= 0 {
-		if asmTokenLooksMacroLike(target[:i]) || asmExternalDefineMayRewriteSymbol(target[:i]) {
+		if asmTokenLooksMacroLike(target[:i]) || asmExternalDefineMayRewriteSymbol(target[:i], externalDefines) {
 			return true
 		}
 		target = target[i+len("·"):]
 	}
-	return asmTokenLooksMacroLike(target) || asmExternalDefineMayRewriteSymbol(target)
+	return asmTokenLooksMacroLike(target) || asmExternalDefineMayRewriteSymbol(target, externalDefines)
 }
 
-func asmExternalDefineMayRewriteSymbol(target string) bool {
-	return asmExternalDefinesMayRewriteSymbols() && asmTokenCanBeMacroName(target)
+func asmExternalDefineMayRewriteSymbol(target string, externalDefines bool) bool {
+	return externalDefines && asmTokenCanBeMacroName(target)
 }
 
-func asmExternalDefinesMayRewriteSymbols() bool {
-	flags := os.Getenv("GOFLAGS")
-	if flags == "" {
-		if out, err := gotool.Run("env", "GOFLAGS"); err == nil {
-			flags = strings.TrimSpace(string(out))
-		}
-	}
+func asmExternalDefinesMayRewriteSymbols(buildFlags []string, goFlags string) bool {
+	flags := strings.TrimSpace(strings.Join(buildFlags, " ") + " " + goFlags)
 	return strings.Contains(flags, "-asmflags") && strings.Contains(flags, "-D")
 }
 

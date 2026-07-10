@@ -162,6 +162,21 @@ func TestBuildConfigDigestsBuildInputs(t *testing.T) {
 	}
 }
 
+func TestBuildConfigInputsAreUnambiguous(t *testing.T) {
+	env := []byte(`{}`)
+	one, err := buildConfigDigest(env, []string{"input=x\nbuildinput=input=y"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := buildConfigDigest(env, []string{"input=x", "input=y"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Fatal("distinct ordered build-input sequences share a digest")
+	}
+}
+
 // TestBuildConfigSensitive is the behavioral sanity that buildConfig digests its
 // keys at all: a GOFLAGS change (an isolated build-flag key) moves the digest.
 func TestBuildConfigSensitive(t *testing.T) {
@@ -253,5 +268,31 @@ func TestCaptureCacheMemoizes(t *testing.T) {
 	}
 	if second != first {
 		t.Errorf("cache recomputed: %+v != %+v", second, first)
+	}
+}
+
+func TestCaptureCacheKeyIsUnambiguous(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	dir := t.TempDir()
+	c := NewCache()
+	first, err := c.Capture(dir, "a\x00b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.Capture(dir, "a", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, err := Capture(dir, "a", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == direct {
+		t.Fatal("test inputs do not produce distinct direct guards")
+	}
+	if second != direct {
+		t.Fatal("cache key collision returned guards for a different input sequence")
 	}
 }

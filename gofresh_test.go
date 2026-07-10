@@ -179,11 +179,11 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	}
 }
 
-// TestBuildInputsAffectVerdict pins that WithBuildInputs threads into the buildconfig
-// guard end to end: a fingerprint captured with no build inputs is stale on
-// buildconfig when checked by an engine that used a build flag, so a build-invocation
-// change is caught.
-func TestBuildInputsAffectVerdict(t *testing.T) {
+// TestBuildFlagsAffectVerdict pins that WithBuildFlags threads into the buildconfig
+// guard end to end: a fingerprint captured with no build flags is stale on
+// buildconfig when checked by an engine that used one, so a build-invocation change
+// is caught.
+func TestBuildFlagsAffectVerdict(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -196,7 +196,7 @@ func TestBuildInputsAffectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	tagged, err := New(WithBuildInputs("-tags=integration"))
+	tagged, err := New(WithBuildFlags("-tags=integration"))
 	if err != nil {
 		t.Fatalf("New tagged: %v", err)
 	}
@@ -206,6 +206,80 @@ func TestBuildInputsAffectVerdict(t *testing.T) {
 	}
 	if v.Status != Stale || v.Reason != "buildconfig" {
 		t.Errorf("build-input change: got {%s %q}, want {stale buildconfig}", v.Status, v.Reason)
+	}
+}
+
+func TestBuildInputsRejectFlags(t *testing.T) {
+	if _, err := New(WithBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "WithBuildFlags") {
+		t.Fatalf("flag-shaped opaque input accepted: %v", err)
+	}
+}
+
+func TestBuildFlagsRejectOverlay(t *testing.T) {
+	flags := []string{"-overlay=overlay.json"}
+	if _, err := New(WithBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
+		t.Fatalf("engine accepted overlay: %v", err)
+	}
+	if _, err := ScanPureDirectivesInWithBuildFlags(t.TempDir(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
+		t.Fatalf("purity scanner accepted overlay: %v", err)
+	}
+}
+
+// TestBuildFlagsSelectSourceAndPurity pins build-selection coherence across the
+// closure and purity surfaces. The same tag that produced the result selects every
+// analyzed declaration; an unselected file cannot contribute code or confer purity.
+func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/tagged\n\ngo 1.26\n")
+	write("selected_default.go", "//go:build !special\n\npackage tagged\n\n//gofresh:pure\nfunc Selected() int { return 1 }\n")
+	write("selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 2 }\n")
+
+	const pkg = "example.com/tagged"
+	flags := []string{"-tags=special"}
+	defaultPure, err := ScanPureDirectivesIn(tmp, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !defaultPure(Subject{Package: pkg, Symbol: "Selected"}) {
+		t.Fatal("default build did not find its purity directive")
+	}
+	specialPure, err := ScanPureDirectivesInWithBuildFlags(tmp, flags, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specialPure(Subject{Package: pkg, Symbol: "Selected"}) {
+		t.Fatal("unselected default file conferred purity on the special build")
+	}
+
+	recorded, err := New(WithDir(tmp), WithBuildFlags(flags...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: pkg, Symbol: "Selected"}
+	fp, err := recorded.Capture(subject, tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 3 }\n")
+	current, err := New(WithDir(tmp), WithBuildFlags(flags...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := current.Check(fp, subject, tmp, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Stale || verdict.Reason != "closure" {
+		t.Fatalf("selected source edit = {%s %q}, want {stale closure}", verdict.Status, verdict.Reason)
 	}
 }
 
@@ -298,5 +372,28 @@ func TestWithDirCoherence(t *testing.T) {
 	}
 	if _, err := e.Capture(Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
 		t.Fatalf("incoherent dirs accepted: %v", err)
+	}
+}
+
+func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	other := filepath.Join(root, "other")
+	child := filepath.Join(other, "child")
+	for _, dir := range []string{base, child} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join("..", "other", "child"), filepath.Join(base, "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	engineDir := filepath.Join(base, "link") + string(os.PathSeparator) + ".."
+	e, err := New(WithDir(engineDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.coherentDir(base); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
+		t.Fatalf("symlink-divergent trees accepted: %v", err)
 	}
 }

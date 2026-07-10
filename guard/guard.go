@@ -121,7 +121,12 @@ func NewCache() *Cache { return &Cache{entries: map[string]captureResult{}} }
 // Capture returns the guards for moduleDir and buildInputs, computing them once and
 // reusing the result (or error) on later calls with the same dir and inputs.
 func (c *Cache) Capture(moduleDir string, buildInputs ...string) (Guards, error) {
-	key := moduleDir + "\x00" + strings.Join(buildInputs, "\x00")
+	var keyBuilder strings.Builder
+	fmt.Fprintf(&keyBuilder, "%d:%s", len(moduleDir), moduleDir)
+	for _, input := range buildInputs {
+		fmt.Fprintf(&keyBuilder, "%d:%s", len(input), input)
+	}
+	key := keyBuilder.String()
 	if r, ok := c.entries[key]; ok {
 		return r.guards, r.err
 	}
@@ -194,12 +199,12 @@ func buildConfigDigest(envJSON []byte, buildInputs []string) (string, error) {
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s=%s\n", k, vals[k])
+		fmt.Fprintf(&b, "env %d:%s %d:%s\n", len(k), k, len(vals[k]), vals[k])
 	}
 	// Caller-supplied build invocation, in the order given (the caller keeps it
 	// stable across capture and check).
 	for _, in := range buildInputs {
-		fmt.Fprintf(&b, "buildinput=%s\n", in)
+		fmt.Fprintf(&b, "buildinput %d:%s\n", len(in), in)
 	}
 	return digest(b.String()), nil
 }

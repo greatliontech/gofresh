@@ -9,7 +9,8 @@ package gofresh
 
 import (
 	"fmt"
-	"path/filepath"
+	"os"
+	"strings"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
@@ -67,6 +68,7 @@ type Engine struct {
 	hasher      *closure.Hasher
 	guards      *guard.Cache
 	assumePure  func(Subject) bool
+	buildFlags  []string
 	buildInputs []string
 	dir         string
 }
@@ -74,13 +76,20 @@ type Engine struct {
 // Option configures an Engine.
 type Option func(*Engine)
 
-// WithBuildInputs supplies the build-affecting parts of the caller's invocation that
-// gofresh cannot observe from `go env` — CLI flags outside GOFLAGS (-tags, -gcflags,
-// -ldflags, -pgo) and PGO profile content (as a content digest). They are folded into
-// the buildconfig guard so a change to them is caught (REQ-guard-buildconfig). The
-// caller keeps them stable across the run that captures and the run that checks.
+// WithBuildFlags supplies complete go-command flags used by the producing build,
+// such as -tags=integration, -race, or -pgo=profile. The flags select every source
+// load and are folded into the build-configuration guard, so the closure and guard
+// describe the same binary (REQ-guard-buildconfig).
+func WithBuildFlags(flags ...string) Option {
+	return func(e *Engine) { e.buildFlags = append([]string(nil), flags...) }
+}
+
+// WithBuildInputs supplies opaque build evidence that cannot itself configure a Go
+// source load, such as a PGO profile's content digest. It is folded into the
+// build-configuration guard (REQ-guard-buildconfig). Go-command flags belong in
+// WithBuildFlags; presenting one here is refused when New applies the options.
 func WithBuildInputs(inputs ...string) Option {
-	return func(e *Engine) { e.buildInputs = inputs }
+	return func(e *Engine) { e.buildInputs = append([]string(nil), inputs...) }
 }
 
 // WithAssumePure supplies the purity predicate: a subject for which it returns true
@@ -108,7 +117,12 @@ func New(opts ...Option) (*Engine, error) {
 	for _, o := range opts {
 		o(e)
 	}
-	h, err := closure.NewAt(e.dir)
+	for _, input := range e.buildInputs {
+		if strings.HasPrefix(strings.TrimSpace(input), "-") {
+			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
+		}
+	}
+	h, err := closure.NewAt(e.dir, e.buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +151,7 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	g, err := e.guards.Capture(moduleDir, e.buildInputs...)
+	g, err := e.guards.Capture(moduleDir, e.guardInputs()...)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -156,7 +170,7 @@ func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, 
 	if err != nil {
 		return Verdict{}, err
 	}
-	g, err := e.guards.Capture(moduleDir, e.buildInputs...)
+	g, err := e.guards.Capture(moduleDir, e.guardInputs()...)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -174,6 +188,17 @@ func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, 
 		}
 	}
 	return decide(recorded, cl, g, rt, kind, e.assumePure(subject)), nil
+}
+
+func (e *Engine) guardInputs() []string {
+	inputs := make([]string, 0, len(e.buildFlags)+len(e.buildInputs))
+	for _, flag := range e.buildFlags {
+		inputs = append(inputs, "flag="+flag)
+	}
+	for _, input := range e.buildInputs {
+		inputs = append(inputs, "input="+input)
+	}
+	return inputs
 }
 
 // decide is the pure verdict function (REQ-fresh-verdict, REQ-fresh-sound): stale on
@@ -231,7 +256,18 @@ func reasonOr(reason, fallback string) string {
 // wrong tree's facts. An engine without WithDir accepts any moduleDir (the
 // closure loads in the process cwd, the caller's arrangement).
 func (e *Engine) coherentDir(moduleDir string) error {
-	if e.dir == "" || filepath.Clean(e.dir) == filepath.Clean(moduleDir) {
+	if e.dir == "" {
+		return nil
+	}
+	root, err := os.Stat(e.dir)
+	if err != nil {
+		return fmt.Errorf("gofresh: resolve engine tree %s: %w", e.dir, err)
+	}
+	module, err := os.Stat(moduleDir)
+	if err != nil {
+		return fmt.Errorf("gofresh: resolve guards tree %s: %w", moduleDir, err)
+	}
+	if os.SameFile(root, module) {
 		return nil
 	}
 	return fmt.Errorf("gofresh: engine rooted at %s asked to capture guards in %s; one tree per fingerprint", e.dir, moduleDir)

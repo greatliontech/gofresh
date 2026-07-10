@@ -80,7 +80,10 @@ later observed through global state and interface dispatch is covered even when 
 subject never names the registering package, the test main rooted for a test subject
 so setup it runs before the subject (state a production subject never sees) is in the
 closure; a narrower root or edge set is taken only when proven to preserve the same
-startup and global-flow coverage.
+startup and global-flow coverage. Package loading, dependency enumeration, and every
+other source-selection step use the caller's executable build flags, so the closure
+describes the binary whose build-configuration guard is recorded rather than a
+different default build.
 
 ## Cross-module dependencies
 

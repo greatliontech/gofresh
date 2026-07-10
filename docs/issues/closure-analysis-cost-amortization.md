@@ -1,7 +1,6 @@
 # Per-subject closure analysis costs more than the tests it saves
 
-Lands: when Check/Capture over many subjects of one tree is next needed
-fast, or when the closure engine is next reworked.
+Lands: 6
 
 ## Context
 

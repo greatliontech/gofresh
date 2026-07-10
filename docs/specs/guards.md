@@ -48,7 +48,14 @@ inputs are the build-affecting parts of the invocation the engine cannot observe
 `go env` — CLI flags passed outside `GOFLAGS` (`-tags`, `-gcflags`, `-ldflags`,
 `-pgo`) and PGO profile content — which the caller supplies as it does the commit,
 since only the caller knows how it built; a caller that passes none asserts it used
-none.
+none. Caller-supplied inputs have two disjoint forms: executable build flags select
+the source and configuration used by every source-dependent analysis, including
+purity directives, and also enter the digest; opaque build evidence such as a PGO
+profile's content digest enters the digest but cannot select source. A build flag
+presented as opaque evidence is refused rather than hashed without being applied,
+because the resulting guard and closure would describe different binaries. A build
+flag whose selected source the analysis cannot represent, such as a Go overlay, is
+also refused rather than evaluated against different disk content.
 
 > Placing `GOOS`/`GOARCH` in the code-guard digest, not the machine fingerprint, is
 > deliberate: a non-timing consumer (a mutation kill-sheet) runs with measurement
