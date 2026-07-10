@@ -11,6 +11,7 @@ import (
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"path/filepath"
 )
 
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set): a
@@ -127,6 +128,9 @@ func (e *Engine) Prime(pkgPaths []string) {
 // (runtimeinput.FromTestLog) into the returned Fingerprint's RuntimeInputs/
 // RuntimeDigest fields.
 func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {
+	if err := e.coherentDir(moduleDir); err != nil {
+		return Fingerprint{}, err
+	}
 	cl, err := e.hasher.Compute(subject.Package, subject.Symbol)
 	if err != nil {
 		return Fingerprint{}, err
@@ -143,6 +147,9 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
 func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, kind Kind) (Verdict, error) {
+	if err := e.coherentDir(moduleDir); err != nil {
+		return Verdict{}, err
+	}
 	cl, err := e.hasher.Compute(subject.Package, subject.Symbol)
 	if err != nil {
 		return Verdict{}, err
@@ -214,4 +221,16 @@ func reasonOr(reason, fallback string) string {
 		return fallback
 	}
 	return reason
+}
+
+// coherentDir refuses a guards dir that disagrees with the engine's tree
+// root: the closure would come from one tree and the environment guards
+// from another — an incoherent fingerprint that could serve or stale on the
+// wrong tree's facts. An engine without WithDir accepts any moduleDir (the
+// closure loads in the process cwd, the caller's arrangement).
+func (e *Engine) coherentDir(moduleDir string) error {
+	if e.dir == "" || filepath.Clean(e.dir) == filepath.Clean(moduleDir) {
+		return nil
+	}
+	return fmt.Errorf("gofresh: engine rooted at %s asked to capture guards in %s; one tree per fingerprint", e.dir, moduleDir)
 }

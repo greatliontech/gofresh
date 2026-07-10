@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -280,5 +281,22 @@ func TestWithDirOutOfTree(t *testing.T) {
 	}
 	if !pred(Subject{Package: "example.com/tiny", Symbol: "Add"}) {
 		t.Fatal("out-of-tree directive not honored")
+	}
+}
+
+// TestWithDirCoherence pins the one-tree rule: an engine rooted somewhere
+// refuses guard capture in a different tree — an incoherent fingerprint
+// (closure from one tree, environment from another) is never produced.
+func TestWithDirCoherence(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := e.Capture(Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
+		t.Fatalf("incoherent dirs accepted: %v", err)
 	}
 }
