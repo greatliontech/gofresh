@@ -1517,7 +1517,7 @@ func TestTier2PinsLinkedCacheModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tier2Contributions: %v", err)
 	}
-	if !contribContains(contribs, "cache:golang.org/x/tools@v0.46.0") {
+	if !contribContains(contribs, "cache:golang.org/x/tools@v0.47.0") {
 		t.Fatalf("linked x/tools module version missing from Tier-2 contributions: %v", contribs)
 	}
 }

@@ -60,15 +60,15 @@ type Refinement struct {
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
 // wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
 // hash, optional refinement evidence, guard values, an attributable purity
-// assertion, and, when the run observed them, the runtime-input manifest and its digest. The caller serializes and stores
-// it alongside its result, and pins any further domain facts of its own
-// (REQ-fresh-caller-pins).
+// assertion, and the caller's runtime-input manifest and digest evidence. The caller
+// serializes and stores it alongside its result, and pins any further domain facts of
+// its own (REQ-fresh-caller-pins).
 type Fingerprint struct {
 	MaximalClosure  string
 	Refinement      Refinement
 	Guards          guard.Guards
 	PurityAssertion string // attributable assertion used to override unverifiability; empty means none
-	RuntimeInputs   string // encoded manifest; empty when no runtime inputs were observed
+	RuntimeInputs   string // encoded manifest; empty only when the caller supplies no observation manifest
 	RuntimeDigest   string // digest of the manifest at capture
 }
 
@@ -196,9 +196,10 @@ func canonicalDir(dir string) (string, error) {
 
 // Capture records the closure hash and guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
-// inputs, when a run observed them, are added by the caller from the run's testlog
-// (runtimeinput.FromTestLog) into the returned Fingerprint's RuntimeInputs/
-// RuntimeDigest fields.
+// inputs are added by the caller from the run's testlog (runtimeinput.FromTestLog,
+// or runtimeinput.Merge for several processes) into the returned Fingerprint's
+// RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
+// non-empty manifest those functions return.
 func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {
 	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {

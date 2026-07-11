@@ -4,6 +4,7 @@ package runtimeinput
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const manifestVersion = 1
@@ -77,6 +79,10 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 		}
 		switch op {
 		case "getenv":
+			if !utf8.ValidString(name) {
+				addUnverifiable(&m, unverifiableSeen, "non-UTF-8 environment name")
+				continue
+			}
 			if !envSeen[name] {
 				envSeen[name] = true
 				m.Env = append(m.Env, name)
@@ -127,6 +133,53 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 		return State{}, err
 	}
 	return st, nil
+}
+
+// Merge revalidates independently completed runtime-input states against one current
+// module view, then returns their deterministic manifest union. Passing no states
+// deliberately produces the encoded observation-free manifest; incomplete, moved,
+// or malformed states are rejected.
+func Merge(moduleDir string, states ...State) (State, error) {
+	merged := manifest{Version: manifestVersion}
+	envSeen := map[string]bool{}
+	pathSeen := map[pathID]bool{}
+	unverifiableSeen := map[string]bool{}
+	for i, input := range states {
+		if !input.OK || input.Manifest == "" || input.Digest == "" {
+			return State{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
+		}
+		current, err := Current(input.Manifest, moduleDir)
+		if err != nil {
+			return State{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+		}
+		if current != input {
+			return State{}, fmt.Errorf("runtimeinputs: merge input %d moved", i)
+		}
+		m, err := decode(input.Manifest)
+		if err != nil {
+			return State{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+		}
+		for _, name := range m.Env {
+			if !envSeen[name] {
+				envSeen[name] = true
+				merged.Env = append(merged.Env, name)
+			}
+		}
+		for _, id := range m.Paths {
+			if !pathSeen[id] {
+				pathSeen[id] = true
+				merged.Paths = append(merged.Paths, id)
+			}
+		}
+		for _, reason := range m.Unverifiable {
+			addUnverifiable(&merged, unverifiableSeen, reason)
+		}
+	}
+	result, err := encode(merged)
+	if err != nil {
+		return State{}, err
+	}
+	return Current(result, moduleDir)
 }
 
 // Current recomputes the runtime-input digest for an encoded manifest.
@@ -186,6 +239,9 @@ func resolvePath(cwd, name string) string {
 }
 
 func classifyPath(moduleDir, p string) (pathID, string) {
+	if !utf8.ValidString(p) {
+		return pathID{}, "non-UTF-8 runtime input path"
+	}
 	if rel, ok := relUnder(moduleDir, p); ok {
 		return pathID{Kind: pathRel, Path: filepath.ToSlash(rel)}, ""
 	}
@@ -235,11 +291,28 @@ func hashPath(h hash.Hash, id pathID, p, moduleDir string) (bool, string, error)
 		fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
 		return true, "unhashable runtime input: " + p, nil
 	}
+	target := p
+	if id.Kind == pathRel {
+		var external bool
+		target, external, err = resolvedTarget(p, moduleDir)
+		if err != nil {
+			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			return true, "unhashable runtime input: " + p, nil
+		}
+		if external {
+			if info.IsDir() {
+				fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
+				return true, "external directory input: " + p, nil
+			}
+			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
+			return true, "external runtime input target: " + p, nil
+		}
+	}
 	mode := info.Mode()
 	switch {
 	case mode.IsRegular():
 		writeStat(h, info)
-		sum, err := fileHash(p)
+		sum, err := fileHash(target)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
 			return true, "unhashable runtime input: " + p, nil
@@ -247,16 +320,7 @@ func hashPath(h hash.Hash, id pathID, p, moduleDir string) (bool, string, error)
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && id.Kind == pathRel:
-		dir, external, err := directoryTarget(p, moduleDir)
-		if err != nil {
-			fprintf(h, "path %s %s unhashable-dir\n", id.Kind, id.Path)
-			return true, "unhashable runtime directory: " + p, nil
-		}
-		if external {
-			fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-			return true, "external directory input: " + p, nil
-		}
-		sum, unv, reason, err := dirHash(dir)
+		sum, unv, reason, err := dirHash(target)
 		if err != nil {
 			return false, "", err
 		}
@@ -278,7 +342,7 @@ func (id pathID) displayPath() string {
 	return filepath.Clean(id.Path)
 }
 
-func directoryTarget(path, moduleDir string) (string, bool, error) {
+func resolvedTarget(path, moduleDir string) (string, bool, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", false, err
@@ -396,17 +460,36 @@ func firstReason(reasons []string) string {
 
 func sortManifest(m *manifest) {
 	sort.Strings(m.Env)
+	m.Env = compact(m.Env)
 	sort.Slice(m.Paths, func(i, j int) bool {
 		if m.Paths[i].Kind != m.Paths[j].Kind {
 			return m.Paths[i].Kind < m.Paths[j].Kind
 		}
 		return m.Paths[i].Path < m.Paths[j].Path
 	})
+	m.Paths = compact(m.Paths)
 	sort.Strings(m.Unverifiable)
+	m.Unverifiable = compact(m.Unverifiable)
+}
+
+func compact[T comparable](values []T) []T {
+	if len(values) == 0 {
+		return nil
+	}
+	out := values[:1]
+	for _, value := range values[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func encode(m manifest) (string, error) {
 	sortManifest(&m)
+	if err := validateManifest(m); err != nil {
+		return "", err
+	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		return "", err
@@ -416,8 +499,9 @@ func encode(m manifest) (string, error) {
 
 // ModuleRelPaths decodes an encoded manifest and returns the module-relative
 // (slash-form) paths of its module-local file/directory inputs. These are the
-// observed inputs whose presence at the recording's commit determines whether the
-// recording is faithful to it (REQ-fresh-fingerprint-data, REQ-inputs-guard); external (absolute) inputs and environment
+// observed inputs whose Git-representable state at the recording's commit determines
+// whether the recording is faithful to it (REQ-fresh-fingerprint-data,
+// REQ-inputs-guard); external (absolute) inputs and environment
 // variables are excluded (an external input is out of the module's git scope).
 func ModuleRelPaths(encoded string) ([]string, error) {
 	m, err := decode(encoded)
@@ -438,9 +522,20 @@ func decode(s string) (manifest, error) {
 	if err != nil {
 		return manifest{}, fmt.Errorf("runtimeinputs: decode manifest: %w", err)
 	}
+	if base64.RawURLEncoding.EncodeToString(b) != s {
+		return manifest{}, fmt.Errorf("runtimeinputs: non-canonical base64url manifest")
+	}
+	if !utf8.Valid(b) {
+		return manifest{}, fmt.Errorf("runtimeinputs: manifest is not valid UTF-8")
+	}
 	var m manifest
-	if err := json.Unmarshal(b, &m); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
 		return manifest{}, fmt.Errorf("runtimeinputs: parse manifest: %w", err)
+	}
+	if err := requireJSONEnd(dec); err != nil {
+		return manifest{}, err
 	}
 	if m.Version != manifestVersion {
 		return manifest{}, fmt.Errorf("runtimeinputs: unsupported manifest version %d", m.Version)
@@ -449,17 +544,24 @@ func decode(s string) (manifest, error) {
 		return manifest{}, err
 	}
 	sortManifest(&m)
+	canonical, err := json.Marshal(m)
+	if err != nil {
+		return manifest{}, err
+	}
+	if !bytes.Equal(canonical, b) {
+		return manifest{}, fmt.Errorf("runtimeinputs: non-canonical manifest encoding")
+	}
 	return m, nil
 }
 
 func validateManifest(m manifest) error {
 	for _, name := range m.Env {
-		if name == "" || strings.ContainsAny(name, "\x00\r\n") {
+		if name == "" || !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n") {
 			return fmt.Errorf("runtimeinputs: invalid env name %q", name)
 		}
 	}
 	for _, id := range m.Paths {
-		if id.Path == "" || strings.ContainsAny(id.Path, "\x00\r\n") {
+		if id.Path == "" || !utf8.ValidString(id.Path) || strings.ContainsAny(id.Path, "\x00\r\n") {
 			return fmt.Errorf("runtimeinputs: invalid path %q", id.Path)
 		}
 		switch id.Kind {
@@ -467,17 +569,39 @@ func validateManifest(m manifest) error {
 			if filepath.IsAbs(id.Path) {
 				return fmt.Errorf("runtimeinputs: relative path input is absolute: %q", id.Path)
 			}
-			clean := filepath.Clean(filepath.FromSlash(id.Path))
-			if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(id.Path)))
+			if clean == ".." || strings.HasPrefix(clean, "../") {
 				return fmt.Errorf("runtimeinputs: relative path escapes module: %q", id.Path)
+			}
+			if clean != id.Path {
+				return fmt.Errorf("runtimeinputs: relative path input is not canonical: %q", id.Path)
 			}
 		case pathAbs:
 			if !filepath.IsAbs(id.Path) {
 				return fmt.Errorf("runtimeinputs: absolute path input is relative: %q", id.Path)
 			}
+			if filepath.Clean(id.Path) != id.Path {
+				return fmt.Errorf("runtimeinputs: absolute path input is not canonical: %q", id.Path)
+			}
 		default:
 			return fmt.Errorf("runtimeinputs: unknown path kind %q", id.Kind)
 		}
+	}
+	for _, reason := range m.Unverifiable {
+		if reason == "" || !utf8.ValidString(reason) || strings.ContainsAny(reason, "\x00\r\n") {
+			return fmt.Errorf("runtimeinputs: invalid unverifiable reason %q", reason)
+		}
+	}
+	return nil
+}
+
+func requireJSONEnd(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("runtimeinputs: parse manifest: trailing JSON value")
+		}
+		return fmt.Errorf("runtimeinputs: parse manifest: %w", err)
 	}
 	return nil
 }

@@ -11,15 +11,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-inputs-dirty"
-  content_hash: "84ccbdba2d8d978a3dd0d4a0383f02dbf4fd222442899bb765450b0fb39aff71"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestUncommitted"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "91a024bf81ce5241e0567ecaa0fc69a9bf36449da08d9b0bd54deebc74f471ac"
-}
-
-bindings {
   requirement_id: "REQ-inputs-unbounded"
   content_hash: "95f459dea6c43d3dd67ef04749f0fa7e9215665fb46b9a43a098e8c9cb75c48b"
   backend: "go"
@@ -53,4 +44,112 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
   shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-merge"
+  content_hash: "96cf7d01c3e9a2b1a4614046093c340a4c0ad787fb12517ff527a6d1fc808256"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMergeUnionsIndependentProcessManifests"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b628277795e28a5faf260ebd57d60c4e2684a62e1047c9db693de5f560bd6a2a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-merge"
+  content_hash: "96cf7d01c3e9a2b1a4614046093c340a4c0ad787fb12517ff527a6d1fc808256"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzMergeAlgebra"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "16f138fb9a42f646048ac3ecc79770c4636629905482971d7e1d3bd9ada1bea4"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "f2fb9e999c57b6048be03b4a1f660a4b9a1401521ac1f6d88c60aa34f11442cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMergedManifestDirtyEvidenceIsMonotone"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "33caf38f9af2d19ebdee18dcff0c9926d2b3570c3178b2086876bbe442b73368"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-merge"
+  content_hash: "96cf7d01c3e9a2b1a4614046093c340a4c0ad787fb12517ff527a6d1fc808256"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.Merge"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "0fcda43071abb00bf56390e496a1bb4591889064a94330909729127191c93d45"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-unbounded"
+  content_hash: "95f459dea6c43d3dd67ef04749f0fa7e9215665fb46b9a43a098e8c9cb75c48b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.hashPath"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "3d967810ac62aad40710965685ef6d90b260d655163c447ca521bd5803aaecfe"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-unbounded"
+  content_hash: "95f459dea6c43d3dd67ef04749f0fa7e9215665fb46b9a43a098e8c9cb75c48b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkFileToExternalTargetIsUnverifiable"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fd584a867549ec0087a0f0c6ee585227d67aafe349c37c34365cb3cbe1274c0f"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "f2fb9e999c57b6048be03b4a1f660a4b9a1401521ac1f6d88c60aa34f11442cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.Dirty"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "faf5488ba4a643e360531c519f02f7a5036c7ab7fbfe5b48e63b6e91e431986e"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "f2fb9e999c57b6048be03b4a1f660a4b9a1401521ac1f6d88c60aa34f11442cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestDirtyEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f8517451defbb1f54cc48a606392010f8165f80c043900e1eaecc6b967f975f1"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-coherence"
+  content_hash: "47167e426319107f113826a54f3b4c6a4e5cbfdd59d92bdfbd9d1d987839df2d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.View.finishRuntimeObservation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "053a9cc150852460c689980e6c3f79dc71fdbbd858c047c772c7c3509df090a5"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-coherence"
+  content_hash: "47167e426319107f113826a54f3b4c6a4e5cbfdd59d92bdfbd9d1d987839df2d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestRuntimeInputCheckDetectsMovementBetweenSnapshots"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cb3457c7b74c55f5b6f0978b83d26677473a5101c253ad74998ca42a0bd8a8be"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "f2fb9e999c57b6048be03b4a1f660a4b9a1401521ac1f6d88c60aa34f11442cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestDirtyRejectsStateThatMovedBeforeInspection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "681f3c2cb05d0f7e8730fdfb2fddb2b68f443a444966f7fff04befa60f6401d8"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-coherence"
+  content_hash: "47167e426319107f113826a54f3b4c6a4e5cbfdd59d92bdfbd9d1d987839df2d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestDirtyRejectsStateThatMovedBeforeInspection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "681f3c2cb05d0f7e8730fdfb2fddb2b68f443a444966f7fff04befa60f6401d8"
 }

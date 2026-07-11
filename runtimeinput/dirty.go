@@ -1,35 +1,50 @@
 package runtimeinput
 
-// CommitInspector reports whether a module-relative path was committed at a given
-// ref. The caller supplies it from its own git layer, so runtimeinput carries no git
-// dependency — validity never reads the commit (REQ-fresh-commit-independent); this
-// is only for the dirty determination below.
+import "fmt"
+
+// CommitInspector reports whether a module-relative runtime input's current
+// Git-representable state is reproducible at a given ref. The caller supplies it from
+// its own git layer, so runtimeinput carries no git dependency: validity never reads
+// the commit (REQ-fresh-commit-independent); this is only for dirty evidence.
 type CommitInspector interface {
-	// ExistsAt reports whether moduleRelPath (slash-separated, relative to the module
-	// root) is present — as a file or a directory — in the tree at commit.
-	ExistsAt(commit, moduleRelPath string) (bool, error)
+	// ReproducibleAt compares the current identity at moduleRelPath with the regular
+	// file, executable mode, symlink target, or directory tree represented at commit.
+	ReproducibleAt(commit, moduleRelPath string) (bool, error)
 }
 
-// Uncommitted reports whether the manifest names a module-local input that is not
-// present at commit — gitignored, untracked, or created during the run. Such an
-// input is not reproducible from that commit, so a recording backed by it is not
-// faithful to its commit and the caller marks it dirty (REQ-inputs-dirty): usable
-// for working-tree reuse, barred as a baseline. Only module-relative inputs are
-// checked; an external absolute input is outside the module's git and does not bear
-// on the recording's faithfulness to its own commit.
-func Uncommitted(encoded, commit string, inspector CommitInspector) (bool, error) {
-	rels, err := ModuleRelPaths(encoded)
+// Dirty revalidates state against the current module view, then reports whether it
+// names a module-local input whose current Git-representable state is not
+// reproducible at commit. A recording backed by such an input is usable for
+// working-tree reuse but barred as a baseline (REQ-inputs-dirty). Only
+// module-relative inputs are checked; external absolute inputs are outside the
+// module's git scope.
+func Dirty(state State, moduleDir, commit string, inspector CommitInspector) (bool, error) {
+	if inspector == nil {
+		return false, fmt.Errorf("runtimeinputs: nil commit inspector")
+	}
+	if !state.OK || state.Manifest == "" || state.Digest == "" {
+		return false, fmt.Errorf("runtimeinputs: incomplete state for dirty inspection")
+	}
+	current, err := Current(state.Manifest, moduleDir)
 	if err != nil {
 		return false, err
 	}
+	if current != state {
+		return false, fmt.Errorf("runtimeinputs: state moved before dirty inspection")
+	}
+	rels, err := ModuleRelPaths(state.Manifest)
+	if err != nil {
+		return false, err
+	}
+	dirty := false
 	for _, rel := range rels {
-		present, err := inspector.ExistsAt(commit, rel)
+		reproducible, err := inspector.ReproducibleAt(commit, rel)
 		if err != nil {
 			return false, err
 		}
-		if !present {
-			return true, nil
+		if !reproducible {
+			dirty = true
 		}
 	}
-	return false, nil
+	return dirty, nil
 }
