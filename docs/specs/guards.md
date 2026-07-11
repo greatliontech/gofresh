@@ -121,3 +121,16 @@ current view sees toolchain, build, machine, or runtime-configuration drift.
 required to evaluate a guard that applies to its result MUST be treated as stale, not
 valid — validity requires proof, so an unevaluable guard is absence of proof, and a
 recording written before a guard existed re-measures rather than being trusted.
+
+**REQ-guard-selective-capture** (behavior): An analysis view MUST capture exactly the
+guards applicable to its caller-declared result kind. A code-result view captures the
+code guards and leaves machine and runtime-configuration values absent without
+probing machine support; a measurement view additionally captures both measurement
+guards. The view's result kind is fixed at construction and a check under another
+kind is refused. Every fingerprint records that nonzero kind and a check derives its
+view policy from the recording rather than accepting a replacement kind from the
+caller; missing or mismatched kind evidence is refused. Unavailable measurement
+support therefore cannot block a code result, and a measurement recording cannot be
+validated under code-only guards. A code-kind fingerprint carrying non-empty
+measurement guard values is internally inconsistent and refused rather than treated
+as permission to ignore them.

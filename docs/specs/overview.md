@@ -40,8 +40,8 @@ current tree — one of valid, stale, or unverifiable.
 
 **fingerprint** (term): the recorded evidence a verdict is computed from — the
 subject's maximal source-closure hash, optional refinement evidence, any attributable
-purity assertion used to override unverifiability, and the value of every applicable
-guard.
+purity assertion used to override unverifiability, the result kind selecting its
+applicable guards, and the value of every applicable guard.
 
 **refinement evidence** (term): an optional recording of a narrower sound source
 closure: its hash, unverifiable-dependence disposition, and stable strategy/version
@@ -92,7 +92,7 @@ whose inputs are unchanged.
 
 **REQ-fresh-fingerprint-data** (structural): A fingerprint MUST be exposed as its
 constituent guard values, maximal closure hash, optional refinement evidence, and
-attributable purity assertion as data, carrying no persistence or wire format of its own — the caller owns how a
+attributable purity assertion and result kind as data, carrying no persistence or wire format of its own — the caller owns how a
 fingerprint is serialized and stored beside its result. Refinement support is
 explicit rather than inferred: a refined recording carries a non-empty recognized
 strategy/version identity and complete, internally consistent refined evidence; a

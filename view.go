@@ -32,6 +32,7 @@ type View struct {
 	engine          *Engine
 	subjects        []Subject
 	moduleDir       string
+	kind            Kind
 	maximal         map[Subject]closure.Closure
 	refined         map[Subject]closure.Closure
 	guards          guard.Guards
@@ -42,14 +43,23 @@ type View struct {
 	runtimeCurrent  func(string, string) (runtimeinput.State, error)
 }
 
-// NewView observes subjects and moduleDir as one analysis view. Reachability and
+// NewView observes subjects and moduleDir as one code-result analysis view.
+// Reachability and
 // package loading are shared across the requested set, but each subject retains
 // its independent closure semantics (REQ-closure-batch-equivalence).
 func (e *Engine) NewView(subjects []Subject, moduleDir string) (*View, error) {
-	return e.newView(context.Background(), subjects, moduleDir)
+	return e.NewViewFor(subjects, moduleDir, CodeResult)
 }
 
-func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
+// NewViewFor observes one analysis view with the guards applicable to kind.
+func (e *Engine) NewViewFor(subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+	return e.newView(context.Background(), subjects, moduleDir, kind)
+}
+
+func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+	if !validKind(kind) {
+		return nil, fmt.Errorf("gofresh: invalid result kind %d", kind)
+	}
 	if len(subjects) == 0 {
 		return nil, errors.New("gofresh: analysis view requires at least one subject")
 	}
@@ -83,11 +93,11 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		}
 	}
 
-	first, err := e.observeView(ctx, unique, requests, packages, moduleDir)
+	first, err := e.observeView(ctx, unique, requests, packages, moduleDir, kind)
 	if err != nil {
 		return nil, err
 	}
-	second, err := e.observeView(ctx, unique, requests, packages, moduleDir)
+	second, err := e.observeView(ctx, unique, requests, packages, moduleDir, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +117,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		engine:          e,
 		subjects:        unique,
 		moduleDir:       moduleDir,
+		kind:            kind,
 		maximal:         first.maximal,
 		refined:         make(map[Subject]closure.Closure, len(unique)),
 		guards:          first.guards,
@@ -124,7 +135,7 @@ type viewObservation struct {
 	openWorld map[Subject]bool
 }
 
-func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string) (viewObservation, error) {
+func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
 	hasher, err := closure.NewAtContext(ctx, e.dir, e.buildFlags...)
 	if err != nil {
 		return viewObservation{}, err
@@ -133,7 +144,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	guards, err := guard.CaptureContext(ctx, moduleDir, e.guardInputs()...)
+	guards, err := guard.CaptureForContext(ctx, moduleDir, kind, e.guardInputs()...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -182,7 +193,7 @@ func (v *View) Capture(subject Subject) (Fingerprint, error) {
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject]}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}, nil
 }
 
 // CaptureRefined returns maximal and declaration-RTA evidence for subject under
@@ -254,11 +265,18 @@ func (v *View) refinedFingerprintLocked(subject Subject) Fingerprint {
 		Refinement:      refinement,
 		Guards:          v.guards,
 		PurityAssertion: v.purity[subject],
+		ResultKind:      v.kind,
 	}
 }
 
-// Check compares recorded against subject's current facts in this View.
-func (v *View) Check(recorded Fingerprint, subject Subject, kind Kind) (Verdict, error) {
+// Check compares recorded against subject's current facts under this View's result kind.
+func (v *View) Check(recorded Fingerprint, subject Subject) (Verdict, error) {
+	if err := validateRecordedKind(recorded); err != nil {
+		return Verdict{}, err
+	}
+	if recorded.ResultKind != v.kind {
+		return Verdict{}, fmt.Errorf("gofresh: recorded result kind %d does not match view kind %d", recorded.ResultKind, v.kind)
+	}
 	cl, ok := v.maximal[subject]
 	if !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
@@ -278,18 +296,18 @@ func (v *View) Check(recorded Fingerprint, subject Subject, kind Kind) (Verdict,
 		if runtimeState != afterRuntime {
 			return Verdict{Stale, "runtimeinputs"}, nil
 		}
-		return decideAfterClosure(recorded, cl, v.guards, runtimeState, kind, v.purityMatches(recorded, subject)), nil
+		return decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject)), nil
 	}
-	return v.checkAfterClosure(recorded, subject, cl, kind), nil
+	return v.checkAfterClosure(recorded, subject, cl), nil
 }
 
 // CheckRefined compares maximal evidence first. It invokes declaration-RTA under
 // ctx only after maximal drift and only for compatible refined evidence.
-func (v *View) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject, kind Kind) (Verdict, error) {
+func (v *View) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
 	if _, ok := v.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	verdicts, err := v.checkRefinedBatch(ctx, map[Subject]Fingerprint{subject: recorded}, kind)
+	verdicts, err := v.checkRefinedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -298,11 +316,11 @@ func (v *View) CheckRefined(ctx context.Context, recorded Fingerprint, subject S
 
 // CheckRefinedBatch checks a caller-supplied recording set, batching precise
 // analysis only for subjects whose maximal evidence drifted.
-func (v *View) CheckRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint, kind Kind) (map[Subject]Verdict, error) {
-	return v.checkRefinedBatch(ctx, recorded, kind)
+func (v *View) CheckRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	return v.checkRefinedBatch(ctx, recorded)
 }
 
-func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint, kind Kind) (map[Subject]Verdict, error) {
+func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	verdicts := make(map[Subject]Verdict, len(recorded))
 	observationCtx := context.Background()
 	hasRuntimeInputs := false
@@ -326,6 +344,12 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 	}
 	var drifted []Subject
 	for subject, rec := range recorded {
+		if err := validateRecordedKind(rec); err != nil {
+			return nil, err
+		}
+		if rec.ResultKind != v.kind {
+			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
+		}
 		maximal, ok := v.maximal[subject]
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
@@ -343,7 +367,7 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 				verdicts[subject] = Verdict{Stale, "refinement"}
 				continue
 			}
-			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], kind); failed {
+			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
 				verdicts[subject] = verdict
 				continue
 			}
@@ -358,7 +382,7 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			effective.Unverifiable = rec.Refinement.Unverifiable
 			effective.Reason = rec.Refinement.Reason
 		}
-		verdicts[subject] = decideAfterClosure(rec, effective, v.guards, runtimeBefore[subject], kind, v.purityMatches(rec, subject))
+		verdicts[subject] = decideAfterClosure(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject))
 	}
 
 	if len(drifted) == 0 {
@@ -383,14 +407,14 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			verdicts[subject] = Verdict{Stale, "refinement"}
 			continue
 		}
-		verdicts[subject] = decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], kind, v.purityMatches(rec, subject))
+		verdicts[subject] = decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject))
 	}
 	return finish()
 }
 
-func (v *View) checkAfterClosure(recorded Fingerprint, subject Subject, cl closure.Closure, kind Kind) Verdict {
+func (v *View) checkAfterClosure(recorded Fingerprint, subject Subject, cl closure.Closure) Verdict {
 	rt := v.currentRuntime(recorded)
-	return decideAfterClosure(recorded, cl, v.guards, rt, kind, v.purityMatches(recorded, subject))
+	return decideAfterClosure(recorded, cl, v.guards, rt, v.kind, v.purityMatches(recorded, subject))
 }
 
 func (v *View) purityMatches(recorded Fingerprint, subject Subject) bool {
@@ -407,8 +431,8 @@ func validPurityAssertion(assertion string) bool {
 	}
 }
 
-func (v *View) knownGuardVerdict(recorded Fingerprint, kind Kind) (Verdict, bool) {
-	return decideKnownGuards(recorded, v.guards, v.currentRuntime(recorded), kind)
+func (v *View) knownGuardVerdict(recorded Fingerprint) (Verdict, bool) {
+	return decideKnownGuards(recorded, v.guards, v.currentRuntime(recorded), v.kind)
 }
 
 func (v *View) observeRuntimeInputs(recorded map[Subject]Fingerprint) map[Subject]runtimeinput.State {
@@ -459,7 +483,7 @@ func (v *View) Validate() error {
 	if hasRefined {
 		return ErrRefinedValidationRequired
 	}
-	current, err := v.engine.NewView(v.subjects, v.moduleDir)
+	current, err := v.engine.NewViewFor(v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
@@ -472,7 +496,7 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	v.mu.Unlock()
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir)
+	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
@@ -495,7 +519,7 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	if err := current.ensureRefined(ctx, subjects); err != nil {
 		return err
 	}
-	final, err := v.engine.newView(ctx, v.subjects, v.moduleDir)
+	final, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
@@ -513,7 +537,7 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 }
 
 func (v *View) reobserveBase(ctx context.Context) error {
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir)
+	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
@@ -557,7 +581,7 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if len(requests) == 0 {
 		return nil
 	}
-	beforeView, err := v.engine.newView(ctx, v.subjects, v.moduleDir)
+	beforeView, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
@@ -575,7 +599,7 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if err != nil {
 		return err
 	}
-	afterView, err := v.engine.newView(ctx, v.subjects, v.moduleDir)
+	afterView, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}

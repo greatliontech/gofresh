@@ -37,15 +37,17 @@ type Guards struct {
 type Kind int
 
 const (
+	invalidKind Kind = iota
 	// CodeResult is a pass/fail-style result (a test verdict, a mutation kill):
 	// only the code guards apply.
-	CodeResult Kind = iota
+	CodeResult
 	// Measurement is a timing result (a benchmark): the measurement guards apply
 	// in addition to the code guards.
 	Measurement
 )
 
-// Capture gathers the current guard values. moduleDir is the directory `go`
+// Capture gathers code-result guard values. Use CaptureFor for a measurement.
+// moduleDir is the directory `go`
 // resolves the toolchain and build environment in — a go.mod toolchain directive
 // and GOTOOLCHAIN are relative to it, so it must be the directory the result is
 // produced in — while the machine and runtime-config guards are host and process
@@ -58,11 +60,28 @@ const (
 // build-input change leaves buildconfig unmoved (REQ-guard-buildconfig,
 // REQ-guard-buildconfig-failclosed). None used ⇒ pass none.
 func Capture(moduleDir string, buildInputs ...string) (Guards, error) {
-	return CaptureContext(context.Background(), moduleDir, buildInputs...)
+	return CaptureFor(moduleDir, CodeResult, buildInputs...)
+}
+
+// CaptureFor gathers the guard values applicable to kind.
+func CaptureFor(moduleDir string, kind Kind, buildInputs ...string) (Guards, error) {
+	return CaptureForContext(context.Background(), moduleDir, kind, buildInputs...)
 }
 
 // CaptureContext is Capture with caller-owned cancellation for subprocess-backed guards.
 func CaptureContext(ctx context.Context, moduleDir string, buildInputs ...string) (Guards, error) {
+	return CaptureForContext(ctx, moduleDir, CodeResult, buildInputs...)
+}
+
+// CaptureForContext is CaptureFor with caller-owned cancellation for subprocess-backed guards.
+func CaptureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs ...string) (Guards, error) {
+	return captureForContext(ctx, moduleDir, kind, buildInputs, gatherFacts, runtimeConfig)
+}
+
+func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
+	if kind != CodeResult && kind != Measurement {
+		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
+	}
 	tc, err := toolchainContext(ctx, moduleDir)
 	if err != nil {
 		return Guards{}, err
@@ -71,16 +90,17 @@ func CaptureContext(ctx context.Context, moduleDir string, buildInputs ...string
 	if err != nil {
 		return Guards{}, err
 	}
-	facts, err := gatherFacts()
+	guards := Guards{Toolchain: tc, BuildConfig: bc}
+	if kind == CodeResult {
+		return guards, nil
+	}
+	facts, err := machine()
 	if err != nil {
 		return Guards{}, err
 	}
-	return Guards{
-		Toolchain:     tc,
-		BuildConfig:   bc,
-		Machine:       facts.Fingerprint(),
-		RuntimeConfig: runtimeConfig(),
-	}, nil
+	guards.Machine = facts.Fingerprint()
+	guards.RuntimeConfig = runtimeGuard()
+	return guards, nil
 }
 
 // Compare reports the first applicable guard whose recorded and current values
@@ -89,6 +109,9 @@ func CaptureContext(ctx context.Context, moduleDir string, buildInputs ...string
 // mismatch, since validity requires proof and an unevaluable guard is not proof
 // (REQ-guard-completeness). Comparison is exact equality (REQ-guard-equality).
 func Compare(recorded, current Guards, kind Kind) string {
+	if kind != CodeResult && kind != Measurement {
+		return "kind"
+	}
 	pairs := []struct{ name, rec, cur string }{
 		{"toolchain", recorded.Toolchain, current.Toolchain},
 		{"buildconfig", recorded.BuildConfig, current.BuildConfig},
@@ -105,40 +128,6 @@ func Compare(recorded, current Guards, kind Kind) string {
 		}
 	}
 	return ""
-}
-
-// Cache memoizes Capture by module dir for the life of one command invocation.
-// Every fact Capture gathers is per-module or per-machine — `go version`/`go env`
-// subprocesses and the machine facts — so a multi-package run over one module
-// captures once instead of once per package. Errors are memoized too. A Cache is
-// not safe for concurrent use.
-type Cache struct {
-	entries map[string]captureResult
-}
-
-type captureResult struct {
-	guards Guards
-	err    error
-}
-
-// NewCache returns an empty capture cache for one command invocation.
-func NewCache() *Cache { return &Cache{entries: map[string]captureResult{}} }
-
-// Capture returns the guards for moduleDir and buildInputs, computing them once and
-// reusing the result (or error) on later calls with the same dir and inputs.
-func (c *Cache) Capture(moduleDir string, buildInputs ...string) (Guards, error) {
-	var keyBuilder strings.Builder
-	fmt.Fprintf(&keyBuilder, "%d:%s", len(moduleDir), moduleDir)
-	for _, input := range buildInputs {
-		fmt.Fprintf(&keyBuilder, "%d:%s", len(input), input)
-	}
-	key := keyBuilder.String()
-	if r, ok := c.entries[key]; ok {
-		return r.guards, r.err
-	}
-	g, err := Capture(moduleDir, buildInputs...)
-	c.entries[key] = captureResult{guards: g, err: err}
-	return g, err
 }
 
 // toolchain is the `go version` identity minus the redundant leading prefix — e.g.

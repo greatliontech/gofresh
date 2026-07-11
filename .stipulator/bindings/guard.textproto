@@ -65,15 +65,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-guard-cache"
-  content_hash: "859611039ae09d91f26d8c55c1b7ce91869a0f48a4b5686beb1a8012c39bf934"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureCacheMemoizes"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "b393482359f48a370acdc8b0c8ba3b53f4d8eac7b07b40d72d1e7a70a00c0f7a"
-}
-
-bindings {
   requirement_id: "REQ-guard-completeness"
   content_hash: "24dffdef598935c994705e9fa18a173362996b86a195241a3f0dad1fde1eea03"
   backend: "go"
@@ -164,15 +155,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-guard-cache"
-  content_hash: "859611039ae09d91f26d8c55c1b7ce91869a0f48a4b5686beb1a8012c39bf934"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureCacheKeyIsUnambiguous"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "0cdd9e95c45126a10e8f4334babac1d73d65c0a823004448545cffa4fb0b53b1"
-}
-
-bindings {
   requirement_id: "REQ-guard-view-lifetime"
   content_hash: "7138b188846757b8b7bde8d25a2a6867a1bff294504b66fa2013707dcd2df9fe"
   backend: "go"
@@ -188,4 +170,67 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
   role: BINDING_ROLE_TESTS
   shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.CaptureForContext"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "2c04b93a94db8b5a236f1f638a4a50e2007f1463cc2d3e8c28d0359d82de1e47"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.Engine.NewViewFor"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "ab41bf63ccec06d2a1fc41bfb1618028d0a8cf59edff6e6eeee20e392860a7fe"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCodeCaptureSkipsMeasurementSupport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a625458b7c1a588a0eeb29094aec53254c8a31b41557d66f5d9018e2d3e0d9bb"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestMeasurementCaptureRequiresMachineSupport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d5c4a12ad63342e007829e6308f40d7145b907bede0872b532e4a1f4c6bed39c"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCodeViewOmitsMeasurementGuards"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "546df83f95d6543214501db926d509c4c402d8d01d620627754ed8fcf90d1f7f"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestViewCheckUsesConstructionKind"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "64ad43a95a2c4a55c5879b74bb5ca5e688be25e02726b52874b7ba5068b6b1a1"
+}
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestResultKindIsBoundToFingerprint"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "863259dd8c2b9e6a4355f1ed9e73c955153ca069bf1e69d1bbec4aae05d42895"
 }

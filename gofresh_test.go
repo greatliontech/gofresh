@@ -133,7 +133,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "Refinement", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest"}
+	want := []string{"MaximalClosure", "Refinement", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
@@ -185,7 +185,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	v, err := e.Check(fp, subj, ".", CodeResult)
+	v, err := e.Check(fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	// The same recorded fingerprint checked against a different subject (Adder.Ptr
 	// has a different closure) is stale on the closure guard.
 	other := Subject{Package: methodPkg, Symbol: "Adder.Ptr"}
-	v2, err := e.Check(fp, other, ".", CodeResult)
+	v2, err := e.Check(fp, other, ".")
 	if err != nil {
 		t.Fatalf("Check other: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	bad := fp
 	bad.RuntimeInputs = "not a manifest"
 	bad.RuntimeDigest = "D"
-	v3, err := e.Check(bad, subj, ".", CodeResult)
+	v3, err := e.Check(bad, subj, ".")
 	if err != nil {
 		t.Fatalf("Check malformed manifest: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestBuildFlagsAffectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New tagged: %v", err)
 	}
-	v, err := tagged.Check(fp, subj, ".", CodeResult)
+	v, err := tagged.Check(fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := current.Check(fp, subject, tmp, CodeResult)
+	verdict, err := current.Check(fp, subject, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,11 +333,11 @@ func TestAssumePureOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fp, err := e.Capture(subj, ".")
+	fp, err := e.CaptureFor(subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if v, err := e.Check(fp, subj, ".", Measurement); err != nil {
+	if v, err := e.Check(fp, subj, "."); err != nil {
 		t.Fatalf("Check: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("default: got %s, want unverifiable (closure reaches file I/O)", v.Status)
@@ -347,19 +347,19 @@ func TestAssumePureOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New pure: %v", err)
 	}
-	pureFP, err := pure.Capture(subj, ".")
+	pureFP, err := pure.CaptureFor(subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture pure: %v", err)
 	}
 	if pureFP.PurityAssertion != "caller assertion" {
 		t.Fatalf("purity assertion = %q, want attributable caller assertion", pureFP.PurityAssertion)
 	}
-	if v, err := pure.Check(fp, subj, ".", Measurement); err != nil {
+	if v, err := pure.Check(fp, subj, "."); err != nil {
 		t.Fatalf("Check unrecorded pure: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("unrecorded assume-pure: got %s, want unverifiable", v.Status)
 	}
-	if v, err := pure.Check(pureFP, subj, ".", Measurement); err != nil {
+	if v, err := pure.Check(pureFP, subj, "."); err != nil {
 		t.Fatalf("Check pure: %v", err)
 	} else if v.Status != Valid {
 		t.Errorf("assume-pure: got %s (%s), want valid", v.Status, v.Reason)
@@ -393,7 +393,7 @@ func TestWithDirOutOfTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture out of tree: %v", err)
 	}
-	v, err := e.Check(fp, subj, tmp, CodeResult)
+	v, err := e.Check(fp, subj, tmp)
 	if err != nil || v.Status != Valid {
 		t.Fatalf("round trip = %+v, %v", v, err)
 	}

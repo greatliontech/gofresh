@@ -1,7 +1,9 @@
 package guard
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -12,7 +14,7 @@ func TestCaptureNonEmpty(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	g, err := Capture(t.TempDir())
+	g, err := CaptureFor(t.TempDir(), Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -23,6 +25,41 @@ func TestCaptureNonEmpty(t *testing.T) {
 		if v == "" {
 			t.Errorf("guard %s captured empty", name)
 		}
+	}
+}
+
+func TestCodeCaptureSkipsMeasurementSupport(t *testing.T) {
+	machineCalled := false
+	runtimeCalled := false
+	g, err := captureForContext(context.Background(), t.TempDir(), CodeResult, nil,
+		func() (MachineFacts, error) {
+			machineCalled = true
+			return MachineFacts{}, errors.New("unsupported")
+		},
+		func() string {
+			runtimeCalled = true
+			return "runtime"
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machineCalled || runtimeCalled {
+		t.Fatalf("code capture evaluated measurement support: machine=%v runtime=%v", machineCalled, runtimeCalled)
+	}
+	if g.Toolchain == "" || g.BuildConfig == "" || g.Machine != "" || g.RuntimeConfig != "" {
+		t.Fatalf("code guards = %+v", g)
+	}
+}
+
+func TestMeasurementCaptureRequiresMachineSupport(t *testing.T) {
+	want := errors.New("unsupported")
+	_, err := captureForContext(context.Background(), t.TempDir(), Measurement, nil,
+		func() (MachineFacts, error) { return MachineFacts{}, want },
+		func() string { return "runtime" },
+	)
+	if !errors.Is(err, want) {
+		t.Fatalf("measurement capture error = %v, want %v", err, want)
 	}
 }
 
@@ -244,55 +281,5 @@ func TestRuntimeConfigSensitive(t *testing.T) {
 	t.Setenv("GOGC", "off")
 	if runtimeConfig() == base {
 		t.Error("runtimeconfig insensitive to a GOGC change")
-	}
-}
-
-// TestCaptureCacheMemoizes pins the per-invocation cache: a second call for the same
-// dir returns the memoized result rather than recomputing.
-func TestCaptureCacheMemoizes(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go toolchain not available")
-	}
-	dir := t.TempDir()
-	c := NewCache()
-	first, err := c.Capture(dir)
-	if err != nil {
-		t.Fatalf("Capture: %v", err)
-	}
-	// Change the runtime-config environment: a fresh direct Capture would see it,
-	// the cache must not (it returns the memoized value).
-	t.Setenv("GOGC", "off")
-	second, err := c.Capture(dir)
-	if err != nil {
-		t.Fatalf("Capture (second): %v", err)
-	}
-	if second != first {
-		t.Errorf("cache recomputed: %+v != %+v", second, first)
-	}
-}
-
-func TestCaptureCacheKeyIsUnambiguous(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go toolchain not available")
-	}
-	dir := t.TempDir()
-	c := NewCache()
-	first, err := c.Capture(dir, "a\x00b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := c.Capture(dir, "a", "b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	direct, err := Capture(dir, "a", "b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == direct {
-		t.Fatal("test inputs do not produce distinct direct guards")
-	}
-	if second != direct {
-		t.Fatal("cache key collision returned guards for a different input sequence")
 	}
 }

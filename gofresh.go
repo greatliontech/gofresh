@@ -12,6 +12,7 @@ package gofresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,9 +61,9 @@ type Refinement struct {
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
 // wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
 // hash, optional refinement evidence, guard values, an attributable purity
-// assertion, and the caller's runtime-input manifest and digest evidence. The caller
-// serializes and stores it alongside its result, and pins any further domain facts of
-// its own (REQ-fresh-caller-pins).
+// assertion, result kind, and the caller's runtime-input manifest and digest evidence.
+// The caller serializes and stores it alongside its result, and pins any further
+// domain facts of its own (REQ-fresh-caller-pins).
 type Fingerprint struct {
 	MaximalClosure  string
 	Refinement      Refinement
@@ -70,6 +71,7 @@ type Fingerprint struct {
 	PurityAssertion string // attributable assertion used to override unverifiability; empty means none
 	RuntimeInputs   string // encoded manifest; empty only when the caller supplies no observation manifest
 	RuntimeDigest   string // digest of the manifest at capture
+	ResultKind      Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -194,7 +196,7 @@ func canonicalDir(dir string) (string, error) {
 	return raw, nil
 }
 
-// Capture records the closure hash and guard values for subject, whose code lives
+// Capture records the closure hash and code-result guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
 // inputs are added by the caller from the run's testlog (runtimeinput.FromTestLog,
 // or runtimeinput.Merge for several processes) into the returned Fingerprint's
@@ -208,8 +210,19 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 	return view.Capture(subject)
 }
 
-// CaptureRefined captures maximal and declaration-RTA evidence under ctx. The
-// caller selects refinement explicitly and owns its cancellation or budget.
+// CaptureFor records subject with the guards applicable to kind. Measurements must
+// use this method so machine and runtime-configuration evidence is captured.
+func (e *Engine) CaptureFor(subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
+	view, err := e.NewViewFor([]Subject{subject}, moduleDir, kind)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return view.Capture(subject)
+}
+
+// CaptureRefined captures maximal and declaration-RTA evidence for a code result
+// under ctx. The caller selects refinement explicitly and owns its cancellation or
+// budget.
 func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
 	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {
@@ -218,27 +231,54 @@ func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir 
 	return view.CaptureRefined(ctx, subject)
 }
 
-// Check reports the freshness verdict for a recorded fingerprint against the current
-// tree, under kind's guard policy. It recomputes the current closure and guards
-// (never reconstructing a historical build — REQ-guard-recompute) and, when the
-// recording carries a runtime-input manifest, re-hashes it, then decides.
-func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, kind Kind) (Verdict, error) {
-	view, err := e.NewView([]Subject{subject}, moduleDir)
+// CaptureRefinedFor captures refined evidence with the guards applicable to kind.
+func (e *Engine) CaptureRefinedFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
+	view, err := e.NewViewFor([]Subject{subject}, moduleDir, kind)
 	if err != nil {
-		return Verdict{}, err
+		return Fingerprint{}, err
 	}
-	return view.Check(recorded, subject, kind)
+	return view.CaptureRefined(ctx, subject)
 }
 
-// CheckRefined checks maximal evidence first and invokes declaration-RTA under ctx
-// only after maximal drift and only when recorded carries compatible refinement
-// evidence (REQ-fresh-hierarchical-check).
-func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string, kind Kind) (Verdict, error) {
-	view, err := e.NewView([]Subject{subject}, moduleDir)
+// Check reports the freshness verdict for a recorded fingerprint against the current
+// tree under its recorded result kind. It recomputes the current closure and guards
+// (never reconstructing a historical build — REQ-guard-recompute) and, when the
+// recording carries a runtime-input manifest, re-hashes it, then decides.
+func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	if err := validateRecordedKind(recorded); err != nil {
+		return Verdict{}, err
+	}
+	view, err := e.NewViewFor([]Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}
-	return view.CheckRefined(ctx, recorded, subject, kind)
+	return view.Check(recorded, subject)
+}
+
+// CheckRefined checks maximal evidence first under the recorded result kind and invokes declaration-RTA under ctx
+// only after maximal drift and only when recorded carries compatible refinement
+// evidence (REQ-fresh-hierarchical-check).
+func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	if err := validateRecordedKind(recorded); err != nil {
+		return Verdict{}, err
+	}
+	view, err := e.NewViewFor([]Subject{subject}, moduleDir, recorded.ResultKind)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return view.CheckRefined(ctx, recorded, subject)
+}
+
+func validKind(kind Kind) bool { return kind == CodeResult || kind == Measurement }
+
+func validateRecordedKind(recorded Fingerprint) error {
+	if !validKind(recorded.ResultKind) {
+		return fmt.Errorf("gofresh: invalid recorded result kind %d", recorded.ResultKind)
+	}
+	if recorded.ResultKind == CodeResult && (recorded.Guards.Machine != "" || recorded.Guards.RuntimeConfig != "") {
+		return errors.New("gofresh: code-result fingerprint carries measurement guards")
+	}
+	return nil
 }
 
 func (e *Engine) guardInputs() []string {
