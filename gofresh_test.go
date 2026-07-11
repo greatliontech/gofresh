@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,10 +20,10 @@ import (
 func TestDecide(t *testing.T) {
 	base := func() (Fingerprint, closure.Closure, guard.Guards, runtimeinput.State) {
 		return Fingerprint{
-				Closure:       "C",
-				Guards:        guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
-				RuntimeInputs: "MANIFEST",
-				RuntimeDigest: "D",
+				MaximalClosure: "C",
+				Guards:         guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
+				RuntimeInputs:  "MANIFEST",
+				RuntimeDigest:  "D",
 			},
 			closure.Closure{Hash: "C"},
 			guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
@@ -39,9 +40,11 @@ func TestDecide(t *testing.T) {
 	}{
 		{"all clean", nil, Measurement, false, Valid, ""},
 		{"closure mismatch", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) { c.Hash = "C2" }, Measurement, false, Stale, "closure"},
-		{"closure missing", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) { f.Closure = "" }, Measurement, false, Stale, "closure"},
+		{"closure missing", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			f.MaximalClosure = ""
+		}, Measurement, false, Stale, "closure"},
 		{"closure both empty", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
-			f.Closure = ""
+			f.MaximalClosure = ""
 			c.Hash = "" // an unevaluable closure is not proof, so never valid (REQ-fresh-sound)
 		}, Measurement, false, Stale, "closure"},
 		{"runtime digest mismatch", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) { r.Digest = "D2" }, Measurement, false, Stale, "runtimeinputs"},
@@ -102,7 +105,7 @@ func FuzzDecideSound(f *testing.F) {
 	f.Add("C", "C", false, false, "M", true)
 	f.Fuzz(func(t *testing.T, recCl, curCl string, clUnver, pure bool, manifest string, rtUnver bool) {
 		g := guard.Guards{Toolchain: "t", BuildConfig: "b"}
-		rec := Fingerprint{Closure: recCl, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
+		rec := Fingerprint{MaximalClosure: recCl, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
 		cl := closure.Closure{Hash: curCl, Unverifiable: clUnver}
 		rt := runtimeinput.State{Digest: "D", Unverifiable: rtUnver, OK: true}
 		v := decide(rec, cl, g, rt, CodeResult, pure)
@@ -125,6 +128,40 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 		if e.assumePure(s) {
 			t.Errorf("default engine inferred purity for %+v", s)
 		}
+	}
+}
+
+func TestFingerprintDataShape(t *testing.T) {
+	typeOf := reflect.TypeFor[Fingerprint]()
+	want := []string{"MaximalClosure", "Refinement", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest"}
+	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
+		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
+	}
+	for i, name := range want {
+		field := typeOf.Field(i)
+		if field.Name != name || !field.IsExported() {
+			t.Fatalf("Fingerprint field %d = %s exported=%v, want exported %s", i, field.Name, field.IsExported(), name)
+		}
+	}
+	if typeOf.NumMethod() != 0 || reflect.PointerTo(typeOf).NumMethod() != 0 {
+		t.Fatal("Fingerprint carries behavior rather than data only")
+	}
+}
+
+func TestPropCommitIdentityAbsent(t *testing.T) {
+	typeOf := reflect.TypeFor[Fingerprint]()
+	for i := 0; i < typeOf.NumField(); i++ {
+		if strings.Contains(strings.ToLower(typeOf.Field(i).Name), "commit") {
+			t.Fatalf("fingerprint validity surface contains commit identity field %s", typeOf.Field(i).Name)
+		}
+	}
+}
+
+func TestAssumePureInputShape(t *testing.T) {
+	typeOf := reflect.TypeOf(WithAssumePure)
+	wantPredicate := reflect.TypeFor[func(Subject) bool]()
+	if typeOf.NumIn() != 1 || typeOf.In(0) != wantPredicate || typeOf.NumOut() != 1 || typeOf.Out(0) != reflect.TypeFor[Option]() {
+		t.Fatalf("WithAssumePure type = %s, want func(func(Subject) bool) Option", typeOf)
 	}
 }
 
@@ -310,7 +347,19 @@ func TestAssumePureOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New pure: %v", err)
 	}
+	pureFP, err := pure.Capture(subj, ".")
+	if err != nil {
+		t.Fatalf("Capture pure: %v", err)
+	}
+	if pureFP.PurityAssertion != "caller assertion" {
+		t.Fatalf("purity assertion = %q, want attributable caller assertion", pureFP.PurityAssertion)
+	}
 	if v, err := pure.Check(fp, subj, ".", Measurement); err != nil {
+		t.Fatalf("Check unrecorded pure: %v", err)
+	} else if v.Status != Unverifiable {
+		t.Errorf("unrecorded assume-pure: got %s, want unverifiable", v.Status)
+	}
+	if v, err := pure.Check(pureFP, subj, ".", Measurement); err != nil {
 		t.Fatalf("Check pure: %v", err)
 	} else if v.Status != Valid {
 		t.Errorf("assume-pure: got %s (%s), want valid", v.Status, v.Reason)
@@ -333,7 +382,7 @@ func TestWithDirOutOfTree(t *testing.T) {
 	}
 	write("go.mod", "module example.com/tiny\n\ngo 1.26\n")
 	write("tiny.go", "package tiny\n\n//gofresh:pure\nfunc Add(a, b int) int { return a + b }\n")
-	write("tiny_test.go", "package tiny\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n")
+	write("tiny_test.go", "package tiny\n\nimport \"testing\"\n\n//gofresh:pure\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n")
 
 	e, err := New(WithDir(tmp))
 	if err != nil {
@@ -358,6 +407,29 @@ func TestWithDirOutOfTree(t *testing.T) {
 	}
 }
 
+func TestDefaultDirIsFrozenAtEngineConstruction(t *testing.T) {
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	if err := os.Chdir(other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(original); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+	if engine.dir != original {
+		t.Fatalf("default engine dir after chdir = %q, want frozen %q", engine.dir, original)
+	}
+}
+
 // TestWithDirCoherence pins the one-tree rule: an engine rooted somewhere
 // refuses guard capture in a different tree — an incoherent fingerprint
 // (closure from one tree, environment from another) is never produced.
@@ -372,6 +444,16 @@ func TestWithDirCoherence(t *testing.T) {
 	}
 	if _, err := e.Capture(Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
 		t.Fatalf("incoherent dirs accepted: %v", err)
+	}
+}
+
+func TestDefaultDirCoherence(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.coherentDir(t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
+		t.Fatalf("default engine accepted guards from another tree: %v", err)
 	}
 }
 

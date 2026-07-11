@@ -8,6 +8,9 @@ func Asserted() int { return sink() }
 // NotAsserted carries no directive.
 func NotAsserted() int { return sink() }
 
+// gofresh:pure
+func SpacedDirective() int { return sink() }
+
 // T has one asserted method and one not.
 type T struct{}
 

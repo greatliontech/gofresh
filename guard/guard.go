@@ -12,6 +12,7 @@
 package guard
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -57,11 +58,16 @@ const (
 // build-input change leaves buildconfig unmoved (REQ-guard-buildconfig,
 // REQ-guard-buildconfig-failclosed). None used ⇒ pass none.
 func Capture(moduleDir string, buildInputs ...string) (Guards, error) {
-	tc, err := toolchain(moduleDir)
+	return CaptureContext(context.Background(), moduleDir, buildInputs...)
+}
+
+// CaptureContext is Capture with caller-owned cancellation for subprocess-backed guards.
+func CaptureContext(ctx context.Context, moduleDir string, buildInputs ...string) (Guards, error) {
+	tc, err := toolchainContext(ctx, moduleDir)
 	if err != nil {
 		return Guards{}, err
 	}
-	bc, err := buildConfig(moduleDir, buildInputs)
+	bc, err := buildConfigContext(ctx, moduleDir, buildInputs)
 	if err != nil {
 		return Guards{}, err
 	}
@@ -139,7 +145,11 @@ func (c *Cache) Capture(moduleDir string, buildInputs ...string) (Guards, error)
 // "go1.26.4 linux/amd64", including any custom or experiment suffix, which affects
 // code generation and so must be part of the guard.
 func toolchain(dir string) (string, error) {
-	out, err := gotool.RunIn(dir, "version")
+	return toolchainContext(context.Background(), dir)
+}
+
+func toolchainContext(ctx context.Context, dir string) (string, error) {
+	out, err := gotool.RunInContext(ctx, dir, "version")
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +180,11 @@ var buildConfigOSEnvKeys = []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG
 // cannot observe). An unparseable `go env` output fails closed
 // (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
 func buildConfig(dir string, buildInputs []string) (string, error) {
-	out, err := gotool.RunIn(dir, "env", "-json")
+	return buildConfigContext(context.Background(), dir, buildInputs)
+}
+
+func buildConfigContext(ctx context.Context, dir string, buildInputs []string) (string, error) {
+	out, err := gotool.RunInContext(ctx, dir, "env", "-json")
 	if err != nil {
 		return "", err
 	}

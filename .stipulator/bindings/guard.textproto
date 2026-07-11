@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-recompute"
-  content_hash: "40e8f70c7afd121a5a4d4dff8a2105b319e154ef611a53c498cce5eb323e6383"
+  content_hash: "56715c910da984395ad997b722e9b470cbdb400d93faac7b3ddd437b44dda0c7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCaptureCheckRoundTrip"
   role: BINDING_ROLE_TESTS
@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-cache"
-  content_hash: "9faf2c00c6e199dc47ffa03c5eba6b3ac80063777fe4564d05ae073d740b03ca"
+  content_hash: "859611039ae09d91f26d8c55c1b7ce91869a0f48a4b5686beb1a8012c39bf934"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestCaptureCacheMemoizes"
   role: BINDING_ROLE_TESTS
@@ -165,9 +165,27 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-cache"
-  content_hash: "9faf2c00c6e199dc47ffa03c5eba6b3ac80063777fe4564d05ae073d740b03ca"
+  content_hash: "859611039ae09d91f26d8c55c1b7ce91869a0f48a4b5686beb1a8012c39bf934"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestCaptureCacheKeyIsUnambiguous"
   role: BINDING_ROLE_TESTS
   shape_hash: "0cdd9e95c45126a10e8f4334babac1d73d65c0a823004448545cffa4fb0b53b1"
+}
+
+bindings {
+  requirement_id: "REQ-guard-view-lifetime"
+  content_hash: "7138b188846757b8b7bde8d25a2a6867a1bff294504b66fa2013707dcd2df9fe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestEngineCheckUsesFreshView"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "65cbc9ac5b80b75ce4d6cb2998f4d213d3d140ad91c5f71a66edbdbe62df2759"
+}
+
+bindings {
+  requirement_id: "REQ-guard-cache"
+  content_hash: "859611039ae09d91f26d8c55c1b7ce91869a0f48a4b5686beb1a8012c39bf934"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
 }

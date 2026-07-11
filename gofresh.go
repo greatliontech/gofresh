@@ -4,16 +4,22 @@
 // (closure, guard, runtimeinput), and reports a verdict by comparing a stored
 // fingerprint against the current one (spec overview.md). It never runs the symbol
 // and never owns the result store: it answers "is this still fresh?" and leaves
-// measuring and storing to the caller.
+// measuring and storing to the caller. Default operations use a shared maximal
+// package closure so multi-subject checks avoid per-subject whole-program analysis;
+// callers opt into declaration-level RTA only when its additional precision is
+// worth the analysis budget.
 package gofresh
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -34,16 +40,36 @@ type Subject struct {
 	Symbol  string
 }
 
+// DeclarationRTA identifies the optional declaration-level RTA refinement. The
+// identity is persisted with refined evidence and changes whenever its semantics
+// become incompatible.
+const DeclarationRTA = "gofresh/declaration-rta@1"
+
+// Refinement is optional narrower closure evidence. Its zero value means the
+// recording is maximal-only. A complete value binds its closure hash and
+// unverifiability disposition to Strategy (REQ-fresh-fingerprint-data).
+type Refinement struct {
+	Strategy     string
+	Subject      Subject
+	Closure      string
+	Unverifiable bool
+	Reason       string
+	Evidence     string
+}
+
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
-// wire format — REQ-fresh-fingerprint-data): the subject's source-closure hash, the
-// guard values, and, when the run observed them, the runtime-input manifest and its
-// digest. The caller serializes and stores it alongside its result, and pins any
-// further domain facts of its own (REQ-fresh-caller-pins).
+// wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
+// hash, optional refinement evidence, guard values, an attributable purity
+// assertion, and, when the run observed them, the runtime-input manifest and its digest. The caller serializes and stores
+// it alongside its result, and pins any further domain facts of its own
+// (REQ-fresh-caller-pins).
 type Fingerprint struct {
-	Closure       string
-	Guards        guard.Guards
-	RuntimeInputs string // encoded manifest; empty when no runtime inputs were observed
-	RuntimeDigest string // digest of the manifest at capture
+	MaximalClosure  string
+	Refinement      Refinement
+	Guards          guard.Guards
+	PurityAssertion string // attributable assertion used to override unverifiability; empty means none
+	RuntimeInputs   string // encoded manifest; empty when no runtime inputs were observed
+	RuntimeDigest   string // digest of the manifest at capture
 }
 
 // Status is a verdict's outcome.
@@ -62,11 +88,10 @@ type Verdict struct {
 	Reason string
 }
 
-// Engine composes the closure hasher, guard capture, and purity policy. The hasher
-// caches loaded programs for the process; the guard cache memoizes per module dir.
+// Engine is immutable analysis configuration. Source, guards, purity directives,
+// and derived analysis state live in an explicit View and never cross view
+// boundaries (REQ-fresh-coherent-view).
 type Engine struct {
-	hasher      *closure.Hasher
-	guards      *guard.Cache
 	assumePure  func(Subject) bool
 	buildFlags  []string
 	buildInputs []string
@@ -92,10 +117,10 @@ func WithBuildInputs(inputs ...string) Option {
 	return func(e *Engine) { e.buildInputs = append([]string(nil), inputs...) }
 }
 
-// WithAssumePure supplies the purity predicate: a subject for which it returns true
-// has all of its unverifiability suppressed (REQ-purity-input, REQ-purity-override).
-// The predicate is fed by a caller's whole-run assertion and by //gofresh:pure
-// directives (ScanPureDirectives); gofresh never infers purity itself.
+// WithAssumePure supplies the caller's purity predicate: a subject for which it
+// returns true has all of its unverifiability suppressed (REQ-purity-input,
+// REQ-purity-override). Source directives are discovered inside each View from the
+// same selected source as closure analysis (REQ-purity-directive).
 func WithAssumePure(pred func(Subject) bool) Option {
 	return func(e *Engine) {
 		if pred != nil {
@@ -106,36 +131,67 @@ func WithAssumePure(pred func(Subject) bool) Option {
 
 // WithDir roots the engine at dir: every package load and go invocation
 // resolves there, so a caller can fingerprint a tree it does not run inside.
-// The default is the process working directory.
+// The default is the process working directory captured when New returns.
 func WithDir(dir string) Option {
 	return func(e *Engine) { e.dir = dir }
 }
 
 // New builds an Engine.
 func New(opts ...Option) (*Engine, error) {
-	e := &Engine{guards: guard.NewCache(), assumePure: func(Subject) bool { return false }}
+	e := &Engine{assumePure: func(Subject) bool { return false }}
 	for _, o := range opts {
 		o(e)
 	}
+	if e.dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: resolve working directory: %w", err)
+		}
+		e.dir = cwd
+	}
+	root, err := canonicalDir(e.dir)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
+	}
+	e.dir = root
 	for _, input := range e.buildInputs {
 		if strings.HasPrefix(strings.TrimSpace(input), "-") {
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
 		}
 	}
-	h, err := closure.NewAt(e.dir, e.buildFlags...)
-	if err != nil {
+	if err := buildflags.Validate(e.dir, e.buildFlags); err != nil {
 		return nil, err
 	}
-	e.hasher = h
 	return e, nil
 }
 
-// Prime batch-loads the packages a caller is about to Capture or Check subjects
-// from, so one whole-program analysis is shared across them instead of one load per
-// package (the dominant cost — REQ-closure-analysis). Optional: an unprimed package
-// loads on first use.
-func (e *Engine) Prime(pkgPaths []string) {
-	e.hasher.Prime(pkgPaths)
+func canonicalDir(dir string) (string, error) {
+	raw := dir
+	if !filepath.IsAbs(raw) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		raw = cwd + string(os.PathSeparator) + raw
+	}
+	resolved, err := filepath.EvalSymlinks(raw)
+	if err != nil {
+		return "", err
+	}
+	originalInfo, err := os.Stat(raw)
+	if err != nil {
+		return "", err
+	}
+	resolvedInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if os.SameFile(originalInfo, resolvedInfo) {
+		return resolved, nil
+	}
+	// Preserve kernel path-walk semantics when lexical cleaning across a symlink
+	// would identify a different directory (for example, link/..).
+	return raw, nil
 }
 
 // Capture records the closure hash and guard values for subject, whose code lives
@@ -144,18 +200,21 @@ func (e *Engine) Prime(pkgPaths []string) {
 // (runtimeinput.FromTestLog) into the returned Fingerprint's RuntimeInputs/
 // RuntimeDigest fields.
 func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {
-	if err := e.coherentDir(moduleDir); err != nil {
-		return Fingerprint{}, err
-	}
-	cl, err := e.hasher.Compute(subject.Package, subject.Symbol)
+	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	g, err := e.guards.Capture(moduleDir, e.guardInputs()...)
+	return view.Capture(subject)
+}
+
+// CaptureRefined captures maximal and declaration-RTA evidence under ctx. The
+// caller selects refinement explicitly and owns its cancellation or budget.
+func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
+	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	return Fingerprint{Closure: cl.Hash, Guards: g}, nil
+	return view.CaptureRefined(ctx, subject)
 }
 
 // Check reports the freshness verdict for a recorded fingerprint against the current
@@ -163,31 +222,22 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
 func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string, kind Kind) (Verdict, error) {
-	if err := e.coherentDir(moduleDir); err != nil {
-		return Verdict{}, err
-	}
-	cl, err := e.hasher.Compute(subject.Package, subject.Symbol)
+	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {
 		return Verdict{}, err
 	}
-	g, err := e.guards.Capture(moduleDir, e.guardInputs()...)
+	return view.Check(recorded, subject, kind)
+}
+
+// CheckRefined checks maximal evidence first and invokes declaration-RTA under ctx
+// only after maximal drift and only when recorded carries compatible refinement
+// evidence (REQ-fresh-hierarchical-check).
+func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string, kind Kind) (Verdict, error) {
+	view, err := e.NewView([]Subject{subject}, moduleDir)
 	if err != nil {
 		return Verdict{}, err
 	}
-	var rt runtimeinput.State
-	if recorded.RuntimeInputs != "" {
-		// A manifest that cannot be re-evaluated — malformed, or naming a path
-		// identity that cannot be materialized against the current tree — is an
-		// unevaluable applicable guard: absence of proof, so Stale, never valid
-		// (REQ-guard-completeness). Operational failures (e.g. an unresolvable
-		// moduleDir) fold into the same conservative Stale rather than erroring —
-		// over-approximation is always safe. decide maps !rt.OK to
-		// Stale{runtimeinputs}.
-		if rt, err = runtimeinput.Current(recorded.RuntimeInputs, moduleDir); err != nil {
-			rt = runtimeinput.State{}
-		}
-	}
-	return decide(recorded, cl, g, rt, kind, e.assumePure(subject)), nil
+	return view.CheckRefined(ctx, recorded, subject, kind)
 }
 
 func (e *Engine) guardInputs() []string {
@@ -211,24 +261,15 @@ func (e *Engine) guardInputs() []string {
 // (REQ-fresh-commit-independent).
 func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
 	// Closure guard: the recorded hash must equal the recomputed current hash.
-	if rec.Closure == "" || rec.Closure != cl.Hash {
+	if rec.MaximalClosure == "" || rec.MaximalClosure != cl.Hash {
 		return Verdict{Stale, "closure"}
 	}
-	// A recorded runtime digest without its manifest is a corrupted recording, not
-	// an absence assertion: the digest proves the guard applied, and the missing
-	// manifest makes it unevaluable — Stale, never valid (REQ-guard-completeness).
-	if rec.RuntimeInputs == "" && rec.RuntimeDigest != "" {
-		return Verdict{Stale, "runtimeinputs"}
-	}
-	// Runtime-input guard, when the recording carries a manifest.
-	if rec.RuntimeInputs != "" {
-		if !rt.OK || rec.RuntimeDigest == "" || rec.RuntimeDigest != rt.Digest {
-			return Verdict{Stale, "runtimeinputs"}
-		}
-	}
-	// Environment guards under the kind policy.
-	if mismatch := guard.Compare(rec.Guards, cur, kind); mismatch != "" {
-		return Verdict{Stale, mismatch}
+	return decideAfterClosure(rec, cl, cur, rt, kind, pure)
+}
+
+func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
+	if verdict, failed := decideKnownGuards(rec, cur, rt, kind); failed {
+		return verdict
 	}
 	// Guards hold. Absent a purity override, an unhashable observed input or an
 	// unverifiable closure dependence makes validity unprovable (REQ-fresh-sound).
@@ -243,6 +284,26 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 	return Verdict{Valid, ""}
 }
 
+func decideKnownGuards(rec Fingerprint, cur guard.Guards, rt runtimeinput.State, kind Kind) (Verdict, bool) {
+	// A recorded runtime digest without its manifest is a corrupted recording, not
+	// an absence assertion: the digest proves the guard applied, and the missing
+	// manifest makes it unevaluable — Stale, never valid (REQ-guard-completeness).
+	if rec.RuntimeInputs == "" && rec.RuntimeDigest != "" {
+		return Verdict{Stale, "runtimeinputs"}, true
+	}
+	// Runtime-input guard, when the recording carries a manifest.
+	if rec.RuntimeInputs != "" {
+		if !rt.OK || rec.RuntimeDigest == "" || rec.RuntimeDigest != rt.Digest {
+			return Verdict{Stale, "runtimeinputs"}, true
+		}
+	}
+	// Environment guards under the kind policy.
+	if mismatch := guard.Compare(rec.Guards, cur, kind); mismatch != "" {
+		return Verdict{Stale, mismatch}, true
+	}
+	return Verdict{}, false
+}
+
 func reasonOr(reason, fallback string) string {
 	if reason == "" {
 		return fallback
@@ -253,15 +314,19 @@ func reasonOr(reason, fallback string) string {
 // coherentDir refuses a guards dir that disagrees with the engine's tree
 // root: the closure would come from one tree and the environment guards
 // from another — an incoherent fingerprint that could serve or stale on the
-// wrong tree's facts. An engine without WithDir accepts any moduleDir (the
-// closure loads in the process cwd, the caller's arrangement).
+// wrong tree's facts. Without WithDir, the source root is the process cwd.
 func (e *Engine) coherentDir(moduleDir string) error {
-	if e.dir == "" {
-		return nil
+	rootDir := e.dir
+	if rootDir == "" {
+		var err error
+		rootDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("gofresh: resolve process tree: %w", err)
+		}
 	}
-	root, err := os.Stat(e.dir)
+	root, err := os.Stat(rootDir)
 	if err != nil {
-		return fmt.Errorf("gofresh: resolve engine tree %s: %w", e.dir, err)
+		return fmt.Errorf("gofresh: resolve engine tree %s: %w", rootDir, err)
 	}
 	module, err := os.Stat(moduleDir)
 	if err != nil {
@@ -270,5 +335,5 @@ func (e *Engine) coherentDir(moduleDir string) error {
 	if os.SameFile(root, module) {
 		return nil
 	}
-	return fmt.Errorf("gofresh: engine rooted at %s asked to capture guards in %s; one tree per fingerprint", e.dir, moduleDir)
+	return fmt.Errorf("gofresh: engine rooted at %s asked to capture guards in %s; one tree per fingerprint", rootDir, moduleDir)
 }

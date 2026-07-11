@@ -12,7 +12,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "7ed1aa6ca09fc93ae3c7b66a926a11b282cd4fe46bb868674e9e197f2e8877ed"
+  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanPureDirectives"
   role: BINDING_ROLE_TESTS
@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-responsibility"
-  content_hash: "104aff1f0423698a247d2195d7ef031913ccfa2420f8815887c8d36e5c42413c"
+  content_hash: "7b4eeb0e9db916c8270243508208c8795a9be290df05a5963a33664f18a6b1f7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEngineNeverInfersPurity"
   role: BINDING_ROLE_TESTS
@@ -30,9 +30,36 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "7ed1aa6ca09fc93ae3c7b66a926a11b282cd4fe46bb868674e9e197f2e8877ed"
+  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
   shape_hash: "20715489f5707cc60d66a18690c67ba4324f2d7dec420606f96d8fcff8a797de"
+}
+
+bindings {
+  requirement_id: "REQ-purity-input"
+  content_hash: "91cd515c41e74bff6863f51dd51fb1da252c98a3b1339e99bd4d933e922834f9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAssumePureInputShape"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b28dd1bf892f9f7bb9c73b4de4da50546817dc019f97d6ca084e0c0396fb9208"
+}
+
+bindings {
+  requirement_id: "REQ-purity-responsibility"
+  content_hash: "7b4eeb0e9db916c8270243508208c8795a9be290df05a5963a33664f18a6b1f7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestMalformedPurityAttributionCannotOverride"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e7eac612cc04dc90f497fee167d69fb886e5581b88f65f7f1bb3bbf3b4bc44a8"
+}
+
+bindings {
+  requirement_id: "REQ-purity-input"
+  content_hash: "91cd515c41e74bff6863f51dd51fb1da252c98a3b1339e99bd4d933e922834f9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPurityInputIsSubjectPredicate"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "44c43c6024fce16e2fdaadbee5fb3e8200ec1691c46d83b27bb8b4e890e08345"
 }

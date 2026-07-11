@@ -45,3 +45,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-absent-asserted"
+  content_hash: "d7fb50eeaf6085e215da91ec13a66bd2c88e818b9adab5a1de08fc999788e3cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestDecide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b5fed8f347993e462c447108e9bd3133f4da364ff583802155975e141363c871"
+}

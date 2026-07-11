@@ -11,6 +11,7 @@ package closure
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,8 @@ type Closure struct {
 	Hash         string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
+	Widened      bool   // declaration refinement fell back to the maximal package closure
+	Unrefinable  bool   // refinement cannot prove this opaque maximal dependence absent
 }
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
@@ -45,11 +48,13 @@ type Hasher struct {
 	// working directory. The analyzed tree is an explicit input.
 	dir      string
 	modCache string
+	ctx      context.Context
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
-	buildFlags []string
-	progs      map[string]*program  // by package import path
-	lists      map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	buildFlags     []string
+	progs          map[string]*program  // by package import path
+	lists          map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	maximalTesting map[string]string    // typed testing-runtime reason by requested package
 }
 
 func New() (*Hasher, error) { return NewAt("") }
@@ -59,10 +64,24 @@ func New() (*Hasher, error) { return NewAt("") }
 // resolves under both, so the analyzed tree and build selection are explicit
 // inputs, never implicit cwd or default-build coupling (REQ-closure-analysis).
 func NewAt(dir string, buildFlags ...string) (*Hasher, error) {
+	return NewAtContext(context.Background(), dir, buildFlags...)
+}
+
+// NewAtContext is NewAt with caller-owned cancellation for closure analysis.
+func NewAtContext(ctx context.Context, dir string, buildFlags ...string) (*Hasher, error) {
+	if ctx == nil {
+		return nil, errors.New("closure: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
 	if err := buildflags.Validate(dir, buildFlags); err != nil {
 		return nil, err
 	}
-	out, err := gotool.RunIn(dir, "env", "GOMODCACHE")
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	out, err := gotool.RunInContext(ctx, dir, "env", "GOMODCACHE")
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +90,14 @@ func NewAt(dir string, buildFlags ...string) (*Hasher, error) {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
 	return &Hasher{
-		dir: dir, modCache: filepath.Clean(mc), buildFlags: append([]string(nil), buildFlags...),
-		progs: map[string]*program{}, lists: map[string][]listPkg{},
+		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, buildFlags: append([]string(nil), buildFlags...),
+		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]string{},
 	}, nil
 }
 
 type listPkg struct {
 	ImportPath   string
+	Name         string
 	Standard     bool
 	Dir          string
 	GoFiles      []string
@@ -102,6 +122,10 @@ type listPkg struct {
 	Error        *listErr
 }
 
+func (p listPkg) isGeneratedTestMainFor(pkgPath string) bool {
+	return p.Name == "main" && p.ImportPath == pkgPath+".test"
+}
+
 type listMod struct {
 	Path    string
 	Version string
@@ -115,7 +139,7 @@ type listErr struct {
 
 // sourceFiles is every compiled/linked input of the package: a change to any of
 // these can move the benchmark's behavior, so all must be hashed (REQ-fresh-sound). Keep
-// this in lockstep with go list's file-kind fields (TestSourceFilesComplete).
+// this in lockstep with go list's file-kind fields (TestPropSourceFilesComplete).
 func (p listPkg) sourceFiles() []string {
 	var f []string
 	for _, set := range [][]string{
@@ -147,7 +171,10 @@ func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
 	seen := map[string]bool{}
 	var contribs []string
 	for _, p := range pkgs {
-		c, err := h.contribution(p)
+		if err := h.contextErr(); err != nil {
+			return nil, err
+		}
+		c, err := h.contributionFor(pkgPath, p)
 		if err != nil {
 			return nil, err
 		}
@@ -160,19 +187,39 @@ func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
 	return contribs, nil
 }
 
+func (h *Hasher) contextErr() error {
+	if h == nil || h.ctx == nil {
+		return nil
+	}
+	if err := h.ctx.Err(); err != nil {
+		return fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	return nil
+}
+
 func hashContributions(pkgPath string, contribs []string) (string, error) {
 	if len(contribs) == 0 {
 		return "", fmt.Errorf("closure: %s reaches no non-stdlib source", pkgPath)
 	}
 	sort.Strings(contribs)
-	sum := sha256.Sum256([]byte(strings.Join(contribs, "\n")))
-	return hex.EncodeToString(sum[:])[:32], nil
+	h := sha256.New()
+	for i, contribution := range contribs {
+		if i > 0 {
+			_, _ = h.Write([]byte{'\n'})
+		}
+		_, _ = h.Write([]byte(contribution))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:32], nil
 }
 
 // contribution returns this package's contribution to the closure, or "" if it
 // is excluded (stdlib, a pseudo-package, or the synthesized test-main).
 func (h *Hasher) contribution(p listPkg) (string, error) {
-	if p.Standard || p.Module == nil || strings.HasSuffix(p.ImportPath, ".test") {
+	return h.contributionFor("", p)
+}
+
+func (h *Hasher) contributionFor(pkgPath string, p listPkg) (string, error) {
+	if p.Standard || p.Module == nil || (pkgPath != "" && p.isGeneratedTestMainFor(pkgPath)) {
 		// stdlib cut (REQ-closure-coverage); pseudo-package ("C", whose C source rides in the
 		// importing package); or the toolchain-generated test main (boilerplate
 		// in a transient dir — deterministic, carries no source information).
@@ -744,7 +791,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)
-	out, err := gotool.RunIn(h.dir, args...)
+	out, err := gotool.RunInContext(h.ctx, h.dir, args...)
 	if err != nil {
 		return nil, err
 	}

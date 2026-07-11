@@ -15,6 +15,11 @@ that trusting the call graph alone would under-cover the closure.
 whole; the sound floor that every blind spot widens to and the closure never falls
 below.
 
+**declaration-RTA refinement** (term): the optional narrower closure identified in
+recordings as `gofresh/declaration-rta@1`, using attributed rapid type analysis and
+declaration-level source contributions while retaining every sound widening and
+unverifiable disposition required by this contract.
+
 **pinned dependency** (term): a reachable module dependency whose resolved source is
 immutable under the module cache, identified by its module path and version rather
 than hashed per declaration.
@@ -49,6 +54,21 @@ able to affect the subject — so soundness holds by construction, the worst cas
 being the maximal source set and never less, and every precision gain being a
 provably safe shrink rather than an optimistic guess.
 
+**REQ-closure-view-maximal** (behavior): A multi-subject analysis view MUST use the
+maximal selected test-binary closure of each subject's package as its default source
+guard, hashing every non-standard dependency whole and salting that package closure
+with the subject identity. Subjects in one package therefore observe the same source
+set without making fingerprints transferable between identities; an unrelated
+sibling edit may stale them together, the deliberately safe price for analysis whose
+time and live memory are bounded independently of subject count.
+
+**REQ-closure-refinement-policy** (behavior): The declaration-RTA refinement MUST be
+optional and selected by the caller for capture, check, and producer validation;
+maximal closure is the default. A refined recording contains both closures, and each
+hash is bound to the subject identity. Refinement never runs merely because gofresh
+estimates execution or recomputation cost: the caller alone chooses whether its
+possible precision is worth the analysis.
+
 ## Blind spots
 
 **REQ-closure-blindspot** (behavior): Every blind spot MUST take exactly one of three
@@ -69,21 +89,33 @@ proven, it widens.
 
 ## Analysis requirements
 
-**REQ-closure-analysis** (behavior): Reachability analysis MUST build whole-program
-SSA with standard-library bodies present and generic instantiations materialized, and
-root the reachability walk at the subject, every linked package initializer, and — for
-a subject that executes through the test harness (one declared in a test file) — the
-test main — bodies present so a user method dispatched inside a standard-library
-function stays visible, generics materialized so each instantiation dispatches
-concretely, initializer roots included so a concrete type registered in `init` and
-later observed through global state and interface dispatch is covered even when the
-subject never names the registering package, the test main rooted for a test subject
-so setup it runs before the subject (state a production subject never sees) is in the
-closure; a narrower root or edge set is taken only when proven to preserve the same
-startup and global-flow coverage. Package loading, dependency enumeration, and every
-other source-selection step use the caller's executable build flags, so the closure
-describes the binary whose build-configuration guard is recorded rather than a
-different default build.
+**REQ-closure-analysis** (behavior): Declaration-RTA refinement MUST build
+whole-program SSA with standard-library bodies present and generic instantiations
+materialized, and root the reachability walk at the subject, every linked source
+package initializer, and — for a subject that executes through the test harness (one
+declared in a test file) — the user-defined test main. The toolchain-generated test
+main's registration initializer is not a source initializer and does not root every
+alternative test or benchmark into a caller-selected subject. Standard-library
+bodies remain present so a user method dispatched inside a
+standard-library function stays visible, generics materialized so each instantiation
+dispatches concretely, initializer roots included so a concrete type registered in
+`init` and later observed through global state and interface dispatch is covered even
+when the subject never names the registering package, the test main rooted for a test
+subject so setup it runs before the subject (state a production subject never sees)
+is in the closure; a narrower root or edge set is taken only when proven to preserve
+the same startup and global-flow coverage. Maximal closure and refinement package
+loading, dependency enumeration, and every other source-selection step use the
+caller's executable build flags, so both closures describe the binary whose
+build-configuration guard is recorded rather than a different default build.
+
+**REQ-closure-batch-equivalence** (invariant): Sharing reachability work across an
+analysis view's refined subjects MUST produce, for every subject, the same reachable
+functions, widening disposition, closure hash, and unverifiability as analyzing that
+subject independently with the same startup and test-harness roots. Dynamic-function
+and interface-dispatch facts are attributed to the subjects that reach both sides of
+their cross-product; a fact reachable only from one subject does not create an edge
+for another. Batching is bounded so attributed state can be discarded incrementally
+rather than growing with every subject in the view.
 
 ## Cross-module dependencies
 

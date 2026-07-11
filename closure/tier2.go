@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
@@ -30,6 +30,7 @@ type asmMacro struct {
 // program is the loaded whole-program SSA for one package's test binary, cached
 // so per-benchmark Compute calls amortize the dominant load cost (REQ-closure-analysis).
 type program struct {
+	pkgPath  string
 	prog     *ssa.Program
 	pkgs     []*packages.Package
 	roots    map[string]*ssa.Function // benchmark function name → its SSA function
@@ -41,7 +42,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
-	p, err := load(h.dir, h.buildFlags, pkgPath)
+	p, err := load(h.ctx, h.dir, h.buildFlags, pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +53,9 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 // loadConfig is the shared packages.Config for both the single-package load and
 // the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
 // ForTest linkage needed to distinguish a package's test-binary variants.
-func loadConfig(dir string, buildFlags ...string) *packages.Config {
+func loadConfig(ctx context.Context, dir string, buildFlags ...string) *packages.Config {
 	return &packages.Config{
+		Context:    ctx,
 		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
 		Tests:      true,
 		Dir:        dir,
@@ -66,12 +68,12 @@ func loadConfig(dir string, buildFlags ...string) *packages.Config {
 // per package); Prime shares one Load across many packages but each still gets its
 // own program from only its own roots. A load error is fatal — analyzing a partial
 // program could miss reachable code and report a stale result valid (REQ-fresh-sound).
-func load(dir string, buildFlags []string, pkgPath string) (*program, error) {
-	roots, err := packages.Load(loadConfig(dir, buildFlags...), pkgPath)
+func load(ctx context.Context, dir string, buildFlags []string, pkgPath string) (*program, error) {
+	roots, err := packages.Load(loadConfig(ctx, dir, buildFlags...), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
-	return buildProgram(pkgPath, roots)
+	return buildProgram(ctx, pkgPath, roots)
 }
 
 // Prime warms the per-package SSA cache for pkgPaths with one shared
@@ -103,12 +105,12 @@ func (h *Hasher) Prime(pkgPaths []string) {
 	if len(need) == 0 {
 		return
 	}
-	roots, err := packages.Load(loadConfig(h.dir, h.buildFlags...), need...)
+	roots, err := packages.Load(loadConfig(h.ctx, h.dir, h.buildFlags...), need...)
 	if err != nil {
 		return // fall back to lazy single loads; the error resurfaces there
 	}
 	for _, p := range need {
-		prog, err := buildProgram(p, rootsForBinary(roots, p))
+		prog, err := buildProgram(h.ctx, p, rootsForBinary(roots, p))
 		if err != nil {
 			continue // leave uncached; loadCached single-loads and surfaces the error
 		}
@@ -139,7 +141,7 @@ func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package
 // and dispatches generic instantiations concretely). A load error is fatal — a
 // partial program could miss reachable code and report a stale result valid
 // (REQ-fresh-sound).
-func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
+func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package) (*program, error) {
 	var errs []string
 	var rootErrs []string
 	var all []*packages.Package
@@ -159,7 +161,16 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	}
 
 	prog, _ := ssautil.AllPackages(roots, ssa.InstantiateGenerics)
-	prog.Build()
+	ssaPackages := prog.AllPackages()
+	sort.Slice(ssaPackages, func(i, j int) bool {
+		return ssaPackages[i].Pkg.Path() < ssaPackages[j].Pkg.Path()
+	})
+	for _, ssaPackage := range ssaPackages {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled during SSA construction: %w", err)
+		}
+		ssaPackage.Build()
+	}
 
 	// Index every top-level function as a candidate root, keyed by name, so any
 	// subject — a benchmark, a test, or a production function — is rootable by name
@@ -203,13 +214,12 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 				if f == nil {
 					continue
 				}
-				if name == "TestMain" {
+				if name == "TestMain" && isTestMainHarness(p, obj) {
 					if testMain != nil && testMain != f {
 						rootErrs = append(rootErrs, name)
 						continue
 					}
 					testMain = f
-					continue
 				}
 				addRoot(name, f)
 			case *types.TypeName:
@@ -220,16 +230,21 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 				// methods — is preferred, falling back to the value set for interfaces.
 				// A value-receiver method appears in both sets with the same
 				// ssa.Function, which addRoot treats as one root, not a collision.
-				for _, ms := range []*types.MethodSet{
-					types.NewMethodSet(types.NewPointer(obj.Type())),
-					types.NewMethodSet(obj.Type()),
-				} {
+				methodSets := []*types.MethodSet{types.NewMethodSet(types.NewPointer(obj.Type()))}
+				if methodSets[0].Len() == 0 {
+					methodSets[0] = types.NewMethodSet(obj.Type())
+				}
+				for _, ms := range methodSets {
 					for i := 0; i < ms.Len(); i++ {
-						m, ok := ms.At(i).Obj().(*types.Func)
+						selection := ms.At(i)
+						m, ok := selection.Obj().(*types.Func)
 						if !ok {
 							continue
 						}
 						f := prog.FuncValue(m)
+						if len(selection.Index()) > 1 {
+							f = prog.MethodValue(selection)
+						}
 						if f == nil {
 							continue
 						}
@@ -242,7 +257,26 @@ func buildProgram(pkgPath string, roots []*packages.Package) (*program, error) {
 	if len(rootErrs) > 0 {
 		return nil, fmt.Errorf("closure: ambiguous subject roots in %s: %s", pkgPath, strings.Join(rootErrs, ", "))
 	}
-	return &program{prog: prog, pkgs: all, roots: funcRoots, testMain: testMain}, nil
+	return &program{pkgPath: pkgPath, prog: prog, pkgs: all, roots: funcRoots, testMain: testMain}, nil
+}
+
+func isTestMainHarness(pkg *packages.Package, function *types.Func) bool {
+	if pkg == nil || pkg.Fset == nil || function == nil {
+		return false
+	}
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Recv() != nil || signature.Params().Len() != 1 || signature.Results().Len() != 0 || signature.Variadic() {
+		return false
+	}
+	if filename := pkg.Fset.PositionFor(function.Pos(), false).Filename; !strings.HasSuffix(filename, "_test.go") {
+		return false
+	}
+	pointer, ok := types.Unalias(signature.Params().At(0).Type()).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "M"
 }
 
 // subjectRunsThroughHarness reports whether fn executes through the Go test harness
@@ -258,14 +292,125 @@ func subjectRunsThroughHarness(prog *program, fn *ssa.Function) bool {
 	return strings.HasSuffix(prog.prog.Fset.Position(fn.Pos()).Filename, "_test.go")
 }
 
-// Compute returns the source closure for one subject of pkgPath — a top-level
-// function named by symbol, whether a benchmark, a test, or a production function.
+// Subject identifies a function or method whose source closure is requested.
+type Subject struct {
+	Package string
+	Symbol  string
+}
+
+const maxAttributedSubjects = 64
+
+// Compute returns the source closure for one subject of pkgPath. It is the
+// one-subject form of ComputeBatch.
 func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
-	tr, err := h.tier2(pkgPath, symbol)
+	subject := Subject{Package: pkgPath, Symbol: symbol}
+	closures, err := h.ComputeBatch([]Subject{subject})
 	if err != nil {
 		return Closure{}, err
 	}
+	return closures[subject], nil
+}
+
+// ComputeBatch returns each distinct subject's source closure. Reachability is
+// shared in package-local batches while retaining independent subject results.
+// Empty input returns an empty map.
+func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
+	results := make(map[Subject]Closure)
+	if len(subjects) == 0 {
+		return results, nil
+	}
+	if err := h.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+
+	type packageBatch struct {
+		path     string
+		subjects []Subject
+	}
+	var groups []*packageBatch
+	byPackage := make(map[string]*packageBatch)
+	seen := make(map[Subject]bool)
+	for _, subject := range subjects {
+		if seen[subject] {
+			continue
+		}
+		seen[subject] = true
+		group := byPackage[subject.Package]
+		if group == nil {
+			group = &packageBatch{path: subject.Package}
+			byPackage[subject.Package] = group
+			groups = append(groups, group)
+		}
+		group.subjects = append(group.subjects, subject)
+	}
+
+	for _, group := range groups {
+		if err := h.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		// A batch view retains only final closures. Explicitly primed programs
+		// remain caller-owned; otherwise load one package program at a time and
+		// release it after this group so peak SSA memory is bounded by the largest
+		// package test binary rather than the total subject set.
+		prog := h.progs[group.path]
+		if prog == nil {
+			var err error
+			prog, err = load(h.ctx, h.dir, h.buildFlags, group.path)
+			if err != nil {
+				return nil, err
+			}
+		}
+		// Resolve every root before listing or analyzing, preserving the clear
+		// one-subject error for a symbol that does not exist.
+		for _, subject := range group.subjects {
+			if prog.roots[subject.Symbol] == nil {
+				return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+			}
+		}
+		_, retainList := h.lists[group.path]
+		metas, err := h.list(group.path)
+		if err != nil {
+			return nil, err
+		}
+		base := newTier2Base(h, prog, metas)
+		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
+			if err := h.ctx.Err(); err != nil {
+				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+			}
+			end := min(start+maxAttributedSubjects, len(group.subjects))
+			batch := group.subjects[start:end]
+			reachable, err := attributedReachableSets(h.ctx, prog, batch)
+			if err != nil {
+				return nil, err
+			}
+			for i, subject := range batch {
+				if err := h.ctx.Err(); err != nil {
+					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+				}
+				tr, err := h.tier2Reachable(base, reachable[i])
+				if err != nil {
+					return nil, err
+				}
+				closure, err := h.closureFromTier2(group.path, tr)
+				if err != nil {
+					return nil, err
+				}
+				results[subject] = closure
+			}
+		}
+		if !retainList {
+			delete(h.lists, group.path)
+		}
+	}
+	if err := h.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	return results, nil
+}
+
+func (h *Hasher) closureFromTier2(pkgPath string, tr tier2Result) (Closure, error) {
 	var hash string
+	var err error
 	if tr.widen {
 		hash, err = h.maximalHash(pkgPath)
 	} else {
@@ -274,7 +419,7 @@ func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
 	if err != nil {
 		return Closure{}, err
 	}
-	return Closure{Hash: hash, Unverifiable: tr.unverifiable, Reason: tr.reason}, nil
+	return Closure{Hash: hash, Unverifiable: tr.unverifiable, Reason: tr.reason, Widened: tr.widen}, nil
 }
 
 type tier2Result struct {
@@ -306,51 +451,233 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 	if err != nil {
 		return tier2Result{}, err
 	}
+	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{{Package: pkgPath, Symbol: bench}})
+	if err != nil {
+		return tier2Result{}, err
+	}
+	return h.tier2Reachable(newTier2Base(h, prog, metas), reachable[0])
+}
 
-	a := newTier2Analyzer(h, prog, metas)
+type attributedReachability struct {
+	functions      map[*ssa.Function]bool
+	resolved       map[ssa.CallInstruction]bool
+	dynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
+	openWorld      bool
+}
+
+// attributedReachableSets runs package-local RTA once and projects its masks
+// back into the reachable set expected by the existing per-subject analyzer.
+func attributedReachableSets(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	roots := make(map[*ssa.Function]uint64)
+	allMasks := ^uint64(0)
+	if len(subjects) < 64 {
+		allMasks = 1<<len(subjects) - 1
+	}
+	var testMasks uint64
+	for i, subject := range subjects {
+		mask := uint64(1) << i
+		root := prog.roots[subject.Symbol]
+		roots[root] |= mask
+		if subjectRunsThroughHarness(prog, root) {
+			testMasks |= mask
+		}
+	}
+	if prog.testMain != nil {
+		roots[prog.testMain] |= testMasks
+	}
+	for _, p := range prog.prog.AllPackages() {
+		if isGeneratedTestMainPackage(prog, p) {
+			continue
+		}
+		if init := p.Func("init"); init != nil {
+			roots[init] |= allMasks
+		}
+	}
+	res, err := analyzeAttributed(ctx, roots)
+	if err != nil {
+		return nil, err
+	}
+	reachable := make([]attributedReachability, len(subjects))
+	for i := range reachable {
+		reachable[i] = attributedReachability{
+			functions:      make(map[*ssa.Function]bool),
+			resolved:       make(map[ssa.CallInstruction]bool),
+			dynamicTargets: make(map[ssa.CallInstruction]map[*ssa.Function]bool),
+			openWorld:      rootMayReceiveUnknownDynamic(prog, prog.roots[subjects[i].Symbol]),
+		}
+		mask := uint64(1) << i
+		for fn, masks := range res.Reachable {
+			if masks&mask != 0 {
+				reachable[i].functions[fn] = true
+			}
+		}
+		for site, masks := range res.Resolved {
+			if masks&mask != 0 {
+				reachable[i].resolved[site] = true
+			}
+		}
+		for site, targets := range res.Targets {
+			for target, masks := range targets {
+				if masks&mask != 0 {
+					projected := reachable[i].dynamicTargets[site]
+					if projected == nil {
+						projected = make(map[*ssa.Function]bool)
+						reachable[i].dynamicTargets[site] = projected
+					}
+					projected[target] = true
+				}
+			}
+		}
+	}
+	return reachable, nil
+}
+
+func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
+	if root == nil || root.Signature == nil {
+		return true
+	}
+	if subjectRunsThroughHarness(prog, root) && isHarnessSubjectSignature(root.Signature) {
+		return false
+	}
+	seen := make(map[types.Type]bool)
+	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(recv.Type(), seen) {
+		return true
+	}
+	params := root.Signature.Params()
+	for i := 0; params != nil && i < params.Len(); i++ {
+		if typeMayCarryDynamic(params.At(i).Type(), seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHarnessSubjectSignature(sig *types.Signature) bool {
+	if sig == nil || sig.Recv() != nil || sig.Params().Len() != 1 {
+		return false
+	}
+	pointer, ok := sig.Params().At(0).Type().(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := pointer.Elem().(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "T", "B", "F", "M":
+		return true
+	default:
+		return false
+	}
+}
+
+func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Basic:
+		return t.Kind() == types.UnsafePointer
+	case *types.Interface, *types.Signature:
+		return true
+	case *types.TypeParam:
+		return typeMayCarryDynamic(t.Constraint(), seen)
+	case *types.Named:
+		return typeMayCarryDynamic(t.Underlying(), seen)
+	case *types.Pointer:
+		return typeMayCarryDynamic(t.Elem(), seen)
+	case *types.Slice:
+		return typeMayCarryDynamic(t.Elem(), seen)
+	case *types.Array:
+		return typeMayCarryDynamic(t.Elem(), seen)
+	case *types.Map:
+		return typeMayCarryDynamic(t.Key(), seen) || typeMayCarryDynamic(t.Elem(), seen)
+	case *types.Chan:
+		return typeMayCarryDynamic(t.Elem(), seen)
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if typeMayCarryDynamic(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+	case *types.Tuple:
+		for i := 0; i < t.Len(); i++ {
+			if typeMayCarryDynamic(t.At(i).Type(), seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
+	return prog != nil && pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Pkg.Path() == prog.pkgPath+".test"
+}
+
+// tier2Reachable performs declaration, source, widening, and unverifiability
+// analysis over a supplied per-subject RTA set. Its behavior is otherwise the
+// same as the former one-subject tier2 path.
+func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachability) (tier2Result, error) {
+	a := base.analyzer()
+	a.rtaResolved = reachable.resolved
+	a.openWorld = reachable.openWorld
 	if err := a.addLinkedCacheModules(); err != nil {
 		return tier2Result{}, err
 	}
-
-	// RTA is rooted at the subject, every package init, and — only for a subject that
-	// runs through the test harness — the test main, so startup/global side effects
-	// the subject observes without naming the registering package are covered
-	// (REQ-closure-analysis). A production subject never executes through TestMain, so
-	// rooting it there would over-include test setup it cannot observe; a test subject
-	// runs after TestMain setup, so omitting it would be a false-valid hole. File I/O
-	// reached anywhere in this closure is Class-B `unverifiable` regardless of when it
-	// runs (REQ-closure-blindspot, REQ-inputs-guard): the runtime-input manifest is evidence, never a completeness
-	// proof, so the closure never promotes observed file I/O to `valid`.
-	roots := []*ssa.Function{root}
-	if prog.testMain != nil && subjectRunsThroughHarness(prog, root) {
-		roots = append(roots, prog.testMain)
-	}
-	for _, p := range prog.prog.AllPackages() {
-		if init := p.Func("init"); init != nil {
-			roots = append(roots, init)
+	for site, targets := range reachable.dynamicTargets {
+		callerIdx := a.idxForFunction(site.Parent())
+		if callerIdx == nil || callerIdx.std || callerIdx.testMain {
+			continue
+		}
+		for target := range targets {
+			idx := a.idxForFunction(target)
+			if idx == nil || !idx.std {
+				continue
+			}
+			reason := classBReasonForFunction(target)
+			if reason == "" && !isSourceOnlyStandardPackage(idx.path) {
+				reason = "reaches unaudited standard operation " + idx.path + "." + target.Name()
+			}
+			if reason != "" {
+				a.markUnverifiable(reason)
+			}
 		}
 	}
-	res := rta.Analyze(roots, true)
-	if res == nil {
-		return tier2Result{}, fmt.Errorf("closure: RTA returned no result for %s.%s", pkgPath, bench)
-	}
-	for fn := range res.Reachable {
+	for fn := range reachable.functions {
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, err
+		}
 		a.rtaReach[fn] = true
 	}
-	for fn := range res.Reachable {
+	for fn := range reachable.functions {
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, err
+		}
 		a.addFunction(fn)
 		if idx := a.idxForFunction(fn); idx != nil && idx.std {
 			continue
 		}
 		a.scanFunction(fn)
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, err
+		}
 	}
-	a.drainObjects()
+	if err := a.drainObjects(); err != nil {
+		return tier2Result{}, err
+	}
 	for {
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, err
+		}
 		pkgCount := len(a.filePkgs)
 		if err := a.addReachedPackageFiles(); err != nil {
 			return tier2Result{}, err
 		}
-		a.drainObjects()
+		if err := a.drainObjects(); err != nil {
+			return tier2Result{}, err
+		}
 		if len(a.filePkgs) == pkgCount {
 			break
 		}
@@ -379,6 +706,21 @@ type pkgIndex struct {
 	linknameDocs   map[types.Object]ast.Node
 }
 
+// tier2Base is the immutable package/source index shared by every subject in
+// one package analysis view. The AST, type, linkname, and package lookup maps
+// are expensive to build but independent of a subject's reachable set.
+type tier2Base struct {
+	h                *Hasher
+	buildFlags       []string
+	prog             *program
+	metas            []listPkg
+	metaByPath       map[string]*listPkg
+	idxByTypes       map[*types.Package]*pkgIndex
+	idxByPath        map[string]*pkgIndex
+	objByName        map[string]types.Object
+	objsByLinkTarget map[string][]types.Object
+}
+
 type tier2Analyzer struct {
 	h                *Hasher
 	buildFlags       []string
@@ -397,6 +739,8 @@ type tier2Analyzer struct {
 	seenPkgs    map[*pkgIndex]bool
 	filePkgs    map[*pkgIndex]bool
 	rtaReach    map[*ssa.Function]bool
+	rtaResolved map[ssa.CallInstruction]bool
+	openWorld   bool
 	scanned     map[*ssa.Function]bool
 	seenContrib map[string]bool
 	contribs    []string
@@ -407,7 +751,7 @@ type tier2Analyzer struct {
 	reason       string
 }
 
-func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer {
+func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 	a := &tier2Analyzer{
 		h:                h,
 		buildFlags:       append([]string(nil), h.buildFlags...),
@@ -418,14 +762,6 @@ func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer 
 		idxByPath:        map[string]*pkgIndex{},
 		objByName:        map[string]types.Object{},
 		objsByLinkTarget: map[string][]types.Object{},
-		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[string]bool{},
-		seenDecls:        map[string]bool{},
-		seenPkgs:         map[*pkgIndex]bool{},
-		filePkgs:         map[*pkgIndex]bool{},
-		rtaReach:         map[*ssa.Function]bool{},
-		scanned:          map[*ssa.Function]bool{},
-		seenContrib:      map[string]bool{},
 	}
 	for i := range metas {
 		m := &metas[i]
@@ -460,7 +796,44 @@ func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer 
 			}
 		}
 	}
-	return a
+	return &tier2Base{
+		h:                h,
+		buildFlags:       a.buildFlags,
+		prog:             prog,
+		metas:            metas,
+		metaByPath:       a.metaByPath,
+		idxByTypes:       a.idxByTypes,
+		idxByPath:        a.idxByPath,
+		objByName:        a.objByName,
+		objsByLinkTarget: a.objsByLinkTarget,
+	}
+}
+
+func (b *tier2Base) analyzer() *tier2Analyzer {
+	return &tier2Analyzer{
+		h:                b.h,
+		buildFlags:       b.buildFlags,
+		prog:             b.prog,
+		metas:            b.metas,
+		metaByPath:       b.metaByPath,
+		idxByTypes:       b.idxByTypes,
+		idxByPath:        b.idxByPath,
+		objByName:        b.objByName,
+		objsByLinkTarget: b.objsByLinkTarget,
+		seenObjects:      map[types.Object]bool{},
+		seenTypes:        map[string]bool{},
+		seenDecls:        map[string]bool{},
+		seenPkgs:         map[*pkgIndex]bool{},
+		filePkgs:         map[*pkgIndex]bool{},
+		rtaReach:         map[*ssa.Function]bool{},
+		rtaResolved:      map[ssa.CallInstruction]bool{},
+		scanned:          map[*ssa.Function]bool{},
+		seenContrib:      map[string]bool{},
+	}
+}
+
+func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer {
+	return newTier2Base(h, prog, metas).analyzer()
 }
 
 func (a *tier2Analyzer) addReverseLinkname(target string, obj types.Object) {
@@ -493,7 +866,7 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 		path:           path,
 		dir:            p.Dir,
 		std:            std,
-		testMain:       strings.HasSuffix(p.ID, ".test") || strings.HasSuffix(path, ".test"),
+		testMain:       p.Name == "main" && path == a.prog.pkgPath+".test",
 		decls:          map[types.Object]ast.Node{},
 		linknames:      map[types.Object]string{},
 		linknameByName: map[string]string{},
@@ -582,7 +955,7 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 						}
 					case *ast.TypeSpec:
 						if obj := p.TypesInfo.Defs[s.Name]; obj != nil {
-							idx.decls[obj] = s
+							addTypeDeclaration(idx, obj, s)
 						}
 					}
 				}
@@ -590,6 +963,22 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 		}
 	}
 	return idx
+}
+
+func addTypeDeclaration(idx *pkgIndex, obj types.Object, node ast.Node) {
+	if idx == nil || obj == nil || node == nil {
+		return
+	}
+	idx.decls[obj] = node
+	underlying := obj.Type().Underlying()
+	iface, ok := underlying.(*types.Interface)
+	if !ok {
+		return
+	}
+	iface.Complete()
+	for i := 0; i < iface.NumExplicitMethods(); i++ {
+		idx.decls[iface.ExplicitMethod(i)] = node
+	}
 }
 
 func (a *tier2Analyzer) metaForPackage(p *packages.Package) *listPkg {
@@ -697,6 +1086,9 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	}
 	var ops [16]*ssa.Value
 	for _, block := range fn.Blocks {
+		if a.contextErr() != nil {
+			return
+		}
 		for _, instr := range block.Instrs {
 			if v, ok := instr.(ssa.Value); ok {
 				a.addType(v.Type())
@@ -708,13 +1100,13 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 				if op == nil || *op == nil {
 					continue
 				}
-				a.scanValue(*op)
+				a.scanValue(idx, *op)
 			}
 			fromRTA := a.rtaReach[fn]
 			if idx.std {
 				fromRTA = false
 			}
-			a.scanInstruction(idx, instr, fromRTA, suppressNestedFileIO)
+			a.scanInstruction(idx, fn, instr, fromRTA, suppressNestedFileIO)
 		}
 	}
 }
@@ -722,6 +1114,9 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 	if idx == nil || fn == nil {
 		return
+	}
+	if origin := fn.Origin(); origin != nil {
+		fn = origin
 	}
 	obj := fn.Object()
 	if obj == nil {
@@ -735,6 +1130,7 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 		}
 		return
 	}
+	obj = originObject(obj)
 	node := idx.decls[obj]
 	if node == nil {
 		a.requestWiden("missing cache function declaration for " + obj.String())
@@ -743,7 +1139,7 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 	a.scanNodeRefs(idx, node)
 }
 
-func (a *tier2Analyzer) scanValue(v ssa.Value) {
+func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	if v == nil {
 		return
 	}
@@ -756,6 +1152,9 @@ func (a *tier2Analyzer) scanValue(v ssa.Value) {
 	switch x := v.(type) {
 	case *ssa.Global:
 		if obj := x.Object(); obj != nil {
+			if callerIdx != nil && !callerIdx.std && obj.Pkg() != nil && isStdImportPath(obj.Pkg().Path()) {
+				a.markUnverifiable("reaches standard global " + obj.Pkg().Path() + "." + obj.Name())
+			}
 			a.enqueueObject(obj)
 		}
 	case *ssa.Function:
@@ -763,26 +1162,54 @@ func (a *tier2Analyzer) scanValue(v ssa.Value) {
 	}
 }
 
-func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
+func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
-		a.scanCall(idx, x.Common(), fromRTA, suppressNestedFileIO)
+		a.scanCall(idx, caller, x, fromRTA, suppressNestedFileIO)
 	case *ssa.MakeInterface:
 		a.addInterfaceMethodSet(x.X.Type())
+	case *ssa.Field:
+		if reason := testingRuntimeFieldReason(x.X.Type(), x.Field); reason != "" {
+			a.markUnverifiable(reason)
+		}
+	case *ssa.FieldAddr:
+		if reason := testingRuntimeFieldReason(x.X.Type(), x.Field); reason != "" {
+			a.markUnverifiable(reason)
+		}
 	}
 }
 
-func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA, suppressNestedFileIO bool) {
+func testingRuntimeFieldReason(t types.Type, index int) string {
+	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
+		t = pointer.Elem()
+	}
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
+		return ""
+	}
+	structure, ok := named.Underlying().(*types.Struct)
+	if !ok || index < 0 || index >= structure.NumFields() {
+		return ""
+	}
+	if name := structure.Field(index).Name(); name == "N" {
+		return "reaches testing.B.N (test runtime configuration)"
+	}
+	return ""
+}
+
+func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site ssa.CallInstruction, fromRTA, suppressNestedFileIO bool) {
+	c := site.Common()
 	if c == nil {
 		return
 	}
 	callerStd := callerIdx != nil && callerIdx.std
-	if c.IsInvoke() && !fromRTA && !callerStd {
+	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
+	if c.IsInvoke() && !resolved && !callerStd {
 		a.requestWiden("interface invoke outside RTA")
 	}
 	if !c.IsInvoke() && c.StaticCallee() == nil {
-		if _, ok := c.Value.(*ssa.Builtin); !ok && !callerStd {
-			a.requestWiden("computed function call")
+		if _, ok := c.Value.(*ssa.Builtin); !ok && !callerStd && !resolved {
+			a.requestWiden("computed function call in " + caller.String())
 		}
 	}
 	callee := c.StaticCallee()
@@ -795,6 +1222,10 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA
 		name = obj.Name()
 	}
 	reason := classBReason(pkgPath, name)
+	calleeIdx := a.idxForFunction(callee)
+	if reason == "" && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
+		reason = "reaches unaudited standard operation " + pkgPath + "." + name
+	}
 	if osOpenFileMayMutate(callee, pkgPath, name, c) {
 		reason = "reaches os.OpenFile (filesystem mutation)"
 	}
@@ -815,6 +1246,39 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, c *ssa.CallCommon, fromRTA
 	}
 	if !callerStd && pkgPath == "reflect" && (name == "Call" || name == "CallSlice" || name == "MakeFunc" || name == "MethodByName") {
 		a.requestWiden("reflect dispatch")
+	}
+}
+
+func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] {
+		return false
+	}
+	seen[value] = true
+	switch value := value.(type) {
+	case *ssa.Function, *ssa.Builtin, *ssa.Const, *ssa.MakeClosure:
+		return true
+	case *ssa.MakeInterface:
+		return true
+	case *ssa.ChangeInterface:
+		return locallyClosedDynamicValue(value.X, seen)
+	case *ssa.ChangeType:
+		return locallyClosedDynamicValue(value.X, seen)
+	case *ssa.Convert:
+		return locallyClosedDynamicValue(value.X, seen)
+	case *ssa.Phi:
+		if len(value.Edges) == 0 {
+			return false
+		}
+		for _, edge := range value.Edges {
+			if !locallyClosedDynamicValue(edge, seen) {
+				return false
+			}
+		}
+		return true
+	case *ssa.Extract:
+		return locallyClosedDynamicValue(value.Tuple, seen)
+	default:
+		return false
 	}
 }
 
@@ -840,6 +1304,7 @@ func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 		if t == nil || found {
 			return
 		}
+		t = types.Unalias(t)
 		key := types.TypeString(t, nil)
 		if seen[key] {
 			return
@@ -886,12 +1351,23 @@ func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 	return found
 }
 
-func (a *tier2Analyzer) drainObjects() {
+func (a *tier2Analyzer) drainObjects() error {
 	for len(a.objectQueue) > 0 {
+		if err := a.contextErr(); err != nil {
+			return err
+		}
 		obj := a.objectQueue[0]
 		a.objectQueue = a.objectQueue[1:]
 		a.addObject(obj)
 	}
+	return nil
+}
+
+func (a *tier2Analyzer) contextErr() error {
+	if a == nil || a.h == nil || a.h.ctx == nil {
+		return nil
+	}
+	return a.h.contextErr()
 }
 
 func (a *tier2Analyzer) enqueueObject(obj types.Object) {
@@ -933,7 +1409,7 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	if !isPackageLevelObject(obj) {
 		return
 	}
-	node := idx.decls[obj]
+	node := idx.decls[originObject(obj)]
 	if idx.cache {
 		a.addType(obj.Type())
 		if node != nil {
@@ -978,6 +1454,17 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 }
 
+func originObject(obj types.Object) types.Object {
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return obj
+	}
+	if origin := fn.Origin(); origin != nil {
+		return origin
+	}
+	return obj
+}
+
 func (a *tier2Analyzer) addReverseLinknameTargets(obj types.Object) {
 	if obj == nil || obj.Pkg() == nil {
 		return
@@ -1007,7 +1494,11 @@ func (a *tier2Analyzer) addLinknameTarget(target string) {
 		return
 	}
 	pkgPath, name := target[:lastDot], target[lastDot+1:]
-	if reason := classBReason(pkgPath, name); reason != "" {
+	reason := classBReason(pkgPath, name)
+	if reason == "" && isStdImportPath(pkgPath) {
+		reason = "reaches standard linkname target " + target
+	}
+	if reason != "" {
 		a.markUnverifiable(reason)
 	}
 	obj := a.objByName[pkgPath+"."+name]
@@ -1105,6 +1596,9 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 	}
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].id < pkgs[j].id })
 	for _, idx := range pkgs {
+		if err := a.contextErr(); err != nil {
+			return err
+		}
 		if idx.meta == nil {
 			a.requestWiden("missing file metadata for " + idx.id)
 			continue
@@ -1159,8 +1653,21 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 					return err
 				}
 			}
+			generated, err := hasGeneratedASMInclude(idx.meta.Dir, idx.meta.SFiles)
+			if err != nil {
+				return err
+			}
+			if generated {
+				// go_asm.h contains only constants and struct sizes/offsets derived
+				// from selected Go declarations. Hash the selected package whole so
+				// those generated values cannot move outside the refined closure.
+				if err := a.addRelFiles(idx, "generated-asm-input", idx.meta.sourceFiles()); err != nil {
+					return err
+				}
+			}
 		}
-		asmCalls, computed, opaque, includes, err := asmCallTargets(idx.meta.Dir, idx.meta.SFiles, a.buildFlags...)
+		var externalASMReason string
+		asmCalls, computed, opaque, includes, err := asmCallTargetsObserved(&externalASMReason, idx.meta.Dir, idx.meta.SFiles, a.buildFlags...)
 		if err != nil {
 			return err
 		}
@@ -1175,11 +1682,61 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 		if opaque {
 			a.requestWiden("opaque asm preprocessing in " + idx.id)
 		}
+		if !idx.std && externalASMReason != "" {
+			a.markUnverifiable(externalASMReason)
+		}
 		for _, target := range asmCalls {
 			a.addASMTarget(idx, target)
 		}
 	}
 	return nil
+}
+
+func asmExternalStateReason(dir string, files []string) (string, error) {
+	for _, name := range files {
+		filename := name
+		if !filepath.IsAbs(filename) {
+			filename = filepath.Join(dir, filename)
+		}
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			return "", err
+		}
+		for _, line := range stripASMBlockComments(strings.Split(string(content), "\n")) {
+			line = strings.TrimSpace(strings.SplitN(line, "//", 2)[0])
+			opcode := asmOpcodeFromFields(strings.Fields(line))
+			if asmOpcodeReadsExternalState(opcode) {
+				return "reaches assembly instruction " + opcode + " (external runtime state)", nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func asmOpcodeFromFields(fields []string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	i := 0
+	if strings.HasSuffix(fields[0], ":") {
+		i++
+	}
+	if i >= len(fields) {
+		return ""
+	}
+	return strings.Trim(strings.ToUpper(fields[i]), ",;:")
+}
+
+func asmOpcodeReadsExternalState(opcode string) bool {
+	switch opcode {
+	case "CPUID", "XGETBV", "XSETBV", "SYSCALL", "SYSRET", "SYSENTER", "SYSEXIT", "INT", "IN", "OUT", "HLT",
+		"MONITOR", "MWAIT", "UMONITOR", "UMWAIT", "TPAUSE",
+		"MRS", "MSR", "SYS", "SYSL", "SVC", "HVC", "SMC",
+		"MFSPR", "MTSPR", "MFTB", "MFTBU",
+		"ECALL", "EBREAK", "RDCYCLE", "RDCYCLEH", "RDTIME", "RDTIMEH", "RDINSTRET", "RDINSTRETH":
+		return true
+	}
+	return strings.HasPrefix(opcode, "RD") || strings.HasPrefix(opcode, "WR") || strings.HasPrefix(opcode, "CSR")
 }
 
 func (a *tier2Analyzer) addASMTarget(idx *pkgIndex, target string) {
@@ -1199,7 +1756,20 @@ func (a *tier2Analyzer) addASMTarget(idx *pkgIndex, target string) {
 		a.requestWiden("unresolved asm call target " + target)
 		return
 	}
+	if reason := standardASMTargetReason(obj); reason != "" {
+		a.markUnverifiable(reason)
+	}
 	a.enqueueObject(obj)
+}
+
+func standardASMTargetReason(obj types.Object) string {
+	if obj == nil || obj.Pkg() == nil || !isStdImportPath(obj.Pkg().Path()) {
+		return ""
+	}
+	if reason := classBReason(obj.Pkg().Path(), obj.Name()); reason != "" {
+		return reason
+	}
+	return "reaches standard assembly target " + obj.Pkg().Path() + "." + obj.Name()
 }
 
 func (a *tier2Analyzer) lookupASMTarget(idx *pkgIndex, prefix, name string) types.Object {
@@ -1347,10 +1917,31 @@ func (a *tier2Analyzer) markUnverifiable(reason string) {
 	// Prefer a non-file-I/O reason when several apply: file I/O is the most common
 	// and least specific external dependence, so a network/plugin/cgo cause is the
 	// more informative one to surface.
-	if !a.unverifiable || (!isFileIOReason(reason) && isFileIOReason(a.reason)) {
+	currentRank := unverifiableReasonRank(a.reason)
+	newRank := unverifiableReasonRank(reason)
+	if !a.unverifiable || newRank > currentRank || (newRank == currentRank && reason < a.reason) {
 		a.reason = reason
 	}
 	a.unverifiable = true
+}
+
+func unverifiableReasonRank(reason string) int {
+	switch {
+	case strings.Contains(reason, "unaudited standard operation"), strings.Contains(reason, "test runtime configuration"), strings.Contains(reason, "test runtime execution"), strings.Contains(reason, "standard assembly target"):
+		return 0
+	case strings.Contains(reason, "formatted output"), strings.Contains(reason, "assembly operand"), strings.Contains(reason, "environment input"):
+		return 1
+	case isFileIOReason(reason):
+		return 3
+	default:
+		return 4
+	}
+}
+
+func isRefinementSourceOnlyStandardPackage(pkgPath string) bool {
+	// The testing harness itself is selected infrastructure. Its externally
+	// observable helpers are classified before this fallback.
+	return pkgPath == "testing" || isSourceOnlyStandardPackage(pkgPath)
 }
 
 func (a *tier2Analyzer) result() tier2Result {
@@ -1511,11 +2102,16 @@ func typeUsesUnsafePointer(t types.Type) bool {
 		if t == nil || found {
 			return
 		}
+		t = types.Unalias(t)
 		key := types.TypeString(t, nil)
 		if seen[key] {
 			return
 		}
 		seen[key] = true
+		if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UnsafePointer {
+			found = true
+			return
+		}
 		if n, ok := t.(*types.Named); ok {
 			if obj := n.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "unsafe" && obj.Name() == "Pointer" {
 				found = true
@@ -1553,8 +2149,18 @@ func typeUsesUnsafePointer(t types.Type) bool {
 }
 
 func classBReason(pkgPath, name string) string {
+	if pkgPath == "fmt" {
+		switch name {
+		case "Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln":
+			return "reaches fmt." + name + " (standard input)"
+		case "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln":
+			return "reaches fmt." + name + " (formatted output)"
+		}
+	}
 	if pkgPath == "os" {
 		switch name {
+		case "Getenv", "LookupEnv", "Environ", "ExpandEnv":
+			return "reaches os." + name + " (environment input)"
 		case "Open", "OpenFile", "ReadFile", "ReadDir", "Stat", "Lstat":
 			return "reaches os." + name + " (file I/O)"
 		case "Create", "CreateTemp", "WriteFile":
@@ -1571,8 +2177,15 @@ func classBReason(pkgPath, name string) string {
 			return "reaches " + pkgPath + "." + name + " (path mutation)"
 		}
 	}
-	if pkgPath == "testing" && name == "TempDir" {
-		return "reaches testing.TempDir (path mutation)"
+	if pkgPath == "testing" {
+		switch name {
+		case "TempDir", "Chdir", "Setenv":
+			return "reaches testing." + name + " (process or path mutation)"
+		case "Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "N", "Loop", "Parallel", "ArtifactDir", "Context":
+			return "reaches testing." + name + " (test runtime configuration)"
+		case "Run", "Fuzz", "RunParallel", "Elapsed", "Result", "AllocsPerRun", "Benchmark", "RunBenchmarks", "RunExamples", "RunTests", "Main", "MainStart":
+			return "reaches testing." + name + " (test runtime execution)"
+		}
 	}
 	if pkgPath == "net" {
 		switch name {
@@ -1646,6 +2259,10 @@ func hasCgoCallbackBlindspot(p *listPkg) bool {
 }
 
 func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObserved(nil, dir, files, buildFlags...)
+}
+
+func asmCallTargetsObserved(externalReason *string, dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
 	var targets []string
 	var includes []string
 	computed := false
@@ -1700,7 +2317,16 @@ func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string,
 						continue
 					}
 					for _, stmt := range asmStatements(strings.Join(fields, " ")) {
-						target, isComputed, ok := asmTargetFromFields(strings.Fields(stmt), labels, externalDefines)
+						stmtFields := strings.Fields(stmt)
+						if externalReason != nil && *externalReason == "" {
+							opcode := asmOpcodeFromFields(stmtFields)
+							if asmOpcodeReadsExternalState(opcode) {
+								*externalReason = "reaches assembly instruction " + opcode + " (external runtime state)"
+							} else if operand := asmExternalStateOperand(stmtFields); operand != "" {
+								*externalReason = "reaches assembly operand " + operand + " (external runtime state)"
+							}
+						}
+						target, isComputed, ok := asmTargetFromFields(stmtFields, labels, externalDefines)
 						computed = computed || isComputed
 						if ok {
 							targets = append(targets, target)
@@ -1717,6 +2343,42 @@ func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string,
 	return targets, computed, opaque, includes, nil
 }
 
+func asmExternalStateOperand(fields []string) string {
+	if len(fields) < 2 {
+		return ""
+	}
+	for _, field := range fields[1:] {
+		upper := strings.ToUpper(strings.Trim(field, ",;"))
+		for _, marker := range []string{"TLS", "FS", "GS"} {
+			if upper == marker || strings.Contains(upper, "("+marker+")") {
+				return marker
+			}
+		}
+		open := strings.IndexByte(upper, '(')
+		close := strings.IndexByte(upper, ')')
+		if open >= 0 && close > open {
+			base := upper[open+1 : close]
+			if base == "SB" && strings.HasPrefix(upper, "$") && strings.Contains(upper, "·") {
+				return "SB symbol address"
+			}
+			if base == "SB" {
+				symbol := strings.TrimPrefix(upper[:open], "$")
+				if dot := strings.Index(symbol, "·"); dot > 0 {
+					return "cross-package SB symbol"
+				}
+			}
+			switch base {
+			case "SP", "FP", "SB", "PC":
+				// Stack, frame, static, and program-relative addressing is
+				// backed by source/runtime inputs already in the closure.
+			default:
+				return base
+			}
+		}
+	}
+	return ""
+}
+
 func scanExpandedASMInclude(dir string, fields []string, stack map[string]bool, addInclude func(string), scan func([]string, map[string]bool) error, markOpaque func()) (bool, error) {
 	fields = normalizeASMPreprocessorFields(fields)
 	if len(fields) == 0 || fields[0] != "#include" {
@@ -1727,6 +2389,9 @@ func scanExpandedASMInclude(dir string, fields []string, stack map[string]bool, 
 	}
 	path, local, ok := asmIncludePath(dir, strings.Trim(fields[1], "\""))
 	if !ok {
+		if isGeneratedASMInclude(strings.Trim(fields[1], "\"")) {
+			return true, nil
+		}
 		return true, fmt.Errorf("closure: unresolved asm include %s", fields[1])
 	}
 	if local {
@@ -2047,6 +2712,9 @@ func asmExpandedLines(dir string, lines []string, stack map[string]bool) ([]stri
 		}
 		path, local, ok := asmIncludePath(dir, strings.Trim(fields[1], "\""))
 		if !ok {
+			if isGeneratedASMInclude(strings.Trim(fields[1], "\"")) {
+				continue
+			}
 			return nil, false, nil, fmt.Errorf("closure: unresolved asm include %s", fields[1])
 		}
 		if local {
@@ -2127,6 +2795,26 @@ func stripASMBlockComments(lines []string) []string {
 		out = append(out, b.String())
 	}
 	return out
+}
+
+func isGeneratedASMInclude(name string) bool {
+	return name == "go_asm.h"
+}
+
+func hasGeneratedASMInclude(dir string, files []string) (bool, error) {
+	for _, name := range files {
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return false, fmt.Errorf("closure: read asm %s: %w", filepath.Join(dir, name), err)
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			fields := normalizeASMPreprocessorFields(strings.Fields(strings.TrimSpace(stripASMLineComment(line))))
+			if len(fields) >= 2 && fields[0] == "#include" && asmIncludeOperandQuoted(fields) && isGeneratedASMInclude(strings.Trim(fields[1], "\"")) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func asmIncludePath(dir, name string) (string, bool, bool) {

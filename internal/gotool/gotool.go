@@ -2,6 +2,7 @@
 package gotool
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -17,7 +18,15 @@ func Run(args ...string) ([]byte, error) { return RunIn("", args...) }
 // it, so provenance capture and `go test` must run in the same dir to describe
 // the same toolchain.
 func RunIn(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("go", args...)
+	return RunInContext(context.Background(), dir, args...)
+}
+
+// RunInContext is RunIn with caller-owned cancellation.
+func RunInContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("go: nil context")
+	}
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

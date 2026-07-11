@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "8a00b03b2fd2cff832fd38e38d4356027cc99a93b113fe0b3c5369a9aa402539"
+  content_hash: "2b2ff5c96e1de3afc0758ef7518413512ae62f0f6b009aa3c6a46c2a190d305d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestComputeRootsAnySubject"
   role: BINDING_ROLE_TESTS
@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "8a00b03b2fd2cff832fd38e38d4356027cc99a93b113fe0b3c5369a9aa402539"
+  content_hash: "2b2ff5c96e1de3afc0758ef7518413512ae62f0f6b009aa3c6a46c2a190d305d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestPrimeUsesBuildFlags"
   role: BINDING_ROLE_TESTS
@@ -75,7 +75,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "8a00b03b2fd2cff832fd38e38d4356027cc99a93b113fe0b3c5369a9aa402539"
+  content_hash: "2b2ff5c96e1de3afc0758ef7518413512ae62f0f6b009aa3c6a46c2a190d305d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestBuildFlagsDriveASMClosure"
   role: BINDING_ROLE_TESTS
@@ -84,9 +84,63 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "8a00b03b2fd2cff832fd38e38d4356027cc99a93b113fe0b3c5369a9aa402539"
+  content_hash: "2b2ff5c96e1de3afc0758ef7518413512ae62f0f6b009aa3c6a46c2a190d305d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
   shape_hash: "20715489f5707cc60d66a18690c67ba4324f2d7dec420606f96d8fcff8a797de"
+}
+
+bindings {
+  requirement_id: "REQ-closure-view-maximal"
+  content_hash: "a002b75c0ab2bbdbd98fa7b2f67f520ad196ec790a27fa1cff8737ae63c7c9e2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ec01a9202b3ade0d579fdcce995b7af8a890a71fd4ee78aa35601c3ddef7f28e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-refinement-policy"
+  content_hash: "e63d799a85b01dbaef8cbbb9d49063b2e2feef5eaa5bf6978fdf66e360af452d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestRefinedViewChecksMaximalBeforeDeclarationRTA"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "431cd8bfa5b9f933028f7fc68f04bac8115057d4f737dcdeaa13dad0d349ad46"
+}
+
+bindings {
+  requirement_id: "REQ-closure-batch-equivalence"
+  content_hash: "b024c518ffa9c90d8c5b5d61da393bca9e2c1416f25c9e5ecf8f8bb5ba77041f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeBatchEqualsIndependentCompute"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3674ad7abad24e9925d44744e06ff29c9bfc74f832e1d05e383ad44b67c7d952"
+}
+
+bindings {
+  requirement_id: "REQ-closure-coverage"
+  content_hash: "6e505fa0fdd66abef005bc41d6200c8de8589542aba9a76dd2cf67dd326d784d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPropSourceFilesComplete"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "218440923534976383079a3bc2db4fca0a2bcf6299c9de03a62253c45b26b335"
+}
+
+bindings {
+  requirement_id: "REQ-closure-floor"
+  content_hash: "93c1bbc09607827deb37566fff306bce8e0feff8be56411052dc72bffd07a5a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzClosureFloor"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fab0b86fcfcca1f8b1b3aa968ed4d46aa4dda4ccd13be44edffe145b231bc7b6"
+}
+
+bindings {
+  requirement_id: "REQ-closure-mutable-local"
+  content_hash: "6bd7c54e4e255009c4b7c4af09c7ac46c69647e3a7bb62227161057772ae7046"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPropMutableLocalContentSensitivity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "53febc0c5e78a1f5f14d1bca2fabc4e6483ebf514f33d3397e912943b0484d20"
 }

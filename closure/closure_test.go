@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -15,7 +16,7 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-func TestHashFiles(t *testing.T) {
+func TestPropHashFilesSensitive(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -57,11 +58,37 @@ func TestContribution(t *testing.T) {
 	for _, p := range []listPkg{
 		{ImportPath: "fmt", Standard: true},
 		{ImportPath: "C"},
-		{ImportPath: "example/x.test", Module: &listMod{Main: true}},
+		{ImportPath: "example/x.test", Name: "main", Module: &listMod{Main: true}},
 	} {
-		if c, err := h.contribution(p); err != nil || c != "" {
+		if c, err := h.contributionFor("example/x", p); err != nil || c != "" {
 			t.Errorf("contribution(%s): got %q, %v; want \"\"", p.ImportPath, c, err)
 		}
+	}
+
+	// An ordinary importable package may legitimately end in .test.
+	dotTestDir := t.TempDir()
+	writeFile(t, dotTestDir, "dep.go", "package dep\nconst Value = 1\n")
+	dotTest, err := h.contribution(listPkg{
+		ImportPath: "example/dep.test", Name: "dep", Dir: dotTestDir,
+		GoFiles: []string{"dep.go"}, Module: &listMod{Main: true, Dir: dotTestDir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(dotTest, "src:example/dep.test=") {
+		t.Fatalf("ordinary .test package contribution = %q", dotTest)
+	}
+	commandDotTestDir := t.TempDir()
+	writeFile(t, commandDotTestDir, "main.go", "package main\nfunc F() int { return 1 }\n")
+	commandDotTest, err := h.contributionFor("example/root", listPkg{
+		ImportPath: "example/tool.test", Name: "main", Dir: commandDotTestDir,
+		GoFiles: []string{"main.go"}, Module: &listMod{Main: true, Dir: commandDotTestDir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(commandDotTest, "src:example/tool.test=") {
+		t.Fatalf("ordinary command .test package contribution = %q", commandDotTest)
 	}
 
 	// Cache dep (classified on the package Dir under GOMODCACHE): pinned by
@@ -801,6 +828,30 @@ func TestContributionRejectsUnresolvedASMInclude(t *testing.T) {
 	}
 }
 
+func TestContributionAcceptsGeneratedASMInclude(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "asm.s", "#include \"go_asm.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
+	if _, err := h.contribution(pkg); err != nil {
+		t.Fatalf("generated go_asm.h include: %v", err)
+	}
+	_, _, opaque, _, err := asmCallTargets(dir, pkg.SFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opaque {
+		t.Fatal("generated go_asm.h constants requested whole-closure widening")
+	}
+	generated, err := hasGeneratedASMInclude(dir, pkg.SFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !generated {
+		t.Fatal("generated go_asm.h include was not attributed to package source")
+	}
+}
+
 func TestContributionRejectsASMSymlinkIncludeDirDotDot(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
@@ -841,9 +892,9 @@ func TestUnderCache(t *testing.T) {
 	}
 }
 
-// TestSourceFilesComplete pins the compiled-file-kind set: dropping a kind (a
+// TestPropSourceFilesComplete pins the compiled-file-kind set: dropping a kind (a
 // silent under-coverage / false-valid hole) changes the count.
-func TestSourceFilesComplete(t *testing.T) {
+func TestPropSourceFilesComplete(t *testing.T) {
 	p := listPkg{
 		GoFiles: []string{"g.go"}, CgoFiles: []string{"cg.go"}, CFiles: []string{"c.c"},
 		CXXFiles: []string{"cc.cc"}, MFiles: []string{"m.m"}, HFiles: []string{"h.h"},
@@ -853,6 +904,57 @@ func TestSourceFilesComplete(t *testing.T) {
 	if got := len(p.sourceFiles()); got != 12 {
 		t.Errorf("sourceFiles count: got %d, want 12 — a compiled file kind is missing", got)
 	}
+}
+
+func TestPropMutableLocalContentSensitivity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.go")
+	if err := os.WriteFile(path, []byte("package p\nconst Value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg := listPkg{
+		ImportPath: "example.com/p",
+		Dir:        dir,
+		GoFiles:    []string{"p.go"},
+		Module:     &listMod{Main: true, Dir: dir},
+	}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	before, err := h.contribution(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package p\nconst Value = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := h.contribution(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("mutable-local source edit did not move its contribution")
+	}
+}
+
+func FuzzClosureFloor(f *testing.F) {
+	h, err := New()
+	if err != nil {
+		f.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/reflectfixture"
+	maximal, err := h.maximalHash(pkg)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add("arbitrary precise contribution")
+	f.Fuzz(func(t *testing.T, contribution string) {
+		got, err := h.closureFromTier2(pkg, tier2Result{widen: true, contribs: []string{contribution}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Hash != maximal {
+			t.Fatalf("widened hash = %s, maximal = %s", got.Hash, maximal)
+		}
+	})
 }
 
 // TestParseListError: a package reporting a load Error must fail the parse, never
@@ -985,7 +1087,7 @@ func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
 		base + "testmainroot",
 		base + "initfile",
 	}
-	batch, err := packages.Load(loadConfig(""), pkgs...)
+	batch, err := packages.Load(loadConfig(context.Background(), ""), pkgs...)
 	if err != nil {
 		t.Fatalf("batch load: %v", err)
 	}
@@ -997,7 +1099,7 @@ func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
 		return m
 	}
 	for _, pkg := range pkgs {
-		single, err := packages.Load(loadConfig(""), pkg)
+		single, err := packages.Load(loadConfig(context.Background(), ""), pkg)
 		if err != nil {
 			t.Fatalf("single load %s: %v", pkg, err)
 		}
@@ -2855,6 +2957,22 @@ func TestTier2InterfaceMethodSetSeesEmbeddedStructField(t *testing.T) {
 	}
 }
 
+func TestTier2InterfaceMethodsUseDeclaringTypeSource(t *testing.T) {
+	pkg := types.NewPackage("example.com/cache", "cache")
+	method := types.NewFunc(token.NoPos, pkg, "Read", types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false))
+	iface := types.NewInterfaceType([]*types.Func{method}, nil)
+	iface.Complete()
+	name := types.NewTypeName(token.NoPos, pkg, "Reader", nil)
+	types.NewNamed(name, iface, nil)
+	node := &ast.TypeSpec{Name: ast.NewIdent("Reader")}
+	idx := &pkgIndex{decls: map[types.Object]ast.Node{}}
+
+	addTypeDeclaration(idx, name, node)
+	if idx.decls[method] != node {
+		t.Fatal("interface method was not attributed to its declaring type")
+	}
+}
+
 func TestTier2CacheDeclarationTraversesMutableReference(t *testing.T) {
 	cacheTypes := types.NewPackage("example.com/cachedep", "cachedep")
 	localTypes := types.NewPackage("example.com/localdep", "localdep")
@@ -3026,6 +3144,41 @@ func TestTier2ReflectReferenceScansClassB(t *testing.T) {
 	}
 	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
 		t.Fatalf("reflect target Class-B = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	}
+}
+
+func TestUnverifiableReasonSelectionIsDeterministic(t *testing.T) {
+	reasons := []string{
+		"reaches fmt.Print (formatted output)",
+		"reaches net.Dial (network I/O)",
+		"reaches os.ReadFile (file I/O)",
+	}
+	first := &tier2Analyzer{}
+	for _, reason := range reasons {
+		first.markUnverifiable(reason)
+	}
+	second := &tier2Analyzer{}
+	for i := len(reasons) - 1; i >= 0; i-- {
+		second.markUnverifiable(reasons[i])
+	}
+	if first.reason != second.reason {
+		t.Fatalf("unverifiable reason depends on traversal order: %q != %q", first.reason, second.reason)
+	}
+}
+
+func TestStandardLinknameTargetIsUnverifiable(t *testing.T) {
+	for _, target := range []string{"runtime.nanotime", "sync.runtime_procPin"} {
+		analyzer := &tier2Analyzer{objByName: map[string]types.Object{}}
+		analyzer.addLinknameTarget(target)
+		if !analyzer.unverifiable || !strings.Contains(analyzer.reason, target) {
+			t.Fatalf("standard linkname target %s disposition = %v/%q, want unverifiable", target, analyzer.unverifiable, analyzer.reason)
+		}
+	}
+}
+
+func TestUnsafePointerBasicTypeIsDetected(t *testing.T) {
+	if !typeUsesUnsafePointer(types.Typ[types.UnsafePointer]) {
+		t.Fatal("unsafe.Pointer basic type was not detected")
 	}
 }
 

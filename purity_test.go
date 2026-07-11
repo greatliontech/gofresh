@@ -23,6 +23,7 @@ func TestScanPureDirectives(t *testing.T) {
 	}{
 		{"Asserted", true},
 		{"NotAsserted", false},
+		{"SpacedDirective", false},
 		{"T.Asserted", true},
 		{"T.NotAsserted", false},
 		// Declared in the external test package ("pkg_test"): the directive must
