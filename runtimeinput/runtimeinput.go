@@ -61,6 +61,48 @@ func Incomplete(moduleDir, reason string) (State, error) {
 	return Current(encoded, moduleDir)
 }
 
+// Absolute revalidates state under moduleDir and returns equivalent evidence
+// whose path identities are all absolute. This permits sound cross-module merge.
+func Absolute(state State, moduleDir string) (State, error) {
+	if !state.OK || state.Manifest == "" || state.Digest == "" {
+		return State{}, fmt.Errorf("runtimeinputs: incomplete state for absolute identities")
+	}
+	current, err := Current(state.Manifest, moduleDir)
+	if err != nil {
+		return State{}, err
+	}
+	if current != state {
+		return State{}, fmt.Errorf("runtimeinputs: state moved before absolute identity conversion")
+	}
+	m, err := decode(state.Manifest)
+	if err != nil {
+		return State{}, err
+	}
+	if current.Unverifiable && current.Reason != "" {
+		seen := make(map[string]bool, len(m.Unverifiable)+1)
+		for _, reason := range m.Unverifiable {
+			seen[reason] = true
+		}
+		addUnverifiable(&m, seen, current.Reason)
+	}
+	moduleDir, err = filepath.Abs(moduleDir)
+	if err != nil {
+		return State{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	for i, id := range m.Paths {
+		path, err := materializePath(moduleDir, id)
+		if err != nil {
+			return State{}, err
+		}
+		m.Paths[i] = pathID{Kind: pathAbs, Path: path}
+	}
+	encoded, err := encode(m)
+	if err != nil {
+		return State{}, err
+	}
+	return Current(encoded, moduleDir)
+}
+
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and environment.
 func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {

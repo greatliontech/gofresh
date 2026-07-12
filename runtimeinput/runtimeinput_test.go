@@ -54,6 +54,86 @@ func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
 	}
 }
 
+func TestAbsoluteIdentitiesMergeAcrossModuleRoots(t *testing.T) {
+	moduleA, packageA := testDirs(t)
+	moduleB, packageB := testDirs(t)
+	pathA := filepath.Join(packageA, "a.txt")
+	pathB := filepath.Join(packageB, "b.txt")
+	if err := os.WriteFile(pathA, []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := FromTestLog([]byte("open a.txt\n"), moduleA, packageA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := FromTestLog([]byte("open b.txt\n"), moduleB, packageB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err = Absolute(a, moduleA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = Absolute(b, moduleB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := Merge(t.TempDir(), a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := Paths(merged.Manifest, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{pathA, pathB}) {
+		t.Fatalf("merged absolute paths = %v, want [%s %s]", paths, pathA, pathB)
+	}
+}
+
+func TestAbsoluteIdentitiesNeverSuppressUnverifiability(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	external := filepath.Join(t.TempDir(), "external.txt")
+	if err := os.WriteFile(external, []byte("external"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(packageDir, "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	state, err := FromTestLog([]byte("open link\n"), moduleDir, packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Unverifiable {
+		t.Fatal("external symlink target was not unverifiable before conversion")
+	}
+	converted, err := Absolute(state, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !converted.Unverifiable || converted.Reason == "" {
+		t.Fatalf("Absolute suppressed unverifiability: %+v", converted)
+	}
+
+	regular := filepath.Join(packageDir, "regular.txt")
+	if err := os.WriteFile(regular, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, err = FromTestLog([]byte("open regular.txt\n"), moduleDir, packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(regular, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Absolute(state, moduleDir); err == nil {
+		t.Fatal("Absolute accepted a moved state")
+	}
+}
+
 func rawManifest(t *testing.T, m manifest) string {
 	t.Helper()
 	b, err := json.Marshal(m)

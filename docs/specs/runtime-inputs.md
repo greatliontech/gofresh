@@ -81,6 +81,17 @@ fabricated identities, and an unverifiable disposition. The state participates i
 ordinary deterministic merge, so one incomplete process makes the merged evidence
 unverifiable without being confused with an explicit completed empty observation.
 
+**REQ-inputs-absolute-identities** (behavior): A caller combining process
+observations rooted at different module directories MUST be able to revalidate each
+completed state against its original module view and convert every module-relative
+path identity to the equivalent clean absolute identity without changing environment
+identities or suppressing unverifiability. Any dynamic unverifiable disposition from
+the original module-relative interpretation is carried into the converted manifest;
+conversion may strengthen the disposition when absolute directory semantics are more
+conservative, but never weakens it. The converted states then participate in ordinary
+merge under any caller root without interpreting one module's relative path under
+another module.
+
 **REQ-inputs-evidence-not-proof** (invariant): A runtime-input manifest MUST be
 treated as evidence of the identities it observed, never as proof that every
 reachable input was observed — so a matching digest can move a logged input change to
