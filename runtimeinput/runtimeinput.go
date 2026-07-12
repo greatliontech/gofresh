@@ -517,6 +517,29 @@ func ModuleRelPaths(encoded string) ([]string, error) {
 	return out, nil
 }
 
+// Paths returns every path identity in a canonical manifest as an absolute path,
+// preserving manifest order. Module-relative identities are rooted at moduleDir;
+// external identities remain absolute.
+func Paths(encoded, moduleDir string) ([]string, error) {
+	m, err := decode(encoded)
+	if err != nil {
+		return nil, err
+	}
+	moduleDir, err = filepath.Abs(moduleDir)
+	if err != nil {
+		return nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	out := make([]string, 0, len(m.Paths))
+	for _, id := range m.Paths {
+		path, err := materializePath(moduleDir, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, path)
+	}
+	return out, nil
+}
+
 func decode(s string) (manifest, error) {
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {

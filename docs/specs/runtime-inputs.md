@@ -44,6 +44,12 @@ and compare, staling the result when the digest moves — it is a code guard, be
 on any result whose non-source inputs can change, and a missing file hashes as
 missing so an input appearing or disappearing moves the guard.
 
+**REQ-inputs-path-identities** (behavior): A caller MUST be able to enumerate every
+path identity in a validated runtime-input manifest as its materialized absolute
+path under a supplied module directory, preserving canonical manifest order and
+including both module-relative and external identities, so caller-owned producer
+actions can reject mutations that would invalidate their completed observation.
+
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
 while merge, dirty inspection, or a current check observes inputs. Merge revalidates

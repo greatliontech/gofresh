@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -413,6 +414,31 @@ func TestModuleRelPaths(t *testing.T) {
 		if !want[p] {
 			t.Errorf("ModuleRelPaths returned unexpected %q", p)
 		}
+	}
+}
+
+func TestPathsMaterializesRelativeAndExternalIdentities(t *testing.T) {
+	parent := t.TempDir()
+	moduleDir := filepath.Join(parent, "module")
+	if err := os.Mkdir(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(parent)
+	external := filepath.Join(t.TempDir(), "external.txt")
+	encoded := rawManifest(t, manifest{
+		Version: manifestVersion,
+		Paths: []pathID{
+			{Kind: pathAbs, Path: external},
+			{Kind: pathRel, Path: "fixtures/input.txt"},
+		},
+	})
+	got, err := Paths(encoded, "module")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{external, filepath.Join(moduleDir, "fixtures", "input.txt")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Paths = %v, want %v", got, want)
 	}
 }
 
