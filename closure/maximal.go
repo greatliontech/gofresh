@@ -22,10 +22,19 @@ import (
 // dependency closure; this deliberately trades declaration precision for bounded
 // analysis cost while preserving the no-false-valid floor (REQ-closure-floor).
 func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, error) {
+	results, _, err := h.ComputeMaximalBatchWithSources(subjects)
+	return results, err
+}
+
+// ComputeMaximalBatchWithSources also returns the exact mutable source paths
+// whose bytes contribute to each subject's maximal closure. Cache-module and
+// standard-library inputs remain represented by their existing guards.
+func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject]Closure, map[Subject][]string, error) {
 	if err := h.contextErr(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	results := make(map[Subject]Closure, len(subjects))
+	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)
 	var packages []string
 	seen := make(map[Subject]bool, len(subjects))
@@ -41,15 +50,19 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, e
 	}
 	for _, pkgPath := range packages {
 		if err := h.contextErr(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		hash, err := h.maximalHash(pkgPath)
+		contributions, files, err := h.maximalContributionsAndFiles(pkgPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		hash, err := hashContributions(pkgPath, contributions)
+		if err != nil {
+			return nil, nil, err
 		}
 		unverifiable, reason, unrefinable, err := h.maximalUnverifiable(pkgPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, subject := range byPackage[pkgPath] {
 			results[subject] = Closure{
@@ -58,13 +71,14 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, e
 				Reason:       reason,
 				Unrefinable:  unrefinable,
 			}
+			sources[subject] = append([]string(nil), files...)
 		}
 		if err := h.contextErr(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		delete(h.lists, pkgPath)
 	}
-	return results, nil
+	return results, sources, nil
 }
 
 func maximalReasonUnrefinable(reason string) bool {

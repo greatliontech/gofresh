@@ -49,6 +49,33 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 	}
 }
 
+func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T) {
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/opaqueasm"
+	subject := Subject{Package: pkg, Symbol: "BenchmarkOpaqueASM"}
+	h, err := NewAt("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sources, err := h.ComputeMaximalBatchWithSources([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs(filepath.Join("fixtures", "opaqueasm", "defs.inc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, path := range sources[subject] {
+		if path == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("widened sources omit %s: %v", want, sources[subject])
+	}
+}
+
 func TestComputeMaximalBatchConservativelyMarksExternalPackageCode(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/external\n\ngo 1.26\n"), 0o644); err != nil {

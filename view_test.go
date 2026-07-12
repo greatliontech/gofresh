@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,27 @@ func writeViewModule(t *testing.T, source string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView([]Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "view.go")
+	files := view.SourceFiles()
+	if len(files) == 0 || !slices.Contains(files, want) {
+		t.Fatalf("SourceFiles = %v, want %s", files, want)
+	}
+	files[0] = "changed"
+	if slices.Contains(view.SourceFiles(), "changed") {
+		t.Fatal("SourceFiles returned mutable view storage")
+	}
 }
 
 func TestEngineCheckUsesFreshView(t *testing.T) {
@@ -154,6 +176,45 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 	}
 	if verdict.Status != Stale || verdict.Reason != "closure" {
 		t.Fatalf("fresh current view = {%s %q}, want {stale closure}", verdict.Status, verdict.Reason)
+	}
+}
+
+func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
+	dir := t.TempDir()
+	for _, dep := range []string{"dep-a", "dep-b"} {
+		depDir := filepath.Join(dir, dep)
+		if err := os.Mkdir(depDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte("module example.com/dep\n\ngo 1.26\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(depDir, "dep.go"), []byte("package dep\n\nfunc F() {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goMod := func(dep string) []byte {
+		return []byte("module example.com/view\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ./" + dep + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), goMod("dep-a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"example.com/dep\"\n\nfunc F() { dep.F() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView([]Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), goMod("dep-b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Validate(); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("Validate after source identity change = %v, want ErrViewChanged", err)
 	}
 }
 

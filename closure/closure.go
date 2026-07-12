@@ -156,7 +156,7 @@ func (p listPkg) sourceFiles() []string {
 // (REQ-closure-floor) and the target every blind spot widens to (REQ-closure-blindspot). It needs no SSA, so
 // it also serves as the analysis-failure-free floor.
 func (h *Hasher) maximalHash(pkgPath string) (string, error) {
-	contribs, err := h.maximalContributions(pkgPath)
+	contribs, _, err := h.maximalContributionsAndFiles(pkgPath)
 	if err != nil {
 		return "", err
 	}
@@ -164,27 +164,41 @@ func (h *Hasher) maximalHash(pkgPath string) (string, error) {
 }
 
 func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
+	contribs, _, err := h.maximalContributionsAndFiles(pkgPath)
+	return contribs, err
+}
+
+func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []string, error) {
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	seen := map[string]bool{}
+	seenFile := map[string]bool{}
 	var contribs []string
+	var sourceFiles []string
 	for _, p := range pkgs {
 		if err := h.contextErr(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		c, err := h.contributionFor(pkgPath, p)
+		c, files, err := h.contributionAndFilesFor(pkgPath, p)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if c != "" && !seen[c] {
 			seen[c] = true
 			contribs = append(contribs, c)
 		}
+		for _, file := range files {
+			if !seenFile[file] {
+				seenFile[file] = true
+				sourceFiles = append(sourceFiles, file)
+			}
+		}
 	}
 	sort.Strings(contribs)
-	return contribs, nil
+	sort.Strings(sourceFiles)
+	return contribs, sourceFiles, nil
 }
 
 func (h *Hasher) contextErr() error {
@@ -219,11 +233,16 @@ func (h *Hasher) contribution(p listPkg) (string, error) {
 }
 
 func (h *Hasher) contributionFor(pkgPath string, p listPkg) (string, error) {
+	contribution, _, err := h.contributionAndFilesFor(pkgPath, p)
+	return contribution, err
+}
+
+func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []string, error) {
 	if p.Standard || p.Module == nil || (pkgPath != "" && p.isGeneratedTestMainFor(pkgPath)) {
 		// stdlib cut (REQ-closure-coverage); pseudo-package ("C", whose C source rides in the
 		// importing package); or the toolchain-generated test main (boilerplate
 		// in a transient dir — deterministic, carries no source information).
-		return "", nil
+		return "", nil, nil
 	}
 	if !p.Module.Main && h.underCache(p.Dir) {
 		// Immutable, version-locked cache dep (classified on the package Dir per
@@ -232,35 +251,35 @@ func (h *Hasher) contributionFor(pkgPath string, p listPkg) (string, error) {
 		// Module.Dir agree on under-cache classification for every reachable config;
 		// REQ-closure-mutable-local names the package Dir, so we use it.
 		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator))
-		return "cache:" + filepath.ToSlash(rel), nil
+		return "cache:" + filepath.ToSlash(rel), nil, nil
 	}
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
 	// so a silent edit moves the hash (REQ-closure-mutable-local).
 	files := p.sourceFiles()
 	if hasCgoCallbackBlindspot(&p) {
 		if root := cgoIncludeRootOutsideDir(&p, h.modCache); root != "" {
-			return "", fmt.Errorf("closure: cgo include root outside package dir: %s", root)
+			return "", nil, fmt.Errorf("closure: cgo include root outside package dir: %s", root)
 		}
 		var err error
 		files, err = allPackageFiles(p.Dir)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if include, err := cgoEscapingInclude(&p, files); err != nil {
-			return "", err
+			return "", nil, err
 		} else if include != "" {
-			return "", fmt.Errorf("closure: cgo include escapes package dir: %s", include)
+			return "", nil, fmt.Errorf("closure: cgo include escapes package dir: %s", include)
 		}
 	}
 	if len(p.SFiles) > 0 {
 		_, _, opaque, includes, err := asmCallTargets(p.Dir, p.SFiles, h.buildFlags...)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if opaque {
 			files, err = allPackageFiles(p.Dir)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 		}
 		for _, path := range includes {
@@ -274,9 +293,13 @@ func (h *Hasher) contributionFor(pkgPath string, p listPkg) (string, error) {
 	files = uniqueStrings(files)
 	fh, err := hashFiles(p.Dir, files)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return "src:" + p.ImportPath + "=" + fh, nil
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, filepath.Join(p.Dir, file))
+	}
+	return "src:" + p.ImportPath + "=" + fh, paths, nil
 }
 
 func allPackageFiles(dir string) ([]string, error) {

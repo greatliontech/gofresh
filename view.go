@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -38,6 +40,7 @@ type View struct {
 	guards          guard.Guards
 	purity          map[Subject]string
 	openWorld       map[Subject]bool
+	sourceFiles     []string
 	capturedRefined map[Subject]bool
 	sealed          bool
 	runtimeCurrent  func(string, string) (runtimeinput.State, error)
@@ -112,6 +115,9 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			return nil, fmt.Errorf("%w: purity for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 	}
+	if !slices.Equal(first.sourceFiles, second.sourceFiles) {
+		return nil, fmt.Errorf("%w: maximal source identities during construction", ErrViewChanged)
+	}
 
 	v := &View{
 		engine:          e,
@@ -123,16 +129,18 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		guards:          first.guards,
 		purity:          first.purity,
 		openWorld:       first.openWorld,
+		sourceFiles:     first.sourceFiles,
 		capturedRefined: make(map[Subject]bool, len(unique)),
 	}
 	return v, nil
 }
 
 type viewObservation struct {
-	maximal   map[Subject]closure.Closure
-	guards    guard.Guards
-	purity    map[Subject]string
-	openWorld map[Subject]bool
+	maximal     map[Subject]closure.Closure
+	guards      guard.Guards
+	purity      map[Subject]string
+	openWorld   map[Subject]bool
+	sourceFiles []string
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
@@ -140,7 +148,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	computed, err := hasher.ComputeMaximalBatch(requests)
+	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -158,6 +166,16 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		purity:    make(map[Subject]string, len(subjects)),
 		openWorld: make(map[Subject]bool, len(subjects)),
 	}
+	seenSource := map[string]bool{}
+	for _, request := range requests {
+		for _, path := range sources[request] {
+			if !seenSource[path] {
+				seenSource[path] = true
+				observation.sourceFiles = append(observation.sourceFiles, path)
+			}
+		}
+	}
+	sort.Strings(observation.sourceFiles)
 	for _, subject := range subjects {
 		if !known[subject] {
 			return viewObservation{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
@@ -194,6 +212,14 @@ func (v *View) Capture(subject Subject) (Fingerprint, error) {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	return Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}, nil
+}
+
+// SourceFiles returns the absolute mutable source paths whose bytes contribute
+// to this view's maximal closures. The returned slice is caller-owned.
+func (v *View) SourceFiles() []string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return append([]string(nil), v.sourceFiles...)
 }
 
 // CaptureRefined returns maximal and declaration-RTA evidence for subject under
@@ -547,6 +573,9 @@ func (v *View) reobserveBase(ctx context.Context) error {
 func (v *View) compareBase(current *View) error {
 	if current.guards != v.guards {
 		return fmt.Errorf("%w: guards", ErrViewChanged)
+	}
+	if !slices.Equal(current.sourceFiles, v.sourceFiles) {
+		return fmt.Errorf("%w: maximal source identities", ErrViewChanged)
 	}
 	for _, subject := range v.subjects {
 		if current.maximal[subject] != v.maximal[subject] {

@@ -144,6 +144,12 @@ the view is constructed and the producing build is read; validation detects ordi
 drift but cannot prove the absence of a change-and-restore interval the caller
 allowed.
 
+**REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
+exact mutable source-file identities whose bytes contribute to its maximal closure,
+excluding standard-library and immutable module-cache source represented by other
+guards, so a producer can prove whether those selected bytes are reproducible from
+caller-owned provenance without reimplementing closure file selection.
+
 ## Composition
 
 A caller's record is rarely about a single subject. A mutation kill-sheet is keyed
