@@ -195,6 +195,13 @@ func TestStatObservationIsUnverifiable(t *testing.T) {
 	if !st.Unverifiable || !strings.Contains(st.Reason, "stat metadata") {
 		t.Fatalf("got unverifiable=%v reason=%q, want stat metadata", st.Unverifiable, st.Reason)
 	}
+	paths, err := Paths(st.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{path}) {
+		t.Fatalf("stat paths = %v, want [%s]", paths, path)
+	}
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}

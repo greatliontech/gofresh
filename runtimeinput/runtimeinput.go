@@ -105,6 +105,10 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 				addUnverifiable(&m, unverifiableSeen, reason)
 				continue
 			}
+			if !pathSeen[id] {
+				pathSeen[id] = true
+				m.Paths = append(m.Paths, id)
+			}
 			addUnverifiable(&m, unverifiableSeen, "stat metadata input: "+id.displayPath())
 		case "chdir":
 			p := resolvePath(cwd, name)
