@@ -64,13 +64,22 @@ such an interval forfeits the proof that the digest describes the run or check.
 processes MUST be able to merge their independently completed states as a deterministic
 manifest set union, with no shared mutable manifest or cross-process lock. Before
 union, each child's recorded digest and disposition are re-evaluated against the same
-merge-time module view; an incomplete child or any disagreement is refused. Every
+merge-time module view; a structurally unfinished or malformed child, or any
+disagreement, is refused, while a finalized state explicitly recording observation
+incompleteness is accepted as unverifiable evidence. Every
 environment identity, path identity, and unverifiable reason from every accepted
 child appears once in the canonical result. Merge is commutative, associative, and
 idempotent; its digest is computed from the merged manifest against that current
 view. Merging zero states deliberately produces the encoded observation-free
 manifest, while an empty, malformed, or unsupported manifest supplied in a state is
 refused rather than treated as no observation.
+
+**REQ-inputs-incomplete** (behavior): A caller whose producing process did not
+complete normal observation finalization MUST be able to construct a canonical
+runtime-input state carrying a non-empty attributable incompleteness reason, no
+fabricated identities, and an unverifiable disposition. The state participates in
+ordinary deterministic merge, so one incomplete process makes the merged evidence
+unverifiable without being confused with an explicit completed empty observation.
 
 **REQ-inputs-evidence-not-proof** (invariant): A runtime-input manifest MUST be
 treated as evidence of the identities it observed, never as proof that every

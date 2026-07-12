@@ -198,8 +198,9 @@ func canonicalDir(dir string) (string, error) {
 
 // Capture records the closure hash and code-result guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
-// inputs are added by the caller from the run's testlog (runtimeinput.FromTestLog,
-// or runtimeinput.Merge for several processes) into the returned Fingerprint's
+// inputs are added by the caller from the run's testlog (runtimeinput.FromTestLog),
+// from an incomplete process (runtimeinput.Incomplete), or by combining several
+// process states (runtimeinput.Merge) into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
 // non-empty manifest those functions return.
 func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {

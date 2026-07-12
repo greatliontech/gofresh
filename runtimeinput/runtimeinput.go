@@ -48,6 +48,19 @@ type pathID struct {
 	Path string `json:"p"`
 }
 
+// Incomplete constructs canonical evidence for a process whose runtime-input
+// observation did not complete. It is mergeable but remains unverifiable.
+func Incomplete(moduleDir, reason string) (State, error) {
+	if strings.TrimSpace(reason) == "" {
+		return State{}, fmt.Errorf("runtimeinputs: incomplete observation needs a reason")
+	}
+	encoded, err := encode(manifest{Version: manifestVersion, Unverifiable: []string{reason}})
+	if err != nil {
+		return State{}, err
+	}
+	return Current(encoded, moduleDir)
+}
+
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and environment.
 func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
@@ -141,8 +154,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 
 // Merge revalidates independently completed runtime-input states against one current
 // module view, then returns their deterministic manifest union. Passing no states
-// deliberately produces the encoded observation-free manifest; incomplete, moved,
-// or malformed states are rejected.
+// deliberately produces the encoded observation-free manifest; structurally
+// unfinished, moved, or malformed states are rejected. A finalized state from
+// Incomplete is accepted as explicit unverifiable evidence.
 func Merge(moduleDir string, states ...State) (State, error) {
 	merged := manifest{Version: manifestVersion}
 	envSeen := map[string]bool{}

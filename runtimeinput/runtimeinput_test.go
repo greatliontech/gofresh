@@ -21,6 +21,39 @@ func testDirs(t *testing.T) (string, string) {
 	return moduleDir, packageDir
 }
 
+func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
+	moduleDir := t.TempDir()
+	incomplete, err := Incomplete(moduleDir, "test process timed out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !incomplete.OK || !incomplete.Unverifiable || !strings.Contains(incomplete.Reason, "timed out") {
+		t.Fatalf("Incomplete = %+v", incomplete)
+	}
+	empty, err := Merge(moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incomplete.Manifest == empty.Manifest {
+		t.Fatal("incomplete observation equals completed empty observation")
+	}
+	merged, err := Merge(moduleDir, empty, incomplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.Unverifiable || !strings.Contains(merged.Reason, "timed out") {
+		t.Fatalf("merged incomplete evidence = %+v", merged)
+	}
+	if _, err := Incomplete(moduleDir, " "); err == nil {
+		t.Fatal("Incomplete accepted an empty reason")
+	}
+	for _, reason := range []string{"line\nbreak", "carriage\rreturn", "nul\x00byte", string([]byte{0xff})} {
+		if _, err := Incomplete(moduleDir, reason); err == nil {
+			t.Errorf("Incomplete accepted unsafe reason %q", reason)
+		}
+	}
+}
+
 func rawManifest(t *testing.T, m manifest) string {
 	t.Helper()
 	b, err := json.Marshal(m)
