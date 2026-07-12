@@ -1,6 +1,9 @@
 package runtimeinput
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // CommitInspector reports whether a module-relative runtime input's current
 // Git-representable state is reproducible at a given ref. The caller supplies it from
@@ -19,13 +22,23 @@ type CommitInspector interface {
 // module-relative inputs are checked; external absolute inputs are outside the
 // module's git scope.
 func Dirty(state State, moduleDir, commit string, inspector CommitInspector) (bool, error) {
+	return DirtyEnv(state, moduleDir, commit, inspector, os.Environ())
+}
+
+// DirtyEnv is Dirty with env as the complete process environment used to
+// revalidate state before commit inspection.
+func DirtyEnv(state State, moduleDir, commit string, inspector CommitInspector, env []string) (bool, error) {
 	if inspector == nil {
 		return false, fmt.Errorf("runtimeinputs: nil commit inspector")
 	}
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
 		return false, fmt.Errorf("runtimeinputs: incomplete state for dirty inspection")
 	}
-	current, err := Current(state.Manifest, moduleDir)
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return false, err
+	}
+	current, err := currentWithNormalizedEnv(state.Manifest, moduleDir, normalized)
 	if err != nil {
 		return false, err
 	}

@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "b7ab7b72194169d74cfc7b4f90dc66da32a599fdb28a7f1a4f2ce897ca07efd5"
+  content_hash: "83305fae9bb978b09ea94f2d33964e17a4286c527c54d2f024128e8b2b125421"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS

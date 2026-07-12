@@ -21,6 +21,7 @@ import (
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/processenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -98,6 +99,8 @@ type Engine struct {
 	buildFlags  []string
 	buildInputs []string
 	dir         string
+	env         []string
+	envSet      bool
 }
 
 // Option configures an Engine.
@@ -138,11 +141,36 @@ func WithDir(dir string) Option {
 	return func(e *Engine) { e.dir = dir }
 }
 
+// WithEnv supplies the complete process environment used by every package load,
+// Go command, source analysis, and guard observation. It has exec.Cmd.Env
+// semantics rather than patch semantics. New rejects malformed or duplicate
+// entries and owns a normalized copy; later caller mutation has no effect. A
+// caller attaching runtime-input evidence under this option uses runtimeinput's
+// Env-suffixed constructors with the same complete environment.
+func WithEnv(env ...string) Option {
+	owned := append([]string(nil), env...)
+	return func(e *Engine) {
+		e.env = append([]string(nil), owned...)
+		e.envSet = true
+	}
+}
+
 // New builds an Engine.
 func New(opts ...Option) (*Engine, error) {
 	e := &Engine{assumePure: func(Subject) bool { return false }}
 	for _, o := range opts {
 		o(e)
+	}
+	if !e.envSet {
+		e.env = os.Environ()
+	}
+	normalized, err := processenv.Normalize(e.env)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: %w", err)
+	}
+	e.env = normalized
+	if _, err := processenv.ForGoPackages(e.env); err != nil {
+		return nil, fmt.Errorf("gofresh: %w", err)
 	}
 	if e.dir == "" {
 		cwd, err := os.Getwd()
@@ -161,7 +189,7 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
 		}
 	}
-	if err := buildflags.Validate(e.dir, e.buildFlags); err != nil {
+	if err := buildflags.ValidateEnv(e.dir, e.env, e.buildFlags); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -198,9 +226,10 @@ func canonicalDir(dir string) (string, error) {
 
 // Capture records the closure hash and code-result guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
-// inputs are added by the caller from the run's testlog (runtimeinput.FromTestLog),
-// from an incomplete process (runtimeinput.Incomplete), or by combining several
-// process states (runtimeinput.Merge) into the returned Fingerprint's
+// inputs are added by the caller from the run's testlog (runtimeinput.FromTestLogEnv),
+// from an incomplete process (runtimeinput.IncompleteEnv), or by combining several
+// process states (runtimeinput.MergeEnv) under the same environment supplied to
+// WithEnv, into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
 // non-empty manifest those functions return.
 func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {

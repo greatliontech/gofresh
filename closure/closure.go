@@ -25,6 +25,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // Closure is the result of analyzing one benchmark (spec REQ-fresh-sound): the hash of its
@@ -46,9 +47,11 @@ type Closure struct {
 type Hasher struct {
 	// dir roots every package load and go invocation; "" = the process
 	// working directory. The analyzed tree is an explicit input.
-	dir      string
-	modCache string
-	ctx      context.Context
+	dir        string
+	modCache   string
+	ctx        context.Context
+	env        []string
+	packageEnv []string
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
 	buildFlags     []string
@@ -69,19 +72,33 @@ func NewAt(dir string, buildFlags ...string) (*Hasher, error) {
 
 // NewAtContext is NewAt with caller-owned cancellation for closure analysis.
 func NewAtContext(ctx context.Context, dir string, buildFlags ...string) (*Hasher, error) {
+	return NewAtContextEnv(ctx, dir, os.Environ(), buildFlags...)
+}
+
+// NewAtContextEnv builds a Hasher using env as the complete immutable process
+// environment for package loading, Go commands, and source selection.
+func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	if err := buildflags.Validate(dir, buildFlags); err != nil {
+	normalized, err := processenv.Normalize(env)
+	if err != nil {
+		return nil, fmt.Errorf("closure: %w", err)
+	}
+	packageEnv, err := processenv.ForGoPackages(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("closure: %w", err)
+	}
+	if err := buildflags.ValidateEnv(dir, normalized, buildFlags); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	out, err := gotool.RunInContext(ctx, dir, "env", "GOMODCACHE")
+	out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE")
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +107,7 @@ func NewAtContext(ctx context.Context, dir string, buildFlags ...string) (*Hashe
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
 	return &Hasher{
-		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, buildFlags: append([]string(nil), buildFlags...),
+		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
 		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]string{},
 	}, nil
 }
@@ -272,7 +289,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	if len(p.SFiles) > 0 {
-		_, _, opaque, includes, err := asmCallTargets(p.Dir, p.SFiles, h.buildFlags...)
+		_, _, opaque, includes, err := asmCallTargetsEnv(p.Dir, h.env, p.SFiles, h.buildFlags...)
 		if err != nil {
 			return "", nil, err
 		}
@@ -814,7 +831,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)
-	out, err := gotool.RunInContext(h.ctx, h.dir, args...)
+	out, err := gotool.RunInContextEnv(h.ctx, h.dir, h.env, args...)
 	if err != nil {
 		return nil, err
 	}

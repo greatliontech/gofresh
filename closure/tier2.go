@@ -42,7 +42,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
-	p, err := load(h.ctx, h.dir, h.buildFlags, pkgPath)
+	p, err := loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +54,16 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 // the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
 // ForTest linkage needed to distinguish a package's test-binary variants.
 func loadConfig(ctx context.Context, dir string, buildFlags ...string) *packages.Config {
+	return loadConfigEnv(ctx, dir, os.Environ(), buildFlags...)
+}
+
+func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...string) *packages.Config {
 	return &packages.Config{
 		Context:    ctx,
 		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
 		Tests:      true,
 		Dir:        dir,
+		Env:        append([]string(nil), env...),
 		BuildFlags: append([]string(nil), buildFlags...),
 	}
 }
@@ -69,7 +74,11 @@ func loadConfig(ctx context.Context, dir string, buildFlags ...string) *packages
 // own program from only its own roots. A load error is fatal — analyzing a partial
 // program could miss reachable code and report a stale result valid (REQ-fresh-sound).
 func load(ctx context.Context, dir string, buildFlags []string, pkgPath string) (*program, error) {
-	roots, err := packages.Load(loadConfig(ctx, dir, buildFlags...), pkgPath)
+	return loadEnv(ctx, dir, os.Environ(), buildFlags, pkgPath)
+}
+
+func loadEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPath string) (*program, error) {
+	roots, err := packages.Load(loadConfigEnv(ctx, dir, env, buildFlags...), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
@@ -105,7 +114,7 @@ func (h *Hasher) Prime(pkgPaths []string) {
 	if len(need) == 0 {
 		return
 	}
-	roots, err := packages.Load(loadConfig(h.ctx, h.dir, h.buildFlags...), need...)
+	roots, err := packages.Load(loadConfigEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags...), need...)
 	if err != nil {
 		return // fall back to lazy single loads; the error resurfaces there
 	}
@@ -355,7 +364,7 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		prog := h.progs[group.path]
 		if prog == nil {
 			var err error
-			prog, err = load(h.ctx, h.dir, h.buildFlags, group.path)
+			prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, group.path)
 			if err != nil {
 				return nil, err
 			}
@@ -1667,7 +1676,11 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			}
 		}
 		var externalASMReason string
-		asmCalls, computed, opaque, includes, err := asmCallTargetsObserved(&externalASMReason, idx.meta.Dir, idx.meta.SFiles, a.buildFlags...)
+		env := os.Environ()
+		if a.h != nil {
+			env = a.h.env
+		}
+		asmCalls, computed, opaque, includes, err := asmCallTargetsObservedEnv(&externalASMReason, idx.meta.Dir, env, idx.meta.SFiles, a.buildFlags...)
 		if err != nil {
 			return err
 		}
@@ -2259,15 +2272,23 @@ func hasCgoCallbackBlindspot(p *listPkg) bool {
 }
 
 func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
-	return asmCallTargetsObserved(nil, dir, files, buildFlags...)
+	return asmCallTargetsEnv(dir, os.Environ(), files, buildFlags...)
+}
+
+func asmCallTargetsEnv(dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEnv(nil, dir, env, files, buildFlags...)
 }
 
 func asmCallTargetsObserved(externalReason *string, dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEnv(externalReason, dir, os.Environ(), files, buildFlags...)
+}
+
+func asmCallTargetsObservedEnv(externalReason *string, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
 	var targets []string
 	var includes []string
 	computed := false
 	opaque := false
-	goFlags, err := buildflags.EffectiveGOFLAGS(dir)
+	goFlags, err := buildflags.EffectiveGOFLAGSEnv(dir, env)
 	if err != nil {
 		return nil, false, false, nil, err
 	}

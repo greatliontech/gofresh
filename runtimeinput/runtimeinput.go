@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 const manifestVersion = 1
@@ -51,23 +53,42 @@ type pathID struct {
 // Incomplete constructs canonical evidence for a process whose runtime-input
 // observation did not complete. It is mergeable but remains unverifiable.
 func Incomplete(moduleDir, reason string) (State, error) {
+	return IncompleteEnv(moduleDir, reason, os.Environ())
+}
+
+// IncompleteEnv is Incomplete with env as the complete process environment.
+func IncompleteEnv(moduleDir, reason string, env []string) (State, error) {
 	if strings.TrimSpace(reason) == "" {
 		return State{}, fmt.Errorf("runtimeinputs: incomplete observation needs a reason")
+	}
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{}, err
 	}
 	encoded, err := encode(manifest{Version: manifestVersion, Unverifiable: []string{reason}})
 	if err != nil {
 		return State{}, err
 	}
-	return Current(encoded, moduleDir)
+	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
 }
 
 // Absolute revalidates state under moduleDir and returns equivalent evidence
 // whose path identities are all absolute. This permits sound cross-module merge.
 func Absolute(state State, moduleDir string) (State, error) {
+	return AbsoluteEnv(state, moduleDir, os.Environ())
+}
+
+// AbsoluteEnv is Absolute with env as the complete process environment used to
+// revalidate the input and compute the converted state.
+func AbsoluteEnv(state State, moduleDir string, env []string) (State, error) {
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
 		return State{}, fmt.Errorf("runtimeinputs: incomplete state for absolute identities")
 	}
-	current, err := Current(state.Manifest, moduleDir)
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{}, err
+	}
+	current, err := currentWithNormalizedEnv(state.Manifest, moduleDir, normalized)
 	if err != nil {
 		return State{}, err
 	}
@@ -100,13 +121,23 @@ func Absolute(state State, moduleDir string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return Current(encoded, moduleDir)
+	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
 }
 
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and environment.
 func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
-	moduleDir, err := filepath.Abs(moduleDir)
+	return FromTestLogEnv(log, moduleDir, packageDir, os.Environ())
+}
+
+// FromTestLogEnv is FromTestLog with env as the complete process environment
+// inherited by the observed test process.
+func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string) (State, error) {
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{}, err
+	}
+	moduleDir, err = filepath.Abs(moduleDir)
 	if err != nil {
 		return State{}, err
 	}
@@ -136,6 +167,10 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 		case "getenv":
 			if !utf8.ValidString(name) {
 				addUnverifiable(&m, unverifiableSeen, "non-UTF-8 environment name")
+				continue
+			}
+			if processenv.EqualKey(name, "PWD") {
+				addUnverifiable(&m, unverifiableSeen, "process-local environment input: PWD")
 				continue
 			}
 			if !envSeen[name] {
@@ -187,7 +222,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	st, err := Current(encoded, moduleDir)
+	st, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
 	if err != nil {
 		return State{}, err
 	}
@@ -200,6 +235,16 @@ func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
 // unfinished, moved, or malformed states are rejected. A finalized state from
 // Incomplete is accepted as explicit unverifiable evidence.
 func Merge(moduleDir string, states ...State) (State, error) {
+	return MergeEnv(moduleDir, os.Environ(), states...)
+}
+
+// MergeEnv is Merge with env as the complete process environment used to
+// revalidate every input and compute the merged state.
+func MergeEnv(moduleDir string, env []string, states ...State) (State, error) {
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{}, err
+	}
 	merged := manifest{Version: manifestVersion}
 	envSeen := map[string]bool{}
 	pathSeen := map[pathID]bool{}
@@ -208,7 +253,7 @@ func Merge(moduleDir string, states ...State) (State, error) {
 		if !input.OK || input.Manifest == "" || input.Digest == "" {
 			return State{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
 		}
-		current, err := Current(input.Manifest, moduleDir)
+		current, err := currentWithNormalizedEnv(input.Manifest, moduleDir, normalized)
 		if err != nil {
 			return State{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
@@ -239,11 +284,32 @@ func Merge(moduleDir string, states ...State) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return Current(result, moduleDir)
+	return currentWithNormalizedEnv(result, moduleDir, normalized)
 }
 
 // Current recomputes the runtime-input digest for an encoded manifest.
 func Current(encoded, moduleDir string) (State, error) {
+	return CurrentEnv(encoded, moduleDir, os.Environ())
+}
+
+// CurrentEnv recomputes a manifest using env as the complete process environment.
+func CurrentEnv(encoded, moduleDir string, env []string) (State, error) {
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{OK: false}, err
+	}
+	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
+}
+
+func normalizeEnvironment(env []string) ([]string, error) {
+	normalized, err := processenv.Normalize(env)
+	if err != nil {
+		return nil, fmt.Errorf("runtimeinputs: %w", err)
+	}
+	return normalized, nil
+}
+
+func currentWithNormalizedEnv(encoded, moduleDir string, env []string) (State, error) {
 	m, err := decode(encoded)
 	if err != nil {
 		return State{OK: false}, err
@@ -256,7 +322,7 @@ func Current(encoded, moduleDir string) (State, error) {
 	h := sha256.New()
 	fprintf(h, "version %d\n", m.Version)
 	for _, name := range m.Env {
-		value, ok := os.LookupEnv(name)
+		value, ok := processenv.Lookup(env, name)
 		valueHash := sha256.Sum256([]byte(value))
 		fprintf(h, "env %s %t %x\n", name, ok, valueHash)
 	}

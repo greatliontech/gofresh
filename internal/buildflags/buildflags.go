@@ -3,6 +3,7 @@
 package buildflags
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -14,12 +15,17 @@ import (
 // flags and effective GOFLAGS are checked together so analysis never silently falls
 // back to disk source for an overlay-backed build.
 func Validate(dir string, explicit []string) error {
+	return ValidateEnv(dir, os.Environ(), explicit)
+}
+
+// ValidateEnv validates flags under env as a complete process environment.
+func ValidateEnv(dir string, env, explicit []string) error {
 	for _, flag := range explicit {
 		if isOverlayFlag(flag) {
 			return unsupportedOverlay(flag)
 		}
 	}
-	goFlags, err := EffectiveGOFLAGS(dir)
+	goFlags, err := EffectiveGOFLAGSEnv(dir, env)
 	if err != nil {
 		return err
 	}
@@ -32,13 +38,15 @@ func Validate(dir string, explicit []string) error {
 	return nil
 }
 
-// EffectiveGOFLAGS returns the flags the go command inherits. An explicitly set,
-// even empty, process value wins; otherwise go env resolves persistent GOENV state.
+// EffectiveGOFLAGS returns the flags selected by the go command, including
+// persistent GOENV state.
 func EffectiveGOFLAGS(dir string) (string, error) {
-	if flags := os.Getenv("GOFLAGS"); flags != "" {
-		return flags, nil
-	}
-	out, err := gotool.RunIn(dir, "env", "GOFLAGS")
+	return EffectiveGOFLAGSEnv(dir, os.Environ())
+}
+
+// EffectiveGOFLAGSEnv returns the GOFLAGS selected by a complete environment.
+func EffectiveGOFLAGSEnv(dir string, env []string) (string, error) {
+	out, err := gotool.RunInContextEnv(context.Background(), dir, env, "env", "GOFLAGS")
 	if err != nil {
 		return "", fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
 	}

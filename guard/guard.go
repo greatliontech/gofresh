@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // Guards are the captured guard values for one result. Every field is a digest or
@@ -78,15 +79,29 @@ func CaptureForContext(ctx context.Context, moduleDir string, kind Kind, buildIn
 	return captureForContext(ctx, moduleDir, kind, buildInputs, gatherFacts, runtimeConfig)
 }
 
+// CaptureForContextEnv is CaptureForContext with env as the complete process
+// environment used by Go subprocesses and environment-backed guards.
+func CaptureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs ...string) (Guards, error) {
+	normalized, err := processenv.Normalize(env)
+	if err != nil {
+		return Guards{}, fmt.Errorf("guard: %w", err)
+	}
+	return captureForContextEnv(ctx, moduleDir, normalized, kind, buildInputs, gatherFacts, runtimeConfigEnv)
+}
+
 func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
+	return captureForContextEnv(ctx, moduleDir, os.Environ(), kind, buildInputs, machine, func([]string) string { return runtimeGuard() })
+}
+
+func captureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
-	tc, err := toolchainContext(ctx, moduleDir)
+	tc, err := toolchainContextEnv(ctx, moduleDir, env)
 	if err != nil {
 		return Guards{}, err
 	}
-	bc, err := buildConfigContext(ctx, moduleDir, buildInputs)
+	bc, err := buildConfigContextEnv(ctx, moduleDir, env, buildInputs)
 	if err != nil {
 		return Guards{}, err
 	}
@@ -99,7 +114,7 @@ func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildIn
 		return Guards{}, err
 	}
 	guards.Machine = facts.Fingerprint()
-	guards.RuntimeConfig = runtimeGuard()
+	guards.RuntimeConfig = runtimeGuard(env)
 	return guards, nil
 }
 
@@ -138,7 +153,11 @@ func toolchain(dir string) (string, error) {
 }
 
 func toolchainContext(ctx context.Context, dir string) (string, error) {
-	out, err := gotool.RunInContext(ctx, dir, "version")
+	return toolchainContextEnv(ctx, dir, os.Environ())
+}
+
+func toolchainContextEnv(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := gotool.RunInContextEnv(ctx, dir, env, "version")
 	if err != nil {
 		return "", err
 	}
@@ -173,17 +192,25 @@ func buildConfig(dir string, buildInputs []string) (string, error) {
 }
 
 func buildConfigContext(ctx context.Context, dir string, buildInputs []string) (string, error) {
-	out, err := gotool.RunInContext(ctx, dir, "env", "-json")
+	return buildConfigContextEnv(ctx, dir, os.Environ(), buildInputs)
+}
+
+func buildConfigContextEnv(ctx context.Context, dir string, env, buildInputs []string) (string, error) {
+	out, err := gotool.RunInContextEnv(ctx, dir, env, "env", "-json")
 	if err != nil {
 		return "", err
 	}
-	return buildConfigDigest(out, buildInputs)
+	return buildConfigDigestEnv(out, env, buildInputs)
 }
 
 // buildConfigDigest parses the `go env -json` output and digests the build-affecting
 // settings plus buildInputs. A malformed env output fails closed with an error
 // (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
 func buildConfigDigest(envJSON []byte, buildInputs []string) (string, error) {
+	return buildConfigDigestEnv(envJSON, os.Environ(), buildInputs)
+}
+
+func buildConfigDigestEnv(envJSON []byte, processEnv, buildInputs []string) (string, error) {
 	var env map[string]string
 	if err := json.Unmarshal(envJSON, &env); err != nil {
 		return "", fmt.Errorf("guard: parse go env: %w", err)
@@ -193,7 +220,7 @@ func buildConfigDigest(envJSON []byte, buildInputs []string) (string, error) {
 		vals[k] = env[k]
 	}
 	for _, k := range buildConfigOSEnvKeys {
-		vals[k] = os.Getenv(k)
+		vals[k], _ = processenv.Lookup(processEnv, k)
 	}
 	keys := make([]string, 0, len(vals))
 	for k := range vals {
@@ -222,9 +249,14 @@ var runtimeConfigEnvKeys = []string{"GOGC", "GODEBUG", "GOMEMLIMIT", "GOMAXPROCS
 // runtimeConfig digests the runtime-config environment (fixed key order; values not
 // stored in clear text).
 func runtimeConfig() string {
+	return runtimeConfigEnv(os.Environ())
+}
+
+func runtimeConfigEnv(env []string) string {
 	var b strings.Builder
 	for _, k := range runtimeConfigEnvKeys {
-		fmt.Fprintf(&b, "%s=%s\n", k, os.Getenv(k))
+		value, _ := processenv.Lookup(env, k)
+		fmt.Fprintf(&b, "%s=%s\n", k, value)
 	}
 	return digest(b.String())
 }

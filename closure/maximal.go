@@ -165,6 +165,7 @@ func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
 		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedForTest,
 		Tests:      true,
 		Dir:        h.dir,
+		Env:        append([]string(nil), h.packageEnv...),
 		BuildFlags: append([]string(nil), h.buildFlags...),
 	}, pkgPath)
 	if err != nil {

@@ -144,7 +144,7 @@ type viewObservation struct {
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
-	hasher, err := closure.NewAtContext(ctx, e.dir, e.buildFlags...)
+	hasher, err := closure.NewAtContextEnv(ctx, e.dir, e.env, e.buildFlags...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -152,11 +152,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	guards, err := guard.CaptureForContext(ctx, moduleDir, kind, e.guardInputs()...)
+	guards, err := guard.CaptureForContextEnv(ctx, moduleDir, e.env, kind, e.guardInputs()...)
 	if err != nil {
 		return viewObservation{}, err
 	}
-	directivePure, known, openWorld, err := scanSubjectsInWithBuildFlags(ctx, e.dir, e.buildFlags, packages...)
+	directivePure, known, openWorld, err := scanSubjectsInWithBuildFlagsEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -490,6 +490,11 @@ func (v *View) currentRuntime(recorded Fingerprint) runtimeinput.State {
 		current := v.runtimeCurrent
 		if current == nil {
 			current = runtimeinput.Current
+			if v.engine != nil {
+				current = func(encoded, moduleDir string) (runtimeinput.State, error) {
+					return runtimeinput.CurrentEnv(encoded, moduleDir, v.engine.env)
+				}
+			}
 		}
 		if rt, err = current(recorded.RuntimeInputs, v.moduleDir); err != nil {
 			rt = runtimeinput.State{}
@@ -620,7 +625,7 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
 	}
-	hasher, err := closure.NewAtContext(ctx, v.engine.dir, v.engine.buildFlags...)
+	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
 	if err != nil {
 		return err
 	}

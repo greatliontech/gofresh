@@ -59,6 +59,11 @@ also re-observes around a check to detect ordinary drift. It cannot prove the ab
 of a mutation-and-restore interval within one observation or construct an atomic
 snapshot spanning process environment, several files, and directory trees; allowing
 such an interval forfeits the proof that the digest describes the run or check.
+Every environment-aware finalization, merge, absolute conversion, dirty inspection,
+and current check uses the same complete process environment as the producing or
+checking process; ambient convenience operations use the ambient environment at the
+operation. Mixing an explicitly configured process with ambient environment hashing
+is not coherent evidence.
 
 **REQ-inputs-merge** (behavior): A caller combining observations from several
 processes MUST be able to merge their independently completed states as a deterministic
@@ -126,5 +131,7 @@ comparison is returned rather than interpreted as clean.
 **REQ-inputs-unbounded** (behavior): An observed input whose full observed value the
 analysis cannot bound — a metadata-only inspection, a directory or symlink resolving
 outside the module, a relative path under a working-directory change the run stream
-cannot confirm was absent — MUST be treated as unverifiable rather than valid, since
-an input identity that cannot be pinned is not proof of a stable input.
+cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
+for each package process — MUST be treated as unverifiable rather than valid, since an
+input identity that cannot be pinned under the shared checking environment is not
+proof of a stable input.

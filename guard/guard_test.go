@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -281,5 +282,36 @@ func TestRuntimeConfigSensitive(t *testing.T) {
 	t.Setenv("GOGC", "off")
 	if runtimeConfig() == base {
 		t.Error("runtimeconfig insensitive to a GOGC change")
+	}
+}
+
+func TestCaptureUsesSuppliedEnvironmentForGuards(t *testing.T) {
+	replace := func(env []string, key, value string) []string {
+		prefix := key + "="
+		result := make([]string, 0, len(env)+1)
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, prefix) {
+				result = append(result, entry)
+			}
+		}
+		return append(result, prefix+value)
+	}
+	firstEnv := replace(os.Environ(), "GOGC", "100")
+	firstEnv = replace(firstEnv, "PKG_CONFIG_PATH", "/first")
+	secondEnv := replace(os.Environ(), "GOGC", "off")
+	secondEnv = replace(secondEnv, "PKG_CONFIG_PATH", "/second")
+	first, err := CaptureForContextEnv(context.Background(), t.TempDir(), firstEnv, Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CaptureForContextEnv(context.Background(), t.TempDir(), secondEnv, Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RuntimeConfig == second.RuntimeConfig {
+		t.Fatal("supplied GOGC did not move runtime-config guard")
+	}
+	if first.BuildConfig == second.BuildConfig {
+		t.Fatal("supplied PKG_CONFIG_PATH did not move build-config guard")
 	}
 }

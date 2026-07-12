@@ -129,7 +129,23 @@ mixture of cached metadata from an earlier tree with bytes or environment values
 from a later one — because a mixed generation can agree with a recording while
 describing no build that existed. Analysis state does not cross view boundaries;
 constructing a current-tree view re-observes the tree and environment rather than
-inheriting first-use state from an older view.
+inheriting first-use state from an older view. The complete process environment used
+for Go commands and package loading is immutable analysis configuration: by default
+the environment captured when the engine is constructed, or an explicit complete
+environment supplied by the caller. Every source load, Go invocation, purity scan,
+and guard observation in the view uses that same environment, so workspace mode,
+persistent Go configuration, toolchain selection, and source selection cannot differ
+between the closure and the binary the guards describe. The host process selects the
+`go` launcher before that complete environment is inherited, matching Go's command
+execution and package-loader semantics; `GOTOOLCHAIN` inside the environment selects
+the effective toolchain. A command with an explicit working directory derives `PWD`
+from that directory, matching package loading rather than inheriting a stale lexical
+path that could select a different automatic workspace. External
+`GOPACKAGESDRIVER` source providers are refused,
+and absent driver configuration is pinned off only in the internal package-loader
+environment, without changing the caller environment observed by commands, guards,
+or runtime inputs, because the ordinary Go loader is the source model the closure and
+guards represent.
 
 **REQ-fresh-producer-view** (behavior): A caller producing results for several
 subjects MUST persist fingerprints captured before execution, with runtime-input

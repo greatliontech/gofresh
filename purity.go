@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"os"
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/processenv"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -46,7 +48,15 @@ func ScanPureDirectivesInWithBuildFlags(dir string, buildFlags []string, pkgPath
 }
 
 func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, error) {
-	if err := buildflags.Validate(dir, buildFlags); err != nil {
+	return scanSubjectsInWithBuildFlagsEnv(ctx, dir, os.Environ(), buildFlags, pkgPaths...)
+}
+
+func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, error) {
+	packageEnv, err := processenv.ForGoPackages(env)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("gofresh: %w", err)
+	}
+	if err := buildflags.ValidateEnv(dir, env, buildFlags); err != nil {
 		return nil, nil, nil, err
 	}
 	cfg := &packages.Config{
@@ -54,6 +64,7 @@ func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []
 		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedForTest,
 		Tests:      true,
 		Dir:        dir,
+		Env:        append([]string(nil), packageEnv...),
 		BuildFlags: append([]string(nil), buildFlags...),
 	}
 	pkgs, err := packages.Load(cfg, pkgPaths...)

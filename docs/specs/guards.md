@@ -55,7 +55,11 @@ profile's content digest enters the digest but cannot select source. A build fla
 presented as opaque evidence is refused rather than hashed without being applied,
 because the resulting guard and closure would describe different binaries. A build
 flag whose selected source the analysis cannot represent, such as a Go overlay, is
-also refused rather than evaluated against different disk content.
+also refused rather than evaluated against different disk content. The engine's
+complete Go-command environment is applied identically to package loading and guard
+capture; it selects source and toolchain rather than riding as opaque evidence, while
+the relevant values observed through `go env` and the process environment enter the
+guard digest under this clause.
 
 > Placing `GOOS`/`GOARCH` in the code-guard digest, not the machine fingerprint, is
 > deliberate: a non-timing consumer (a mutation kill-sheet) runs with measurement
@@ -113,9 +117,11 @@ make an unsound result look valid.
 
 **REQ-guard-view-lifetime** (invariant): Environment guards MUST be re-observed for
 every new analysis view, with capture shared only by subjects inside that view and
-never memoized by module directory across views. A producer view
-therefore freezes the guards inherited by its producing process, while a later
-current view sees toolchain, build, machine, or runtime-configuration drift.
+never memoized by module directory across views. Each view re-observes facts under its
+engine's immutable complete process environment; constructing a new engine captures
+later ambient process-environment drift. A producer view therefore freezes the guards
+inherited by its producing process, while a current view under newly constructed
+engine configuration sees toolchain, build, machine, or runtime-configuration drift.
 
 **REQ-guard-completeness** (invariant): A recorded fingerprint missing a value
 required to evaluate a guard that applies to its result MUST be treated as stale, not

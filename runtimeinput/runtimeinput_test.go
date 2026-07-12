@@ -180,6 +180,140 @@ func TestEnvDigestChangesWithoutStoringValue(t *testing.T) {
 	}
 }
 
+func TestCurrentEnvUsesSuppliedEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOWORK", "/ambient/workspace")
+	env := []string{"GOWORK=/explicit/workspace"}
+	state, err := FromTestLogEnv([]byte("getenv GOWORK\n"), dir, dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := CurrentEnv(state.Manifest, dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != state {
+		t.Fatalf("explicitly finalized state moved under the same env:\n%+v\n%+v", state, current)
+	}
+	ambient, err := Current(state.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ambient.Digest == state.Digest {
+		t.Fatal("explicit GOWORK state was finalized from ambient GOWORK")
+	}
+	changed, err := CurrentEnv(state.Manifest, dir, []string{"GOWORK=/other/workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == state || changed.Digest == state.Digest {
+		t.Fatal("moving supplied GOWORK did not move the runtime-input state")
+	}
+}
+
+func TestFromTestLogMarksPWDUnverifiable(t *testing.T) {
+	dir := t.TempDir()
+	state, err := FromTestLogEnv([]byte("getenv PWD\n"), dir, dir, []string{"PWD=/caller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Unverifiable || !strings.Contains(state.Reason, "process-local environment input: PWD") {
+		t.Fatalf("PWD observation = %+v, want process-local unverifiable evidence", state)
+	}
+}
+
+func TestEnvironmentStateAbsoluteAndMergeUseSuppliedEnvironment(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(packageDir, "fixture.txt"), []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", "/ambient/workspace")
+	env := []string{"GOWORK=/explicit/workspace"}
+	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.txt\n"), moduleDir, packageDir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absolute, err := AbsoluteEnv(state, moduleDir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Absolute(state, moduleDir); err == nil {
+		t.Fatal("ambient Absolute accepted a state finalized under a different environment")
+	}
+	incomplete, err := IncompleteEnv(moduleDir, "worker interrupted", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergeDir := t.TempDir()
+	merged, err := MergeEnv(mergeDir, env, absolute, incomplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := CurrentEnv(merged.Manifest, mergeDir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != merged || !merged.Unverifiable {
+		t.Fatalf("merged explicit-environment state = %+v, current = %+v", merged, current)
+	}
+	if _, err := Merge(mergeDir, absolute, incomplete); err == nil {
+		t.Fatal("ambient Merge accepted states finalized under a different environment")
+	}
+	if _, err := MergeEnv(mergeDir, []string{"GOWORK=/other/workspace"}, absolute); err == nil {
+		t.Fatal("MergeEnv accepted a state finalized under a different supplied environment")
+	}
+}
+
+func TestAmbientConstructionWrappersMatchAmbientEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOWORK", "/ambient/workspace")
+	env := os.Environ()
+	fromAmbient, err := FromTestLog([]byte("getenv GOWORK\n"), dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromEnv, err := FromTestLogEnv([]byte("getenv GOWORK\n"), dir, dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromAmbient != fromEnv {
+		t.Fatalf("FromTestLog wrapper differs from ambient Env variant:\n%+v\n%+v", fromAmbient, fromEnv)
+	}
+	incompleteAmbient, err := Incomplete(dir, "interrupted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incompleteEnv, err := IncompleteEnv(dir, "interrupted", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incompleteAmbient != incompleteEnv {
+		t.Fatal("Incomplete wrapper differs from ambient Env variant")
+	}
+	absoluteAmbient, err := Absolute(fromAmbient, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absoluteEnv, err := AbsoluteEnv(fromEnv, dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if absoluteAmbient != absoluteEnv {
+		t.Fatal("Absolute wrapper differs from ambient Env variant")
+	}
+	mergedAmbient, err := Merge(dir, absoluteAmbient, incompleteAmbient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedEnv, err := MergeEnv(dir, env, absoluteEnv, incompleteEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergedAmbient != mergedEnv {
+		t.Fatal("Merge wrapper differs from ambient Env variant")
+	}
+}
+
 func TestFileDigestChanges(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	path := filepath.Join(packageDir, "fixture.txt")

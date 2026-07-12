@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestBuildConfigDigestsBuildInputs"
   role: BINDING_ROLE_TESTS
@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsAffectVerdict"
   role: BINDING_ROLE_TESTS
@@ -102,7 +102,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildInputsRejectFlags"
   role: BINDING_ROLE_TESTS
@@ -111,7 +111,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestBuildConfigInputsAreUnambiguous"
   role: BINDING_ROLE_TESTS
@@ -120,7 +120,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
@@ -129,7 +129,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/buildflags.Validate"
   role: BINDING_ROLE_IMPLEMENTS
@@ -138,7 +138,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/buildflags.TestValidateRejectsOverlay"
   role: BINDING_ROLE_TESTS
@@ -147,7 +147,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-buildconfig"
-  content_hash: "d23705cd9dabcba1b53b8efd80a136feccb54293254d4c849f9194407bde3554"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsRejectOverlay"
   role: BINDING_ROLE_TESTS
@@ -156,7 +156,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-view-lifetime"
-  content_hash: "7138b188846757b8b7bde8d25a2a6867a1bff294504b66fa2013707dcd2df9fe"
+  content_hash: "30bf052695a5a080867d83d91ce7e682112216606e9465d4971c85703e5e4f74"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEngineCheckUsesFreshView"
   role: BINDING_ROLE_TESTS

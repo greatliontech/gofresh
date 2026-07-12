@@ -51,11 +51,11 @@ func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
 func TestEngineCheckUsesFreshView(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	t.Setenv("GOGC", "100")
 	engine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOGC", "100")
 	fingerprint, err := engine.CaptureFor(subject, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
@@ -67,8 +67,19 @@ func TestEngineCheckUsesFreshView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if verdict.Status != Valid {
+		t.Fatalf("same Engine after ambient drift = {%s %q}, want valid", verdict.Status, verdict.Reason)
+	}
+	current, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err = current.Check(fingerprint, subject, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if verdict.Status != Stale || verdict.Reason != "runtimeconfig" {
-		t.Fatalf("runtime-config drift = {%s %q}, want {stale runtimeconfig}", verdict.Status, verdict.Reason)
+		t.Fatalf("new Engine after runtime-config drift = {%s %q}, want {stale runtimeconfig}", verdict.Status, verdict.Reason)
 	}
 }
 
@@ -1485,16 +1496,23 @@ func TestRefinedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
 func TestRefinedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	goenv := filepath.Join(t.TempDir(), "goenv")
+	if err := os.WriteFile(goenv, []byte("GOFLAGS=-tags=first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOENV", goenv)
+	t.Setenv("GOFLAGS", "")
 	engine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOGC", "36")
 	view, err := engine.NewViewFor([]Subject{subject}, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOGC", "37")
+	if err := os.WriteFile(goenv, []byte("GOFLAGS=-tags=second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := view.CaptureRefined(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("CaptureRefined after guard drift = %v, want ErrViewChanged", err)
 	}

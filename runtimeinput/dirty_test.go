@@ -132,3 +132,24 @@ func TestDirtyRejectsStateThatMovedBeforeInspection(t *testing.T) {
 		t.Fatalf("Dirty = %v, %v; want moved-state error", dirty, err)
 	}
 }
+
+func TestDirtyEnvRevalidatesWithSuppliedEnvironment(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	path := filepath.Join(packageDir, "fixture.dat")
+	if err := os.WriteFile(path, []byte("recorded"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", "/ambient/workspace")
+	env := []string{"GOWORK=/explicit/workspace"}
+	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.dat\n"), moduleDir, packageDir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspector := fakeInspector{reproducible: map[string]bool{"pkg/fixture.dat": true}}
+	if dirty, err := DirtyEnv(state, moduleDir, "commit", inspector, env); err != nil || dirty {
+		t.Fatalf("DirtyEnv = %v, %v; want false, nil", dirty, err)
+	}
+	if dirty, err := Dirty(state, moduleDir, "commit", inspector); err == nil || dirty {
+		t.Fatalf("ambient Dirty = %v, %v; want moved-state error", dirty, err)
+	}
+}
