@@ -116,6 +116,9 @@ and interface-dispatch facts are attributed to the subjects that reach both side
 their cross-product; a fact reachable only from one subject does not create an edge
 for another. Batching is bounded so attributed state can be discarded incrementally
 rather than growing with every subject in the view.
+The same equivalence applies to maximal source identities: a batched subject's
+source-file set is exactly the set an independent maximal view would expose,
+while the view-wide set is their union.
 
 ## Cross-module dependencies
 

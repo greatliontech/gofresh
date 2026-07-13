@@ -5,10 +5,12 @@ package runtimeinput
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -289,16 +291,32 @@ func MergeEnv(moduleDir string, env []string, states ...State) (State, error) {
 
 // Current recomputes the runtime-input digest for an encoded manifest.
 func Current(encoded, moduleDir string) (State, error) {
-	return CurrentEnv(encoded, moduleDir, os.Environ())
+	return CurrentContext(context.Background(), encoded, moduleDir)
+}
+
+// CurrentContext recomputes the runtime-input digest under ctx.
+func CurrentContext(ctx context.Context, encoded, moduleDir string) (State, error) {
+	return CurrentEnvContext(ctx, encoded, moduleDir, os.Environ())
 }
 
 // CurrentEnv recomputes a manifest using env as the complete process environment.
 func CurrentEnv(encoded, moduleDir string, env []string) (State, error) {
+	return CurrentEnvContext(context.Background(), encoded, moduleDir, env)
+}
+
+// CurrentEnvContext is CurrentContext with env as the complete process environment.
+func CurrentEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
+	if ctx == nil {
+		return State{OK: false}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return State{OK: false}, err
+	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
 		return State{OK: false}, err
 	}
-	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	return currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
 }
 
 func normalizeEnvironment(env []string) ([]string, error) {
@@ -310,6 +328,13 @@ func normalizeEnvironment(env []string) ([]string, error) {
 }
 
 func currentWithNormalizedEnv(encoded, moduleDir string, env []string) (State, error) {
+	return currentWithNormalizedEnvContext(context.Background(), encoded, moduleDir, env)
+}
+
+func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
+	if err := ctx.Err(); err != nil {
+		return State{OK: false}, err
+	}
 	m, err := decode(encoded)
 	if err != nil {
 		return State{OK: false}, err
@@ -322,6 +347,9 @@ func currentWithNormalizedEnv(encoded, moduleDir string, env []string) (State, e
 	h := sha256.New()
 	fprintf(h, "version %d\n", m.Version)
 	for _, name := range m.Env {
+		if err := ctx.Err(); err != nil {
+			return State{OK: false}, err
+		}
 		value, ok := processenv.Lookup(env, name)
 		valueHash := sha256.Sum256([]byte(value))
 		fprintf(h, "env %s %t %x\n", name, ok, valueHash)
@@ -329,11 +357,14 @@ func currentWithNormalizedEnv(encoded, moduleDir string, env []string) (State, e
 	unverifiable := len(m.Unverifiable) > 0
 	reason := firstReason(m.Unverifiable)
 	for _, id := range m.Paths {
+		if err := ctx.Err(); err != nil {
+			return State{OK: false}, err
+		}
 		path, err := materializePath(moduleDir, id)
 		if err != nil {
 			return State{}, err
 		}
-		pathUnverifiable, pathReason, err := hashPath(h, id, path, moduleDir)
+		pathUnverifiable, pathReason, err := hashPath(ctx, h, id, path, moduleDir)
 		if err != nil {
 			return State{}, err
 		}
@@ -346,6 +377,9 @@ func currentWithNormalizedEnv(encoded, moduleDir string, env []string) (State, e
 	}
 	for _, reason := range m.Unverifiable {
 		fprintf(h, "unverifiable %s\n", reason)
+	}
+	if err := ctx.Err(); err != nil {
+		return State{OK: false}, err
 	}
 	sum := h.Sum(nil)
 	return State{
@@ -407,7 +441,10 @@ func materializePath(moduleDir string, id pathID) (string, error) {
 	}
 }
 
-func hashPath(h hash.Hash, id pathID, p, moduleDir string) (bool, string, error) {
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string) (bool, string, error) {
+	if err := ctx.Err(); err != nil {
+		return false, "", err
+	}
 	info, err := os.Stat(p)
 	if os.IsNotExist(err) {
 		fprintf(h, "path %s %s missing\n", id.Kind, id.Path)
@@ -438,7 +475,7 @@ func hashPath(h hash.Hash, id pathID, p, moduleDir string) (bool, string, error)
 	switch {
 	case mode.IsRegular():
 		writeStat(h, info)
-		sum, err := fileHash(target)
+		sum, err := fileHash(ctx, target)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
 			return true, "unhashable runtime input: " + p, nil
@@ -446,7 +483,7 @@ func hashPath(h hash.Hash, id pathID, p, moduleDir string) (bool, string, error)
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && id.Kind == pathRel:
-		sum, unv, reason, err := dirHash(target)
+		sum, unv, reason, err := dirHash(ctx, target)
 		if err != nil {
 			return false, "", err
 		}
@@ -487,26 +524,42 @@ func writeStat(h hash.Hash, info os.FileInfo) {
 	fprintf(h, "stat %d %x %d %t\n", info.Size(), uint64(info.Mode()), info.ModTime().UnixNano(), info.IsDir())
 }
 
-func fileHash(path string) ([32]byte, error) {
+func fileHash(ctx context.Context, path string) ([32]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return [32]byte{}, err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return [32]byte{}, err
+	buffer := make([]byte, 32*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return [32]byte{}, err
+		}
+		n, readErr := f.Read(buffer)
+		if n != 0 {
+			_, _ = h.Write(buffer[:n])
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return [32]byte{}, readErr
+		}
 	}
 	var sum [32]byte
 	copy(sum[:], h.Sum(nil))
 	return sum, nil
 }
 
-func dirHash(root string) ([32]byte, bool, string, error) {
+func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
 	h := sha256.New()
 	unverifiable := false
 	reason := ""
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
 		if err != nil {
 			unverifiable = true
 			if reason == "" {
@@ -533,7 +586,7 @@ func dirHash(root string) ([32]byte, bool, string, error) {
 			writeStat(h, info)
 		case info.Mode().IsRegular():
 			writeStat(h, info)
-			sum, err := fileHash(path)
+			sum, err := fileHash(ctx, path)
 			if err != nil {
 				unverifiable = true
 				if reason == "" {

@@ -160,11 +160,21 @@ the view is constructed and the producing build is read; validation detects ordi
 drift but cannot prove the absence of a change-and-restore interval the caller
 allowed.
 
+**REQ-fresh-context** (behavior): Context-aware analysis-view construction,
+maximal checking, and producer validation MUST honor caller cancellation before
+and between source, guard, runtime-input, and comparison observations, returning
+the context error rather than a partial view, verdict, or successful validation.
+The context bounds observation work; a producer validation attempt still seals
+its original view against later capture.
+
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
-exact mutable source-file identities whose bytes contribute to its maximal closure,
-excluding standard-library and immutable module-cache source represented by other
-guards, so a producer can prove whether those selected bytes are reproducible from
-caller-owned provenance without reimplementing closure file selection.
+exact mutable source-file identities whose bytes contribute to each subject's
+maximal closure and their view-wide union, excluding standard-library and
+immutable module-cache source represented by other guards. Subject-local queries
+must not include identities contributed only by another subject in the same
+view, so a producer can prove whether the selected bytes behind each result are
+reproducible from caller-owned provenance without reimplementing closure file
+selection.
 
 ## Composition
 

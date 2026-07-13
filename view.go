@@ -30,20 +30,21 @@ var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
 // behind a caller-supplied subject set. It can serve a current check batch or a
 // producer transaction; analysis state is never shared with another View.
 type View struct {
-	mu              sync.RWMutex
-	engine          *Engine
-	subjects        []Subject
-	moduleDir       string
-	kind            Kind
-	maximal         map[Subject]closure.Closure
-	refined         map[Subject]closure.Closure
-	guards          guard.Guards
-	purity          map[Subject]string
-	openWorld       map[Subject]bool
-	sourceFiles     []string
-	capturedRefined map[Subject]bool
-	sealed          bool
-	runtimeCurrent  func(string, string) (runtimeinput.State, error)
+	mu                   sync.RWMutex
+	engine               *Engine
+	subjects             []Subject
+	moduleDir            string
+	kind                 Kind
+	maximal              map[Subject]closure.Closure
+	refined              map[Subject]closure.Closure
+	guards               guard.Guards
+	purity               map[Subject]string
+	openWorld            map[Subject]bool
+	sourceFiles          []string
+	sourceFilesBySubject map[Subject][]string
+	capturedRefined      map[Subject]bool
+	sealed               bool
+	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
 }
 
 // NewView observes subjects and moduleDir as one code-result analysis view.
@@ -54,12 +55,28 @@ func (e *Engine) NewView(subjects []Subject, moduleDir string) (*View, error) {
 	return e.NewViewFor(subjects, moduleDir, CodeResult)
 }
 
+// NewViewContext observes one code-result analysis view under ctx.
+func (e *Engine) NewViewContext(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
+	return e.NewViewForContext(ctx, subjects, moduleDir, CodeResult)
+}
+
 // NewViewFor observes one analysis view with the guards applicable to kind.
 func (e *Engine) NewViewFor(subjects []Subject, moduleDir string, kind Kind) (*View, error) {
 	return e.newView(context.Background(), subjects, moduleDir, kind)
 }
 
+// NewViewForContext observes one analysis view with kind's guards under ctx.
+func (e *Engine) NewViewForContext(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+	return e.newView(ctx, subjects, moduleDir, kind)
+}
+
 func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !validKind(kind) {
 		return nil, fmt.Errorf("gofresh: invalid result kind %d", kind)
 	}
@@ -105,42 +122,68 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		return nil, err
 	}
 	if first.guards != second.guards {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%w: guards during construction", ErrViewChanged)
 	}
 	for _, subject := range unique {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if first.maximal[subject] != second.maximal[subject] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("%w: closure for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 		if first.purity[subject] != second.purity[subject] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("%w: purity for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+		}
+		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: maximal source identities for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 	}
 	if !slices.Equal(first.sourceFiles, second.sourceFiles) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%w: maximal source identities during construction", ErrViewChanged)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	v := &View{
-		engine:          e,
-		subjects:        unique,
-		moduleDir:       moduleDir,
-		kind:            kind,
-		maximal:         first.maximal,
-		refined:         make(map[Subject]closure.Closure, len(unique)),
-		guards:          first.guards,
-		purity:          first.purity,
-		openWorld:       first.openWorld,
-		sourceFiles:     first.sourceFiles,
-		capturedRefined: make(map[Subject]bool, len(unique)),
+		engine:               e,
+		subjects:             unique,
+		moduleDir:            moduleDir,
+		kind:                 kind,
+		maximal:              first.maximal,
+		refined:              make(map[Subject]closure.Closure, len(unique)),
+		guards:               first.guards,
+		purity:               first.purity,
+		openWorld:            first.openWorld,
+		sourceFiles:          first.sourceFiles,
+		sourceFilesBySubject: first.sourceFilesBySubject,
+		capturedRefined:      make(map[Subject]bool, len(unique)),
 	}
 	return v, nil
 }
 
 type viewObservation struct {
-	maximal     map[Subject]closure.Closure
-	guards      guard.Guards
-	purity      map[Subject]string
-	openWorld   map[Subject]bool
-	sourceFiles []string
+	maximal              map[Subject]closure.Closure
+	guards               guard.Guards
+	purity               map[Subject]string
+	openWorld            map[Subject]bool
+	sourceFiles          []string
+	sourceFilesBySubject map[Subject][]string
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
@@ -161,10 +204,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return viewObservation{}, err
 	}
 	observation := viewObservation{
-		maximal:   make(map[Subject]closure.Closure, len(subjects)),
-		guards:    guards,
-		purity:    make(map[Subject]string, len(subjects)),
-		openWorld: make(map[Subject]bool, len(subjects)),
+		maximal:              make(map[Subject]closure.Closure, len(subjects)),
+		guards:               guards,
+		purity:               make(map[Subject]string, len(subjects)),
+		openWorld:            make(map[Subject]bool, len(subjects)),
+		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
 	}
 	seenSource := map[string]bool{}
 	for _, request := range requests {
@@ -187,6 +231,9 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			observation.openWorld[subject] = true
 		}
 		observation.maximal[subject] = maximal
+		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
+		observation.sourceFilesBySubject[subject] = slices.Clone(sources[request])
+		sort.Strings(observation.sourceFilesBySubject[subject])
 		switch caller, directive := e.assumePure(subject), directivePure(subject); {
 		case caller && directive:
 			observation.purity[subject] = "caller assertion and source directive"
@@ -220,6 +267,18 @@ func (v *View) SourceFiles() []string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return append([]string(nil), v.sourceFiles...)
+}
+
+// SourceFilesFor returns the caller-owned mutable source paths contributing to
+// subject's maximal closure in this view.
+func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	files, ok := v.sourceFilesBySubject[subject]
+	if !ok {
+		return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	}
+	return slices.Clone(files), nil
 }
 
 // CaptureRefined returns maximal and declaration-RTA evidence for subject under
@@ -297,6 +356,17 @@ func (v *View) refinedFingerprintLocked(subject Subject) Fingerprint {
 
 // Check compares recorded against subject's current facts under this View's result kind.
 func (v *View) Check(recorded Fingerprint, subject Subject) (Verdict, error) {
+	return v.CheckContext(context.Background(), recorded, subject)
+}
+
+// CheckContext compares recorded against subject's current facts under ctx.
+func (v *View) CheckContext(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
+	if ctx == nil {
+		return Verdict{}, errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Verdict{}, err
+	}
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
@@ -308,23 +378,43 @@ func (v *View) Check(recorded Fingerprint, subject Subject) (Verdict, error) {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	if recorded.MaximalClosure == "" || recorded.MaximalClosure != cl.Hash {
+		if err := ctx.Err(); err != nil {
+			return Verdict{}, err
+		}
 		return Verdict{Stale, "closure"}, nil
 	}
 	if recorded.RuntimeInputs != "" {
-		if err := v.reobserveBase(context.Background()); err != nil {
+		if err := v.reobserveBase(ctx); err != nil {
 			return Verdict{}, err
 		}
-		runtimeState := v.currentRuntime(recorded)
-		afterRuntime := v.currentRuntime(recorded)
-		if err := v.reobserveBase(context.Background()); err != nil {
+		runtimeState, err := v.currentRuntimeContext(ctx, recorded)
+		if err != nil {
+			return Verdict{}, err
+		}
+		afterRuntime, err := v.currentRuntimeContext(ctx, recorded)
+		if err != nil {
+			return Verdict{}, err
+		}
+		if err := v.reobserveBase(ctx); err != nil {
 			return Verdict{}, err
 		}
 		if runtimeState != afterRuntime {
+			if err := ctx.Err(); err != nil {
+				return Verdict{}, err
+			}
 			return Verdict{Stale, "runtimeinputs"}, nil
 		}
-		return decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject)), nil
+		verdict := decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject))
+		if err := ctx.Err(); err != nil {
+			return Verdict{}, err
+		}
+		return verdict, nil
 	}
-	return v.checkAfterClosure(recorded, subject, cl), nil
+	verdict := v.checkAfterClosure(recorded, subject, cl)
+	if err := ctx.Err(); err != nil {
+		return Verdict{}, err
+	}
+	return verdict, nil
 }
 
 // CheckRefined compares maximal evidence first. It invokes declaration-RTA under
@@ -482,6 +572,11 @@ func (v *View) finishRuntimeObservation(recorded map[Subject]Fingerprint, before
 }
 
 func (v *View) currentRuntime(recorded Fingerprint) runtimeinput.State {
+	rt, _ := v.currentRuntimeContext(context.Background(), recorded)
+	return rt
+}
+
+func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) (runtimeinput.State, error) {
 	var rt runtimeinput.State
 	var err error
 	if recorded.RuntimeInputs != "" {
@@ -489,36 +584,53 @@ func (v *View) currentRuntime(recorded Fingerprint) runtimeinput.State {
 		// valid (REQ-guard-completeness).
 		current := v.runtimeCurrent
 		if current == nil {
-			current = runtimeinput.Current
+			current = runtimeinput.CurrentContext
 			if v.engine != nil {
-				current = func(encoded, moduleDir string) (runtimeinput.State, error) {
-					return runtimeinput.CurrentEnv(encoded, moduleDir, v.engine.env)
+				current = func(ctx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
+					return runtimeinput.CurrentEnvContext(ctx, encoded, moduleDir, v.engine.env)
 				}
 			}
 		}
-		if rt, err = current(recorded.RuntimeInputs, v.moduleDir); err != nil {
+		if rt, err = current(ctx, recorded.RuntimeInputs, v.moduleDir); err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return runtimeinput.State{}, contextErr
+			}
 			rt = runtimeinput.State{}
 		}
 	}
-	return rt
+	return rt, nil
 }
 
 // Validate re-observes the View's complete subject set and reports ErrViewChanged
 // when any source closure, guard, or purity assertion moved. A producer calls it
 // after execution before persisting results (REQ-fresh-producer-view).
 func (v *View) Validate() error {
+	return v.ValidateContext(context.Background())
+}
+
+// ValidateContext re-observes the complete maximal view under ctx.
+func (v *View) ValidateContext(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	hasRefined := len(v.capturedRefined) != 0
 	v.mu.Unlock()
+	if ctx == nil {
+		return errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if hasRefined {
 		return ErrRefinedValidationRequired
 	}
-	current, err := v.engine.NewViewFor(v.subjects, v.moduleDir, v.kind)
+	current, err := v.engine.NewViewForContext(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	return v.compareBase(current)
+	if err := v.compareBaseContext(ctx, current); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // ValidateRefined re-observes the view and every refined closure captured from it
@@ -527,11 +639,20 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	v.mu.Unlock()
+	if ctx == nil {
+		return errors.New("gofresh: nil refinement context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	if err := v.compareBase(current); err != nil {
+	if err := v.compareBaseContext(ctx, current); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	v.mu.RLock()
@@ -545,7 +666,7 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	}
 	v.mu.RUnlock()
 	if len(subjects) == 0 {
-		return nil
+		return ctx.Err()
 	}
 	if err := current.ensureRefined(ctx, subjects); err != nil {
 		return err
@@ -554,17 +675,33 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := current.compareBase(final); err != nil {
+	if err := current.compareBaseContext(ctx, final); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	current.mu.RLock()
 	defer current.mu.RUnlock()
+	return compareRefinedContext(ctx, current.refined, expected, subjects)
+}
+
+func compareRefinedContext(ctx context.Context, current, expected map[Subject]closure.Closure, subjects []Subject) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for _, subject := range subjects {
-		if current.refined[subject] != expected[subject] {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if current[subject] != expected[subject] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("%w: refinement for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (v *View) reobserveBase(ctx context.Context) error {
@@ -572,25 +709,59 @@ func (v *View) reobserveBase(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return v.compareBase(current)
+	return v.compareBaseContext(ctx, current)
 }
 
 func (v *View) compareBase(current *View) error {
+	return v.compareBaseContext(context.Background(), current)
+}
+
+func (v *View) compareBaseContext(ctx context.Context, current *View) error {
+	if ctx == nil {
+		return errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if current.guards != v.guards {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: guards", ErrViewChanged)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !slices.Equal(current.sourceFiles, v.sourceFiles) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: maximal source identities", ErrViewChanged)
 	}
 	for _, subject := range v.subjects {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !slices.Equal(current.sourceFilesBySubject[subject], v.sourceFilesBySubject[subject]) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: maximal source identities for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+		}
 		if current.maximal[subject] != v.maximal[subject] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("%w: closure for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 		if current.purity[subject] != v.purity[subject] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("%w: purity for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
@@ -619,7 +790,7 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if err != nil {
 		return err
 	}
-	if err := v.compareBase(beforeView); err != nil {
+	if err := v.compareBaseContext(ctx, beforeView); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -640,7 +811,7 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
 	}
-	if err := v.compareBase(afterView); err != nil {
+	if err := v.compareBaseContext(ctx, afterView); err != nil {
 		return err
 	}
 	v.mu.Lock()

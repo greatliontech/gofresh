@@ -1,8 +1,10 @@
 package runtimeinput
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,56 @@ import (
 	"strings"
 	"testing"
 )
+
+type cancelAfterChecks struct {
+	context.Context
+	after, checks int
+}
+
+func (c *cancelAfterChecks) Err() error {
+	c.checks++
+	if c.checks > c.after {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCurrentContextHonorsCancellation(t *testing.T) {
+	moduleDir := t.TempDir()
+	state, err := Merge(moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := CurrentEnvContext(ctx, state.Manifest, moduleDir, os.Environ()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled current check = %v, want context.Canceled", err)
+	}
+}
+
+func TestCurrentContextStopsBetweenInputsAndFileChunks(t *testing.T) {
+	moduleDir := t.TempDir()
+	encoded, err := encode(manifest{Version: manifestVersion, Env: []string{"A", "B"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envCtx := &cancelAfterChecks{Context: context.Background(), after: 3}
+	if _, err := CurrentEnvContext(envCtx, encoded, moduleDir, []string{"A=1", "B=2"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("between-environment cancellation = %v, want context.Canceled", err)
+	}
+	path := filepath.Join(moduleDir, "large")
+	if err := os.WriteFile(path, make([]byte, 64*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
+	if _, err := fileHash(fileCtx, path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("file-chunk cancellation = %v, want context.Canceled", err)
+	}
+	dirCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
+	if _, _, _, err := dirHash(dirCtx, moduleDir); !errors.Is(err, context.Canceled) {
+		t.Fatalf("directory-entry cancellation = %v, want context.Canceled", err)
+	}
+}
 
 func testDirs(t *testing.T) (string, string) {
 	t.Helper()

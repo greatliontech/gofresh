@@ -15,6 +15,19 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
+type cancelAfterChecks struct {
+	context.Context
+	after, checks int
+}
+
+func (c *cancelAfterChecks) Err() error {
+	c.checks++
+	if c.checks > c.after {
+		return context.Canceled
+	}
+	return nil
+}
+
 func writeViewModule(t *testing.T, source string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -45,6 +58,68 @@ func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
 	files[0] = "changed"
 	if slices.Contains(view.SourceFiles(), "changed") {
 		t.Fatal("SourceFiles returned mutable view storage")
+	}
+}
+
+func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":  "module example.com/view\n\ngo 1.26\n",
+		"root.go": "package view\n\nfunc F() {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "sub.go"), []byte("package sub\n\nfunc G() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := []Subject{
+		{Package: "example.com/view", Symbol: "F"},
+		{Package: "example.com/view/sub", Symbol: "G"},
+	}
+	batch, err := engine.NewView(subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range subjects {
+		singleton, err := engine.NewView([]Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batchedFingerprint, err := batch.Capture(subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		singletonFingerprint, err := singleton.Capture(subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batchedFingerprint != singletonFingerprint {
+			t.Fatalf("%+v batched fingerprint = %+v, singleton = %+v", subject, batchedFingerprint, singletonFingerprint)
+		}
+		batchedFiles, err := batch.SourceFilesFor(subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if singletonFiles := singleton.SourceFiles(); !slices.Equal(batchedFiles, singletonFiles) {
+			t.Fatalf("%+v batched files = %v, singleton = %v", subject, batchedFiles, singletonFiles)
+		}
+		batchedFiles[0] = "changed"
+		current, err := batch.SourceFilesFor(subject)
+		if err != nil || slices.Contains(current, "changed") {
+			t.Fatalf("SourceFilesFor returned mutable storage: %v, %v", current, err)
+		}
+	}
+	if _, err := batch.SourceFilesFor(Subject{Package: "example.com/view", Symbol: "Missing"}); err == nil {
+		t.Fatal("SourceFilesFor accepted a subject outside the view")
 	}
 }
 
@@ -1137,7 +1212,7 @@ func TestRuntimeInputCheckDetectsMovementBetweenSnapshots(t *testing.T) {
 	fingerprint.RuntimeInputs = "manifest"
 	fingerprint.RuntimeDigest = "recorded"
 	calls := 0
-	view.runtimeCurrent = func(string, string) (runtimeinput.State, error) {
+	view.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
 		calls++
 		digest := "recorded"
 		if calls > 1 {
@@ -1468,9 +1543,84 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = engine.newView(ctx, []Subject{{Package: "example.com/view", Symbol: "F"}}, dir, CodeResult)
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	_, err = engine.NewViewContext(ctx, []Subject{subject}, dir)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view construction = %v, want context.Canceled", err)
+	}
+	view, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := view.CheckContext(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled view check = %v, want context.Canceled", err)
+	}
+	stale := fingerprint
+	stale.MaximalClosure = "moved"
+	publicationCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
+	if _, err := view.CheckContext(publicationCtx, stale, subject); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled verdict publication = %v, want context.Canceled", err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparisonCtx := &cancelAfterChecks{Context: context.Background(), after: 2}
+	if err := view.compareBaseContext(comparisonCtx, current); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled base comparison = %v, want context.Canceled", err)
+	}
+	refinedComparisonCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
+	if err := compareRefinedContext(refinedComparisonCtx, map[Subject]closure.Closure{subject: {}}, map[Subject]closure.Closure{subject: {}}, []Subject{subject}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled refined comparison = %v, want context.Canceled", err)
+	}
+	runtimeFingerprint := fingerprint
+	runtimeFingerprint.RuntimeInputs = "manifest"
+	runtimeFingerprint.RuntimeDigest = "digest"
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	view.runtimeCurrent = func(ctx context.Context, _, _ string) (runtimeinput.State, error) {
+		close(started)
+		<-ctx.Done()
+		return runtimeinput.State{}, ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := view.CheckContext(runtimeCtx, runtimeFingerprint, subject)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("runtime-input check did not start")
+	}
+	runtimeCancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("runtime-input cancellation = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runtime-input check ignored cancellation")
+	}
+	if err := view.ValidateContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled view validation = %v, want context.Canceled", err)
+	}
+	if _, err := view.Capture(subject); !errors.Is(err, ErrViewSealed) {
+		t.Fatalf("capture after cancelled validation = %v, want ErrViewSealed", err)
+	}
+	refinedView, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := refinedView.CaptureRefined(context.Background(), subject); err != nil {
+		t.Fatal(err)
+	}
+	if err := refinedView.ValidateContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled maximal validation of refined view = %v, want context.Canceled", err)
 	}
 }
 

@@ -65,6 +65,12 @@ checking process; ambient convenience operations use the ambient environment at 
 operation. Mixing an explicitly configured process with ambient environment hashing
 is not coherent evidence.
 
+**REQ-inputs-context** (behavior): Context-aware current checks MUST observe
+caller cancellation before and between environment identities, path identities,
+directory members, and file-read chunks, returning the context error without a
+partial state. Context-free checks retain identical hashing semantics under an
+unbounded background context.
+
 **REQ-inputs-merge** (behavior): A caller combining observations from several
 processes MUST be able to merge their independently completed states as a deterministic
 manifest set union, with no shared mutable manifest or cross-process lock. Before
