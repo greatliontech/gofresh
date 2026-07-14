@@ -120,6 +120,26 @@ manifest distinct from no manifest at all, so absence is always a deliberate
 assertion, never a capture accident; a caller that runs subjects through the test
 harness attaches what the testlog yields.
 
+**REQ-inputs-exclusions** (behavior): Observation construction from a test-harness
+log MUST accept caller-declared path exclusions — each a non-empty identity-form
+path (module-relative or clean absolute), an empty pattern refused rather than
+read as anything — and record neither a path identity nor any per-path
+disposition for an excluded observation, while leaving working-directory
+tracking and every non-excluded observation unchanged. A pattern excludes
+exactly the identical identity of its kind, plus every identity of that kind
+that extends it past a path separator — the pattern followed by a separator as
+a string prefix — so the root listings `.` and `/` exclude only themselves,
+never the identities beneath them. Exclusion is per identity, never per
+content: a directory identity that remains recorded still digests everything
+its hash walks, so a caller silencing a volatile subtree excludes both the
+subtree and every recorded ancestor listing whose digest observes it. An
+exclusion is the caller's assertion that the excluded paths are not inputs of
+the subject: it carries the same soundness responsibility as attaching no
+manifest, and it is how a caller meets observation coherence for volatile
+paths it cannot hold still — a VCS bookkeeping directory mutated by unrelated
+tooling makes every digest over it environmental noise rather than evidence.
+Environment identities are never excludable through path exclusions.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked
 as a dirty recording, because the recording is not faithful to that commit; the mark

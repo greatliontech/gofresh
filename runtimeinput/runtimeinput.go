@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -128,13 +129,78 @@ func AbsoluteEnv(state State, moduleDir string, env []string) (State, error) {
 
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and environment.
-func FromTestLog(log []byte, moduleDir, packageDir string) (State, error) {
-	return FromTestLogEnv(log, moduleDir, packageDir, os.Environ())
+func FromTestLog(log []byte, moduleDir, packageDir string, opts ...TestLogOption) (State, error) {
+	return FromTestLogEnv(log, moduleDir, packageDir, os.Environ(), opts...)
+}
+
+// TestLogOption configures observation construction from a testlog.
+type TestLogOption func(*testLogConfig)
+
+type testLogConfig struct {
+	excluded []pathID
+	err      error
+}
+
+// WithExcludedPaths declares path exclusions (REQ-inputs-exclusions):
+// each pattern is a non-empty identity-form path — module-relative, or
+// clean absolute — excluding the identical identity of its kind and
+// every identity of that kind extending it past a path separator; the
+// root listings "." and "/" exclude only themselves. An excluded
+// observation records neither a path identity nor a per-path
+// disposition; the exclusion is the caller's assertion that those
+// paths are not inputs of the subject, with the same soundness
+// responsibility as attaching no manifest. Exclusion is per identity,
+// never per content: a recorded directory identity still digests
+// everything its hash walks, so silencing a volatile subtree means
+// excluding both the subtree and every recorded ancestor listing whose
+// digest observes it. Patterns that can name no identity — a relative
+// path escaping the module, an absolute path inside it — exclude
+// nothing. Environment identities are never excluded.
+func WithExcludedPaths(patterns ...string) TestLogOption {
+	return func(c *testLogConfig) {
+		for _, q := range patterns {
+			if q == "" {
+				c.err = errors.New("runtimeinputs: empty exclusion pattern")
+				return
+			}
+			if filepath.IsAbs(q) {
+				c.excluded = append(c.excluded, pathID{Kind: pathAbs, Path: filepath.Clean(q)})
+				continue
+			}
+			c.excluded = append(c.excluded, pathID{Kind: pathRel, Path: path.Clean(filepath.ToSlash(q))})
+		}
+	}
+}
+
+// excludes reports whether id falls under any declared exclusion:
+// equal, or extending it past a separator. Relative identities are
+// slash-separated; absolute identities carry the host separator.
+func (c *testLogConfig) excludes(id pathID) bool {
+	for _, q := range c.excluded {
+		if q.Kind != id.Kind {
+			continue
+		}
+		sep := "/"
+		if q.Kind == pathAbs {
+			sep = string(filepath.Separator)
+		}
+		if id.Path == q.Path || strings.HasPrefix(id.Path, q.Path+sep) {
+			return true
+		}
+	}
+	return false
 }
 
 // FromTestLogEnv is FromTestLog with env as the complete process environment
 // inherited by the observed test process.
-func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string) (State, error) {
+func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (State, error) {
+	var cfg testLogConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.err != nil {
+		return State{}, cfg.err
+	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
 		return State{}, err
@@ -186,6 +252,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string) (Sta
 				addUnverifiable(&m, unverifiableSeen, reason)
 				continue
 			}
+			if cfg.excludes(id) {
+				continue
+			}
 			if !pathSeen[id] {
 				pathSeen[id] = true
 				m.Paths = append(m.Paths, id)
@@ -195,6 +264,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string) (Sta
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
+				continue
+			}
+			if cfg.excludes(id) {
 				continue
 			}
 			if !pathSeen[id] {
@@ -207,7 +279,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string) (Sta
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
-			} else if !pathSeen[id] {
+			} else if !cfg.excludes(id) && !pathSeen[id] {
 				pathSeen[id] = true
 				m.Paths = append(m.Paths, id)
 			}
