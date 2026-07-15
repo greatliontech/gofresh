@@ -1106,7 +1106,7 @@ func TestRefinedBatchMarksRuntimeInputDriftStale(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir)
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,11 +1133,11 @@ func TestRuntimeInputDriftIsSubjectLocal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stateA, err := runtimeinput.FromTestLog([]byte("open a\n"), dir, dir)
+	stateA, err := runtimeinput.FromTestLog([]byte("open a\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stateB, err := runtimeinput.FromTestLog([]byte("open b\n"), dir, dir)
+	stateB, err := runtimeinput.FromTestLog([]byte("open b\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-b"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1180,7 +1180,7 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir)
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1235,7 +1235,7 @@ func TestRuntimeInputDriftDoesNotOverrideStale(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir)
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1274,7 +1274,7 @@ func TestCancelledRefinementContextDoesNotAbortUnchangedRuntimeCheck(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir)
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
 	if err != nil {
 		t.Fatal(err)
 	}

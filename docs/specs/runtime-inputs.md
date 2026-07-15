@@ -161,8 +161,6 @@ process without both gates is represented through the incomplete-observation
 constructor; merge refuses a state that claims completion without them, and one
 incomplete child keeps the deterministic union unverifiable.
 
-Lands: 3.
-
 **REQ-inputs-observation-disposition** (invariant): Runtime-manifest
 unverifiability MUST NOT be suppressible by an observability proof. Malformed or unrecognized
 records, incomplete observations, `stat` metadata, `chdir`, `PWD`, unrepresentable
@@ -171,8 +169,6 @@ or caller-supplied reasons all remain unverifiable. Thus proof can replace only 
 closure-level conservatism for its admitted effects; the manifest must independently
 be complete, recognized, and fully hashable.
 
-Lands: 3.
-
 **REQ-inputs-path-congruence** (invariant): A validity-bearing observed path identity
 MUST materialize to the same filesystem object under the checker that the producing
 operation addressed under kernel path-walk semantics. The observation is
@@ -180,8 +176,6 @@ unverifiable when this cannot be established, including any raw path with a `..`
 component that may cross a symlink before lexical cleaning and any relative path
 after a working-directory change. Lexical normalization alone never discharges this
 obligation.
-
-Lands: 3.
 
 **REQ-inputs-fresh-mutation** (invariant): A later observability extension MAY admit
 a filesystem mutation only when subject-local value and alias analysis proves its

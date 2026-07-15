@@ -79,7 +79,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.Merge"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "0fcda43071abb00bf56390e496a1bb4591889064a94330909729127191c93d45"
+  shape_hash: "98b82f75bcf6738eeaf00c807d42ce471a287aeb37e3bc21f707297c7fb6eadb"
 }
 
 bindings {
@@ -88,7 +88,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.hashPath"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "3d967810ac62aad40710965685ef6d90b260d655163c447ca521bd5803aaecfe"
+  shape_hash: "5e1ed3f5de9bd0b81b11761193d252e0aa243fa8bf7954e6a6db579e3015a506"
 }
 
 bindings {
@@ -106,7 +106,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.Dirty"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "faf5488ba4a643e360531c519f02f7a5036c7ab7fbfe5b48e63b6e91e431986e"
+  shape_hash: "8c01f7ba0ad98250b14d59cb857b2d321d90436210f0a89757b8c3ae5f129fe8"
 }
 
 bindings {
@@ -152,4 +152,76 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestDirtyRejectsStateThatMovedBeforeInspection"
   role: BINDING_ROLE_TESTS
   shape_hash: "681f3c2cb05d0f7e8730fdfb2fddb2b68f443a444966f7fff04befa60f6401d8"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-completed-observation"
+  content_hash: "15d0ac5b65271a08e80059ec137e95c5f621f5776fe34cff08a9b396b185c3ff"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "86a9d3e6c818737aebc30614e327026c2b2e1e0e42b01652bed6b6f8d9dec2c3"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-disposition"
+  content_hash: "9ed7b929dbb8e621b9f882e195cc4f282cc249c5136f01126b1743fbea43b386"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.currentWithNormalizedEnvContext"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "b7a03692049b60c7eb174a05f2fcd32927bb41d008e52aacc1921448791c2090"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkParentTraversalIsUnverifiable"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "08f71d5335357d30551f0da03b8eb7a5596cfbf535b97af4a986dd277e867565"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-completed-observation"
+  content_hash: "15d0ac5b65271a08e80059ec137e95c5f621f5776fe34cff08a9b396b185c3ff"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCompletedObservationRequiresProcessAssertion"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dcfd2bff5bec9a3d8dbdf6450be03bd041dcbd0aa1172313e44eff61463ceb93"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-completed-observation"
+  content_hash: "15d0ac5b65271a08e80059ec137e95c5f621f5776fe34cff08a9b396b185c3ff"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMergeRejectsConflictingEvidenceForOneProcess"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c84ad152b9ef380026befb87a1580a1e1915014b325c00fac0de980eed60528f"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-disposition"
+  content_hash: "9ed7b929dbb8e621b9f882e195cc4f282cc249c5136f01126b1743fbea43b386"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMergeUnionsIndependentProcessManifests"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b628277795e28a5faf260ebd57d60c4e2684a62e1047c9db693de5f560bd6a2a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestChdirResolvesRelativePaths"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3f5d78989db64c70ad73fb54d05bb85ec532a7e2b4a6aaa603282867b5005688"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "86a9d3e6c818737aebc30614e327026c2b2e1e0e42b01652bed6b6f8d9dec2c3"
 }

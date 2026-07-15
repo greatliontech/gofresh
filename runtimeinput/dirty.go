@@ -21,16 +21,20 @@ type CommitInspector interface {
 // working-tree reuse but barred as a baseline (REQ-inputs-dirty). Only
 // module-relative inputs are checked; external absolute inputs are outside the
 // module's git scope.
-func Dirty(state State, moduleDir, commit string, inspector CommitInspector) (bool, error) {
-	return DirtyEnv(state, moduleDir, commit, inspector, os.Environ())
+func Dirty(observation Observation, moduleDir, commit string, inspector CommitInspector) (bool, error) {
+	return DirtyEnv(observation, moduleDir, commit, inspector, os.Environ())
 }
 
 // DirtyEnv is Dirty with env as the complete process environment used to
 // revalidate state before commit inspection.
-func DirtyEnv(state State, moduleDir, commit string, inspector CommitInspector, env []string) (bool, error) {
+func DirtyEnv(observation Observation, moduleDir, commit string, inspector CommitInspector, env []string) (bool, error) {
 	if inspector == nil {
 		return false, fmt.Errorf("runtimeinputs: nil commit inspector")
 	}
+	if err := validateObservation(observation, false); err != nil {
+		return false, err
+	}
+	state := observation.State
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
 		return false, fmt.Errorf("runtimeinputs: incomplete state for dirty inspection")
 	}

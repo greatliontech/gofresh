@@ -3,7 +3,6 @@
 package runtimeinput
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -41,6 +40,22 @@ type State struct {
 	OK           bool
 }
 
+// Observation is producer-constructed runtime-input evidence. Its private process
+// provenance distinguishes completion-gated evidence from a State recomputed by a
+// checker, while the embedded State remains the persisted manifest and digest.
+type Observation struct {
+	State
+	processes []processObservation
+	empty     bool
+	seal      string
+}
+
+type processObservation struct {
+	process string
+	origin  string
+	view    string
+}
+
 type manifest struct {
 	Version      int      `json:"v"`
 	Env          []string `json:"env,omitempty"`
@@ -54,53 +69,65 @@ type pathID struct {
 }
 
 // Incomplete constructs canonical evidence for a process whose runtime-input
-// observation did not complete. It is mergeable but remains unverifiable.
-func Incomplete(moduleDir, reason string) (State, error) {
-	return IncompleteEnv(moduleDir, reason, os.Environ())
+// observation did not complete. Process must identify that contributing process
+// uniquely and consistently across every observation in a merge.
+func Incomplete(moduleDir, process, reason string) (Observation, error) {
+	return IncompleteEnv(moduleDir, process, reason, os.Environ())
 }
 
 // IncompleteEnv is Incomplete with env as the complete process environment.
-func IncompleteEnv(moduleDir, reason string, env []string) (State, error) {
+func IncompleteEnv(moduleDir, process, reason string, env []string) (Observation, error) {
+	if err := validateProcess(process); err != nil {
+		return Observation{}, err
+	}
 	if strings.TrimSpace(reason) == "" {
-		return State{}, fmt.Errorf("runtimeinputs: incomplete observation needs a reason")
+		return Observation{}, fmt.Errorf("runtimeinputs: incomplete observation needs a reason")
 	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	encoded, err := encode(manifest{Version: manifestVersion, Unverifiable: []string{reason}})
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
-	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	state, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	if err != nil {
+		return Observation{}, err
+	}
+	return newObservation(state, process, "incomplete"), nil
 }
 
 // Absolute revalidates state under moduleDir and returns equivalent evidence
 // whose path identities are all absolute. This permits sound cross-module merge.
-func Absolute(state State, moduleDir string) (State, error) {
-	return AbsoluteEnv(state, moduleDir, os.Environ())
+func Absolute(observation Observation, moduleDir string) (Observation, error) {
+	return AbsoluteEnv(observation, moduleDir, os.Environ())
 }
 
 // AbsoluteEnv is Absolute with env as the complete process environment used to
 // revalidate the input and compute the converted state.
-func AbsoluteEnv(state State, moduleDir string, env []string) (State, error) {
+func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Observation, error) {
+	if err := validateObservation(observation, false); err != nil {
+		return Observation{}, err
+	}
+	state := observation.State
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
-		return State{}, fmt.Errorf("runtimeinputs: incomplete state for absolute identities")
+		return Observation{}, fmt.Errorf("runtimeinputs: incomplete state for absolute identities")
 	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	current, err := currentWithNormalizedEnv(state.Manifest, moduleDir, normalized)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	if current != state {
-		return State{}, fmt.Errorf("runtimeinputs: state moved before absolute identity conversion")
+		return Observation{}, fmt.Errorf("runtimeinputs: state moved before absolute identity conversion")
 	}
 	m, err := decode(state.Manifest)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	if current.Unverifiable && current.Reason != "" {
 		seen := make(map[string]bool, len(m.Unverifiable)+1)
@@ -111,25 +138,37 @@ func AbsoluteEnv(state State, moduleDir string, env []string) (State, error) {
 	}
 	moduleDir, err = filepath.Abs(moduleDir)
 	if err != nil {
-		return State{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
+		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
 	for i, id := range m.Paths {
 		path, err := materializePath(moduleDir, id)
 		if err != nil {
-			return State{}, err
+			return Observation{}, err
 		}
 		m.Paths[i] = pathID{Kind: pathAbs, Path: path}
 	}
 	encoded, err := encode(m)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
-	return currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	converted, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	if err != nil {
+		return Observation{}, err
+	}
+	records := make([]processObservation, len(observation.processes))
+	for i, record := range observation.processes {
+		records[i] = processObservation{
+			process: record.process,
+			origin:  record.origin,
+			view:    absoluteProcessView(record.origin),
+		}
+	}
+	return sealObservation(converted, records, observation.empty), nil
 }
 
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and environment.
-func FromTestLog(log []byte, moduleDir, packageDir string, opts ...TestLogOption) (State, error) {
+func FromTestLog(log []byte, moduleDir, packageDir string, opts ...TestLogOption) (Observation, error) {
 	return FromTestLogEnv(log, moduleDir, packageDir, os.Environ(), opts...)
 }
 
@@ -138,7 +177,26 @@ type TestLogOption func(*testLogConfig)
 
 type testLogConfig struct {
 	excluded []pathID
+	process  string
 	err      error
+}
+
+// WithCompletedProcess asserts that process terminated normally and every
+// behavior-affecting observed-operation outcome agreed with its guarded value.
+// Process must identify that contributing process uniquely and consistently across
+// every observation in a merge. A caller lacking either fact must use Incomplete.
+func WithCompletedProcess(process string) TestLogOption {
+	return func(c *testLogConfig) {
+		if c.process != "" {
+			c.err = errors.New("runtimeinputs: duplicate completed process assertion")
+			return
+		}
+		if err := validateProcess(process); err != nil {
+			c.err = err
+			return
+		}
+		c.process = process
+	}
 }
 
 // WithExcludedPaths declares path exclusions (REQ-inputs-exclusions):
@@ -193,25 +251,28 @@ func (c *testLogConfig) excludes(id pathID) bool {
 
 // FromTestLogEnv is FromTestLog with env as the complete process environment
 // inherited by the observed test process.
-func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (State, error) {
+func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
 	var cfg testLogConfig
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	if cfg.err != nil {
-		return State{}, cfg.err
+		return Observation{}, cfg.err
+	}
+	if cfg.process == "" {
+		return Observation{}, errors.New("runtimeinputs: completed observation needs a process assertion")
 	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	moduleDir, err = filepath.Abs(moduleDir)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	packageDir, err = filepath.Abs(packageDir)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 
 	m := manifest{Version: manifestVersion}
@@ -219,11 +280,19 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	pathSeen := map[pathID]bool{}
 	unverifiableSeen := map[string]bool{}
 	cwd := packageDir
+	cwdChanged := false
 
-	s := bufio.NewScanner(strings.NewReader(string(log)))
-	for s.Scan() {
-		line := strings.TrimRight(s.Text(), "\r")
+	lines := bytes.Split(log, []byte{'\n'})
+	if len(lines) != 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	for _, raw := range lines {
+		line := string(raw)
+		if line == "# test log" {
+			continue
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
+			addUnverifiable(&m, unverifiableSeen, "malformed testlog line")
 			continue
 		}
 		op, name, ok := strings.Cut(line, " ")
@@ -237,6 +306,10 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				addUnverifiable(&m, unverifiableSeen, "non-UTF-8 environment name")
 				continue
 			}
+			if strings.ContainsAny(name, "\x00\r\n") {
+				addUnverifiable(&m, unverifiableSeen, "unrepresentable environment name")
+				continue
+			}
 			if processenv.EqualKey(name, "PWD") {
 				addUnverifiable(&m, unverifiableSeen, "process-local environment input: PWD")
 				continue
@@ -246,6 +319,8 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				m.Env = append(m.Env, name)
 			}
 		case "open":
+			ambiguousParent := hasParentTraversal(name)
+			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
@@ -259,7 +334,15 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				pathSeen[id] = true
 				m.Paths = append(m.Paths, id)
 			}
+			if ambiguousParent {
+				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
+			}
+			if relativeAfterChdir {
+				addUnverifiable(&m, unverifiableSeen, "relative runtime input after working-directory change: "+id.displayPath())
+			}
 		case "stat":
+			ambiguousParent := hasParentTraversal(name)
+			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
@@ -274,7 +357,14 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				m.Paths = append(m.Paths, id)
 			}
 			addUnverifiable(&m, unverifiableSeen, "stat metadata input: "+id.displayPath())
+			if ambiguousParent {
+				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
+			}
+			if relativeAfterChdir {
+				addUnverifiable(&m, unverifiableSeen, "relative runtime input after working-directory change: "+id.displayPath())
+			}
 		case "chdir":
+			ambiguousParent := hasParentTraversal(name)
 			p := resolvePath(cwd, name)
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
@@ -283,60 +373,139 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				pathSeen[id] = true
 				m.Paths = append(m.Paths, id)
 			}
+			addUnverifiable(&m, unverifiableSeen, "working-directory change")
+			if reason == "" && !cfg.excludes(id) && ambiguousParent {
+				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
+			}
 			cwd = p
+			cwdChanged = true
 		default:
-			addUnverifiable(&m, unverifiableSeen, "unrecognized testlog op: "+op)
+			if !utf8.ValidString(op) || strings.ContainsAny(op, "\x00\r\n") {
+				addUnverifiable(&m, unverifiableSeen, "unrepresentable testlog operation")
+			} else {
+				addUnverifiable(&m, unverifiableSeen, "unrecognized testlog op: "+op)
+			}
 		}
 	}
-	if err := s.Err(); err != nil {
-		return State{}, err
+	if len(log) != 0 && log[len(log)-1] != '\n' {
+		addUnverifiable(&m, unverifiableSeen, "malformed testlog line")
 	}
 	sortManifest(&m)
 	encoded, err := encode(m)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	st, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
-	return st, nil
+	return newObservation(st, cfg.process, "complete"), nil
 }
 
-// Merge revalidates independently completed runtime-input states against one current
-// module view, then returns their deterministic manifest union. Passing no states
+func validateProcess(process string) error {
+	if process == "" || !utf8.ValidString(process) || strings.ContainsAny(process, "\x00\r\n") {
+		return fmt.Errorf("runtimeinputs: invalid process identity %q", process)
+	}
+	return nil
+}
+
+func newObservation(state State, process, disposition string) Observation {
+	origin := processOrigin(state, process, disposition)
+	records := []processObservation{{process: process, origin: origin, view: origin}}
+	return sealObservation(state, records, false)
+}
+
+func processOrigin(state State, process, disposition string) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s", len(process), process, len(disposition), disposition, len(state.Manifest), state.Manifest, len(state.Digest), state.Digest))
+	return hex.EncodeToString(sum[:])
+}
+
+func absoluteProcessView(origin string) string {
+	sum := sha256.Sum256([]byte("absolute:" + origin))
+	return hex.EncodeToString(sum[:])
+}
+
+func sealObservation(state State, processes []processObservation, empty bool) Observation {
+	observation := Observation{State: state, processes: append([]processObservation(nil), processes...), empty: empty}
+	h := sha256.New()
+	fprintf(h, "manifest %s\ndigest %s\nunverifiable %t\nreason %s\nok %t\nempty %t\n", state.Manifest, state.Digest, state.Unverifiable, state.Reason, state.OK, empty)
+	for _, record := range observation.processes {
+		fprintf(h, "process %s %s %s\n", record.process, record.origin, record.view)
+	}
+	observation.seal = hex.EncodeToString(h.Sum(nil))
+	return observation
+}
+
+func validateObservation(observation Observation, _ bool) error {
+	if len(observation.processes) == 0 {
+		if observation.empty && observation.State.OK && observation.State.Manifest != "" && observation.State.Digest != "" {
+			if sealObservation(observation.State, nil, true).seal == observation.seal {
+				return nil
+			}
+			return errors.New("runtimeinputs: observation seal is invalid")
+		}
+		return errors.New("runtimeinputs: observation has no process provenance")
+	}
+	if !observation.State.OK || observation.State.Manifest == "" || observation.State.Digest == "" {
+		return errors.New("runtimeinputs: observation state is incomplete")
+	}
+	for _, record := range observation.processes {
+		if err := validateProcess(record.process); err != nil || record.origin == "" || record.view == "" {
+			return errors.New("runtimeinputs: observation process provenance is invalid")
+		}
+	}
+	if sealObservation(observation.State, observation.processes, observation.empty).seal != observation.seal {
+		return errors.New("runtimeinputs: observation seal is invalid")
+	}
+	return nil
+}
+
+// Merge revalidates independently completed runtime-input observations against one
+// current module view, then returns their deterministic manifest union. Process
+// identities must be unique and stable across the contributing process set. Passing no observations
 // deliberately produces the encoded observation-free manifest; structurally
 // unfinished, moved, or malformed states are rejected. A finalized state from
 // Incomplete is accepted as explicit unverifiable evidence.
-func Merge(moduleDir string, states ...State) (State, error) {
-	return MergeEnv(moduleDir, os.Environ(), states...)
+func Merge(moduleDir string, observations ...Observation) (Observation, error) {
+	return MergeEnv(moduleDir, os.Environ(), observations...)
 }
 
 // MergeEnv is Merge with env as the complete process environment used to
 // revalidate every input and compute the merged state.
-func MergeEnv(moduleDir string, env []string, states ...State) (State, error) {
+func MergeEnv(moduleDir string, env []string, observations ...Observation) (Observation, error) {
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
 	merged := manifest{Version: manifestVersion}
 	envSeen := map[string]bool{}
 	pathSeen := map[pathID]bool{}
 	unverifiableSeen := map[string]bool{}
-	for i, input := range states {
+	processes := map[string]processObservation{}
+	for i, observation := range observations {
+		if err := validateObservation(observation, false); err != nil {
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+		}
+		for _, record := range observation.processes {
+			if existing, ok := processes[record.process]; ok && existing != record {
+				return Observation{}, fmt.Errorf("runtimeinputs: conflicting observations for process %q", record.process)
+			}
+			processes[record.process] = record
+		}
+		input := observation.State
 		if !input.OK || input.Manifest == "" || input.Digest == "" {
-			return State{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
 		}
 		current, err := currentWithNormalizedEnv(input.Manifest, moduleDir, normalized)
 		if err != nil {
-			return State{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
 		if current != input {
-			return State{}, fmt.Errorf("runtimeinputs: merge input %d moved", i)
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d moved", i)
 		}
 		m, err := decode(input.Manifest)
 		if err != nil {
-			return State{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
 		for _, name := range m.Env {
 			if !envSeen[name] {
@@ -356,9 +525,18 @@ func MergeEnv(moduleDir string, env []string, states ...State) (State, error) {
 	}
 	result, err := encode(merged)
 	if err != nil {
-		return State{}, err
+		return Observation{}, err
 	}
-	return currentWithNormalizedEnv(result, moduleDir, normalized)
+	state, err := currentWithNormalizedEnv(result, moduleDir, normalized)
+	if err != nil {
+		return Observation{}, err
+	}
+	records := make([]processObservation, 0, len(processes))
+	for _, record := range processes {
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].process < records[j].process })
+	return sealObservation(state, records, len(records) == 0), nil
 }
 
 // Current recomputes the runtime-input digest for an encoded manifest.
@@ -470,9 +648,25 @@ func resolvePath(cwd, name string) string {
 	return filepath.Clean(filepath.Join(cwd, name))
 }
 
+func hasParentTraversal(name string) bool {
+	volume := filepath.VolumeName(name)
+	name = strings.TrimPrefix(name, volume)
+	for _, component := range strings.FieldsFunc(name, func(r rune) bool {
+		return r == '/' || filepath.Separator == '\\' && r == '\\'
+	}) {
+		if component == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func classifyPath(moduleDir, p string) (pathID, string) {
 	if !utf8.ValidString(p) {
 		return pathID{}, "non-UTF-8 runtime input path"
+	}
+	if strings.ContainsAny(p, "\x00\r\n") {
+		return pathID{}, "unrepresentable runtime input path"
 	}
 	if rel, ok := relUnder(moduleDir, p); ok {
 		return pathID{Kind: pathRel, Path: filepath.ToSlash(rel)}, ""
