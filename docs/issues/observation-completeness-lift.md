@@ -1,9 +1,6 @@
 # Completeness lift: assertion-vouched unverifiability needs subject-tier observability
 
-Lands: when a consumer needs unverifiable-by-file-I/O subjects served
-from a freshness cache with a smaller trust surface than a per-subject
-purity assertion, and accepts per-subject call-graph analysis cost for
-the observability proof.
+Lands: 4 of `docs/plans/observation-completeness-proof.md`.
 
 The idea: a caller-owned completeness assertion — "the producing
 harness observed every file and environment read of the subject's
