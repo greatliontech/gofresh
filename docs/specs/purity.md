@@ -44,3 +44,12 @@ record, never a hidden default that could mask a real external dependence. The
 recorded attribution is empty when absent, otherwise exactly `caller assertion`,
 `source directive`, or `caller assertion and source directive`; unknown attribution
 values confer no responsibility and cannot override unverifiability.
+
+**REQ-purity-observation-separation** (invariant): An observation-completeness
+assertion MUST NOT be treated as a purity assertion: it vouches that the recognized
+harness completed its observations, while the engine's separate observability proof
+establishes which reachable effects that stream can cover. It does not suppress
+runtime-manifest unverifiability or a closure effect outside the admitted observation
+set.
+
+Lands: 4.

@@ -39,14 +39,30 @@ result that is a measurement.
 current tree — one of valid, stale, or unverifiable.
 
 **fingerprint** (term): the recorded evidence a verdict is computed from — the
-subject's maximal source-closure hash, optional refinement evidence, any attributable
-purity assertion used to override unverifiability, the result kind selecting its
-applicable guards, and the value of every applicable guard.
+subject's maximal source-closure hash, optional refinement evidence, optional
+attributable observation-completeness assertion and observability proof evidence, any
+attributable purity assertion used to override unverifiability, the result kind
+selecting its applicable guards, and the value of every applicable guard.
 
 **refinement evidence** (term): an optional recording of a narrower sound source
 closure: its hash, unverifiable-dependence disposition, and stable strategy/version
 and subject identities. It can recover reuse after maximal closure drift but never
 substitute for the maximal closure recording.
+
+**observation-completeness assertion** (term): an attributable caller declaration
+that every process contributing to a subject's result ran under the recognized
+observation harness; that exactly one completed or incomplete observation was attached
+for each such process; and that every behavior-affecting outcome of an admitted
+operation agreed with the guarded value recorded for it, with any exceptional or
+partial outcome not derivable from that value making the process observation
+incomplete. It vouches for how the run was observed, not for which effects the subject
+can reach.
+
+**observability proof** (term): optional, caller-selected, versioned per-subject
+evidence that whole-program analysis found every behavior-affecting non-source effect
+reachable by the subject and proved each one representable by the recognized
+observation stream. It is an engine proof, distinct from the caller's
+observation-completeness assertion and from a purity assertion.
 
 **analysis view** (term): one bounded observation of selected source, build and
 environment inputs, purity assertions, and every derived analysis object used to
@@ -79,6 +95,46 @@ valid.
 > source or environment behind it has changed. Over-approximation — a spurious
 > stale or unverifiable — is always safe. Every other requirement serves this one.
 
+**REQ-fresh-observation-conjunction** (invariant): Closure-level external-input
+unverifiability MUST be suppressed by observation only when a recognized attributable
+observation-completeness assertion, compatible observability proof, completed runtime
+manifest, matching runtime digest, and every ordinary applicable guard all hold. The
+proof suppresses only the closure effects it proves observable; any runtime-manifest
+unverifiability or other closure blind spot still prevents validity. Purity remains a
+separate, broader caller-responsible override.
+
+Lands: 4.
+
+**REQ-fresh-observation-compatibility** (invariant): Recorded observability evidence
+MUST be usable only when its non-empty recognized strategy/version, subject identity,
+maximal closure hash, assertion attribution, and complete disposition agree with its
+integrity evidence. An unchanged maximal hash may retain compatible evidence; maximal
+drift requires current caller-selected proof analysis, and missing, cancelled,
+unrecognized, incomplete, or inconsistent evidence never suppresses
+unverifiability. Changing any proof rule that can change a disposition requires a new
+strategy/version identity even when source is unchanged.
+
+Lands: 4.
+
+**REQ-fresh-observation-data** (invariant): The observation-completeness assertion
+attribution and observability proof strategy/version, subject, disposition, and
+integrity evidence MUST be fingerprint constituents exposed as data beside refinement,
+purity, result kind, and guard values. They carry no engine-owned persistence or wire
+format. Empty assertion and proof evidence means the lift was not selected; partial,
+unknown, or internally inconsistent evidence confers no proof.
+
+Lands: 4.
+
+**REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
+explicitly by the caller for capture, checking, and producer validation. A producer
+captures the proof from the same pre-execution analysis view as its closure, attaches
+the completed runtime evidence after execution, and persists only after validation
+re-establishes every selected tier against the post-execution view. Historical
+recordings cannot be upgraded to observability evidence without rerunning the
+subject.
+
+Lands: 4.
+
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime
@@ -92,7 +148,9 @@ whose inputs are unchanged.
 
 **REQ-fresh-fingerprint-data** (structural): A fingerprint MUST be exposed as its
 constituent guard values, maximal closure hash, optional refinement evidence, and
-attributable purity assertion and result kind as data, carrying no persistence or wire format of its own — the caller owns how a
+optional attributable observation-completeness assertion and observability proof
+evidence, attributable purity assertion, and result kind as data, carrying no
+persistence or wire format of its own — the caller owns how a
 fingerprint is serialized and stored beside its result. Refinement support is
 explicit rather than inferred: a refined recording carries a non-empty recognized
 strategy/version identity and complete, internally consistent refined evidence; a

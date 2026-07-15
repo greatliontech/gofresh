@@ -107,8 +107,93 @@ another module.
 treated as evidence of the identities it observed, never as proof that every
 reachable input was observed — so a matching digest can move a logged input change to
 stale, but can never on its own promote a subject's closure-level file dependence to
-valid; absent an explicit completeness proof, a subject reaching an unobserved
-unverifiable dependence stays unverifiable.
+valid; absent the recognized attributable observation-completeness assertion and
+compatible observability proof required together by the freshness contract, a subject
+reaching an unobserved unverifiable dependence stays unverifiable.
+
+## Observation completeness
+
+**REQ-inputs-observable-read-set** (invariant): The read-only observability proof
+MUST model the Go test observation producer as exposing exactly the operation names
+`getenv`, `open`, `stat`, and `chdir`, starting after package initialization when user
+test-main flow calls into the harness; account for the producer omitting an
+empty identity or one containing a newline; `open` not encoding access flags; `stat`
+not recording returned metadata; every operation omitting its return values, byte
+counts, and errors; and mutation and child-process operations producing no record.
+The identity-only stream does not establish the outcome part of an
+observation-completeness assertion by itself. The toolchain guard pins producer
+behavior and the observability strategy identity pins the engine's interpretation
+of it. Against that model, the proof admits only subject-time `os.Getenv`,
+`os.LookupEnv`, `os.Open`, `os.ReadFile`, and
+`os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, free
+of carriage return and newline, and reproducibly resolvable. On a read-only file
+handle obtained from that admitted acquisition, only `Close`, `Name`, `Read`,
+`ReadAt`, and `Seek` are admitted. An admitted standard-library wrapper is classified
+atomically at its audited public operation: implementation-internal syscall or native
+steps solely realizing that same logged effect do not become duplicate subject
+effects, while callbacks, additional effects, and returned-value methods remain
+independently classified; any descriptor escape or unaudited implementation path
+blocks the proof. On a directory entry returned by an admitted `ReadDir`, only `Name`,
+`IsDir`, and `Type` are admitted. Every method of
+every result value is audited independently, unknown methods block, and metadata
+returning methods such as `File.Stat` and `DirEntry.Info` block because their complete
+values are not hashed. `File.ReadDir` also blocks because filesystem enumeration order
+is not represented by the canonical directory digest. Each admitted operation's
+behavior-affecting return values, byte counts, and errors must be established as
+derivable from its guarded environment value or hashed regular-file or sorted-directory
+value; an identity observation alone never establishes that fact. Every other
+environment, filesystem, network, process, metadata,
+mutation, direct-syscall, native, linked, or unknown effect blocks the proof;
+`os.Environ`, `os.OpenFile`, `os.Stat`, `os.Lstat`, process execution, and every
+filesystem mutation are explicitly outside the read-only set. An addition to either
+the producer hook set or the admitted set is a contract change, never inferred from a
+matching diagnostic string.
+
+Lands: 4.
+
+**REQ-inputs-completed-observation** (invariant): Testlog bytes MUST become a completed
+observation only through a construction path gated by the caller's verified normal
+termination of that producing process and its evidence that every behavior-affecting
+admitted-operation outcome agreed with the guarded value. EOF, including EOF exactly
+at a line boundary, is neither termination nor outcome evidence. Exactly one completed
+or incomplete observation is required for every process contributing to the result. A
+process without both gates is represented through the incomplete-observation
+constructor; merge refuses a state that claims completion without them, and one
+incomplete child keeps the deterministic union unverifiable.
+
+Lands: 3.
+
+**REQ-inputs-observation-disposition** (invariant): Runtime-manifest
+unverifiability MUST NOT be suppressible by an observability proof. Malformed or unrecognized
+records, incomplete observations, `stat` metadata, `chdir`, `PWD`, unrepresentable
+identities, unhashable values, external directories or symlink targets, and unknown
+or caller-supplied reasons all remain unverifiable. Thus proof can replace only the
+closure-level conservatism for its admitted effects; the manifest must independently
+be complete, recognized, and fully hashable.
+
+Lands: 3.
+
+**REQ-inputs-path-congruence** (invariant): A validity-bearing observed path identity
+MUST materialize to the same filesystem object under the checker that the producing
+operation addressed under kernel path-walk semantics. The observation is
+unverifiable when this cannot be established, including any raw path with a `..`
+component that may cross a symlink before lexical cleaning and any relative path
+after a working-directory change. Lexical normalization alone never discharges this
+obligation.
+
+Lands: 3.
+
+**REQ-inputs-fresh-mutation** (invariant): A later observability extension MAY admit
+a filesystem mutation only when subject-local value and alias analysis proves its
+target was freshly created within the same observed run, every result used as an
+existence or metadata probe is bounded, every read of the target is derived solely
+from guarded source or runtime inputs, and destructive cleanup cannot erase a
+pre-existing consumed value before finalization. `OpenFile` additionally requires
+proved non-mutating flags or a proved-fresh target. Rename, hard-link, symlink, direct
+syscall, and process operations remain inadmissible because they can transport or
+introduce unobserved state.
+
+Lands: 5.
 
 **REQ-inputs-absent-asserted** (behavior): A fingerprint carrying no runtime-input
 manifest MUST be read as the caller's assertion that the subject's run observed no

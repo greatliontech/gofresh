@@ -21,10 +21,11 @@ proof.
 A full implementation was built and withdrawn (design 1, adversarial
 review). A maximal-tier redesign was then attacked on paper and
 refuted before implementation (design 2). What follows is the
-surviving structure and the complete obligation set any third attempt
-must discharge. The reviews' verdict converged: **observability is a
-call-graph-tier property.** No syntactic maximal-tier scan can carry
-the proof alone; the maximal tier can at most fail closed.
+surviving structure and the obligations those reviews exposed; the
+canonical specs now carry the settled contract. The reviews' verdict
+converged: **observability is a call-graph-tier property.** No
+syntactic maximal-tier scan can carry the proof alone; the maximal
+tier can at most fail closed.
 
 ### Survives (use in any future design)
 
@@ -55,9 +56,8 @@ the proof alone; the maximal tier can at most fail closed.
    symbol table yet records no identity: env/testdata are not source,
    so every guard holds across a change. No maximal-tier discharge
    exists; reads reachable only from init need call-graph evidence.
-   This is a third modulo on the caller assertion beside direct
-   syscalls and foreign code — and unlike those, one the engine must
-   prove absent, not the caller.
+   Like direct syscalls and foreign code, this is an engine-proved
+   exclusion rather than a caller-asserted exception.
 2. **Mutation return values are unlogged existence probes.** No
    mutation op calls testlog. `os.Mkdir` → EEXIST, `os.Remove` →
    ENOENT are unobserved reads of filesystem state a test can branch
@@ -82,39 +82,46 @@ the proof alone; the maximal tier can at most fail closed.
    today (such subjects stay unverifiable); validity-bearing under a
    lift. Any lift must resolve identities physically or refuse `..`
    traversals it cannot prove symlink-free.
+7. **Identity records do not capture operation outcomes.** Testlog
+   records a path, not the bytes returned, byte count, or error. A
+   transient short read or `EIO` can shape a cached result while
+   finalization later hashes unchanged bytes. Identity-only evidence
+   therefore cannot establish completeness: every behavior-affecting
+   outcome must agree with the guarded value, or the process
+   observation is incomplete.
 
-Consequence for the admitted set: at the maximal tier it shrinks to
-logged read operations only — open (read-only provably, so not
-OpenFile), ReadFile, ReadDir, Stat, Lstat, Getenv, LookupEnv — and
-**no mutation class at all**; `testing.TempDir`-idiom suites are
-served only by the refined-tier extension below.
+Consequence for the subject-tier admitted set: it contains only logged
+value-bounded read operations — open (read-only provably, so not
+OpenFile), ReadFile, sorted ReadDir, Getenv, and LookupEnv — with
+complete outcome evidence and **no metadata or mutation class at
+all**. The maximal tier only rejects; `testing.TempDir`-idiom suites
+are served only by the refined-tier extension below.
 
 ### Specification obligations (beyond the channels)
 
 - **Enumerate suppressible manifest-unverifiability reasons.** The
-  lift may suppress only reasons whose protection the observability
-  proof replaces; "malformed testlog line" / "unrecognized op" are
-  evidence the completeness assertion itself failed and are never
-  suppressible; external-directory identities digest no content and
-  their suppression is unsound.
+  settled set is empty: malformed or unrecognized records,
+  incomplete processes, metadata-only observations, ambiguous or
+  unhashable identities, external directories, and symlink targets
+  all remain blocking.
 - **Version the observability disposition** (as
   `gofresh/declaration-rta@1` versions refinement): an engine fix to
   the class analysis must invalidate recorded dispositions computed
   under the buggy analysis even when the maximal hash is unchanged;
   "conservatively clear unrecognized evidence" is unenforceable
   without a recorded identity to fail to recognize.
-- **Child-observation merge needs a termination gate**: a child log
-  truncated at a line boundary is indistinguishable from complete;
-  the caller must gate each merged child on verified normal
-  termination or route it through the incomplete-state constructor.
+- **Child-observation merge needs termination and outcome gates**: a
+  child log truncated at a line boundary is indistinguishable from
+  complete, and identity records do not vouch for operation results;
+  the caller must attach exactly one completed or incomplete
+  observation for every contributing process.
 - **Method-set audit rule**: every method of every type reachable
   from an admitted symbol's results must itself be observable or
-  effect-free (File.Chdir logs; a read-only handle bounds Truncate —
-  survivable this round by luck, so state it as the audit rule).
-- **Exec blocks unconditionally** at every tier; recoveries are
-  caller-owned (merged child observations, or an attributable
-  child-coverage assertion — same responsibility shape as purity,
-  narrower scope).
+  effect-free; metadata, mutation, descriptor escape, and unknown
+  methods block even when the originating handle is read-only.
+- **Exec blocks unconditionally** at every tier. Child observations
+  can complete the child's runtime manifest but cannot guard the
+  parent-visible spawn, status, signal, or communication outcome.
 - Amend REQ-inputs-evidence-not-proof to license the recorded
   assertion+proof pair and say which word governs; the class table
   and the actual testlog hook set become contract.

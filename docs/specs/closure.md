@@ -108,6 +108,20 @@ loading, dependency enumeration, and every other source-selection step use the
 caller's executable build flags, so both closures describe the binary whose
 build-configuration guard is recorded rather than a different default build.
 
+**REQ-closure-observability-analysis** (invariant): An observability proof MUST use the
+same whole-program SSA, standard-library bodies, generic instantiations, executable
+build selection, and subject attribution required of declaration-RTA, but preserves
+root provenance: any external effect attributable to a package initializer or to
+user test-main flow rather than the subject is outside subject-time observation and
+blocks the proof, while subject flow is classified against the admitted observation
+set. Every reachable call and effect is classified to the walk's end; the preferred
+human diagnostic is derived afterward and can never select which facts participate. A complete maximal-tier negative scan
+may reject opaque linkage, native code, process execution, dot imports, unaudited
+standard-library access, or other unclassified external-capable syntax, but can never
+grant the proof on its own.
+
+Lands: 4.
+
 **REQ-closure-batch-equivalence** (invariant): Sharing reachability work across an
 analysis view's refined subjects MUST produce, for every subject, the same reachable
 functions, widening disposition, closure hash, and unverifiability as analyzing that
@@ -119,6 +133,14 @@ rather than growing with every subject in the view.
 The same equivalence applies to maximal source identities: a batched subject's
 source-file set is exactly the set an independent maximal view would expose,
 while the view-wide set is their union.
+
+**REQ-closure-observability-batch-equivalence** (invariant): Sharing observability
+analysis across subjects MUST yield exactly the proof disposition, complete effect set,
+root provenance, and diagnostic that independent analysis of each subject under the
+same view would yield. No effect or proof fact reached only by one subject can confer
+or deny another subject's proof.
+
+Lands: 4.
 
 ## Cross-module dependencies
 
