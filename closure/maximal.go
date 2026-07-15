@@ -100,13 +100,23 @@ func maximalSubjectHash(packageHash string, subject Subject) string {
 // package-wide hit applies to every subject sharing this maximal closure; the
 // safe failure direction is a spurious unverifiable verdict.
 func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, bool, error) {
+	effects, selected, unrefinable, err := h.maximalExternalEffects(pkgPath)
+	return len(effects) != 0, selected, unrefinable, err
+}
+
+func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, string, bool, error) {
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
-		return false, "", false, err
+		return nil, "", false, err
 	}
+	var effects []externalEffect
 	var selected string
 	unrefinable := false
-	record := func(reason string) {
+	record := func(scan maximalEffectScan) {
+		for _, effect := range scan.effects {
+			effects = appendExternalEffect(effects, effect)
+		}
+		reason := scan.preferred
 		if reason == "" {
 			return
 		}
@@ -115,36 +125,32 @@ func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, bool, error)
 			selected = reason
 		}
 	}
-	testingReason, err := h.maximalTestingTypeReason(pkgPath)
+	testingEffects, err := h.maximalTestingTypeEffects(pkgPath)
 	if err != nil {
-		return false, "", false, err
+		return nil, "", false, err
 	}
-	record(testingReason)
+	record(testingEffects)
 	for _, pkg := range pkgs {
 		if err := h.contextErr(); err != nil {
-			return false, "", false, err
+			return nil, "", false, err
 		}
 		if pkg.Standard || pkg.Module == nil || pkg.isGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if reason := maximalPackageExternalReason(&pkg); reason != "" {
-			record(reason)
-		}
+		record(maximalPackageExternalEffects(&pkg))
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
 		for _, name := range files {
 			if err := h.contextErr(); err != nil {
-				return false, "", false, err
+				return nil, "", false, err
 			}
-			reason, err := maximalFileReason(filepath.Join(pkg.Dir, name))
+			scan, err := maximalFileEffects(filepath.Join(pkg.Dir, name))
 			if err != nil {
-				return false, "", false, err
+				return nil, "", false, err
 			}
-			if reason != "" {
-				record(reason)
-			}
+			record(scan)
 		}
 	}
-	return selected != "", selected, unrefinable, nil
+	return effects, selected, unrefinable, nil
 }
 
 func preferMaximalReason(candidate, current string) bool {
@@ -157,8 +163,13 @@ func preferMaximalReason(candidate, current string) bool {
 }
 
 func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
-	if reason, ok := h.maximalTesting[pkgPath]; ok {
-		return reason, nil
+	scan, err := h.maximalTestingTypeEffects(pkgPath)
+	return scan.preferred, err
+}
+
+func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
+	if scan, ok := h.maximalTesting[pkgPath]; ok {
+		return scan, nil
 	}
 	loaded, err := packages.Load(&packages.Config{
 		Context:    h.ctx,
@@ -169,15 +180,15 @@ func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
 		BuildFlags: append([]string(nil), h.buildFlags...),
 	}, pkgPath)
 	if err != nil {
-		return "", err
+		return maximalEffectScan{}, err
 	}
-	selected := ""
+	var scan maximalEffectScan
 	for _, pkg := range loaded {
 		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
 			continue
 		}
 		for _, packageErr := range pkg.Errors {
-			return "", fmt.Errorf("closure: load %s: %s", pkgPath, packageErr)
+			return maximalEffectScan{}, fmt.Errorf("closure: load %s: %s", pkgPath, packageErr)
 		}
 		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(node ast.Node) bool {
@@ -194,32 +205,56 @@ func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
 				if object == nil || object.Pkg() == nil || object.Pkg().Path() != "testing" {
 					return true
 				}
-				reason := classBReason("testing", object.Name())
-				if reason != "" && (selected == "" || reason < selected) {
-					selected = reason
+				effect, ok := classBEffect("testing", object.Name())
+				if ok {
+					scan.add(effect)
+					if scan.preferred == "" || effect.reason < scan.preferred {
+						scan.preferred = effect.reason
+					}
 				}
 				return true
 			})
 		}
 	}
-	h.maximalTesting[pkgPath] = selected
-	return selected, nil
+	h.maximalTesting[pkgPath] = scan
+	return scan, nil
 }
 
 func maximalPackageExternalReason(pkg *listPkg) string {
+	return maximalPackageExternalEffects(pkg).preferred
+}
+
+func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
+	var scan maximalEffectScan
 	if hasExternalCgoMeta(pkg) {
-		return "reaches cgo external library"
+		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
+		effect.unrefinable = true
+		scan.add(effect)
+		scan.preferred = effect.reason
 	}
 	if pkg != nil && len(pkg.SysoFiles) != 0 {
-		return "reaches non-standard system object"
+		effect := opaqueExternalEffect(externalEffectNative, "reaches non-standard system object")
+		effect.unrefinable = true
+		scan.add(effect)
+		if scan.preferred == "" {
+			scan.preferred = effect.reason
+		}
 	}
 	if hasCgoCallbackBlindspot(pkg) {
-		return "reaches cgo or native source"
+		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo or native source")
+		scan.add(effect)
+		if scan.preferred == "" {
+			scan.preferred = effect.reason
+		}
 	}
 	if pkg != nil && len(pkg.SFiles) != 0 {
-		return "reaches non-standard assembly"
+		effect := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")
+		scan.add(effect)
+		if scan.preferred == "" {
+			scan.preferred = effect.reason
+		}
 	}
-	return ""
+	return scan
 }
 
 func maximalFileReason(filename string) (string, error) {
@@ -314,6 +349,76 @@ func maximalFileReason(filename string) (string, error) {
 		return "reaches " + potentialExternal + " (potential external dependence)", nil
 	}
 	return "", nil
+}
+
+func maximalFileEffects(filename string) (maximalEffectScan, error) {
+	preferred, err := maximalFileReason(filename)
+	if err != nil {
+		return maximalEffectScan{}, err
+	}
+	scan := maximalEffectScan{preferred: preferred}
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return maximalEffectScan{}, err
+	}
+	if strings.Contains(string(content), "//go:wasmimport") {
+		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
+		effect.unrefinable = true
+		scan.add(effect)
+	}
+	if strings.Contains(string(content), "//go:linkname") {
+		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)
+	if err != nil {
+		return maximalEffectScan{}, fmt.Errorf("closure: parse %s: %w", filename, err)
+	}
+	aliases := make(map[string]string, len(file.Imports))
+	for _, spec := range file.Imports {
+		pkgPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return maximalEffectScan{}, fmt.Errorf("closure: parse import in %s: %w", filename, err)
+		}
+		alias := path.Base(pkgPath)
+		if spec.Name != nil {
+			alias = spec.Name.Name
+		}
+		aliases[alias] = pkgPath
+		if pkgPath == "testing" {
+			if alias == "." {
+				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
+			}
+			continue
+		}
+		if alias == "." || alias == "_" {
+			if isAlwaysExternalPackage(pkgPath) {
+				scan.add(trueExternalEffect(pkgPath))
+			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
+				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
+			}
+		}
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		sel, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		pkgPath := aliases[ident.Name]
+		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
+			scan.add(effect)
+		} else if pkgPath != "testing" && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+		}
+		return true
+	})
+	for _, effect := range testingMethodEffects(file, aliases) {
+		scan.add(effect)
+	}
+	return scan, nil
 }
 
 func testingMethodReason(file *ast.File, aliases map[string]string) string {
@@ -430,6 +535,114 @@ func testingMethodReasonWithHandleTypes(file *ast.File, aliases map[string]strin
 		}
 	}
 	return ""
+}
+
+func testingMethodEffects(file *ast.File, aliases map[string]string) []externalEffect {
+	if file == nil {
+		return nil
+	}
+	handleTypes := testingHandleTypeNames(file, aliases)
+	var effects []externalEffect
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Type.Params == nil || function.Body == nil {
+			continue
+		}
+		receivers := map[string]bool{}
+		for _, field := range function.Type.Params.List {
+			if isTestingHandleType(field.Type, aliases, handleTypes) {
+				for _, name := range field.Names {
+					receivers[name.Name] = true
+				}
+			}
+		}
+		changed := true
+		for changed {
+			changed = false
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				if specification, ok := node.(*ast.ValueSpec); ok {
+					for i, value := range specification.Values {
+						name, ok := identifierName(value)
+						if ok && receivers[name] && i < len(specification.Names) && !receivers[specification.Names[i].Name] {
+							receivers[specification.Names[i].Name] = true
+							changed = true
+						}
+					}
+				}
+				assignment, ok := node.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for i, rhs := range assignment.Rhs {
+					name, ok := identifierName(rhs)
+					if !ok || !receivers[name] || i >= len(assignment.Lhs) {
+						continue
+					}
+					if lhs, ok := assignment.Lhs[i].(*ast.Ident); ok && !receivers[lhs.Name] {
+						receivers[lhs.Name] = true
+						changed = true
+					}
+				}
+				return true
+			})
+		}
+		parents := make(map[ast.Node]ast.Node)
+		var stack []ast.Node
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if node == nil {
+				stack = stack[:len(stack)-1]
+				return false
+			}
+			if len(stack) != 0 {
+				parents[node] = stack[len(stack)-1]
+			}
+			stack = append(stack, node)
+			return true
+		})
+		escape := opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.AssignStmt:
+				for i, rhs := range node.Rhs {
+					name, ok := identifierName(rhs)
+					if ok && receivers[name] && i < len(node.Lhs) {
+						if _, ok := node.Lhs[i].(*ast.Ident); !ok {
+							effects = appendExternalEffect(effects, escape)
+						}
+					}
+				}
+			case *ast.CallExpr:
+				for _, argument := range node.Args {
+					if name, ok := identifierName(argument); ok && receivers[name] {
+						effects = appendExternalEffect(effects, escape)
+					}
+				}
+			case *ast.ReturnStmt:
+				for _, result := range node.Results {
+					if name, ok := identifierName(result); ok && receivers[name] {
+						effects = appendExternalEffect(effects, escape)
+					}
+				}
+			case *ast.Ident:
+				if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
+					effects = appendExternalEffect(effects, escape)
+				}
+			}
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, ok := selector.X.(*ast.Ident)
+			if !ok || !receivers[receiver.Name] {
+				return true
+			}
+			if effect, ok := classBEffect("testing", selector.Sel.Name); ok {
+				effects = appendExternalEffect(effects, effect)
+			}
+			return true
+		})
+	}
+	return effects
 }
 
 func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]ast.Node) bool {
@@ -577,12 +790,16 @@ func packageHasClassifiedExternalAPI(pkgPath string) bool {
 }
 
 func trueReason(pkgPath string) string {
+	return trueExternalEffect(pkgPath).reason
+}
+
+func trueExternalEffect(pkgPath string) externalEffect {
 	switch {
 	case pkgPath == "plugin":
-		return "reaches plugin"
+		return externalEffect{kind: externalEffectPlugin, packagePath: pkgPath, reason: "reaches plugin"}
 	case pkgPath == "net" || strings.HasPrefix(pkgPath, "net/"):
-		return "reaches " + pkgPath + " (network I/O)"
+		return externalEffect{kind: externalEffectNetwork, packagePath: pkgPath, reason: "reaches " + pkgPath + " (network I/O)"}
 	default:
-		return "reaches " + pkgPath + " (external system call)"
+		return externalEffect{kind: externalEffectNative, packagePath: pkgPath, reason: "reaches " + pkgPath + " (external system call)"}
 	}
 }

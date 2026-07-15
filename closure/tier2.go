@@ -433,6 +433,7 @@ func (h *Hasher) closureFromTier2(pkgPath string, tr tier2Result) (Closure, erro
 
 type tier2Result struct {
 	contribs     []string
+	effects      []externalEffect
 	widen        bool
 	widenReason  string
 	unverifiable bool
@@ -645,12 +646,13 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 			if idx == nil || !idx.std {
 				continue
 			}
-			reason := classBReasonForFunction(target)
-			if reason == "" && !isSourceOnlyStandardPackage(idx.path) {
-				reason = "reaches unaudited standard operation " + idx.path + "." + target.Name()
+			effect, ok := classBEffectForFunction(target)
+			if !ok && !isSourceOnlyStandardPackage(idx.path) {
+				effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, target.Name(), "reaches unaudited standard operation "+idx.path+"."+target.Name())
+				ok = true
 			}
-			if reason != "" {
-				a.markUnverifiable(reason)
+			if ok {
+				a.recordExternalEffect(effect)
 			}
 		}
 	}
@@ -753,6 +755,7 @@ type tier2Analyzer struct {
 	scanned     map[*ssa.Function]bool
 	seenContrib map[string]bool
 	contribs    []string
+	effects     []externalEffect
 
 	widen        bool
 	widenReason  string
@@ -1080,17 +1083,22 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		return
 	}
 	a.scanned[fn] = true
-	suppressNestedFileIO := idx.std && isFileIOReason(classBReasonForFunction(fn))
+	classified, classifiedOK := classBEffectForFunction(fn)
+	suppressNestedFileIO := idx.std && classifiedOK && classified.kind == externalEffectFileIO
 	if !idx.std && idx.wasmImport {
-		a.markUnverifiable("reaches go:wasmimport")
+		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
+		effect.unrefinable = true
+		a.recordExternalEffect(effect)
 	}
 	if idx.cache && hasExternalCgoMeta(idx.meta) {
-		a.markUnverifiable("reaches cgo external library")
+		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
+		effect.unrefinable = true
+		a.recordExternalEffect(effect)
 	}
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && isFileIOReason(classBReasonForFunction(fn)) {
+	if idx.std && classifiedOK && classified.kind == externalEffectFileIO {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -1162,7 +1170,7 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	case *ssa.Global:
 		if obj := x.Object(); obj != nil {
 			if callerIdx != nil && !callerIdx.std && obj.Pkg() != nil && isStdImportPath(obj.Pkg().Path()) {
-				a.markUnverifiable("reaches standard global " + obj.Pkg().Path() + "." + obj.Name())
+				a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
 			}
 			a.enqueueObject(obj)
 		}
@@ -1178,32 +1186,40 @@ func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, ins
 	case *ssa.MakeInterface:
 		a.addInterfaceMethodSet(x.X.Type())
 	case *ssa.Field:
-		if reason := testingRuntimeFieldReason(x.X.Type(), x.Field); reason != "" {
-			a.markUnverifiable(reason)
+		if effect, ok := testingRuntimeFieldEffect(x.X.Type(), x.Field); ok {
+			a.recordExternalEffect(effect)
 		}
 	case *ssa.FieldAddr:
-		if reason := testingRuntimeFieldReason(x.X.Type(), x.Field); reason != "" {
-			a.markUnverifiable(reason)
+		if effect, ok := testingRuntimeFieldEffect(x.X.Type(), x.Field); ok {
+			a.recordExternalEffect(effect)
 		}
 	}
 }
 
 func testingRuntimeFieldReason(t types.Type, index int) string {
+	effect, ok := testingRuntimeFieldEffect(t, index)
+	if !ok {
+		return ""
+	}
+	return effect.reason
+}
+
+func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
 		t = pointer.Elem()
 	}
 	named, ok := types.Unalias(t).(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
-		return ""
+		return externalEffect{}, false
 	}
 	structure, ok := named.Underlying().(*types.Struct)
 	if !ok || index < 0 || index >= structure.NumFields() {
-		return ""
+		return externalEffect{}, false
 	}
 	if name := structure.Field(index).Name(); name == "N" {
-		return "reaches testing.B.N (test runtime configuration)"
+		return symbolExternalEffect(externalEffectTestRuntime, "testing", "B.N", "reaches testing.B.N (test runtime configuration)"), true
 	}
-	return ""
+	return externalEffect{}, false
 }
 
 func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site ssa.CallInstruction, fromRTA, suppressNestedFileIO bool) {
@@ -1230,23 +1246,26 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if obj := callee.Object(); obj != nil {
 		name = obj.Name()
 	}
-	reason := classBReason(pkgPath, name)
+	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
-	if reason == "" && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
-		reason = "reaches unaudited standard operation " + pkgPath + "." + name
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
+		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+		classified = true
 	}
 	if osOpenFileMayMutate(callee, pkgPath, name, c) {
-		reason = "reaches os.OpenFile (filesystem mutation)"
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
+		classified = true
 	}
-	if reason == "" && syscallOpenMayCreate(pkgPath, name, c) {
-		reason = "reaches " + pkgPath + "." + name + " (filesystem mutation)"
+	if !classified && syscallOpenMayCreate(pkgPath, name, c) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
+		classified = true
 	}
-	if reason != "" {
-		if callerStd && isFilesystemMutationReason(reason) {
+	if classified {
+		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
 			return
 		}
-		if !(suppressNestedFileIO && isFileIOReason(reason)) {
-			a.markUnverifiable(reason)
+		if !(suppressNestedFileIO && effect.kind == externalEffectFileIO) {
+			a.recordExternalEffect(effect)
 		}
 	}
 	calleeStd := isStdImportPath(pkgPath)
@@ -1400,8 +1419,8 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	a.addReverseLinknameTargets(obj)
 	if fn, ok := obj.(*types.Func); ok {
-		if reason := classBReason(obj.Pkg().Path(), obj.Name()); reason != "" {
-			a.markUnverifiable(reason)
+		if effect, ok := classBEffect(obj.Pkg().Path(), obj.Name()); ok {
+			a.recordExternalEffect(effect)
 		}
 		if ssaFn := a.prog.prog.FuncValue(fn); ssaFn != nil {
 			a.scanFunction(ssaFn)
@@ -1503,12 +1522,13 @@ func (a *tier2Analyzer) addLinknameTarget(target string) {
 		return
 	}
 	pkgPath, name := target[:lastDot], target[lastDot+1:]
-	reason := classBReason(pkgPath, name)
-	if reason == "" && isStdImportPath(pkgPath) {
-		reason = "reaches standard linkname target " + target
+	effect, classified := classBEffect(pkgPath, name)
+	if !classified && isStdImportPath(pkgPath) {
+		effect = symbolExternalEffect(externalEffectLinkage, pkgPath, name, "reaches standard linkname target "+target)
+		classified = true
 	}
-	if reason != "" {
-		a.markUnverifiable(reason)
+	if classified {
+		a.recordExternalEffect(effect)
 	}
 	obj := a.objByName[pkgPath+"."+name]
 	if obj == nil {
@@ -1613,7 +1633,9 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			continue
 		}
 		if idx.wasmImport {
-			a.markUnverifiable("reaches go:wasmimport")
+			effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
+			effect.unrefinable = true
+			a.recordExternalEffect(effect)
 		}
 		if idx.mutable {
 			for _, n := range idx.imports {
@@ -1621,7 +1643,9 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			}
 		}
 		if hasExternalCgoMeta(idx.meta) {
-			a.markUnverifiable("reaches cgo external library")
+			effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
+			effect.unrefinable = true
+			a.recordExternalEffect(effect)
 		}
 		if idx.mutable {
 			if hasCgoCallbackBlindspot(idx.meta) {
@@ -1676,11 +1700,12 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			}
 		}
 		var externalASMReason string
+		var externalASMEffects []externalEffect
 		env := os.Environ()
 		if a.h != nil {
 			env = a.h.env
 		}
-		asmCalls, computed, opaque, includes, err := asmCallTargetsObservedEnv(&externalASMReason, idx.meta.Dir, env, idx.meta.SFiles, a.buildFlags...)
+		asmCalls, computed, opaque, includes, err := asmCallTargetsObservedEffectsEnv(&externalASMReason, &externalASMEffects, idx.meta.Dir, env, idx.meta.SFiles, a.buildFlags...)
 		if err != nil {
 			return err
 		}
@@ -1695,8 +1720,14 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 		if opaque {
 			a.requestWiden("opaque asm preprocessing in " + idx.id)
 		}
-		if !idx.std && externalASMReason != "" {
-			a.markUnverifiable(externalASMReason)
+		if !idx.std {
+			for _, effect := range externalASMEffects {
+				if effect.reason == externalASMReason {
+					a.recordExternalEffect(effect)
+				} else {
+					a.collectExternalEffect(effect)
+				}
+			}
 		}
 		for _, target := range asmCalls {
 			a.addASMTarget(idx, target)
@@ -1769,20 +1800,28 @@ func (a *tier2Analyzer) addASMTarget(idx *pkgIndex, target string) {
 		a.requestWiden("unresolved asm call target " + target)
 		return
 	}
-	if reason := standardASMTargetReason(obj); reason != "" {
-		a.markUnverifiable(reason)
+	if effect, ok := standardASMTargetEffect(obj); ok {
+		a.recordExternalEffect(effect)
 	}
 	a.enqueueObject(obj)
 }
 
 func standardASMTargetReason(obj types.Object) string {
-	if obj == nil || obj.Pkg() == nil || !isStdImportPath(obj.Pkg().Path()) {
+	effect, ok := standardASMTargetEffect(obj)
+	if !ok {
 		return ""
 	}
-	if reason := classBReason(obj.Pkg().Path(), obj.Name()); reason != "" {
-		return reason
+	return effect.reason
+}
+
+func standardASMTargetEffect(obj types.Object) (externalEffect, bool) {
+	if obj == nil || obj.Pkg() == nil || !isStdImportPath(obj.Pkg().Path()) {
+		return externalEffect{}, false
 	}
-	return "reaches standard assembly target " + obj.Pkg().Path() + "." + obj.Name()
+	if effect, ok := classBEffect(obj.Pkg().Path(), obj.Name()); ok {
+		return effect, true
+	}
+	return symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard assembly target "+obj.Pkg().Path()+"."+obj.Name()), true
 }
 
 func (a *tier2Analyzer) lookupASMTarget(idx *pkgIndex, prefix, name string) types.Object {
@@ -1927,6 +1966,12 @@ func (a *tier2Analyzer) requestWiden(reason string) {
 }
 
 func (a *tier2Analyzer) markUnverifiable(reason string) {
+	a.recordExternalEffect(opaqueExternalEffect(externalEffectOpaque, reason))
+}
+
+func (a *tier2Analyzer) recordExternalEffect(effect externalEffect) {
+	a.collectExternalEffect(effect)
+	reason := effect.reason
 	// Prefer a non-file-I/O reason when several apply: file I/O is the most common
 	// and least specific external dependence, so a network/plugin/cgo cause is the
 	// more informative one to surface.
@@ -1936,6 +1981,12 @@ func (a *tier2Analyzer) markUnverifiable(reason string) {
 		a.reason = reason
 	}
 	a.unverifiable = true
+}
+
+func (a *tier2Analyzer) collectExternalEffect(effect externalEffect) bool {
+	before := len(a.effects)
+	a.effects = appendExternalEffect(a.effects, effect)
+	return len(a.effects) != before
 }
 
 func unverifiableReasonRank(reason string) int {
@@ -1959,7 +2010,7 @@ func isRefinementSourceOnlyStandardPackage(pkgPath string) bool {
 
 func (a *tier2Analyzer) result() tier2Result {
 	sort.Strings(a.contribs)
-	return tier2Result{contribs: a.contribs, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
+	return tier2Result{contribs: a.contribs, effects: append([]externalEffect(nil), a.effects...), widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
 }
 
 func isFileIOReason(reason string) bool {
@@ -1970,16 +2021,24 @@ func isFilesystemMutationReason(reason string) bool {
 	return strings.Contains(reason, "mutation")
 }
 
-func classBReasonForFunction(fn *ssa.Function) string {
+func classBEffectForFunction(fn *ssa.Function) (externalEffect, bool) {
 	if fn == nil {
-		return ""
+		return externalEffect{}, false
 	}
 	pkgPath := funcPkgPath(fn)
 	name := fn.Name()
 	if obj := fn.Object(); obj != nil {
 		name = obj.Name()
 	}
-	return classBReason(pkgPath, name)
+	return classBEffect(pkgPath, name)
+}
+
+func classBReasonForFunction(fn *ssa.Function) string {
+	effect, ok := classBEffectForFunction(fn)
+	if !ok {
+		return ""
+	}
+	return effect.reason
 }
 
 func osOpenFileMayMutate(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon) bool {
@@ -2161,69 +2220,6 @@ func typeUsesUnsafePointer(t types.Type) bool {
 	return found
 }
 
-func classBReason(pkgPath, name string) string {
-	if pkgPath == "fmt" {
-		switch name {
-		case "Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln":
-			return "reaches fmt." + name + " (standard input)"
-		case "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln":
-			return "reaches fmt." + name + " (formatted output)"
-		}
-	}
-	if pkgPath == "os" {
-		switch name {
-		case "Getenv", "LookupEnv", "Environ", "ExpandEnv":
-			return "reaches os." + name + " (environment input)"
-		case "Open", "OpenFile", "ReadFile", "ReadDir", "Stat", "Lstat":
-			return "reaches os." + name + " (file I/O)"
-		case "Create", "CreateTemp", "WriteFile":
-			return "reaches os." + name + " (filesystem mutation)"
-		case "CopyFS", "Link", "Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Symlink":
-			return "reaches os." + name + " (path mutation)"
-		}
-	}
-	if pkgPath == "syscall" || pkgPath == "golang.org/x/sys/unix" {
-		switch name {
-		case "Creat":
-			return "reaches " + pkgPath + "." + name + " (filesystem mutation)"
-		case "Link", "Linkat", "Mkdir", "Mkdirat", "Rename", "Renameat", "Renameat2", "Rmdir", "Symlink", "Symlinkat", "Unlink", "Unlinkat":
-			return "reaches " + pkgPath + "." + name + " (path mutation)"
-		}
-	}
-	if pkgPath == "testing" {
-		switch name {
-		case "TempDir", "Chdir", "Setenv":
-			return "reaches testing." + name + " (process or path mutation)"
-		case "Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "N", "Loop", "Parallel", "ArtifactDir", "Context":
-			return "reaches testing." + name + " (test runtime configuration)"
-		case "Run", "Fuzz", "RunParallel", "Elapsed", "Result", "AllocsPerRun", "Benchmark", "RunBenchmarks", "RunExamples", "RunTests", "Main", "MainStart":
-			return "reaches testing." + name + " (test runtime execution)"
-		}
-	}
-	if pkgPath == "net" {
-		switch name {
-		case "Dial", "DialContext", "DialTCP", "DialUDP", "DialIP", "Listen", "ListenTCP", "ListenUDP", "ListenIP", "ListenPacket":
-			return "reaches net." + name + " (network I/O)"
-		}
-	}
-	if pkgPath == "net/http" {
-		switch name {
-		case "Get", "Head", "Post", "PostForm", "Do", "ListenAndServe", "ListenAndServeTLS", "Serve", "ServeTLS":
-			return "reaches net/http." + name + " (network I/O)"
-		}
-	}
-	if pkgPath == "html/template" || pkgPath == "text/template" {
-		switch name {
-		case "ParseFiles", "ParseGlob":
-			return "reaches " + pkgPath + "." + name + " (file I/O)"
-		}
-	}
-	if pkgPath == "plugin" && (name == "Open" || name == "Lookup") {
-		return "reaches plugin." + name
-	}
-	return ""
-}
-
 func hasExternalCgo(flags []string) bool {
 	for _, f := range flags {
 		for _, tok := range expandLinkerFlag(f) {
@@ -2284,6 +2280,10 @@ func asmCallTargetsObserved(externalReason *string, dir string, files []string, 
 }
 
 func asmCallTargetsObservedEnv(externalReason *string, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEffectsEnv(externalReason, nil, dir, env, files, buildFlags...)
+}
+
+func asmCallTargetsObservedEffectsEnv(externalReason *string, externalEffects *[]externalEffect, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
 	var targets []string
 	var includes []string
 	computed := false
@@ -2339,12 +2339,21 @@ func asmCallTargetsObservedEnv(externalReason *string, dir string, env []string,
 					}
 					for _, stmt := range asmStatements(strings.Join(fields, " ")) {
 						stmtFields := strings.Fields(stmt)
-						if externalReason != nil && *externalReason == "" {
+						if externalReason != nil || externalEffects != nil {
 							opcode := asmOpcodeFromFields(stmtFields)
+							reason := ""
 							if asmOpcodeReadsExternalState(opcode) {
-								*externalReason = "reaches assembly instruction " + opcode + " (external runtime state)"
+								reason = "reaches assembly instruction " + opcode + " (external runtime state)"
 							} else if operand := asmExternalStateOperand(stmtFields); operand != "" {
-								*externalReason = "reaches assembly operand " + operand + " (external runtime state)"
+								reason = "reaches assembly operand " + operand + " (external runtime state)"
+							}
+							if reason != "" {
+								if externalReason != nil && *externalReason == "" {
+									*externalReason = reason
+								}
+								if externalEffects != nil {
+									*externalEffects = appendExternalEffect(*externalEffects, opaqueExternalEffect(externalEffectNative, reason))
+								}
 							}
 						}
 						target, isComputed, ok := asmTargetFromFields(stmtFields, labels, externalDefines)

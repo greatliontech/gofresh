@@ -505,6 +505,85 @@ func TestAssemblyExternalStateMacroAndStatementAreClassified(t *testing.T) {
 	}
 }
 
+func TestMaximalFileEffectsRetainAllFactsAndLegacyDiagnostic(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "effects.go")
+	source := `package effects
+import (
+	"net"
+	"os"
+)
+func F() {
+	_, _ = os.ReadFile("fixture")
+	_, _ = net.Dial("tcp", "example.invalid:1")
+}
+`
+	if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scan, err := maximalFileEffects(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := maximalFileReason(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scan.preferred != legacy {
+		t.Fatalf("preferred diagnostic = %q, want legacy %q", scan.preferred, legacy)
+	}
+	for _, want := range [][2]string{{"os", "ReadFile"}, {"net", "Dial"}} {
+		found := false
+		for _, effect := range scan.effects {
+			found = found || effect.packagePath == want[0] && effect.symbol == want[1]
+		}
+		if !found {
+			t.Errorf("missing typed effect %s.%s in %+v", want[0], want[1], scan.effects)
+		}
+	}
+	for _, effect := range scan.effects {
+		if effect.packagePath == "" && effect.kind == externalEffectUnauditedStandard {
+			t.Fatalf("classified selectors retained a spurious package blocker: %+v", scan.effects)
+		}
+	}
+}
+
+func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
+	pkg := &listPkg{
+		CgoLDFLAGS: []string{"-lm"},
+		CFiles:     []string{"native.c"},
+		SFiles:     []string{"asm.s"},
+		SysoFiles:  []string{"object.syso"},
+	}
+	scan := maximalPackageExternalEffects(pkg)
+	if scan.preferred != "reaches cgo external library" {
+		t.Fatalf("preferred package diagnostic = %q", scan.preferred)
+	}
+	if len(scan.effects) != 4 {
+		t.Fatalf("package effects = %+v, want four complete facts", scan.effects)
+	}
+}
+
+func TestAssemblyExternalEffectsRetainEveryInstruction(t *testing.T) {
+	dir := t.TempDir()
+	source := "TEXT ·F(SB), $0-0\n\tRDTSC\n\tCPUID\n\tRET\n"
+	if err := os.WriteFile(filepath.Join(dir, "external.s"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	var effects []externalEffect
+	_, _, _, _, err := asmCallTargetsObservedEffectsEnv(&reason, &effects, dir, os.Environ(), []string{"external.s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reason, "RDTSC") {
+		t.Fatalf("legacy assembly reason = %q, want first RDTSC", reason)
+	}
+	if len(effects) != 2 {
+		t.Fatalf("assembly effects = %+v, want RDTSC and CPUID", effects)
+	}
+}
+
 func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 	h, err := New()
 	if err != nil {

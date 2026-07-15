@@ -55,9 +55,9 @@ type Hasher struct {
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
 	buildFlags     []string
-	progs          map[string]*program  // by package import path
-	lists          map[string][]listPkg // parsed `go list -deps -test`, by package import path
-	maximalTesting map[string]string    // typed testing-runtime reason by requested package
+	progs          map[string]*program          // by package import path
+	lists          map[string][]listPkg         // parsed `go list -deps -test`, by package import path
+	maximalTesting map[string]maximalEffectScan // typed testing-runtime effects by requested package
 }
 
 func New() (*Hasher, error) { return NewAt("") }
@@ -108,7 +108,7 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	}
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
-		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]string{},
+		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 	}, nil
 }
 

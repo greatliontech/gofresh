@@ -1658,6 +1658,30 @@ func TestComputeReachesUnverifiable(t *testing.T) {
 	}
 }
 
+func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/mixedexternal"
+	result, err := h.tier2(pkg, "BenchmarkMixedExternal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range [][2]string{{"os", "ReadFile"}, {"net", "Dial"}} {
+		found := false
+		for _, effect := range result.effects {
+			found = found || effect.packagePath == want[0] && effect.symbol == want[1]
+		}
+		if !found {
+			t.Errorf("missing reached effect %s.%s from %+v", want[0], want[1], result.effects)
+		}
+	}
+	if !strings.Contains(result.reason, "network I/O") {
+		t.Fatalf("legacy diagnostic = %q, want network I/O", result.reason)
+	}
+}
+
 func TestTier2ReflectWidens(t *testing.T) {
 	h, err := New()
 	if err != nil {
@@ -3163,6 +3187,54 @@ func TestUnverifiableReasonSelectionIsDeterministic(t *testing.T) {
 	}
 	if first.reason != second.reason {
 		t.Fatalf("unverifiable reason depends on traversal order: %q != %q", first.reason, second.reason)
+	}
+}
+
+func TestTypedEffectsAreCompleteAndDiagnosticSelectionIsDeterministic(t *testing.T) {
+	effects := []externalEffect{
+		symbolExternalEffect(externalEffectFormattedOutput, "fmt", "Print", "reaches fmt.Print (formatted output)"),
+		symbolExternalEffect(externalEffectNetwork, "net", "Dial", "reaches net.Dial (network I/O)"),
+		symbolExternalEffect(externalEffectFileIO, "os", "ReadFile", "reaches os.ReadFile (file I/O)"),
+	}
+	first := &tier2Analyzer{}
+	for _, effect := range effects {
+		first.recordExternalEffect(effect)
+	}
+	second := &tier2Analyzer{}
+	for i := len(effects) - 1; i >= 0; i-- {
+		second.recordExternalEffect(effects[i])
+	}
+	if first.reason != second.reason {
+		t.Fatalf("typed effect diagnostic depends on traversal order: %q != %q", first.reason, second.reason)
+	}
+	if len(first.effects) != len(effects) || len(second.effects) != len(effects) {
+		t.Fatalf("typed effects lost: first=%+v second=%+v", first.effects, second.effects)
+	}
+	for _, want := range effects {
+		for _, got := range [][]externalEffect{first.effects, second.effects} {
+			found := false
+			for _, effect := range got {
+				found = found || effect == want
+			}
+			if !found {
+				t.Errorf("missing typed effect %+v from %+v", want, got)
+			}
+		}
+	}
+}
+
+func TestPreferredDiagnosticProjectsAfterSecondaryEffectDeduplication(t *testing.T) {
+	rdtsc := opaqueExternalEffect(externalEffectNative, "reaches assembly instruction RDTSC (external runtime state)")
+	cpuid := opaqueExternalEffect(externalEffectNative, "reaches assembly instruction CPUID (external runtime state)")
+	analyzer := &tier2Analyzer{}
+	analyzer.recordExternalEffect(rdtsc)
+	analyzer.collectExternalEffect(cpuid)
+	analyzer.recordExternalEffect(cpuid)
+	if analyzer.reason != cpuid.reason {
+		t.Fatalf("preferred diagnostic = %q, want later package preference %q", analyzer.reason, cpuid.reason)
+	}
+	if len(analyzer.effects) != 2 {
+		t.Fatalf("deduplicated effects = %+v, want two", analyzer.effects)
 	}
 }
 
