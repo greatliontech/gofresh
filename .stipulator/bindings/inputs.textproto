@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-evidence-not-proof"
-  content_hash: "4102aad1d3fc588cb5682208ad24a8aa4fe43efe21f30ef6b76bdd0bc9add802"
+  content_hash: "b664a10ff56b4e6966d97055435b98cb6e9fda37bfc10c154bb81ce7445b49c8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservationIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -30,7 +30,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-evidence-not-proof"
-  content_hash: "4102aad1d3fc588cb5682208ad24a8aa4fe43efe21f30ef6b76bdd0bc9add802"
+  content_hash: "b664a10ff56b4e6966d97055435b98cb6e9fda37bfc10c154bb81ce7445b49c8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
   role: BINDING_ROLE_TESTS

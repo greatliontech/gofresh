@@ -111,7 +111,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-batch-equivalence"
-  content_hash: "b024c518ffa9c90d8c5b5d61da393bca9e2c1416f25c9e5ecf8f8bb5ba77041f"
+  content_hash: "5c96c5526219468f135d3b232d0d7afa6714c5c713ae7bdaceef5aa70774408e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestComputeBatchEqualsIndependentCompute"
   role: BINDING_ROLE_TESTS
@@ -179,4 +179,22 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityBatchMatchesIndependentAnalysis"
   role: BINDING_ROLE_TESTS
   shape_hash: "c5cd73995401add0edf94221e96ad0b990d5b5d266bcf20a3ed7227fa0eb17c9"
+}
+
+bindings {
+  requirement_id: "REQ-closure-batch-equivalence"
+  content_hash: "5c96c5526219468f135d3b232d0d7afa6714c5c713ae7bdaceef5aa70774408e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bde6a7c3735b6ca589e3a615239abf4065313aad85b1c1c255b22e5dde53befb"
+}
+
+bindings {
+  requirement_id: "REQ-closure-batch-equivalence"
+  content_hash: "5c96c5526219468f135d3b232d0d7afa6714c5c713ae7bdaceef5aa70774408e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeBatchSplitsAttributedStateAtMaskWidth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "52b1f8e63b19bd5d1a5410f54a01d0d0ce207da7588a6f97e8570122ab618365"
 }

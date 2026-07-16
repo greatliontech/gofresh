@@ -3,6 +3,9 @@ package closure
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/callgraph/rta"
@@ -276,6 +279,40 @@ func TestComputeBatchEqualsIndependentCompute(t *testing.T) {
 	empty, err := h.ComputeBatch(nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("ComputeBatch(nil) = %v, %v; want empty map, nil", empty, err)
+	}
+}
+
+func TestComputeBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/batchbound\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var source strings.Builder
+	source.WriteString("package batchbound\n\n")
+	subjects := make([]Subject, maxAttributedSubjects+1)
+	for i := range subjects {
+		symbol := fmt.Sprintf("F%d", i)
+		fmt.Fprintf(&source, "func %s() int { return %d }\n", symbol, i)
+		subjects[i] = Subject{Package: "example.com/batchbound", Symbol: symbol}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "batchbound.go"), []byte(source.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.ComputeBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := subjects[len(subjects)-1]
+	want, err := h.Compute(last.Package, last.Symbol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[last] != want {
+		t.Fatalf("boundary subject closure = %+v, independent = %+v", got[last], want)
 	}
 }
 

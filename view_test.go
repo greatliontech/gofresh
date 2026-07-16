@@ -328,7 +328,7 @@ func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
 		"go.mod":  "module example.com/view\n\ngo 1.26\n",
-		"root.go": "package view\n\nfunc F() {}\n",
+		"root.go": "package view\n\nfunc F() {}\nfunc H() {}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
@@ -346,12 +346,18 @@ func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
 	}
 	subjects := []Subject{
 		{Package: "example.com/view", Symbol: "F"},
+		{Package: "example.com/view", Symbol: "H"},
 		{Package: "example.com/view/sub", Symbol: "G"},
+	}
+	wantByPackage := map[string][]string{
+		"example.com/view":     {filepath.Join(dir, "root.go")},
+		"example.com/view/sub": {filepath.Join(dir, "sub", "sub.go")},
 	}
 	batch, err := engine.NewView(subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var wantUnion []string
 	for _, subject := range subjects {
 		singleton, err := engine.NewView([]Subject{subject}, dir)
 		if err != nil {
@@ -372,14 +378,24 @@ func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if singletonFiles := singleton.SourceFiles(); !slices.Equal(batchedFiles, singletonFiles) {
+		singletonFiles := singleton.SourceFiles()
+		if want := wantByPackage[subject.Package]; !slices.Equal(singletonFiles, want) {
+			t.Fatalf("%+v singleton files = %v, want exact source identities %v", subject, singletonFiles, want)
+		}
+		if !slices.Equal(batchedFiles, singletonFiles) {
 			t.Fatalf("%+v batched files = %v, singleton = %v", subject, batchedFiles, singletonFiles)
 		}
+		wantUnion = append(wantUnion, singletonFiles...)
 		batchedFiles[0] = "changed"
 		current, err := batch.SourceFilesFor(subject)
 		if err != nil || slices.Contains(current, "changed") {
 			t.Fatalf("SourceFilesFor returned mutable storage: %v, %v", current, err)
 		}
+	}
+	slices.Sort(wantUnion)
+	wantUnion = slices.Compact(wantUnion)
+	if got := batch.SourceFiles(); !slices.Equal(got, wantUnion) {
+		t.Fatalf("batched source-file union = %v, want %v", got, wantUnion)
 	}
 	if _, err := batch.SourceFilesFor(Subject{Package: "example.com/view", Symbol: "Missing"}); err == nil {
 		t.Fatal("SourceFilesFor accepted a subject outside the view")
