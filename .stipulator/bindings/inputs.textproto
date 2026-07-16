@@ -228,7 +228,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observable-read-set"
-  content_hash: "b85ffd46171b8b7f60b9fc5f9353da9c076eded27ab238914b8670e079b0473f"
+  content_hash: "f6be5ab971169e3890bf16f7cd48c60e70ba170cb75e74b388a3f157931578e4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
@@ -237,7 +237,25 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observable-read-set"
-  content_hash: "b85ffd46171b8b7f60b9fc5f9353da9c076eded27ab238914b8670e079b0473f"
+  content_hash: "f6be5ab971169e3890bf16f7cd48c60e70ba170cb75e74b388a3f157931578e4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5969b2b844d559f9d4ab50568864f76fb9ac2db19f6957d804fb9b5f9b6e530e"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-fresh-mutation"
+  content_hash: "7a1f5ec5997571cb81c8fabacf3f35ab7943f3e0a49206aa3f7b65078ed53868"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "dfd1315c737428820fe1e38e7329ec0799c5be890c7a4b0f9da850e64fdd90b0"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-fresh-mutation"
+  content_hash: "7a1f5ec5997571cb81c8fabacf3f35ab7943f3e0a49206aa3f7b65078ed53868"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS

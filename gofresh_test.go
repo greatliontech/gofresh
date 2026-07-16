@@ -148,6 +148,12 @@ func TestFingerprintDataShape(t *testing.T) {
 	}
 }
 
+func TestObservationRTAVersion(t *testing.T) {
+	if ObservationRTA != "gofresh/observation-rta@2" {
+		t.Fatalf("ObservationRTA = %q, want fresh-mutation proof semantics", ObservationRTA)
+	}
+}
+
 func TestPropCommitIdentityAbsent(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
 	for i := 0; i < typeOf.NumField(); i++ {

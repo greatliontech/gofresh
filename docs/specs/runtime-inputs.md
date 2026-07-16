@@ -123,7 +123,7 @@ counts, and errors; and mutation and child-process operations producing no recor
 The identity-only stream does not establish the outcome part of an
 observation-completeness assertion by itself. The toolchain guard pins producer
 behavior and the observability strategy identity pins the engine's interpretation
-of it. Against that model, the proof admits only subject-time `os.Getenv`,
+of it. Against that model, the base read-only proof admits only subject-time `os.Getenv`,
 `os.LookupEnv`, `os.Open`, `os.ReadFile`, and
 `os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, free
 of carriage return and newline, and reproducibly resolvable. On a read-only file
@@ -144,8 +144,9 @@ derivable from its guarded environment value or hashed regular-file or sorted-di
 value; an identity observation alone never establishes that fact. Every other
 environment, filesystem, network, process, metadata,
 mutation, direct-syscall, native, linked, or unknown effect blocks the proof;
-`os.Environ`, `os.OpenFile`, `os.Stat`, `os.Lstat`, process execution, and every
-filesystem mutation are explicitly outside the read-only set. An addition to either
+`os.Environ`, `os.Stat`, `os.Lstat`, process execution, and every
+filesystem mutation or `os.OpenFile` use not admitted by the fresh-mutation extension
+are explicitly outside the set. An addition to either
 the producer hook set or the admitted set is a contract change, never inferred from a
 matching diagnostic string.
 
@@ -175,7 +176,7 @@ component that may cross a symlink before lexical cleaning and any relative path
 after a working-directory change. Lexical normalization alone never discharges this
 obligation.
 
-**REQ-inputs-fresh-mutation** (invariant): A later observability extension MAY admit
+**REQ-inputs-fresh-mutation** (invariant): The fresh-mutation observability extension MAY admit
 a filesystem mutation only when subject-local value and alias analysis proves its
 target was freshly created within the same observed run, every result used as an
 existence or metadata probe is bounded, every read of the target is derived solely
@@ -185,7 +186,19 @@ proved non-mutating flags or a proved-fresh target. Rename, hard-link, symlink, 
 syscall, and process operations remain inadmissible because they can transport or
 introduce unobserved state.
 
-Lands: 5.
+The recognized fresh-mutation extension treats a `testing.TempDir` result as an opaque
+fresh directory capability and derives child capabilities only by joining portable
+constant basename components. The capability may not affect behavior as a string or
+escape the recognized operation graph. A guarded `os.WriteFile` of source-constant
+bytes establishes its target as freshly created. `os.ReadFile` may consume a fresh
+capability. `os.Remove` and `os.RemoveAll` require the exact target to be the fresh
+directory root or to have a preceding guarded creation that applies on every path to
+the operation. Every fresh-path `os.OpenFile` requires that preceding file creation;
+zero-flag `os.OpenFile` is non-mutating and may instead address an ordinary
+reproducible identity. Mutation errors and handle
+existence may affect control flow only through direct nil checks, and generated names,
+handles, and probe results may not escape. Unknown flags, path transforms, aliases,
+ordering, or uses fail the proof closed.
 
 **REQ-inputs-absent-asserted** (behavior): A fingerprint carrying no runtime-input
 manifest MUST be read as the caller's assertion that the subject's run observed no

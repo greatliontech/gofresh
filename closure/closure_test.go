@@ -1699,10 +1699,34 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observable", subject: "TestLookupEnv", observable: true},
 		{fixture: "observable", subject: "TestOpen", observable: true},
 		{fixture: "observable", subject: "TestReadDir", observable: true},
+		{fixture: "observableopenfile", subject: "TestOpenFile", observable: true},
+		{fixture: "observablefresh", subject: "TestTempDirWriteReadCleanup", observable: true},
+		{fixture: "observablefresh", subject: "TestTempDirOpenFile", observable: true},
 		{fixture: "observablestat", subject: "TestStat"},
-		{fixture: "observableopenfile", subject: "TestOpenFile"},
 		{fixture: "observablemutation", subject: "TestRemove"},
 		{fixture: "observableprocess", subject: "TestCommand"},
+		{fixture: "observableconcurrent", subject: "TestConcurrentFileRead", reason: "os.Open"},
+		{fixture: "observablefresh", subject: "TestRemoveOrdinary", reason: "os.Remove"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "os.OpenFile"},
+		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "os.Remove"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileUncheckedBeforeRead", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationBeforeRead", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationAcrossLoop", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughAlias", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughDuplicateJoin", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestAncestorCleanupBeforeRead", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperEscape"},
+		{fixture: "observablefresh", subject: "TestFreshPathNoopEscape", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
 		{fixture: "testmainhelper", subject: "TestRead", reason: "testing runtime value escapes"},
 		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
 		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
@@ -1722,6 +1746,48 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 				t.Fatalf("observability = %+v, want observable=%v reason containing %q", got, tc.observable, tc.reason)
 			}
 		})
+	}
+}
+
+func TestOrdinaryOpenFileRequiresZeroFlags(t *testing.T) {
+	if !ordinaryOpenFileFlagsObservable(0) {
+		t.Fatal("zero-valued read-only mode was rejected")
+	}
+	if ordinaryOpenFileFlagsObservable(1 << 40) {
+		t.Fatal("target-specific nonzero flag was interpreted with host flag values")
+	}
+}
+
+func TestOpenFileFlagsUseSelectedGOOS(t *testing.T) {
+	env := append([]string(nil), os.Environ()...)
+	found := false
+	for i, entry := range env {
+		if strings.HasPrefix(entry, "GOOS=") {
+			env[i] = "GOOS=plan9"
+			found = true
+		}
+	}
+	if !found {
+		env = append(env, "GOOS=plan9")
+	}
+	h, err := NewAtContextEnv(context.Background(), "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observablefresh"
+	subjects := []Subject{
+		{Package: pkg, Symbol: "TestTempDirOpenFile"},
+		{Package: pkg, Symbol: "TestOpenFileUnknownFlags"},
+	}
+	results, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !results[subjects[0]].Observable {
+		t.Fatalf("Plan 9 recognized flags = %+v, want observable", results[subjects[0]])
+	}
+	if results[subjects[1]].Observable {
+		t.Fatalf("Plan 9 unknown flags = %+v, want blocked", results[subjects[1]])
 	}
 }
 
