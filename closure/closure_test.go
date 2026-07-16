@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1680,6 +1681,139 @@ func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
 	if !strings.Contains(result.reason, "network I/O") {
 		t.Fatalf("legacy diagnostic = %q, want network I/O", result.reason)
 	}
+}
+
+func TestReadOnlyObservabilityProof(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
+	for _, tc := range []struct {
+		fixture, subject string
+		observable       bool
+		reason           string
+	}{
+		{fixture: "observable", subject: "TestReadFile", observable: true},
+		{fixture: "observable", subject: "TestGetenv", observable: true},
+		{fixture: "observable", subject: "TestLookupEnv", observable: true},
+		{fixture: "observable", subject: "TestOpen", observable: true},
+		{fixture: "observable", subject: "TestReadDir", observable: true},
+		{fixture: "observablestat", subject: "TestStat"},
+		{fixture: "observableopenfile", subject: "TestOpenFile"},
+		{fixture: "observablemutation", subject: "TestRemove"},
+		{fixture: "observableprocess", subject: "TestCommand"},
+		{fixture: "testmainhelper", subject: "TestRead", reason: "testing runtime value escapes"},
+		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
+		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
+		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "testing.Run"},
+		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
+		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
+		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
+			results, err := h.ComputeObservabilityBatch([]Subject{subject})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := results[subject]
+			if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
+				t.Fatalf("observability = %+v, want observable=%v reason containing %q", got, tc.observable, tc.reason)
+			}
+		})
+	}
+}
+
+func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observablecallbackbad"
+	prog, err := h.loadCached(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: pkg, Symbol: "TestSubtestRead"}
+	reachable, err := attributedReachableSets(context.Background(), prog, []Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for fn := range reachable[0].subjectFunctions {
+		names = append(names, fn.String())
+		if funcPkgPath(fn) == pkg && strings.Contains(fn.Name(), "TestSubtestRead$1") {
+			return
+		}
+	}
+	sort.Strings(names)
+	t.Fatalf("testing callback was omitted from subject provenance: %v", names)
+}
+
+func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
+	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
+	subjects := []Subject{
+		{Package: base + "observable", Symbol: "TestReadFile"},
+		{Package: base + "observable", Symbol: "TestReadDir"},
+		{Package: base + "observablecallbackbad", Symbol: "TestSubtestRead"},
+	}
+	batchHasher, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := batchHasher.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range subjects {
+		independentHasher, err := New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		independent, err := independentHasher.ComputeObservabilityBatch([]Subject{subject})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batch[subject] != independent[subject] {
+			t.Errorf("%s.%s batch=%+v independent=%+v", subject.Package, subject.Symbol, batch[subject], independent[subject])
+		}
+	}
+}
+
+func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := provenanceReachable(ctx, nil, 1, &attributedRTAResult{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("provenanceReachable = %v, want context.Canceled", err)
+	}
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observable"
+	prog, err := h.loadCached(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := prog.roots["TestReadFile"]
+	bounded := &cancelProvenanceContext{Context: context.Background(), remaining: 1}
+	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &attributedRTAResult{Reachable: map[*ssa.Function]uint64{root: 1}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("provenanceReachable during traversal = %v, want context.Canceled", err)
+	}
+}
+
+type cancelProvenanceContext struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelProvenanceContext) Err() error {
+	if c.remaining == 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
 }
 
 func TestTier2ReflectWidens(t *testing.T) {

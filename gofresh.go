@@ -47,6 +47,9 @@ type Subject struct {
 // become incompatible.
 const DeclarationRTA = "gofresh/declaration-rta@1"
 
+// ObservationRTA identifies the caller-selected declaration-RTA observability proof.
+const ObservationRTA = "gofresh/observation-rta@1"
+
 // Refinement is optional narrower closure evidence. Its zero value means the
 // recording is maximal-only. A complete value binds its closure hash and
 // unverifiability disposition to Strategy (REQ-fresh-fingerprint-data).
@@ -59,20 +62,32 @@ type Refinement struct {
 	Evidence     string
 }
 
+// ObservationProof is versioned per-subject evidence that every reachable external
+// effect is representable by the recognized completed observation stream.
+type ObservationProof struct {
+	Strategy   string
+	Subject    Subject
+	Observable bool
+	Reason     string
+	Evidence   string
+}
+
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
 // wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
-// hash, optional refinement evidence, guard values, an attributable purity
-// assertion, result kind, and the caller's runtime-input manifest and digest evidence.
+// hash, optional refinement and observability evidence, guard values, attributable
+// observation and purity assertions, result kind, and the caller's runtime-input manifest and digest evidence.
 // The caller serializes and stores it alongside its result, and pins any further
 // domain facts of its own (REQ-fresh-caller-pins).
 type Fingerprint struct {
-	MaximalClosure  string
-	Refinement      Refinement
-	Guards          guard.Guards
-	PurityAssertion string // attributable assertion used to override unverifiability; empty means none
-	RuntimeInputs   string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest   string // digest of the manifest at capture
-	ResultKind      Kind   // guard policy captured with this recording; zero is invalid
+	MaximalClosure       string
+	Refinement           Refinement
+	ObservationAssertion string
+	ObservationProof     ObservationProof
+	Guards               guard.Guards
+	PurityAssertion      string // attributable assertion used to override unverifiability; empty means none
+	RuntimeInputs        string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest        string // digest of the manifest at capture
+	ResultKind           Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -300,6 +315,19 @@ func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject
 	return view.CheckRefined(ctx, recorded, subject)
 }
 
+// CheckObserved checks a caller-selected observation proof under ctx. It never
+// infers observation policy for ordinary Check calls.
+func (e *Engine) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	if err := validateRecordedKind(recorded); err != nil {
+		return Verdict{}, err
+	}
+	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return view.CheckObserved(ctx, recorded, subject)
+}
+
 func validKind(kind Kind) bool { return kind == CodeResult || kind == Measurement }
 
 func validateRecordedKind(recorded Fingerprint) error {
@@ -340,6 +368,10 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 }
 
 func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
+	return decideAfterClosureObserved(rec, cl, cur, rt, kind, pure, false)
+}
+
+func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure, observed bool) Verdict {
 	if verdict, failed := decideKnownGuards(rec, cur, rt, kind); failed {
 		return verdict
 	}
@@ -350,6 +382,9 @@ func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, r
 			return Verdict{Unverifiable, reasonOr(rt.Reason, "runtime inputs")}
 		}
 		if cl.Unverifiable {
+			if observed && rec.RuntimeInputs != "" {
+				return Verdict{Valid, ""}
+			}
 			return Verdict{Unverifiable, reasonOr(cl.Reason, "external dependence")}
 		}
 	}

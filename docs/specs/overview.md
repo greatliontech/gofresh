@@ -103,8 +103,6 @@ proof suppresses only the closure effects it proves observable; any runtime-mani
 unverifiability or other closure blind spot still prevents validity. Purity remains a
 separate, broader caller-responsible override.
 
-Lands: 4.
-
 **REQ-fresh-observation-compatibility** (invariant): Recorded observability evidence
 MUST be usable only when its non-empty recognized strategy/version, subject identity,
 maximal closure hash, assertion attribution, and complete disposition agree with its
@@ -114,16 +112,12 @@ unrecognized, incomplete, or inconsistent evidence never suppresses
 unverifiability. Changing any proof rule that can change a disposition requires a new
 strategy/version identity even when source is unchanged.
 
-Lands: 4.
-
 **REQ-fresh-observation-data** (invariant): The observation-completeness assertion
 attribution and observability proof strategy/version, subject, disposition, and
 integrity evidence MUST be fingerprint constituents exposed as data beside refinement,
 purity, result kind, and guard values. They carry no engine-owned persistence or wire
 format. Empty assertion and proof evidence means the lift was not selected; partial,
 unknown, or internally inconsistent evidence confers no proof.
-
-Lands: 4.
 
 **REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
 explicitly by the caller for capture, checking, and producer validation. A producer
@@ -132,8 +126,6 @@ the completed runtime evidence after execution, and persists only after validati
 re-establishes every selected tier against the post-execution view. Historical
 recordings cannot be upgraded to observability evidence without rerunning the
 subject.
-
-Lands: 4.
 
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing

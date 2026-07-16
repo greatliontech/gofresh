@@ -40,6 +40,269 @@ func writeViewModule(t *testing.T, source string) string {
 	return dir
 }
 
+func writeObservedViewModule(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":           "module example.com/observed\n\ngo 1.26\n",
+		"observed_test.go": "package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\nfunc Sibling() int { return 1 }\n",
+		"fixture":          "one",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestObservedCaptureRequiresObservedValidation(t *testing.T) {
+	view := &View{capturedObserved: map[Subject]bool{{}: true}}
+	if err := view.ValidateContext(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("ValidateContext = %v, want ErrObservedValidationRequired", err)
+	}
+	if err := view.ValidateRefined(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("ValidateRefined = %v, want ErrObservedValidationRequired", err)
+	}
+}
+
+func TestObservedRefinementRecomputesProofAfterMaximalDrift(t *testing.T) {
+	dir := writeObservedViewModule(t)
+	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObservedRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.Refinement == (Refinement{}) || !fingerprint.ObservationProof.Observable {
+		t.Fatalf("combined fingerprint = %+v", fingerprint)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := producer.AttachObservation(subject, producer.observedFingerprintLocked(subject), observation); err == nil {
+		t.Fatal("second runtime observation attachment was accepted")
+	}
+	if err := producer.ValidateContext(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("ValidateContext for combined capture = %v, want ErrObservedValidationRequired", err)
+	}
+	if err := producer.ValidateRefined(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("ValidateRefined for combined capture = %v, want ErrObservedValidationRequired", err)
+	}
+	if err := producer.ValidateObserved(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(dir, "observed_test.go")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(strings.Replace(string(source), "return 1", "return 2", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("combined check after unrelated maximal drift = %+v, want valid", verdict)
+	}
+}
+
+func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
+	dir := writeObservedViewModule(t)
+	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObservedRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(dir, "observed_test.go")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(strings.Replace(string(source), "return 1", "return 2", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &cancelAfterChecks{Context: context.Background(), after: 1}
+	if verdict, err := current.CheckObserved(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) || verdict != (Verdict{}) {
+		t.Fatalf("CheckObserved cancellation = %+v, %v; want zero verdict and context.Canceled", verdict, err)
+	}
+}
+
+func TestUnavailableObservedAnalysisPrefersContextError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if verdict, err := unavailableObservedAnalysis(ctx, "refinement", errors.New("failed")); !errors.Is(err, context.Canceled) || verdict != (Verdict{}) {
+		t.Fatalf("unavailable analysis = %+v, %v; want zero verdict and context.Canceled", verdict, err)
+	}
+}
+
+func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
+	dir := writeObservedViewModule(t)
+	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fingerprint.ObservationProof.Observable || !compatibleObservationProof(fingerprint.ObservationProof, fingerprint.ObservationAssertion, subject, fingerprint.MaximalClosure) {
+		t.Fatalf("captured proof = %+v", fingerprint.ObservationProof)
+	}
+	withoutManifest, err := producer.CheckObserved(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutManifest.Status != Unverifiable {
+		t.Fatalf("proof without completed manifest = %+v, want unverifiable", withoutManifest)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("# test log\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.ValidateObserved(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, err := current.Check(fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordinary.Status != Unverifiable {
+		t.Fatalf("ordinary check inferred observation policy: %+v", ordinary)
+	}
+	observed, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != Valid {
+		t.Fatalf("observed check = %+v, want valid", observed)
+	}
+	tampered := fingerprint
+	tampered.ObservationProof.Evidence = "tampered"
+	verdict, err := current.CheckObserved(context.Background(), tampered, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable {
+		t.Fatalf("tampered proof = %+v, want unverifiable", verdict)
+	}
+	malformed, err := runtimeinput.FromTestLog([]byte("# test log\n\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-malformed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformedState, err := runtimeinput.CompletedState(malformed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformedFingerprint := fingerprint
+	malformedFingerprint.RuntimeInputs = malformedState.Manifest
+	malformedFingerprint.RuntimeDigest = malformedState.Digest
+	verdict, err = current.CheckObserved(context.Background(), malformedFingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable {
+		t.Fatalf("manifest unverifiability was suppressed: %+v", verdict)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	verdict, err = current.CheckObserved(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Stale || verdict.Reason != "runtimeinputs" {
+		t.Fatalf("changed observed input = %+v, want stale runtimeinputs", verdict)
+	}
+}
+
+func TestValidateObservedBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
+	dir := writeObservedViewModule(t)
+	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	producer.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
+		calls++
+		if calls == 1 {
+			return state, nil
+		}
+		moved := state
+		moved.Digest = "moved"
+		return moved, nil
+	}
+	if err := producer.ValidateObserved(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("ValidateObserved across runtime drift = %v, want ErrViewChanged", err)
+	}
+	if calls != 2 {
+		t.Fatalf("runtime observations = %d, want 2", calls)
+	}
+}
+
 func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	engine, err := New(WithDir(dir))

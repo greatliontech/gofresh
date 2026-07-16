@@ -10,3 +10,7 @@ func BenchmarkReadFile(b *testing.B) {
 		_, _ = os.ReadFile("fixture.txt")
 	}
 }
+
+func TestReadFile(*testing.T) {
+	_, _ = os.ReadFile("fixture.txt")
+}

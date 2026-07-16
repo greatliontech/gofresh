@@ -51,5 +51,3 @@ harness completed its observations, while the engine's separate observability pr
 establishes which reachable effects that stream can cover. It does not suppress
 runtime-manifest unverifiability or a closure effect outside the admitted observation
 set.
-
-Lands: 4.

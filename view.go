@@ -23,6 +23,10 @@ var ErrViewChanged = errors.New("gofresh: analysis view changed")
 // and must validate it through ValidateRefined with caller-owned cancellation.
 var ErrRefinedValidationRequired = errors.New("gofresh: refined producer view requires refined validation")
 
+// ErrObservedValidationRequired reports that a producer captured observation proof
+// evidence and must validate it through ValidateObserved.
+var ErrObservedValidationRequired = errors.New("gofresh: observed producer view requires observation validation")
+
 // ErrViewSealed reports a capture attempted after producer validation started.
 var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
 
@@ -37,12 +41,15 @@ type View struct {
 	kind                 Kind
 	maximal              map[Subject]closure.Closure
 	refined              map[Subject]closure.Closure
+	observable           map[Subject]closure.Observability
 	guards               guard.Guards
 	purity               map[Subject]string
 	openWorld            map[Subject]bool
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	capturedRefined      map[Subject]bool
+	capturedObserved     map[Subject]bool
+	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
 	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
 }
@@ -167,12 +174,15 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		kind:                 kind,
 		maximal:              first.maximal,
 		refined:              make(map[Subject]closure.Closure, len(unique)),
+		observable:           make(map[Subject]closure.Observability, len(unique)),
 		guards:               first.guards,
 		purity:               first.purity,
 		openWorld:            first.openWorld,
 		sourceFiles:          first.sourceFiles,
 		sourceFilesBySubject: first.sourceFilesBySubject,
 		capturedRefined:      make(map[Subject]bool, len(unique)),
+		capturedObserved:     make(map[Subject]bool, len(unique)),
+		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 	}
 	return v, nil
 }
@@ -354,6 +364,125 @@ func (v *View) refinedFingerprintLocked(subject Subject) Fingerprint {
 	}
 }
 
+// CaptureObserved returns maximal closure evidence plus a caller-selected,
+// attributable observation proof for subject.
+func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprint, error) {
+	if _, ok := v.maximal[subject]; !ok {
+		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	}
+	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+		return Fingerprint{}, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Fingerprint{}, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
+	}
+	if v.sealed {
+		return Fingerprint{}, ErrViewSealed
+	}
+	v.capturedObserved[subject] = true
+	return v.observedFingerprintLocked(subject), nil
+}
+
+// CaptureObservedRefined captures independently selected refinement and observation
+// proof evidence in one fingerprint and validates both through ValidateObserved.
+func (v *View) CaptureObservedRefined(ctx context.Context, subject Subject) (Fingerprint, error) {
+	if _, ok := v.maximal[subject]; !ok {
+		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	}
+	if err := v.ensureRefined(ctx, []Subject{subject}); err != nil {
+		return Fingerprint{}, err
+	}
+	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+		return Fingerprint{}, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Fingerprint{}, err
+	}
+	if v.sealed {
+		return Fingerprint{}, ErrViewSealed
+	}
+	v.capturedRefined[subject] = true
+	v.capturedObserved[subject] = true
+	return v.observedRefinedFingerprintLocked(subject), nil
+}
+
+// CaptureObservedBatch captures observation proof evidence for every subject.
+func (v *View) CaptureObservedBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+	if err := v.ensureObservable(ctx, v.subjects); err != nil {
+		return nil, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
+	}
+	if v.sealed {
+		return nil, ErrViewSealed
+	}
+	result := make(map[Subject]Fingerprint, len(v.subjects))
+	for _, subject := range v.subjects {
+		v.capturedObserved[subject] = true
+		result[subject] = v.observedFingerprintLocked(subject)
+	}
+	return result, nil
+}
+
+func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
+	disposition := v.observable[subject]
+	proof := ObservationProof{
+		Strategy:   ObservationRTA,
+		Subject:    subject,
+		Observable: disposition.Observable,
+		Reason:     disposition.Reason,
+	}
+	const assertion = "caller assertion"
+	proof.Evidence = observationProofEvidence(v.maximal[subject].Hash, assertion, proof)
+	return Fingerprint{
+		MaximalClosure:       v.maximal[subject].Hash,
+		ObservationAssertion: assertion,
+		ObservationProof:     proof,
+		Guards:               v.guards,
+		PurityAssertion:      v.purity[subject],
+		ResultKind:           v.kind,
+	}
+}
+
+func (v *View) observedRefinedFingerprintLocked(subject Subject) Fingerprint {
+	fingerprint := v.observedFingerprintLocked(subject)
+	fingerprint.Refinement = v.refinedFingerprintLocked(subject).Refinement
+	return fingerprint
+}
+
+// AttachObservation binds sealed, process-backed runtime evidence to a captured
+// observation proof. The returned fingerprint is ready for producer validation.
+func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.sealed {
+		return Fingerprint{}, ErrViewSealed
+	}
+	observed := v.observedFingerprintLocked(subject)
+	combined := v.observedRefinedFingerprintLocked(subject)
+	if !v.capturedObserved[subject] || fingerprint != observed && fingerprint != combined {
+		return Fingerprint{}, errors.New("gofresh: observation does not match captured subject proof")
+	}
+	if _, attached := v.attachedObservations[subject]; attached {
+		return Fingerprint{}, errors.New("gofresh: runtime observation already attached for subject")
+	}
+	fingerprint.RuntimeInputs = state.Manifest
+	fingerprint.RuntimeDigest = state.Digest
+	v.attachedObservations[subject] = state
+	return fingerprint, nil
+}
+
 // Check compares recorded against subject's current facts under this View's result kind.
 func (v *View) Check(recorded Fingerprint, subject Subject) (Verdict, error) {
 	return v.CheckContext(context.Background(), recorded, subject)
@@ -415,6 +544,88 @@ func (v *View) CheckContext(ctx context.Context, recorded Fingerprint, subject S
 		return Verdict{}, err
 	}
 	return verdict, nil
+}
+
+// CheckObserved explicitly checks a fingerprint under its recorded observation
+// assertion and proof. Ordinary Check never infers this policy from evidence.
+func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
+	if ctx == nil {
+		return Verdict{}, errors.New("gofresh: nil observation proof context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Verdict{}, err
+	}
+	if err := validateRecordedKind(recorded); err != nil {
+		return Verdict{}, err
+	}
+	if recorded.ResultKind != v.kind {
+		return Verdict{}, fmt.Errorf("gofresh: recorded result kind %d does not match view kind %d", recorded.ResultKind, v.kind)
+	}
+	cl, ok := v.maximal[subject]
+	if !ok {
+		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	}
+	if recorded.MaximalClosure == "" {
+		return Verdict{Stale, "closure"}, nil
+	}
+	compatible := compatibleObservationProof(recorded.ObservationProof, recorded.ObservationAssertion, subject, recorded.MaximalClosure)
+	positive := compatible && recorded.ObservationProof.Observable
+	effective := cl
+	drifted := recorded.MaximalClosure != cl.Hash
+	if drifted && !compatibleRefinement(recorded.Refinement, subject, recorded.MaximalClosure) {
+		return Verdict{Stale, "refinement"}, nil
+	}
+	var before runtimeinput.State
+	if recorded.RuntimeInputs != "" {
+		if err := v.reobserveBase(ctx); err != nil {
+			return Verdict{}, err
+		}
+		var err error
+		before, err = v.currentRuntimeContext(ctx, recorded)
+		if err != nil {
+			return Verdict{}, err
+		}
+	}
+	if drifted {
+		if verdict, failed := decideKnownGuards(recorded, v.guards, before, v.kind); failed {
+			return verdict, nil
+		}
+		if err := v.ensureRefined(ctx, []Subject{subject}); err != nil {
+			return unavailableObservedAnalysis(ctx, "refinement", err)
+		}
+		if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+			return unavailableObservedAnalysis(ctx, "observation proof", err)
+		}
+		v.mu.RLock()
+		effective = v.refined[subject]
+		currentObservable := v.observable[subject]
+		v.mu.RUnlock()
+		if recorded.Refinement.Closure != refinedSubjectHash(subject, effective.Hash) {
+			return Verdict{Stale, "refinement"}, nil
+		}
+		positive = positive && currentObservable.Observable
+	}
+	if recorded.RuntimeInputs != "" {
+		after, err := v.currentRuntimeContext(ctx, recorded)
+		if err != nil {
+			return Verdict{}, err
+		}
+		if err := v.reobserveBase(ctx); err != nil {
+			return Verdict{}, err
+		}
+		if before != after {
+			return Verdict{Stale, "runtimeinputs"}, nil
+		}
+		return decideAfterClosureObserved(recorded, effective, v.guards, before, v.kind, v.purityMatches(recorded, subject), positive), nil
+	}
+	return decideAfterClosureObserved(recorded, effective, v.guards, runtimeinput.State{}, v.kind, v.purityMatches(recorded, subject), false), nil
+}
+
+func unavailableObservedAnalysis(ctx context.Context, analysis string, err error) (Verdict, error) {
+	if contextErr := ctx.Err(); contextErr != nil {
+		return Verdict{}, contextErr
+	}
+	return Verdict{Unverifiable, analysis + " unavailable: " + err.Error()}, nil
 }
 
 // CheckRefined compares maximal evidence first. It invokes declaration-RTA under
@@ -613,12 +824,16 @@ func (v *View) ValidateContext(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	hasRefined := len(v.capturedRefined) != 0
+	hasObserved := len(v.capturedObserved) != 0
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if hasObserved {
+		return ErrObservedValidationRequired
 	}
 	if hasRefined {
 		return ErrRefinedValidationRequired
@@ -638,12 +853,16 @@ func (v *View) ValidateContext(ctx context.Context) error {
 func (v *View) ValidateRefined(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
+	hasObserved := len(v.capturedObserved) != 0
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil refinement context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if hasObserved {
+		return ErrObservedValidationRequired
 	}
 	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
@@ -684,6 +903,101 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	current.mu.RLock()
 	defer current.mu.RUnlock()
 	return compareRefinedContext(ctx, current.refined, expected, subjects)
+}
+
+// ValidateObserved re-establishes every captured observation proof and attached
+// runtime state after execution before the caller persists its fingerprints.
+func (v *View) ValidateObserved(ctx context.Context) error {
+	v.mu.Lock()
+	v.sealed = true
+	v.mu.Unlock()
+	if ctx == nil {
+		return errors.New("gofresh: nil observation validation context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	if err != nil {
+		return err
+	}
+	if err := v.compareBaseContext(ctx, current); err != nil {
+		return err
+	}
+	v.mu.RLock()
+	subjects := make([]Subject, 0, len(v.capturedObserved))
+	expected := make(map[Subject]closure.Observability, len(v.capturedObserved))
+	expectedRefined := make(map[Subject]closure.Closure, len(v.capturedRefined))
+	attached := make(map[Subject]runtimeinput.State, len(v.capturedObserved))
+	for _, subject := range v.subjects {
+		if v.capturedObserved[subject] {
+			subjects = append(subjects, subject)
+			expected[subject] = v.observable[subject]
+			attached[subject] = v.attachedObservations[subject]
+		}
+		if v.capturedRefined[subject] {
+			expectedRefined[subject] = v.refined[subject]
+		}
+	}
+	v.mu.RUnlock()
+	if len(subjects) == 0 {
+		return errors.New("gofresh: no captured observation proof")
+	}
+	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
+		return err
+	}
+	if err := current.ensureObservable(ctx, subjects); err != nil {
+		return err
+	}
+	if len(expectedRefined) != 0 {
+		refinedSubjects := make([]Subject, 0, len(expectedRefined))
+		for _, subject := range v.subjects {
+			if _, ok := expectedRefined[subject]; ok {
+				refinedSubjects = append(refinedSubjects, subject)
+			}
+		}
+		if err := current.ensureRefined(ctx, refinedSubjects); err != nil {
+			return err
+		}
+		current.mu.RLock()
+		if err := compareRefinedContext(ctx, current.refined, expectedRefined, refinedSubjects); err != nil {
+			current.mu.RUnlock()
+			return err
+		}
+		current.mu.RUnlock()
+	}
+	current.mu.RLock()
+	for _, subject := range subjects {
+		if current.observable[subject] != expected[subject] {
+			current.mu.RUnlock()
+			return fmt.Errorf("%w: observation proof for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+		}
+	}
+	current.mu.RUnlock()
+	return v.compareAttachedObservations(ctx, attached, subjects)
+}
+
+func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
+	for _, subject := range subjects {
+		state := attached[subject]
+		if !state.OK || state.Manifest == "" || state.Digest == "" {
+			return fmt.Errorf("gofresh: subject %s.%s has no attached completed observation", subject.Package, subject.Symbol)
+		}
+		var observed runtimeinput.State
+		var err error
+		if v.runtimeCurrent != nil {
+			observed, err = v.runtimeCurrent(ctx, state.Manifest, v.moduleDir)
+		} else {
+			observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.env)
+		}
+		if err != nil {
+			return err
+		}
+		if observed != state {
+			return fmt.Errorf("%w: runtime inputs for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+		}
+	}
+	return ctx.Err()
 }
 
 func compareRefinedContext(ctx context.Context, current, expected map[Subject]closure.Closure, subjects []Subject) error {
@@ -828,6 +1142,58 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	return nil
 }
 
+func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
+	if ctx == nil {
+		return errors.New("gofresh: nil observation proof context")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("gofresh: observation proof cancelled: %w", err)
+	}
+	v.mu.RLock()
+	requests := make([]closure.Subject, 0, len(subjects))
+	for _, subject := range subjects {
+		if _, ok := v.observable[subject]; !ok {
+			requests = append(requests, closure.Subject{Package: subject.Package, Symbol: subject.Symbol})
+		}
+	}
+	v.mu.RUnlock()
+	if len(requests) == 0 {
+		return nil
+	}
+	before, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	if err != nil {
+		return err
+	}
+	if err := v.compareBaseContext(ctx, before); err != nil {
+		return err
+	}
+	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
+	if err != nil {
+		return err
+	}
+	computed, err := hasher.ComputeObservabilityBatch(requests)
+	if err != nil {
+		return err
+	}
+	after, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	if err != nil {
+		return err
+	}
+	if err := v.compareBaseContext(ctx, after); err != nil {
+		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.sealed {
+		return ErrViewSealed
+	}
+	for _, request := range requests {
+		subject := Subject{Package: request.Package, Symbol: request.Symbol}
+		v.observable[subject] = computed[request]
+	}
+	return ctx.Err()
+}
+
 func retainMaximalDisposition(maximal, refined closure.Closure, openWorld bool) closure.Closure {
 	if maximal.Unverifiable && (openWorld || refined.Widened || maximal.Unrefinable) {
 		refined.Unverifiable = true
@@ -842,6 +1208,21 @@ func compatibleRefinement(ref Refinement, subject Subject, maximalClosure string
 
 func refinementEvidence(maximalClosure string, ref Refinement) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(ref.Strategy), ref.Strategy, len(ref.Subject.Package), ref.Subject.Package, len(ref.Subject.Symbol), ref.Subject.Symbol, len(ref.Closure), ref.Closure, ref.Unverifiable, len(ref.Reason), ref.Reason))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+func compatibleObservationProof(proof ObservationProof, assertion string, subject Subject, maximalClosure string) bool {
+	if assertion != "caller assertion" || proof.Strategy != ObservationRTA || proof.Subject != subject {
+		return false
+	}
+	if proof.Observable == (proof.Reason != "") {
+		return false
+	}
+	return proof.Evidence == observationProofEvidence(maximalClosure, assertion, proof)
+}
+
+func observationProofEvidence(maximalClosure, assertion string, proof ObservationProof) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason))
 	return hex.EncodeToString(sum[:])[:32]
 }
 

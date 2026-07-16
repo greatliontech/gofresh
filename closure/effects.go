@@ -27,6 +27,7 @@ type externalEffect struct {
 	detail      string
 	reason      string
 	unrefinable bool
+	observable  bool
 }
 
 type maximalEffectScan struct {

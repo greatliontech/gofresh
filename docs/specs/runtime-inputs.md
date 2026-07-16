@@ -149,8 +149,6 @@ filesystem mutation are explicitly outside the read-only set. An addition to eit
 the producer hook set or the admitted set is a contract change, never inferred from a
 matching diagnostic string.
 
-Lands: 4.
-
 **REQ-inputs-completed-observation** (invariant): Testlog bytes MUST become a completed
 observation only through a construction path gated by the caller's verified normal
 termination of that producing process and its evidence that every behavior-affecting

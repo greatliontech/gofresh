@@ -133,7 +133,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "Refinement", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "Refinement", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}

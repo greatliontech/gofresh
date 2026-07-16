@@ -225,3 +225,21 @@ bindings {
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "86a9d3e6c818737aebc30614e327026c2b2e1e0e42b01652bed6b6f8d9dec2c3"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-observable-read-set"
+  content_hash: "b85ffd46171b8b7f60b9fc5f9353da9c076eded27ab238914b8670e079b0473f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "dfd1315c737428820fe1e38e7329ec0799c5be890c7a4b0f9da850e64fdd90b0"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observable-read-set"
+  content_hash: "b85ffd46171b8b7f60b9fc5f9353da9c076eded27ab238914b8670e079b0473f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5969b2b844d559f9d4ab50568864f76fb9ac2db19f6957d804fb9b5f9b6e530e"
+}

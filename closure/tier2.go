@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"golang.org/x/tools/go/packages"
@@ -307,6 +308,13 @@ type Subject struct {
 	Symbol  string
 }
 
+// Observability is the complete subject-tier disposition for runtime-input
+// observation. Observable is true only when every reachable effect is admitted.
+type Observability struct {
+	Observable bool
+	Reason     string
+}
+
 const maxAttributedSubjects = 64
 
 // Compute returns the source closure for one subject of pkgPath. It is the
@@ -417,6 +425,161 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 	return results, nil
 }
 
+// ComputeObservabilityBatch computes caller-selected per-subject observation proofs.
+// It intentionally performs subject-local analysis: proof cost is caller-selected,
+// while batching equivalence is retained by the attributed RTA implementation.
+func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
+	results := make(map[Subject]Observability, len(subjects))
+	for _, subject := range subjects {
+		if _, ok := results[subject]; ok {
+			continue
+		}
+		result, err := h.computeObservability(subject)
+		if err != nil {
+			return nil, err
+		}
+		results[subject] = result
+	}
+	return results, nil
+}
+
+func (h *Hasher) computeObservability(subject Subject) (Observability, error) {
+	prog, err := h.loadCached(subject.Package)
+	if err != nil {
+		return Observability{}, err
+	}
+	if prog.roots[subject.Symbol] == nil {
+		return Observability{}, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, subject.Package)
+	}
+	metas, err := h.list(subject.Package)
+	if err != nil {
+		return Observability{}, err
+	}
+	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{subject})
+	if err != nil {
+		return Observability{}, err
+	}
+	base := newTier2Base(h, prog, metas)
+	subjectReach := reachable[0]
+	subjectReach.functions = subjectReach.subjectFunctions
+	subjectResult, err := h.tier2Reachable(base, subjectReach)
+	if err != nil {
+		return Observability{}, err
+	}
+	startupReach := reachable[0]
+	startupReach.functions = nonStandardFunctions(startupReach.startupFunctions)
+	startupResult := directExternalEffects(base, startupReach)
+	if startupResult.unverifiable {
+		reason := startupResult.reason
+		if reason == "" {
+			reason = "external dependence"
+		}
+		return Observability{Reason: "startup effect: " + reason}, nil
+	}
+	if subjectResult.widen || subjectReach.openWorld {
+		reason := subjectResult.widenReason
+		if reason == "" {
+			reason = "open subject world"
+		}
+		return Observability{Reason: "subject reachability is not closed: " + reason}, nil
+	}
+	maximalEffects, _, _, err := h.maximalExternalEffects(subject.Package)
+	if err != nil {
+		return Observability{}, err
+	}
+	for _, effect := range maximalEffects {
+		if maximalObservabilityBlocker(effect) {
+			return Observability{Reason: effect.reason}, nil
+		}
+	}
+	for _, effect := range subjectResult.effects {
+		if !effect.observable {
+			return Observability{Reason: effect.reason}, nil
+		}
+	}
+	return Observability{Observable: true}, nil
+}
+
+func directExternalEffects(base *tier2Base, reachable attributedReachability) tier2Result {
+	analyzer := base.analyzer()
+	for function := range reachable.functions {
+		idx := analyzer.idxForFunction(function)
+		if idx == nil || idx.std || idx.testMain {
+			continue
+		}
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				site, ok := instruction.(ssa.CallInstruction)
+				if !ok || site.Common() == nil {
+					continue
+				}
+				callee := site.Common().StaticCallee()
+				if callee != nil {
+					recordDirectCallEffect(analyzer, callee, site)
+				}
+				for target := range reachable.dynamicTargets[site] {
+					if observableDirEntryCall(site) {
+						continue
+					}
+					recordDirectCallEffect(analyzer, target, site)
+				}
+			}
+		}
+	}
+	return analyzer.result()
+}
+
+func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.CallInstruction) {
+	if analyzer == nil || callee == nil || observableFileMethod(callee) || observableDirEntryCall(site) || isTestingMRun(callee) {
+		return
+	}
+	pkgPath := funcPkgPath(callee)
+	name := callee.Name()
+	if object := callee.Object(); object != nil {
+		name = object.Name()
+	}
+	effect, classified := classBEffect(pkgPath, name)
+	calleeIdx := analyzer.idxForFunction(callee)
+	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
+		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+		classified = true
+	}
+	if osOpenFileMayMutate(callee, pkgPath, name, site.Common()) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
+		classified = true
+	}
+	if !classified && syscallOpenMayCreate(pkgPath, name, site.Common()) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
+		classified = true
+	}
+	if classified {
+		analyzer.recordExternalEffect(effect)
+	}
+}
+
+func nonStandardFunctions(functions map[*ssa.Function]bool) map[*ssa.Function]bool {
+	filtered := make(map[*ssa.Function]bool)
+	for function := range functions {
+		if !isStdImportPath(funcPkgPath(function)) {
+			filtered[function] = true
+		}
+	}
+	return filtered
+}
+
+func maximalObservabilityBlocker(effect externalEffect) bool {
+	if effect.packagePath == "testing" && effect.symbol == "Run" {
+		return false
+	}
+	if effect.packagePath == "os" {
+		switch effect.symbol {
+		case "Getenv", "LookupEnv", "Open", "ReadFile", "ReadDir":
+			return false
+		}
+	}
+	return true
+}
+
 func (h *Hasher) closureFromTier2(pkgPath string, tr tier2Result) (Closure, error) {
 	var hash string
 	var err error
@@ -469,10 +632,12 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 }
 
 type attributedReachability struct {
-	functions      map[*ssa.Function]bool
-	resolved       map[ssa.CallInstruction]bool
-	dynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	openWorld      bool
+	functions        map[*ssa.Function]bool
+	subjectFunctions map[*ssa.Function]bool
+	startupFunctions map[*ssa.Function]bool
+	resolved         map[ssa.CallInstruction]bool
+	dynamicTargets   map[ssa.CallInstruction]map[*ssa.Function]bool
+	openWorld        bool
 }
 
 // attributedReachableSets runs package-local RTA once and projects its masks
@@ -516,6 +681,27 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 			openWorld:      rootMayReceiveUnknownDynamic(prog, prog.roots[subjects[i].Symbol]),
 		}
 		mask := uint64(1) << i
+		subjectRoot := prog.roots[subjects[i].Symbol]
+		startupRoots := make([]*ssa.Function, 0, len(prog.prog.AllPackages())+1)
+		if prog.testMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
+			startupRoots = append(startupRoots, prog.testMain)
+		}
+		for _, p := range prog.prog.AllPackages() {
+			if isGeneratedTestMainPackage(prog, p) {
+				continue
+			}
+			if init := p.Func("init"); init != nil {
+				startupRoots = append(startupRoots, init)
+			}
+		}
+		reachable[i].subjectFunctions, err = provenanceReachable(ctx, []*ssa.Function{subjectRoot}, mask, res)
+		if err != nil {
+			return nil, err
+		}
+		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res)
+		if err != nil {
+			return nil, err
+		}
 		for fn, masks := range res.Reachable {
 			if masks&mask != 0 {
 				reachable[i].functions[fn] = true
@@ -527,8 +713,12 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 			}
 		}
 		for site, targets := range res.Targets {
+			callee := site.Common().StaticCallee()
+			if !reachable[i].functions[site.Parent()] || callee != nil && funcPkgPath(callee) == "testing" {
+				continue
+			}
 			for target, masks := range targets {
-				if masks&mask != 0 {
+				if masks&mask != 0 && reachable[i].functions[target] {
 					projected := reachable[i].dynamicTargets[site]
 					if projected == nil {
 						projected = make(map[*ssa.Function]bool)
@@ -540,6 +730,77 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		}
 	}
 	return reachable, nil
+}
+
+func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *attributedRTAResult) (map[*ssa.Function]bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reachable := make(map[*ssa.Function]bool)
+	scanned := make(map[*ssa.Function]bool)
+	queue := append([]*ssa.Function(nil), roots...)
+	for len(queue) != 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		fn := queue[0]
+		queue = queue[1:]
+		if fn == nil || scanned[fn] || result.Reachable[fn]&mask == 0 {
+			continue
+		}
+		scanned[fn] = true
+		testingFunction := funcPkgPath(fn) == "testing"
+		if !testingFunction {
+			reachable[fn] = true
+		}
+		for _, block := range fn.Blocks {
+			for _, instruction := range block.Instrs {
+				site, ok := instruction.(ssa.CallInstruction)
+				if !ok || site.Common() == nil {
+					continue
+				}
+				callee := site.Common().StaticCallee()
+				if isTestingMRun(callee) {
+					continue
+				}
+				if callee != nil {
+					calleeTesting := funcPkgPath(callee) == "testing"
+					if !testingFunction || calleeTesting {
+						queue = append(queue, callee)
+					}
+					if calleeTesting && !testingFunction {
+						continue
+					}
+				}
+				for target, targetMask := range result.Targets[site] {
+					if targetMask&mask == 0 || isTestingMRun(target) {
+						continue
+					}
+					targetTesting := funcPkgPath(target) == "testing"
+					if !testingFunction || targetTesting || !isStdImportPath(funcPkgPath(target)) {
+						queue = append(queue, target)
+					}
+				}
+			}
+		}
+	}
+	return reachable, nil
+}
+
+func isTestingMRun(fn *ssa.Function) bool {
+	if fn == nil {
+		return false
+	}
+	if strings.Contains(fn.String(), "testing.M).Run") {
+		return true
+	}
+	if fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	if funcPkgPath(fn) != "testing" || fn.Name() != "Run" {
+		return false
+	}
+	return strings.Contains(types.TypeString(fn.Signature.Recv().Type(), nil), "testing.M")
 }
 
 func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
@@ -637,17 +898,23 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		return tier2Result{}, err
 	}
 	for site, targets := range reachable.dynamicTargets {
+		if !reachable.functions[site.Parent()] {
+			continue
+		}
 		callerIdx := a.idxForFunction(site.Parent())
-		if callerIdx == nil || callerIdx.std || callerIdx.testMain {
+		if callerIdx == nil || callerIdx.testMain {
 			continue
 		}
 		for target := range targets {
+			if observableDirEntryCall(site) {
+				continue
+			}
 			idx := a.idxForFunction(target)
 			if idx == nil || !idx.std {
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
-			if !ok && !isSourceOnlyStandardPackage(idx.path) {
+			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(idx.path) {
 				effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, target.Name(), "reaches unaudited standard operation "+idx.path+"."+target.Name())
 				ok = true
 			}
@@ -1109,7 +1376,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		for _, instr := range block.Instrs {
 			if v, ok := instr.(ssa.Value); ok {
 				a.addType(v.Type())
-				if !idx.std && typeUsesUnsafePointer(v.Type()) {
+				if !idx.std && typeUsesUnsafePointer(v.Type()) && !isOSFileType(v.Type()) {
 					a.requestWiden("unsafe pointer reachable in " + idx.id)
 				}
 			}
@@ -1161,7 +1428,7 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 		return
 	}
 	a.addType(v.Type())
-	if typeUsesUnsafePointer(v.Type()) {
+	if typeUsesUnsafePointer(v.Type()) && !isOSFileType(v.Type()) {
 		if idx := a.idxForFunction(v.Parent()); idx != nil && !idx.std {
 			a.requestWiden("unsafe pointer reachable in " + idx.id)
 		}
@@ -1177,6 +1444,14 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	case *ssa.Function:
 		a.addFunction(x)
 	}
+}
+
+func isOSFileType(t types.Type) bool {
+	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
+		t = pointer.Elem()
+	}
+	named, ok := types.Unalias(t).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "os" && named.Obj().Name() == "File"
 }
 
 func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
@@ -1228,6 +1503,9 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		return
 	}
 	callerStd := callerIdx != nil && callerIdx.std
+	if c.IsInvoke() && observableDirEntryCall(site) {
+		return
+	}
 	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
 	if c.IsInvoke() && !resolved && !callerStd {
 		a.requestWiden("interface invoke outside RTA")
@@ -1246,6 +1524,13 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if obj := callee.Object(); obj != nil {
 		name = obj.Name()
 	}
+	if observableFileMethod(callee) {
+		if len(c.Args) != 0 && fileValueFromAdmittedOpen(c.Args[0], make(map[ssa.Value]bool)) {
+			return
+		}
+		a.recordExternalEffect(symbolExternalEffect(externalEffectFileIO, "os", "File."+name, "reaches os.File."+name+" on an unattributed file handle (file I/O)"))
+		return
+	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
 	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
@@ -1261,6 +1546,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		classified = true
 	}
 	if classified {
+		effect.observable = observableCallEffect(effect, c, site)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
 			return
 		}
@@ -1275,6 +1561,339 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if !callerStd && pkgPath == "reflect" && (name == "Call" || name == "CallSlice" || name == "MakeFunc" || name == "MethodByName") {
 		a.requestWiden("reflect dispatch")
 	}
+}
+
+func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction) bool {
+	if call == nil || effect.packagePath != "os" {
+		return false
+	}
+	switch effect.symbol {
+	case "Getenv", "LookupEnv", "Open", "ReadFile", "ReadDir":
+	default:
+		return false
+	}
+	if !observableIdentityArgument(effect, call) {
+		return false
+	}
+	switch effect.symbol {
+	case "Open":
+		return observableOpenResult(site)
+	case "ReadDir":
+		return observableReadDirResult(site)
+	default:
+		return true
+	}
+}
+
+func observableIdentityArgument(effect externalEffect, call *ssa.CallCommon) bool {
+	if call == nil || len(call.Args) == 0 {
+		return false
+	}
+	value, ok := call.Args[0].(*ssa.Const)
+	if !ok || value.Value == nil || value.Value.Kind() != constant.String {
+		return false
+	}
+	identity := constant.StringVal(value.Value)
+	if identity == "" || !utf8.ValidString(identity) || strings.ContainsAny(identity, "\x00\r\n") {
+		return false
+	}
+	return effect.kind != externalEffectFileIO || !hasParentTraversalPath(identity)
+}
+
+func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] {
+		return false
+	}
+	seen[value] = true
+	switch value := value.(type) {
+	case *ssa.Extract:
+		if value.Index != 0 {
+			return false
+		}
+		call, ok := value.Tuple.(ssa.CallInstruction)
+		if !ok || call.Common() == nil || call.Common().StaticCallee() == nil {
+			return false
+		}
+		effect, classified := classBEffect(funcPkgPath(call.Common().StaticCallee()), call.Common().StaticCallee().Name())
+		return classified && effect.packagePath == "os" && effect.symbol == "Open" && observableIdentityArgument(effect, call.Common())
+	case *ssa.Phi:
+		if len(value.Edges) == 0 {
+			return false
+		}
+		for _, edge := range value.Edges {
+			if !fileValueFromAdmittedOpen(edge, seen) {
+				return false
+			}
+		}
+		return true
+	case *ssa.ChangeType:
+		return fileValueFromAdmittedOpen(value.X, seen)
+	case *ssa.Convert:
+		return fileValueFromAdmittedOpen(value.X, seen)
+	default:
+		return false
+	}
+}
+
+func observableOpenResult(site ssa.CallInstruction) bool {
+	value, ok := site.(ssa.Value)
+	if !ok || value.Referrers() == nil {
+		return false
+	}
+	for _, ref := range *value.Referrers() {
+		extract, ok := ref.(*ssa.Extract)
+		if !ok {
+			if _, debug := ref.(*ssa.DebugRef); !debug {
+				return false
+			}
+			continue
+		}
+		if extract.Index == 0 && !observableFileValue(extract, make(map[ssa.Value]bool)) {
+			return false
+		}
+	}
+	return true
+}
+
+func observableReadDirResult(site ssa.CallInstruction) bool {
+	value, ok := site.(ssa.Value)
+	if !ok || value.Referrers() == nil {
+		return false
+	}
+	for _, ref := range *value.Referrers() {
+		extract, ok := ref.(*ssa.Extract)
+		if !ok {
+			if _, debug := ref.(*ssa.DebugRef); !debug {
+				return false
+			}
+			continue
+		}
+		if extract.Index == 0 && !observableDirEntriesValue(extract, make(map[ssa.Value]bool)) {
+			return false
+		}
+	}
+	return true
+}
+
+func observableDirEntriesValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] || value.Referrers() == nil {
+		return value != nil
+	}
+	seen[value] = true
+	for _, ref := range *value.Referrers() {
+		switch ref := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Index:
+			if !observableDirEntryValue(ref, make(map[ssa.Value]bool)) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if !observableDirEntryAddress(ref) {
+				return false
+			}
+		case *ssa.Slice:
+			if !observableDirEntriesValue(ref, seen) {
+				return false
+			}
+		case *ssa.Phi:
+			if !observableDirEntriesValue(ref, seen) {
+				return false
+			}
+		case ssa.CallInstruction:
+			common := ref.Common()
+			if common == nil {
+				return false
+			}
+			builtin, ok := common.Value.(*ssa.Builtin)
+			if !ok || builtin.Name() != "len" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func observableDirEntryAddress(value ssa.Value) bool {
+	if value == nil || value.Referrers() == nil {
+		return false
+	}
+	for _, ref := range *value.Referrers() {
+		switch ref := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.UnOp:
+			if ref.Op != token.MUL || !observableDirEntryValue(ref, make(map[ssa.Value]bool)) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func observableDirEntryValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] || value.Referrers() == nil {
+		return value != nil
+	}
+	seen[value] = true
+	for _, ref := range *value.Referrers() {
+		switch ref := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.MakeInterface:
+			if !observableDirEntryValue(ref, seen) {
+				return false
+			}
+		case *ssa.ChangeInterface:
+			if !observableDirEntryValue(ref, seen) {
+				return false
+			}
+		case *ssa.Phi:
+			if !observableDirEntryValue(ref, seen) {
+				return false
+			}
+		case ssa.CallInstruction:
+			if !observableDirEntryCall(ref) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func observableDirEntryCall(site ssa.CallInstruction) bool {
+	if site == nil || site.Common() == nil || !site.Common().IsInvoke() || site.Common().Method == nil {
+		return false
+	}
+	switch site.Common().Method.Name() {
+	case "Name", "IsDir", "Type":
+		return dirEntryValueFromAdmittedReadDir(site.Common().Value, make(map[ssa.Value]bool))
+	default:
+		return false
+	}
+}
+
+func dirEntryValueFromAdmittedReadDir(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] {
+		return false
+	}
+	seen[value] = true
+	switch value := value.(type) {
+	case *ssa.MakeInterface:
+		return dirEntryValueFromAdmittedReadDir(value.X, seen)
+	case *ssa.ChangeInterface:
+		return dirEntryValueFromAdmittedReadDir(value.X, seen)
+	case *ssa.Index:
+		return dirEntriesValueFromAdmittedReadDir(value.X, seen)
+	case *ssa.UnOp:
+		if value.Op != token.MUL {
+			return false
+		}
+		address, ok := value.X.(*ssa.IndexAddr)
+		return ok && dirEntriesValueFromAdmittedReadDir(address.X, seen)
+	case *ssa.Phi:
+		if len(value.Edges) == 0 {
+			return false
+		}
+		for _, edge := range value.Edges {
+			if !dirEntryValueFromAdmittedReadDir(edge, seen) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func dirEntriesValueFromAdmittedReadDir(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] {
+		return false
+	}
+	seen[value] = true
+	switch value := value.(type) {
+	case *ssa.Extract:
+		if value.Index != 0 {
+			return false
+		}
+		call, ok := value.Tuple.(ssa.CallInstruction)
+		if !ok || call.Common() == nil || call.Common().StaticCallee() == nil {
+			return false
+		}
+		effect, classified := classBEffect(funcPkgPath(call.Common().StaticCallee()), call.Common().StaticCallee().Name())
+		return classified && effect.packagePath == "os" && effect.symbol == "ReadDir" && observableIdentityArgument(effect, call.Common())
+	case *ssa.Slice:
+		return dirEntriesValueFromAdmittedReadDir(value.X, seen)
+	case *ssa.Phi:
+		if len(value.Edges) == 0 {
+			return false
+		}
+		for _, edge := range value.Edges {
+			if !dirEntriesValueFromAdmittedReadDir(edge, seen) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func observableFileValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] || value.Referrers() == nil {
+		return value != nil
+	}
+	seen[value] = true
+	for _, ref := range *value.Referrers() {
+		switch ref := ref.(type) {
+		case *ssa.DebugRef:
+			continue
+		case *ssa.Phi:
+			if !observableFileValue(ref, seen) {
+				return false
+			}
+		case *ssa.BinOp:
+			if ref.Op != token.EQL && ref.Op != token.NEQ {
+				return false
+			}
+		case ssa.CallInstruction:
+			common := ref.Common()
+			if common == nil || len(common.Args) == 0 || common.Args[0] != value || !observableFileMethod(common.StaticCallee()) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func observableFileMethod(fn *ssa.Function) bool {
+	if fn == nil || funcPkgPath(fn) != "os" || fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	receiver := types.TypeString(fn.Signature.Recv().Type(), nil)
+	if !strings.Contains(receiver, "os.File") {
+		return false
+	}
+	switch fn.Name() {
+	case "Close", "Name", "Read", "ReadAt", "Seek":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasParentTraversalPath(name string) bool {
+	for _, component := range strings.FieldsFunc(name, func(r rune) bool { return r == '/' || filepath.Separator == '\\' && r == '\\' }) {
+		if component == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
@@ -1419,9 +2038,6 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	a.addReverseLinknameTargets(obj)
 	if fn, ok := obj.(*types.Func); ok {
-		if effect, ok := classBEffect(obj.Pkg().Path(), obj.Name()); ok {
-			a.recordExternalEffect(effect)
-		}
 		if ssaFn := a.prog.prog.FuncValue(fn); ssaFn != nil {
 			a.scanFunction(ssaFn)
 		}

@@ -144,3 +144,39 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "53febc0c5e78a1f5f14d1bca2fabc4e6483ebf514f33d3397e912943b0484d20"
 }
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "4ec27036efaff17b5849f66f1f21cb87ce0f54da07ff29679f0151c229aebc61"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "3b63acf490c77b59bdffeae2cb9d02bec8931b13fa428778cc2665edb4779701"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "4ec27036efaff17b5849f66f1f21cb87ce0f54da07ff29679f0151c229aebc61"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5969b2b844d559f9d4ab50568864f76fb9ac2db19f6957d804fb9b5f9b6e530e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-batch-equivalence"
+  content_hash: "da3fca8017cc4312f1feb299eeabfe5f3ac25177300f2658b114e2d085c48055"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "3b63acf490c77b59bdffeae2cb9d02bec8931b13fa428778cc2665edb4779701"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-batch-equivalence"
+  content_hash: "da3fca8017cc4312f1feb299eeabfe5f3ac25177300f2658b114e2d085c48055"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityBatchMatchesIndependentAnalysis"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c5cd73995401add0edf94221e96ad0b990d5b5d266bcf20a3ed7227fa0eb17c9"
+}

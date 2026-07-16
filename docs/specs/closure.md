@@ -120,8 +120,6 @@ may reject opaque linkage, native code, process execution, dot imports, unaudite
 standard-library access, or other unclassified external-capable syntax, but can never
 grant the proof on its own.
 
-Lands: 4.
-
 **REQ-closure-batch-equivalence** (invariant): Sharing reachability work across an
 analysis view's refined subjects MUST produce, for every subject, the same reachable
 functions, widening disposition, closure hash, and unverifiability as analyzing that
@@ -139,8 +137,6 @@ analysis across subjects MUST yield exactly the proof disposition, complete effe
 root provenance, and diagnostic that independent analysis of each subject under the
 same view would yield. No effect or proof fact reached only by one subject can confer
 or deny another subject's proof.
-
-Lands: 4.
 
 ## Cross-module dependencies
 

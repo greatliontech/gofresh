@@ -16,3 +16,7 @@ func BenchmarkInitFile(b *testing.B) {
 		_ = len(initData)
 	}
 }
+
+func TestInitFile(*testing.T) {
+	_ = len(initData)
+}

@@ -63,3 +63,21 @@ bindings {
   role: BINDING_ROLE_PROVES
   shape_hash: "44c43c6024fce16e2fdaadbee5fb3e8200ec1691c46d83b27bb8b4e890e08345"
 }
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.View.CheckObserved"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "a4646e643d2568ea2d391cd0008bf4e49060baaa7b9381eb05151daa9a4ce1ba"
+}
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "44518f4af9eb96078e82508a2539b10c0e37055a76c10a0e3b27b997e13410cc"
+}

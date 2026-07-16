@@ -56,6 +56,18 @@ type processObservation struct {
 	view    string
 }
 
+// CompletedState returns the persisted state from a sealed observation backed by
+// at least one contributing process. Zero-process merge evidence is refused.
+func CompletedState(observation Observation) (State, error) {
+	if err := validateObservation(observation, false); err != nil {
+		return State{}, err
+	}
+	if len(observation.processes) == 0 {
+		return State{}, errors.New("runtimeinputs: completed observation has no contributing process")
+	}
+	return observation.State, nil
+}
+
 type manifest struct {
 	Version      int      `json:"v"`
 	Env          []string `json:"env,omitempty"`
