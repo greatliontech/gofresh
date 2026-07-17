@@ -80,11 +80,12 @@ func TestExternal(t *testing.T) {
 		}
 	}
 	subject := Subject{Package: "example.com/external", Symbol: "Ok"}
+	oracle := Subject{Package: "example.com/external", Symbol: "TestExternal"}
 	engine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView([]Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +96,13 @@ func TestExternal(t *testing.T) {
 	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("observation proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
+	oracleFingerprint, err := producer.CaptureObserved(context.Background(), oracle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(oracleFingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("oracle observation proof = %+v, want isolated analyzed disposition", oracleFingerprint.ObservationProof)
+	}
 	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("external test"))
 	if err != nil {
 		t.Fatal(err)
@@ -103,10 +111,13 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := producer.AttachObservation(oracle, oracleFingerprint, observation); err != nil {
+		t.Fatal(err)
+	}
 	if err := producer.ValidateObserved(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView([]Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

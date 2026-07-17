@@ -1178,7 +1178,15 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		}
 		computed = make(map[closure.Subject]closure.Observability, len(requests))
 		for _, request := range requests {
-			computed[request] = closure.Observability{Reason: "observation analysis unavailable: " + err.Error()}
+			isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
+			if isolatedErr != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
+				}
+				computed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
+				continue
+			}
+			computed[request] = isolated[request]
 		}
 	}
 	after, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
