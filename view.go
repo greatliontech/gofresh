@@ -208,6 +208,9 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if e.observeHook != nil {
 		e.observeHook()
 	}
+	if e.progress != nil {
+		e.progress(Progress{Phase: "observe"})
+	}
 	hasher, err := closure.NewAtContextEnv(ctx, e.dir, e.env, e.buildFlags...)
 	if err != nil {
 		return viewObservation{}, err
@@ -834,6 +837,14 @@ func validPurityAssertion(assertion string) bool {
 }
 
 func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
+	if v.engine != nil && v.engine.progress != nil {
+		for _, fingerprint := range recorded {
+			if fingerprint.RuntimeInputs != "" {
+				v.engine.progress(Progress{Phase: "runtime"})
+				break
+			}
+		}
+	}
 	observed := make(map[Subject]runtimeinput.State, len(recorded))
 	for subject, fingerprint := range recorded {
 		state, err := v.currentRuntimeContext(ctx, fingerprint)
@@ -1242,6 +1253,11 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
 	if err != nil {
 		return err
+	}
+	if progress := v.engine.progress; progress != nil {
+		hasher.OnProgress(func(phase, pkgPath string) {
+			progress(Progress{Phase: phase, Package: pkgPath})
+		})
 	}
 	// The caller's analysis budget bounds only the precise analysis itself: the
 	// Hasher's analysis context carries the budget deadline, so exhaustion

@@ -118,6 +118,7 @@ type Engine struct {
 	env            []string
 	envSet         bool
 	analysisBudget time.Duration
+	progress       func(Progress)
 	// observeHook observes every source/guard/purity observation pass. Tests use
 	// it to pin how many observations an operation performs.
 	observeHook func()
@@ -140,6 +141,27 @@ func WithBuildFlags(flags ...string) Option {
 // WithBuildFlags; presenting one here is refused when New applies the options.
 func WithBuildInputs(inputs ...string) Option {
 	return func(e *Engine) { e.buildInputs = append([]string(nil), inputs...) }
+}
+
+// Progress reports the start of one long-running analysis step: Phase is
+// "observe" for a view observation pass, "runtime" for each runtime-input
+// observation pass (a check's window performs two), "load" for a package program load, "refine" for a
+// package's declaration-RTA batch, or "prove" for a package's observability
+// batch; Package names the package for the per-package phases. Events are
+// emitted before the step runs, carry no completion signal, and are
+// diagnostic keep-alive data, not contract.
+type Progress struct {
+	Phase   string
+	Package string
+}
+
+// WithProgress supplies a callback invoked synchronously at the start of each
+// long-running analysis step. The callback must be fast, must not call back
+// into the engine, and must be safe for concurrent invocation — one engine can
+// serve concurrent operations. A panicking callback unwinds through the
+// operation that emitted the event.
+func WithProgress(f func(Progress)) Option {
+	return func(e *Engine) { e.progress = f }
 }
 
 // WithAnalysisBudget bounds each precise-analysis phase — declaration-RTA

@@ -49,6 +49,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if err, ok := h.progErrs[pkgPath]; ok {
 		return nil, err
 	}
+	h.emitProgress("load", pkgPath)
 	p, err := loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 	if err != nil {
 		if h.ctx.Err() == nil {
@@ -123,6 +124,9 @@ func (h *Hasher) Prime(pkgPaths []string) {
 	}
 	if len(need) == 0 {
 		return
+	}
+	for _, p := range need {
+		h.emitProgress("load", p)
 	}
 	roots, err := packages.Load(loadConfigEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags...), need...)
 	if err != nil {
@@ -370,6 +374,7 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
+		h.emitProgress("refine", group.path)
 		// A batch view retains only final closures. Explicitly primed programs
 		// remain caller-owned; otherwise load one package program at a time and
 		// release it after this group so peak SSA memory is bounded by the largest
@@ -463,6 +468,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
+		h.emitProgress("prove", group.path)
 		prog, err := h.loadCached(group.path)
 		if err != nil {
 			return nil, err

@@ -61,6 +61,22 @@ type Hasher struct {
 	maximalTesting map[string]maximalEffectScan // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
+	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
+}
+
+// OnProgress supplies a callback invoked synchronously at the start of each
+// long-running analysis step: "load" before a package program load, "refine"
+// before a package's declaration-RTA batch, "prove" before a package's
+// observability batch. The callback must be fast; events are diagnostic
+// keep-alive data, not contract.
+func (h *Hasher) OnProgress(f func(phase, pkgPath string)) {
+	h.progress = f
+}
+
+func (h *Hasher) emitProgress(phase, pkgPath string) {
+	if h.progress != nil {
+		h.progress(phase, pkgPath)
+	}
 }
 
 func New() (*Hasher, error) { return NewAt("") }

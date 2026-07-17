@@ -2766,6 +2766,83 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 	}
 }
 
+func TestProgressReportsAnalysisPhases(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	var events []Progress
+	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := producer.CaptureObservedRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() {}\nfunc G() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events = nil
+	if _, err := current.CheckObserved(context.Background(), recorded, subject); err != nil {
+		t.Fatal(err)
+	}
+	phases := map[string]int{}
+	for _, event := range events {
+		phases[event.Phase]++
+		switch event.Phase {
+		case "load", "refine", "prove":
+			if event.Package != subject.Package {
+				t.Fatalf("per-package %s event names %q, want %q", event.Phase, event.Package, subject.Package)
+			}
+		case "observe", "runtime":
+			if event.Package != "" {
+				t.Fatalf("%s event names a package: %+v", event.Phase, event)
+			}
+		default:
+			t.Fatalf("unknown progress phase %q", event.Phase)
+		}
+	}
+	// A manifest-less drift-forced observed check observes twice (one bracket
+	// pair), opens no runtime window, loads the package program once, and runs
+	// each precise tier once.
+	if phases["observe"] != 2 || phases["runtime"] != 0 || phases["load"] != 1 || phases["refine"] != 1 || phases["prove"] != 1 {
+		t.Fatalf("progress phases = %v, want observe:2 load:1 refine:1 prove:1", phases)
+	}
+
+	// A manifest-carrying record's window performs two observation passes.
+	state, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withRuntime := recorded
+	withRuntime.RuntimeInputs = state.Manifest
+	withRuntime.RuntimeDigest = state.Digest
+	runtimeView, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events = nil
+	if _, err := runtimeView.CheckObserved(context.Background(), withRuntime, subject); err != nil {
+		t.Fatal(err)
+	}
+	runtimeEvents := 0
+	for _, event := range events {
+		if event.Phase == "runtime" {
+			runtimeEvents++
+		}
+	}
+	if runtimeEvents != 2 {
+		t.Fatalf("runtime-window events = %d, want 2", runtimeEvents)
+	}
+}
+
 func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")
