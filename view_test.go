@@ -85,7 +85,7 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject, oracle}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestExternal(t *testing.T) {
 	if err := producer.ValidateObserved(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject, oracle}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestExternal(t *testing.T) {
 	}
 	// One batched capture over both subjects preserves the same isolation: the
 	// unrootable subject degrades alone while its package sibling analyzes.
-	batchProducer, err := engine.NewView([]Subject{subject, oracle}, dir)
+	batchProducer, err := engine.NewView(context.Background(), []Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +148,8 @@ func TestExternal(t *testing.T) {
 
 func TestObservedCaptureRequiresObservedValidation(t *testing.T) {
 	view := &View{capturedObserved: map[Subject]bool{{}: true}}
-	if err := view.ValidateContext(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
-		t.Fatalf("ValidateContext = %v, want ErrObservedValidationRequired", err)
+	if err := view.Validate(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("Validate = %v, want ErrObservedValidationRequired", err)
 	}
 	if err := view.ValidateRefined(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
 		t.Fatalf("ValidateRefined = %v, want ErrObservedValidationRequired", err)
@@ -163,7 +163,7 @@ func TestObservedRefinementRecomputesProofAfterMaximalDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,8 +185,8 @@ func TestObservedRefinementRecomputesProofAfterMaximalDrift(t *testing.T) {
 	if _, err := producer.AttachObservation(subject, producer.observedFingerprintLocked(subject), observation); err == nil {
 		t.Fatal("second runtime observation attachment was accepted")
 	}
-	if err := producer.ValidateContext(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
-		t.Fatalf("ValidateContext for combined capture = %v, want ErrObservedValidationRequired", err)
+	if err := producer.Validate(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
+		t.Fatalf("Validate for combined capture = %v, want ErrObservedValidationRequired", err)
 	}
 	if err := producer.ValidateRefined(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {
 		t.Fatalf("ValidateRefined for combined capture = %v, want ErrObservedValidationRequired", err)
@@ -202,7 +202,7 @@ func TestObservedRefinementRecomputesProofAfterMaximalDrift(t *testing.T) {
 	if err := os.WriteFile(sourcePath, []byte(strings.Replace(string(source), "return 1", "return 2", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
 	if err := os.WriteFile(sourcePath, []byte(strings.Replace(string(source), "return 1", "return 2", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,13 +284,13 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err := producer.ValidateObserved(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	analyses := 0
 	current.beforePreciseAnalysis = func() { analyses++ }
-	ordinary, err := current.Check(fingerprint, subject)
+	ordinary, err := current.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestValidateObservedBracketsProofAnalysisWithRuntimeObservation(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,13 +441,13 @@ func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
 		"example.com/view":     {filepath.Join(dir, "root.go")},
 		"example.com/view/sub": {filepath.Join(dir, "sub", "sub.go")},
 	}
-	batch, err := engine.NewView(subjects, dir)
+	batch, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var wantUnion []string
 	for _, subject := range subjects {
-		singleton, err := engine.NewView([]Subject{subject}, dir)
+		singleton, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -498,14 +498,14 @@ func TestEngineCheckUsesFreshView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := engine.CaptureFor(subject, dir, Measurement)
+	fingerprint, err := engine.CaptureFor(context.Background(), subject, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Setenv("GOGC", "off"); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := engine.Check(fingerprint, subject, dir)
+	verdict, err := engine.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestEngineCheckUsesFreshView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = current.Check(fingerprint, subject, dir)
+	verdict, err = current.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestCodeViewOmitsMeasurementGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +546,7 @@ func TestCodeViewOmitsMeasurementGuards(t *testing.T) {
 	if fingerprint.Guards.Machine != "" || fingerprint.Guards.RuntimeConfig != "" {
 		t.Fatalf("code view captured measurement guards: %+v", fingerprint.Guards)
 	}
-	if _, err := engine.NewViewFor([]Subject{subject}, dir, Kind(99)); err == nil {
+	if _, err := engine.NewViewFor(context.Background(), []Subject{subject}, dir, Kind(99)); err == nil {
 		t.Fatal("invalid result kind accepted")
 	}
 }
@@ -558,7 +558,7 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	measurement, err := engine.NewViewFor([]Subject{subject}, dir, Measurement)
+	measurement, err := engine.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,11 +569,11 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 	if fingerprint.ResultKind != Measurement {
 		t.Fatalf("captured result kind = %d, want measurement", fingerprint.ResultKind)
 	}
-	code, err := engine.NewView([]Subject{subject}, dir)
+	code, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := code.Check(fingerprint, subject); err == nil {
+	if _, err := code.Check(context.Background(), fingerprint, subject); err == nil {
 		t.Fatal("measurement fingerprint accepted by code-result view")
 	}
 	if _, err := code.CheckRefined(context.Background(), fingerprint, subject); err == nil {
@@ -584,11 +584,11 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 	}
 	reclassified := fingerprint
 	reclassified.ResultKind = CodeResult
-	if _, err := engine.Check(reclassified, subject, dir); err == nil {
+	if _, err := engine.Check(context.Background(), reclassified, subject, dir); err == nil {
 		t.Fatal("measurement guards accepted after result-kind reclassification")
 	}
 	fingerprint.ResultKind = 0
-	if _, err := engine.Check(fingerprint, subject, dir); err == nil {
+	if _, err := engine.Check(context.Background(), fingerprint, subject, dir); err == nil {
 		t.Fatal("fingerprint with missing result kind accepted")
 	}
 }
@@ -600,7 +600,7 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,17 +613,17 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 	}
 
 	// The producer view remains the immutable pre-run observation.
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Valid {
 		t.Fatalf("frozen producer view = {%s %q}, want valid", verdict.Status, verdict.Reason)
 	}
-	if err := view.Validate(); !errors.Is(err, ErrViewChanged) {
+	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("Validate after source edit = %v, want ErrViewChanged", err)
 	}
-	verdict, err = engine.Check(fingerprint, subject, dir)
+	verdict, err = engine.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,14 +659,14 @@ func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), goMod("dep-b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(); !errors.Is(err, ErrViewChanged) {
+	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("Validate after source identity change = %v, want ErrViewChanged", err)
 	}
 }
@@ -689,7 +689,7 @@ func TestNewViewRejectsSourceChangeDuringConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewView([]Subject{subject}, dir); !errors.Is(err, ErrViewChanged) {
+	if _, err := engine.NewView(context.Background(), []Subject{subject}, dir); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("NewView during source change = %v, want ErrViewChanged", err)
 	}
 }
@@ -701,14 +701,14 @@ func TestViewDetectsAddedInitializer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "init.go"), []byte("package view\n\nfunc init() { Value = 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(); !errors.Is(err, ErrViewChanged) {
+	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("Validate after adding initializer = %v, want ErrViewChanged", err)
 	}
 }
@@ -720,7 +720,7 @@ func TestViewDiscoversSourcePurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func TestViewDiscoversSourcePurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,7 +744,7 @@ func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +752,7 @@ func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +766,7 @@ func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\ntype Inner struct{}\n\n//gofresh:pure\nfunc (Inner) M() { _, _ = os.ReadFile(\"fixture\") }\n\ntype Outer struct{ *Inner }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -793,7 +793,7 @@ func TestImportedPromotedMethodInheritsPurityDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "Outer.M"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +804,7 @@ func TestImportedPromotedMethodInheritsPurityDirective(t *testing.T) {
 	if fingerprint.PurityAssertion != "source directive" {
 		t.Fatalf("imported promoted purity = %q, want source directive", fingerprint.PurityAssertion)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestViewRejectsExternalTestSubjectCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.NewView([]Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
+	_, err = engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
 	if err == nil || !strings.Contains(err.Error(), "ambiguous subject") {
 		t.Fatalf("external-test collision accepted: %v", err)
 	}
@@ -835,7 +835,7 @@ func TestSourcePurityRemainsPortableWhenProducerAlsoAsserts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.Capture(subject, dir)
+	fingerprint, err := producer.Capture(context.Background(), subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -846,7 +846,7 @@ func TestSourcePurityRemainsPortableWhenProducerAlsoAsserts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := consumer.Check(fingerprint, subject, dir)
+	verdict, err := consumer.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -862,7 +862,7 @@ func TestMalformedPurityAttributionCannotOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.Capture(subject, dir)
+	fingerprint, err := producer.Capture(context.Background(), subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -871,7 +871,7 @@ func TestMalformedPurityAttributionCannotOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := consumer.Check(fingerprint, subject, dir)
+	verdict, err := consumer.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -887,7 +887,7 @@ func TestViewMarksCallerSuppliedCallbackUnverifiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,7 +895,7 @@ func TestViewMarksCallerSuppliedCallbackUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -911,7 +911,7 @@ func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -935,7 +935,7 @@ func TestRefinementRetainsMaximalDispositionForMutableCallbackGlobal(t *testing.
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -965,7 +965,7 @@ func TestRefinementPropagatesMutableCallbackGlobalFromDependency(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -992,7 +992,7 @@ func TestMaximalOrdinaryTestHarnessIsVerifiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "TestF"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1000,7 +1000,7 @@ func TestMaximalOrdinaryTestHarnessIsVerifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1020,7 +1020,7 @@ func TestRefinementClassifiesResolvedStandardInterfaceTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "TestF"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1040,7 +1040,7 @@ func TestRefinementRejectsUnauditedStandardOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1064,7 +1064,7 @@ func TestRefinementRejectsRuntimeBackedSyncOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1084,7 +1084,7 @@ func TestRefinementClassifiesExternalCallbackFromStandardLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1107,7 +1107,7 @@ func TestRefinementRejectsRuntimeAddressExposure(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1127,7 +1127,7 @@ func TestRefinementRejectsUnsafePointerAddressInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1147,7 +1147,7 @@ func TestRefinementRejectsCPUDispatchedMathForCodeResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1167,7 @@ func TestRefinementRejectsStandardGlobalState(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1203,7 +1203,7 @@ func TestViewFreezesRelativeModuleDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, ".")
+	view, err := engine.NewView(context.Background(), []Subject{subject}, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1226,7 +1226,7 @@ func TestRefinementRejectsFormattedReaderInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1253,7 +1253,7 @@ func TestRefinementRejectsBenchmarkIterationCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "BenchmarkF"}
-	view, err := engine.NewViewFor([]Subject{subject}, dir, Measurement)
+	view, err := engine.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1296,7 +1296,7 @@ func TestRefinementAllowsResolvedAssembly(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1319,7 +1319,7 @@ func TestRefinementRetainsSystemObjectDisposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1343,7 +1343,7 @@ func TestRefinementRejectsRuntimeDependentAssemblyInstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1370,7 +1370,7 @@ func TestRefinementRejectsExternalStateInAssemblyInclude(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1390,7 +1390,7 @@ func TestRefinementRejectsExternalStandardLinknameTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1410,7 +1410,7 @@ func TestRefinementRootsProductionFunctionNamedTestMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "TestMain"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1429,7 +1429,7 @@ func TestProductionTestMainSignatureIsNotHarnessSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "TestF"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1449,7 +1449,7 @@ func TestRefinedCheckRejectsMalformedEvidenceWhenMaximalMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1551,7 +1551,7 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1568,7 +1568,7 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.Check(fingerprint, subject); !errors.Is(err, ErrViewChanged) {
+	if _, err := view.Check(context.Background(), fingerprint, subject); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("runtime-input check after base drift = %v, want ErrViewChanged", err)
 	}
 }
@@ -1580,7 +1580,7 @@ func TestRuntimeInputCheckDetectsMovementBetweenSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1599,7 +1599,7 @@ func TestRuntimeInputCheckDetectsMovementBetweenSnapshots(t *testing.T) {
 		}
 		return runtimeinput.State{Digest: digest, OK: true}, nil
 	}
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1651,7 +1651,7 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1665,7 +1665,7 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1695,7 +1695,7 @@ func TestCheckRefinedBatchHonorsCancellationDuringRuntimeObservation(t *testing.
 	}
 	f := Subject{Package: "example.com/view", Symbol: "F"}
 	g := Subject{Package: "example.com/view", Symbol: "G"}
-	producer, err := engine.NewView([]Subject{f, g}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1713,7 +1713,7 @@ func TestCheckRefinedBatchHonorsCancellationDuringRuntimeObservation(t *testing.
 		fingerprint.RuntimeDigest = state.Digest
 		recorded[subject] = fingerprint
 	}
-	current, err := engine.NewView([]Subject{f, g}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1743,7 +1743,7 @@ func TestCheckRefinedBatchReturnsContextErrorDuringRefinement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1754,7 +1754,7 @@ func TestCheckRefinedBatchReturnsContextErrorDuringRefinement(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() {}\nfunc G() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1776,7 +1776,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1797,7 +1797,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if maximalOnly.Refinement != (Refinement{}) {
 		t.Fatalf("maximal capture contains refinement: %+v", maximalOnly.Refinement)
 	}
-	if err := producer.Validate(); !errors.Is(err, ErrRefinedValidationRequired) {
+	if err := producer.Validate(context.Background()); !errors.Is(err, ErrRefinedValidationRequired) {
 		t.Fatalf("Validate after refined capture = %v, want ErrRefinedValidationRequired", err)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
@@ -1809,7 +1809,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 		t.Fatalf("ValidateRefined unchanged: %v", err)
 	}
 
-	unchanged, err := engine.NewView([]Subject{subject}, dir)
+	unchanged, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1851,11 +1851,11 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\nfunc F() int { return 1 }\nfunc G() { _, _ = os.ReadFile(\"changed\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = current.Check(refined, subject)
+	verdict, err = current.Check(context.Background(), refined, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1872,7 +1872,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	// A cold view pins that these drifted recordings are refused before any
 	// precise analysis: a warm refined cache would mask an analysis invocation
 	// from the seam.
-	coldCurrent, err := engine.NewView([]Subject{subject}, dir)
+	coldCurrent, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1906,7 +1906,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if verdict.Status != Stale || verdict.Reason != "refinement" {
 		t.Fatalf("refined mismatch after drift = %+v, want stale refinement", verdict)
 	}
-	cancelledCurrent, err := engine.NewView([]Subject{subject}, dir)
+	cancelledCurrent, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1935,7 +1935,7 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\nfunc F() int { return 2 }\nfunc G() { _, _ = os.ReadFile(\"changed\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	relevant, err := engine.NewView([]Subject{subject}, dir)
+	relevant, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1955,7 +1955,7 @@ func TestRefinementDispositionIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1968,7 +1968,7 @@ func TestRefinementDispositionIntegrity(t *testing.T) {
 	}
 	fingerprint.Refinement.Unverifiable = false
 	fingerprint.Refinement.Reason = ""
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1988,7 +1988,7 @@ func TestRefinementEvidenceBindsMaximalGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := engine.NewView([]Subject{subject}, dir)
+	first, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1999,7 +1999,7 @@ func TestRefinementEvidenceBindsMaximalGeneration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := engine.NewView([]Subject{subject}, dir)
+	second, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2024,7 +2024,7 @@ func TestRefinedCaptureHonorsExhaustedBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2044,11 +2044,11 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	_, err = engine.NewViewContext(ctx, []Subject{subject}, dir)
+	_, err = engine.NewView(ctx, []Subject{subject}, dir)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view construction = %v, want context.Canceled", err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2056,16 +2056,16 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.CheckContext(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
+	if _, err := view.Check(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view check = %v, want context.Canceled", err)
 	}
 	stale := fingerprint
 	stale.MaximalClosure = "moved"
 	publicationCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
-	if _, err := view.CheckContext(publicationCtx, stale, subject); !errors.Is(err, context.Canceled) {
+	if _, err := view.Check(publicationCtx, stale, subject); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled verdict publication = %v, want context.Canceled", err)
 	}
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2089,7 +2089,7 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.CheckContext(runtimeCtx, runtimeFingerprint, subject)
+		_, err := view.Check(runtimeCtx, runtimeFingerprint, subject)
 		done <- err
 	}()
 	select {
@@ -2106,20 +2106,20 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("runtime-input check ignored cancellation")
 	}
-	if err := view.ValidateContext(ctx); !errors.Is(err, context.Canceled) {
+	if err := view.Validate(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view validation = %v, want context.Canceled", err)
 	}
 	if _, err := view.Capture(subject); !errors.Is(err, ErrViewSealed) {
 		t.Fatalf("capture after cancelled validation = %v, want ErrViewSealed", err)
 	}
-	refinedView, err := engine.NewView([]Subject{subject}, dir)
+	refinedView, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := refinedView.CaptureRefined(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
-	if err := refinedView.ValidateContext(ctx); !errors.Is(err, context.Canceled) {
+	if err := refinedView.Validate(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled maximal validation of refined view = %v, want context.Canceled", err)
 	}
 }
@@ -2131,7 +2131,7 @@ func TestRefinedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2156,7 +2156,7 @@ func TestRefinedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewViewFor([]Subject{subject}, dir, Measurement)
+	view, err := engine.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2175,7 +2175,7 @@ func TestCancelledRefinementDoesNotWaitForViewLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2206,7 +2206,7 @@ func TestRefinedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2247,7 +2247,7 @@ func TestValidateRefinedReobservesPurityAfterAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2266,17 +2266,17 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(); err != nil {
+	if err := view.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := view.Capture(subject); !errors.Is(err, ErrViewSealed) {
 		t.Fatalf("capture after validation = %v, want ErrViewSealed", err)
 	}
-	refinedView, err := engine.NewView([]Subject{subject}, dir)
+	refinedView, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2295,7 +2295,7 @@ func TestValidationSealsConcurrentRefinedPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2314,7 +2314,7 @@ func TestValidationSealsConcurrentRefinedPublication(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("refined capture did not reach publication boundary")
 	}
-	if err := view.Validate(); err != nil {
+	if err := view.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	close(release)
@@ -2330,7 +2330,7 @@ func TestRefinedCaptureIsConcurrentSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2377,7 +2377,7 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView([]Subject{f, g}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2388,7 +2388,7 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 	if fingerprints[f].Refinement.Closure == fingerprints[g].Refinement.Closure {
 		t.Fatal("distinct subjects shared one refined closure hash")
 	}
-	current, err := engine.NewView([]Subject{f, g}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2438,7 +2438,7 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(subjects, dir)
+	producer, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2465,11 +2465,11 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "b", "b.go"), []byte("package b\n\nfunc H() int { return 3 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	singleView, err := engine.NewView(subjects, dir)
+	singleView, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	batchView, err := engine.NewView(subjects, dir)
+	batchView, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2535,7 +2535,7 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	// An all-unchanged manifest-less batch answers without observations or
 	// precise analysis, and a cancelled caller context aborts the batch.
 	engine.observeHook = nil
-	quietView, err := engine.NewView(subjects, dir)
+	quietView, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2591,7 +2591,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 				t.Fatal(err)
 			}
 			subject := Subject{Package: "example.com/view", Symbol: "F"}
-			producer, err := engine.NewView([]Subject{subject}, dir)
+			producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2625,7 +2625,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 					return runtimeinput.State{}, nil
 				}
 			}
-			current, err := engine.NewView([]Subject{subject}, dir)
+			current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2637,7 +2637,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 			if verdicts[subject] != want {
 				t.Fatalf("moving runtime input in observed batch = %+v, want %+v", verdicts[subject], want)
 			}
-			singleView, err := engine.NewView([]Subject{subject}, dir)
+			singleView, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2664,7 +2664,7 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	producer, err := engine.NewView([]Subject{subject}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2678,7 +2678,7 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	current, err := engine.NewView([]Subject{subject}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2687,7 +2687,7 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	// the dominant cost without adding drift-detection power.
 	observations := 0
 	engine.observeHook = func() { observations++ }
-	if _, err := current.CheckContext(context.Background(), fingerprint, subject); err != nil {
+	if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
 		t.Fatal(err)
 	}
 	if observations != 2 {
@@ -2720,7 +2720,7 @@ func TestRefinementUnavailabilityIsSubjectLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView([]Subject{f, g}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2728,7 +2728,7 @@ func TestRefinementUnavailabilityIsSubjectLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView([]Subject{f, g}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

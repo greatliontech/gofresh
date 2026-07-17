@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,11 +188,11 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	subj := Subject{Package: methodPkg, Symbol: "Adder.Value"}
-	fp, err := e.Capture(subj, ".")
+	fp, err := e.Capture(context.Background(), subj, ".")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	v, err := e.Check(fp, subj, ".")
+	v, err := e.Check(context.Background(), fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	// The same recorded fingerprint checked against a different subject (Adder.Ptr
 	// has a different closure) is stale on the closure guard.
 	other := Subject{Package: methodPkg, Symbol: "Adder.Ptr"}
-	v2, err := e.Check(fp, other, ".")
+	v2, err := e.Check(context.Background(), fp, other, ".")
 	if err != nil {
 		t.Fatalf("Check other: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	bad := fp
 	bad.RuntimeInputs = "not a manifest"
 	bad.RuntimeDigest = "D"
-	v3, err := e.Check(bad, subj, ".")
+	v3, err := e.Check(context.Background(), bad, subj, ".")
 	if err != nil {
 		t.Fatalf("Check malformed manifest: %v", err)
 	}
@@ -235,7 +236,7 @@ func TestBuildFlagsAffectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fp, err := plain.Capture(subj, ".") // captured with no build inputs
+	fp, err := plain.Capture(context.Background(), subj, ".") // captured with no build inputs
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestBuildFlagsAffectVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New tagged: %v", err)
 	}
-	v, err := tagged.Check(fp, subj, ".")
+	v, err := tagged.Check(context.Background(), fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -308,7 +309,7 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: pkg, Symbol: "Selected"}
-	fp, err := recorded.Capture(subject, tmp)
+	fp, err := recorded.Capture(context.Background(), subject, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +318,7 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := current.Check(fp, subject, tmp)
+	verdict, err := current.Check(context.Background(), fp, subject, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,11 +340,11 @@ func TestAssumePureOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fp, err := e.CaptureFor(subj, ".", Measurement)
+	fp, err := e.CaptureFor(context.Background(), subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if v, err := e.Check(fp, subj, "."); err != nil {
+	if v, err := e.Check(context.Background(), fp, subj, "."); err != nil {
 		t.Fatalf("Check: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("default: got %s, want unverifiable (closure reaches file I/O)", v.Status)
@@ -353,19 +354,19 @@ func TestAssumePureOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New pure: %v", err)
 	}
-	pureFP, err := pure.CaptureFor(subj, ".", Measurement)
+	pureFP, err := pure.CaptureFor(context.Background(), subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture pure: %v", err)
 	}
 	if pureFP.PurityAssertion != "caller assertion" {
 		t.Fatalf("purity assertion = %q, want attributable caller assertion", pureFP.PurityAssertion)
 	}
-	if v, err := pure.Check(fp, subj, "."); err != nil {
+	if v, err := pure.Check(context.Background(), fp, subj, "."); err != nil {
 		t.Fatalf("Check unrecorded pure: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("unrecorded assume-pure: got %s, want unverifiable", v.Status)
 	}
-	if v, err := pure.Check(pureFP, subj, "."); err != nil {
+	if v, err := pure.Check(context.Background(), pureFP, subj, "."); err != nil {
 		t.Fatalf("Check pure: %v", err)
 	} else if v.Status != Valid {
 		t.Errorf("assume-pure: got %s (%s), want valid", v.Status, v.Reason)
@@ -395,11 +396,11 @@ func TestWithDirOutOfTree(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	subj := Subject{Package: "example.com/tiny", Symbol: "TestAdd"}
-	fp, err := e.Capture(subj, tmp)
+	fp, err := e.Capture(context.Background(), subj, tmp)
 	if err != nil {
 		t.Fatalf("Capture out of tree: %v", err)
 	}
-	v, err := e.Check(fp, subj, tmp)
+	v, err := e.Check(context.Background(), fp, subj, tmp)
 	if err != nil || v.Status != Valid {
 		t.Fatalf("round trip = %+v, %v", v, err)
 	}
@@ -448,7 +449,7 @@ func TestWithDirCoherence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := e.Capture(Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
+	if _, err := e.Capture(context.Background(), Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
 		t.Fatalf("incoherent dirs accepted: %v", err)
 	}
 }

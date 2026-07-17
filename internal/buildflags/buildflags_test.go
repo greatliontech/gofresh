@@ -1,6 +1,7 @@
 package buildflags
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,8 @@ func TestValidateRejectsOverlay(t *testing.T) {
 		{"-overlay=overlay.json"}, {"-overlay", "overlay.json"},
 		{"--overlay=overlay.json"}, {"--overlay", "overlay.json"},
 	} {
-		if err := Validate(t.TempDir(), flags); err == nil || !strings.Contains(err.Error(), "-overlay") {
-			t.Fatalf("Validate(%v) = %v, want overlay refusal", flags, err)
+		if err := ValidateEnv(context.Background(), t.TempDir(), os.Environ(), flags); err == nil || !strings.Contains(err.Error(), "-overlay") {
+			t.Fatalf("ValidateEnv(context.Background(), %v) = %v, want overlay refusal", flags, err)
 		}
 	}
 }
@@ -27,7 +28,7 @@ func TestValidateRejectsPersistentOverlay(t *testing.T) {
 	t.Setenv("GOENV", goenv)
 	t.Setenv("GOFLAGS", "")
 
-	if err := Validate(dir, []string{"-tags=special"}); err == nil || !strings.Contains(err.Error(), "-overlay") {
+	if err := ValidateEnv(context.Background(), dir, os.Environ(), []string{"-tags=special"}); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("Validate with persistent overlay = %v, want refusal", err)
 	}
 }

@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"context"
 	"testing"
 
 	"github.com/greatliontech/gofresh/guard"
@@ -26,5 +27,5 @@ func TestPurityInputIsSubjectPredicate(t *testing.T) {
 }
 
 func TestViewCheckUsesConstructionKind(t *testing.T) {
-	structural.FunctionSignature[func(*View, Fingerprint, Subject) (Verdict, error)](t, (*View).Check)
+	structural.FunctionSignature[func(*View, context.Context, Fingerprint, Subject) (Verdict, error)](t, (*View).Check)
 }

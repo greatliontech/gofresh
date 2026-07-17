@@ -95,7 +95,7 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.ValidateEnv(dir, normalized, buildFlags); err != nil {
+	if err := buildflags.ValidateEnv(ctx, dir, normalized, buildFlags); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -293,7 +293,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	if len(p.SFiles) > 0 {
-		_, _, opaque, includes, err := asmCallTargetsEnv(p.Dir, h.env, p.SFiles, h.buildFlags...)
+		_, _, opaque, includes, err := asmCallTargetsEnv(h.ctx, p.Dir, h.env, p.SFiles, h.buildFlags...)
 		if err != nil {
 			return "", nil, err
 		}

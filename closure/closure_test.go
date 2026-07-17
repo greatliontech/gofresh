@@ -53,7 +53,7 @@ func TestPropHashFilesSensitive(t *testing.T) {
 }
 
 func TestContribution(t *testing.T) {
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 
 	// Excluded: stdlib, pseudo-package, synthesized test main.
 	for _, p := range []listPkg{
@@ -145,7 +145,7 @@ func TestContributionIncludesASMIncludes(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
 	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	one, err := h.contribution(pkg)
 	if err != nil {
@@ -167,7 +167,7 @@ func TestContributionIncludesAbsoluteASMInclude(t *testing.T) {
 	include := filepath.Join(includeDir, "defs.inc")
 	writeFile(t, includeDir, "defs.inc", "#define RETVAL $1\n")
 	writeFile(t, dir, "asm.s", "#include \""+filepath.ToSlash(include)+"\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	one, err := h.contribution(pkg)
 	if err != nil {
@@ -187,7 +187,7 @@ func TestContributionOpaqueASMHashesPackageFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
 	writeFile(t, dir, "asm.s", "#ifdef WANT\n#define RETVAL $1\n#endif\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	one, err := h.contribution(pkg)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"include/cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, filepath.Join("include", "cfg.h"), "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -246,7 +246,7 @@ func TestContributionCgoOutsideIncludeRootFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, outside, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -269,7 +269,7 @@ func TestContributionCgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"../cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -293,7 +293,7 @@ func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 			writeFile(t, dir, "bridge.c", "#include "+inc+"\nvoid bridge(void) { GoCallback(); }\n")
-			h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+			h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 			pkg := listPkg{
 				ImportPath: "example/cgocallback",
 				Dir:        dir,
@@ -395,7 +395,7 @@ func TestContributionCgoNestedIncIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "bridge.c", "#include \"local.inc\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.inc", "#include \"../cfg.h\"\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -418,7 +418,7 @@ func TestContributionCgoNestedSoHeaderIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "bridge.c", "#include \"local.so.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.so.h", "#include \"../cfg.h\"\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -441,7 +441,7 @@ func TestContributionCgoNestedVersionedSoIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "bridge.c", "#include \"local.so.1\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.so.1", "#include \"../cfg.h\"\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -463,7 +463,7 @@ func TestContributionCgoSplicedIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#\\\ninclude \"../cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -485,7 +485,7 @@ func TestContributionCgoGoPreambleSplicedIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\n// #\\\n// include \"../cfg.h\"\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "void bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -507,7 +507,7 @@ func TestContributionCgoImportFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.m", "#import \"../cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -536,7 +536,7 @@ func TestContributionCgoSymlinkIncludeDirFailsClosed(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "include")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -565,7 +565,7 @@ func TestContributionCgoSymlinkIncludeDirDotDotFailsClosed(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "sub"), filepath.Join(dir, "include")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -594,7 +594,7 @@ func TestContributionCgoIncludeRootSymlinkDotDotFailsClosed(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "sub"), filepath.Join(dir, "include")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -617,7 +617,7 @@ func TestContributionCgoMacroIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#define CFG \"../cfg.h\"\n#include CFG\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -639,7 +639,7 @@ func TestContributionCgoCommentedIncludeDirectiveFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#/**/include \"../cfg.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -662,7 +662,7 @@ func TestContributionCgoMultilineCommentedIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "bridge.c", "#include \"local.inc\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.inc", "/*\n*/ #include \"../cfg.h\"\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -684,7 +684,7 @@ func TestContributionCgoCharConstantDoesNotHideInclude(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "int x = '/*';\n#include \"../cfg.h\"\nint y = '*/';\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -706,7 +706,7 @@ func TestContributionCgoRawStringFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.cc", "const char *x = R\"raw(\"/*)raw\";\n#include \"../cfg.h\"\nconst char *y = R\"raw(*/)raw\";\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -729,7 +729,7 @@ func TestContributionCgoHeaderRawStringFailsClosed(t *testing.T) {
 	writeFile(t, dir, "bridge.cc", "#include \"local.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.h", "const char *x = R\"raw(\"/*)raw\";\n#include \"../cfg.h\"\nconst char *y = R\"raw(*/)raw\";\n")
 	writeFile(t, root, "cfg.h", "#define N 1\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -747,7 +747,7 @@ func TestContributionCgoObjectFileNotScannedAsIncludeSource(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"_cgo_export.h\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "blob.obj", "#include <not-source.h>\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -765,7 +765,7 @@ func TestContributionCgoReferencedObjectIncludeFailsClosed(t *testing.T) {
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"local.o\"\nvoid bridge(void) { GoCallback(); }\n")
 	writeFile(t, dir, "local.o", "#include \"../cfg.h\"\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -797,7 +797,7 @@ func TestContributionCgoSymlinkHeaderHashesTarget(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "cfg.h"), filepath.Join(dir, "include", "cfg.h")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{
 		ImportPath: "example/cgocallback",
 		Dir:        dir,
@@ -822,7 +822,7 @@ func TestContributionCgoSymlinkHeaderHashesTarget(t *testing.T) {
 func TestContributionRejectsUnresolvedASMInclude(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unresolved asm include") {
 		t.Fatalf("contribution error = %v, want unresolved asm include", err)
@@ -832,12 +832,12 @@ func TestContributionRejectsUnresolvedASMInclude(t *testing.T) {
 func TestContributionAcceptsGeneratedASMInclude(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "asm.s", "#include \"go_asm.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	if _, err := h.contribution(pkg); err != nil {
 		t.Fatalf("generated go_asm.h include: %v", err)
 	}
-	_, _, opaque, _, err := asmCallTargets(dir, pkg.SFiles)
+	_, _, opaque, _, err := asmCallTargets(context.Background(), dir, pkg.SFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +869,7 @@ func TestContributionRejectsASMSymlinkIncludeDirDotDot(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "sub"), filepath.Join(dir, "include")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
 	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unresolved asm include") {
 		t.Fatalf("contribution error = %v, want unresolved asm include", err)
@@ -919,7 +919,7 @@ func TestPropMutableLocalContentSensitivity(t *testing.T) {
 		GoFiles:    []string{"p.go"},
 		Module:     &listMod{Main: true, Dir: dir},
 	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache")}
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	before, err := h.contribution(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -2118,7 +2118,7 @@ func TestTier2ASMLocalJumpContinuesScanning(t *testing.T) {
 func TestASMCallTargetsExpandsParamMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2162,7 +2162,7 @@ func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\t"+tc.line+"\n\tRET\n")
-			targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+			targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 			if err != nil {
 				t.Fatalf("asmCallTargets: %v", err)
 			}
@@ -2182,7 +2182,7 @@ func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
 func TestASMCallTargetsSubstitutesBareSBParamMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(·helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2200,7 +2200,7 @@ func TestASMCallTargetsSubstitutesBareSBParamMacro(t *testing.T) {
 func TestASMCallTargetsExpandsZeroArgFuncMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_HELPER() CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER()\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2218,7 +2218,7 @@ func TestASMCallTargetsExpandsZeroArgFuncMacro(t *testing.T) {
 func TestASMCallTargetsExpandsEmptyObjectMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define EMPTY\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tEMPTY CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2236,7 +2236,7 @@ func TestASMCallTargetsExpandsEmptyObjectMacro(t *testing.T) {
 func TestASMCallTargetsExpandsWhitespaceMacroSyntax(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "# define CALL_HELPER() CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER ()\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2254,7 +2254,7 @@ func TestASMCallTargetsExpandsWhitespaceMacroSyntax(t *testing.T) {
 func TestASMCallTargetsExpandsSplitMacroArgs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_HELPER() CALL ·helper(SB)\n#define CALL_ARG(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER( )\n\tCALL_ARG ( helper2 )\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2272,7 +2272,7 @@ func TestASMCallTargetsExpandsSplitMacroArgs(t *testing.T) {
 func TestASMCallTargetsExpandsNestedCommaMacroArg(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_HELPER(x) CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER((1,2))\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2290,7 +2290,7 @@ func TestASMCallTargetsExpandsNestedCommaMacroArg(t *testing.T) {
 func TestASMCallTargetsMacroSubstitutesTokensOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·xSuffix(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2308,7 +2308,7 @@ func TestASMCallTargetsMacroSubstitutesTokensOnly(t *testing.T) {
 func TestASMCallTargetsExpandsNestedMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_A(x) CALL_B(x)\n#define CALL_B(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_A(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2326,7 +2326,7 @@ func TestASMCallTargetsExpandsNestedMacro(t *testing.T) {
 func TestASMCallTargetsExpandsOperandMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define TARGET ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2344,7 +2344,7 @@ func TestASMCallTargetsExpandsOperandMacro(t *testing.T) {
 func TestASMCallTargetsExpandsSymbolOffsetParamMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·x+0(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(realHelper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2362,7 +2362,7 @@ func TestASMCallTargetsExpandsSymbolOffsetParamMacro(t *testing.T) {
 func TestASMCallTargetsExpandsSymbolComponentMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define NAME helper\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·NAME(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2380,7 +2380,7 @@ func TestASMCallTargetsExpandsSymbolComponentMacro(t *testing.T) {
 func TestASMCallTargetsIgnoresBlockCommentedMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "/*\n#define NAME helper\n*/\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·NAME(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2398,7 +2398,7 @@ func TestASMCallTargetsIgnoresBlockCommentedMacro(t *testing.T) {
 func TestASMCallTargetsBlockCommentPreservesTokenSeparator(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL/*sep*/·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2416,7 +2416,7 @@ func TestASMCallTargetsBlockCommentPreservesTokenSeparator(t *testing.T) {
 func TestASMCallTargetsExpandsSymbolPrefixMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define pp dep\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL pp·Helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2434,7 +2434,7 @@ func TestASMCallTargetsExpandsSymbolPrefixMacro(t *testing.T) {
 func TestASMCallTargetsUnresolvedSymbolPrefixMacroComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL PP·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2452,7 +2452,7 @@ func TestASMCallTargetsUnresolvedSymbolPrefixMacroComputed(t *testing.T) {
 func TestASMCallTargetsSubstitutesSymbolPrefixParamMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALLP(P) CALL P·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALLP(realdep)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2470,7 +2470,7 @@ func TestASMCallTargetsSubstitutesSymbolPrefixParamMacro(t *testing.T) {
 func TestASMCallTargetsExpandsDeepMacroChain(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define M1 M2\n#define M2 M3\n#define M3 M4\n#define M4 M5\n#define M5 M6\n#define M6 M7\n#define M7 M8\n#define M8 M9\n#define M9 M10\n#define M10 CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tM1\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2488,7 +2488,7 @@ func TestASMCallTargetsExpandsDeepMacroChain(t *testing.T) {
 func TestASMCallTargetsHonorsMacroRedefinitionOrder(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macro.s", "#define CALL_GO CALL ·a(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO\n#undef CALL_GO\n#define CALL_GO CALL ·b(SB)\n\tCALL_GO\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2507,7 +2507,7 @@ func TestASMCallTargetsExpandsIncludedMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "callmacro.h", "#define CALL_INCLUDED(x) CALL ·x(SB)\n")
 	writeFile(t, dir, "macro.s", "#include \"callmacro.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_INCLUDED(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2526,7 +2526,7 @@ func TestASMCallTargetsScansIncludedBody(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
 	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n#include \"body.h\"\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2548,7 +2548,7 @@ func TestASMCallTargetsScansMacroExpandedInclude(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
 	writeFile(t, dir, "macro.s", "#define LOAD_BODY #include \"body.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tLOAD_BODY\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2570,7 +2570,7 @@ func TestASMCallTargetsExpandsIncludeOperandMacro(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
 	writeFile(t, dir, "macro.s", "#define HDR \"body.h\"\n#include HDR\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2611,7 +2611,7 @@ func TestASMCallTargetsIndirectSBComputed(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, "indirect.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\t"+line+"\n\tRET\n")
-			targets, computed, opaque, _, err := asmCallTargets(dir, []string{"indirect.s"})
+			targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"indirect.s"})
 			if err != nil {
 				t.Fatalf("asmCallTargets: %v", err)
 			}
@@ -2631,7 +2631,7 @@ func TestASMCallTargetsIndirectSBComputed(t *testing.T) {
 func TestASMCallTargetsUnknownOpcodeWithSBComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2649,7 +2649,7 @@ func TestASMCallTargetsUnknownOpcodeWithSBComputed(t *testing.T) {
 func TestASMCallTargetsUnknownOpcodeMacroOperandComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2667,7 +2667,7 @@ func TestASMCallTargetsUnknownOpcodeMacroOperandComputed(t *testing.T) {
 func TestASMCallTargetsUnknownOpcodeBareMacroOperandComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALLGO TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2686,7 +2686,7 @@ func TestASMCallTargetsExternalLowercaseDefineComputed(t *testing.T) {
 	t.Setenv("GOFLAGS", "-asmflags=all=-D=hook=helper")
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2704,7 +2704,7 @@ func TestASMCallTargetsExternalLowercaseDefineComputed(t *testing.T) {
 func TestASMCallTargetsCallerLowercaseDefineComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"}, "-asmflags=all=-D=hook=helper")
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"}, "-asmflags=all=-D=hook=helper")
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2736,7 +2736,7 @@ func TestASMCallTargetsPersistentAndCallerFlags(t *testing.T) {
 		}
 	})
 
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"}, "-tags=special")
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"}, "-tags=special")
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2754,7 +2754,7 @@ func TestASMCallTargetsPersistentAndCallerFlags(t *testing.T) {
 func TestASMCallTargetsUnknownSingleOpcodeComputed(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macroflag.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2772,7 +2772,7 @@ func TestASMCallTargetsUnknownSingleOpcodeComputed(t *testing.T) {
 func TestASMCallTargetsScansSemicolonStatements(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "semi.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ $0, AX; CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"semi.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"semi.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2790,7 +2790,7 @@ func TestASMCallTargetsScansSemicolonStatements(t *testing.T) {
 func TestASMCallTargetsScansLabelPrefixedInstruction(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "label.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\nentry: CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"label.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"label.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2808,7 +2808,7 @@ func TestASMCallTargetsScansLabelPrefixedInstruction(t *testing.T) {
 func TestASMCallTargetsScansStaticBranchLink(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "branch.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tBL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"branch.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"branch.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2826,7 +2826,7 @@ func TestASMCallTargetsScansStaticBranchLink(t *testing.T) {
 func TestASMCallTargetsScansConditionalBranchLink(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "branch.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tBL.NE ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"branch.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"branch.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2844,7 +2844,7 @@ func TestASMCallTargetsScansConditionalBranchLink(t *testing.T) {
 func TestASMCallTargetsScansMacroExpandedSemicolonStatements(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "macrosemi.s", "#define CALL_HELPER MOVQ $0, AX; CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macrosemi.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macrosemi.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2862,7 +2862,7 @@ func TestASMCallTargetsScansMacroExpandedSemicolonStatements(t *testing.T) {
 func TestASMCallTargetsLineCommentRespectsStringLiteral(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "stringcomment.s", "#define X DATA ·s+0(SB)/8, $\"http://\"; CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tX\n\tRET\nGLOBL ·s(SB), 8, $8\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"stringcomment.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"stringcomment.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}
@@ -2881,7 +2881,7 @@ func TestASMCallTargetsRepeatsIncludedBodyWithCurrentMacros(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "call.h", "\tCALL_GO\n")
 	writeFile(t, dir, "macro.s", "#define CALL_GO CALL ·a(SB)\n#include \"call.h\"\n#undef CALL_GO\n#define CALL_GO CALL ·b(SB)\n#include \"call.h\"\n")
-	targets, computed, opaque, _, err := asmCallTargets(dir, []string{"macro.s"})
+	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
 	if err != nil {
 		t.Fatalf("asmCallTargets: %v", err)
 	}

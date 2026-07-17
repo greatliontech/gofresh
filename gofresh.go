@@ -207,7 +207,9 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
 		}
 	}
-	if err := buildflags.ValidateEnv(e.dir, e.env, e.buildFlags); err != nil {
+	// Engine construction is caller-side setup, not an operation phase; its
+	// one-time flag validation runs to completion.
+	if err := buildflags.ValidateEnv(context.Background(), e.dir, e.env, e.buildFlags); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -251,8 +253,8 @@ func canonicalDir(dir string) (string, error) {
 // WithEnv, into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
 // non-empty manifest those functions return.
-func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.NewView([]Subject{subject}, moduleDir)
+func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
+	view, err := e.NewView(ctx, []Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -261,8 +263,8 @@ func (e *Engine) Capture(subject Subject, moduleDir string) (Fingerprint, error)
 
 // CaptureFor records subject with the guards applicable to kind. Measurements must
 // use this method so machine and runtime-configuration evidence is captured.
-func (e *Engine) CaptureFor(subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.NewViewFor([]Subject{subject}, moduleDir, kind)
+func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -273,7 +275,7 @@ func (e *Engine) CaptureFor(subject Subject, moduleDir string, kind Kind) (Finge
 // under ctx. The caller selects refinement explicitly and owns its cancellation or
 // budget.
 func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.NewViewContext(ctx, []Subject{subject}, moduleDir)
+	view, err := e.NewView(ctx, []Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -282,7 +284,7 @@ func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir 
 
 // CaptureRefinedFor captures refined evidence with the guards applicable to kind.
 func (e *Engine) CaptureRefinedFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, kind)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -293,15 +295,15 @@ func (e *Engine) CaptureRefinedFor(ctx context.Context, subject Subject, moduleD
 // tree under its recorded result kind. It recomputes the current closure and guards
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
-func (e *Engine) Check(recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewFor([]Subject{subject}, moduleDir, recorded.ResultKind)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}
-	return view.Check(recorded, subject)
+	return view.Check(ctx, recorded, subject)
 }
 
 // CheckRefined checks maximal evidence first under the recorded result kind and invokes declaration-RTA under ctx
@@ -311,7 +313,7 @@ func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -324,7 +326,7 @@ func (e *Engine) CheckObserved(ctx context.Context, recorded Fingerprint, subjec
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}

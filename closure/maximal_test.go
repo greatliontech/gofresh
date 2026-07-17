@@ -480,7 +480,7 @@ func TestAssemblyExternalStateInstructionInIncludeIsClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reason string
-	_, _, _, _, err := asmCallTargetsObserved(&reason, dir, []string{"external.s"})
+	_, _, _, _, err := asmCallTargetsObserved(context.Background(), &reason, dir, []string{"external.s"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func TestAssemblyExternalStateMacroAndStatementAreClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reason string
-	_, _, _, _, err := asmCallTargetsObserved(&reason, dir, []string{"external.s"})
+	_, _, _, _, err := asmCallTargetsObserved(context.Background(), &reason, dir, []string{"external.s"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestAssemblyExternalEffectsRetainEveryInstruction(t *testing.T) {
 	}
 	var reason string
 	var effects []externalEffect
-	_, _, _, _, err := asmCallTargetsObservedEffectsEnv(&reason, &effects, dir, os.Environ(), []string{"external.s"})
+	_, _, _, _, err := asmCallTargetsObservedEffectsEnv(context.Background(), &reason, &effects, dir, os.Environ(), []string{"external.s"})
 	if err != nil {
 		t.Fatal(err)
 	}

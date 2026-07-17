@@ -61,26 +61,17 @@ type View struct {
 	beforePreciseAnalysis func()
 }
 
-// NewView observes subjects and moduleDir as one code-result analysis view.
-// Reachability and
-// package loading are shared across the requested set, but each subject retains
-// its independent closure semantics (REQ-closure-batch-equivalence).
-func (e *Engine) NewView(subjects []Subject, moduleDir string) (*View, error) {
-	return e.NewViewFor(subjects, moduleDir, CodeResult)
+// NewView observes subjects and moduleDir as one code-result analysis view
+// under the caller's context. Reachability and package loading are shared
+// across the requested set, but each subject retains its independent closure
+// semantics (REQ-closure-batch-equivalence).
+func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
+	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult)
 }
 
-// NewViewContext observes one code-result analysis view under ctx.
-func (e *Engine) NewViewContext(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
-	return e.NewViewForContext(ctx, subjects, moduleDir, CodeResult)
-}
-
-// NewViewFor observes one analysis view with the guards applicable to kind.
-func (e *Engine) NewViewFor(subjects []Subject, moduleDir string, kind Kind) (*View, error) {
-	return e.newView(context.Background(), subjects, moduleDir, kind)
-}
-
-// NewViewForContext observes one analysis view with kind's guards under ctx.
-func (e *Engine) NewViewForContext(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+// NewViewFor observes one analysis view with the guards applicable to kind
+// under the caller's context.
+func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
 	return e.newView(ctx, subjects, moduleDir, kind)
 }
 
@@ -492,13 +483,9 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 	return fingerprint, nil
 }
 
-// Check compares recorded against subject's current facts under this View's result kind.
-func (v *View) Check(recorded Fingerprint, subject Subject) (Verdict, error) {
-	return v.CheckContext(context.Background(), recorded, subject)
-}
-
-// CheckContext compares recorded against subject's current facts under ctx.
-func (v *View) CheckContext(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
+// Check compares recorded against subject's current facts under this View's
+// result kind and the caller's context.
+func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
 	if ctx == nil {
 		return Verdict{}, errors.New("gofresh: nil analysis context")
 	}
@@ -816,8 +803,11 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 	return finish()
 }
 
+// checkAfterClosure decides a manifest-less recording: its only caller reaches
+// it with RuntimeInputs empty, so the runtime state is the zero value and no
+// observation runs.
 func (v *View) checkAfterClosure(recorded Fingerprint, subject Subject, cl closure.Closure) Verdict {
-	rt := v.currentRuntime(recorded)
+	var rt runtimeinput.State
 	return decideAfterClosure(recorded, cl, v.guards, rt, v.kind, v.purityMatches(recorded, subject))
 }
 
@@ -862,11 +852,6 @@ func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subjec
 	return verdicts, nil
 }
 
-func (v *View) currentRuntime(recorded Fingerprint) runtimeinput.State {
-	rt, _ := v.currentRuntimeContext(context.Background(), recorded)
-	return rt
-}
-
 func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) (runtimeinput.State, error) {
 	var rt runtimeinput.State
 	var err error
@@ -892,15 +877,11 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) 
 	return rt, nil
 }
 
-// Validate re-observes the View's complete subject set and reports ErrViewChanged
-// when any source closure, guard, or purity assertion moved. A producer calls it
-// after execution before persisting results (REQ-fresh-producer-view).
-func (v *View) Validate() error {
-	return v.ValidateContext(context.Background())
-}
-
-// ValidateContext re-observes the complete maximal view under ctx.
-func (v *View) ValidateContext(ctx context.Context) error {
+// Validate re-observes the View's complete subject set under the caller's
+// context and reports ErrViewChanged when any source closure, guard, or purity
+// assertion moved. A producer calls it after execution before persisting
+// results (REQ-fresh-producer-view).
+func (v *View) Validate(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	hasRefined := len(v.capturedRefined) != 0
@@ -918,7 +899,7 @@ func (v *View) ValidateContext(ctx context.Context) error {
 	if hasRefined {
 		return ErrRefinedValidationRequired
 	}
-	current, err := v.engine.NewViewForContext(ctx, v.subjects, v.moduleDir, v.kind)
+	current, err := v.engine.NewViewFor(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}

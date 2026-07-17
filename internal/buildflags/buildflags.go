@@ -5,27 +5,22 @@ package buildflags
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
-// Validate refuses flags whose selected source gofresh cannot represent. Explicit
-// flags and effective GOFLAGS are checked together so analysis never silently falls
-// back to disk source for an overlay-backed build.
-func Validate(dir string, explicit []string) error {
-	return ValidateEnv(dir, os.Environ(), explicit)
-}
-
-// ValidateEnv validates flags under env as a complete process environment.
-func ValidateEnv(dir string, env, explicit []string) error {
+// ValidateEnv refuses flags whose selected source gofresh cannot represent,
+// under env as a complete process environment and the caller's context.
+// Explicit flags and effective GOFLAGS are checked together so analysis never
+// silently falls back to disk source for an overlay-backed build.
+func ValidateEnv(ctx context.Context, dir string, env, explicit []string) error {
 	for _, flag := range explicit {
 		if isOverlayFlag(flag) {
 			return unsupportedOverlay(flag)
 		}
 	}
-	goFlags, err := EffectiveGOFLAGSEnv(dir, env)
+	goFlags, err := EffectiveGOFLAGSEnv(ctx, dir, env)
 	if err != nil {
 		return err
 	}
@@ -38,15 +33,10 @@ func ValidateEnv(dir string, env, explicit []string) error {
 	return nil
 }
 
-// EffectiveGOFLAGS returns the flags selected by the go command, including
-// persistent GOENV state.
-func EffectiveGOFLAGS(dir string) (string, error) {
-	return EffectiveGOFLAGSEnv(dir, os.Environ())
-}
-
-// EffectiveGOFLAGSEnv returns the GOFLAGS selected by a complete environment.
-func EffectiveGOFLAGSEnv(dir string, env []string) (string, error) {
-	out, err := gotool.RunInContextEnv(context.Background(), dir, env, "env", "GOFLAGS")
+// EffectiveGOFLAGSEnv returns the GOFLAGS selected by a complete environment
+// under the caller's context.
+func EffectiveGOFLAGSEnv(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := gotool.RunInContextEnv(ctx, dir, env, "env", "GOFLAGS")
 	if err != nil {
 		return "", fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
 	}

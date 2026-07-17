@@ -3008,10 +3008,12 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 		var externalASMReason string
 		var externalASMEffects []externalEffect
 		env := os.Environ()
+		scanCtx := context.Background()
 		if a.h != nil {
 			env = a.h.env
+			scanCtx = a.h.ctx
 		}
-		asmCalls, computed, opaque, includes, err := asmCallTargetsObservedEffectsEnv(&externalASMReason, &externalASMEffects, idx.meta.Dir, env, idx.meta.SFiles, a.buildFlags...)
+		asmCalls, computed, opaque, includes, err := asmCallTargetsObservedEffectsEnv(scanCtx, &externalASMReason, &externalASMEffects, idx.meta.Dir, env, idx.meta.SFiles, a.buildFlags...)
 		if err != nil {
 			return err
 		}
@@ -3610,28 +3612,28 @@ func hasCgoCallbackBlindspot(p *listPkg) bool {
 	return false
 }
 
-func asmCallTargets(dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
-	return asmCallTargetsEnv(dir, os.Environ(), files, buildFlags...)
+func asmCallTargets(ctx context.Context, dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsEnv(ctx, dir, os.Environ(), files, buildFlags...)
 }
 
-func asmCallTargetsEnv(dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
-	return asmCallTargetsObservedEnv(nil, dir, env, files, buildFlags...)
+func asmCallTargetsEnv(ctx context.Context, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEnv(ctx, nil, dir, env, files, buildFlags...)
 }
 
-func asmCallTargetsObserved(externalReason *string, dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
-	return asmCallTargetsObservedEnv(externalReason, dir, os.Environ(), files, buildFlags...)
+func asmCallTargetsObserved(ctx context.Context, externalReason *string, dir string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEnv(ctx, externalReason, dir, os.Environ(), files, buildFlags...)
 }
 
-func asmCallTargetsObservedEnv(externalReason *string, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
-	return asmCallTargetsObservedEffectsEnv(externalReason, nil, dir, env, files, buildFlags...)
+func asmCallTargetsObservedEnv(ctx context.Context, externalReason *string, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+	return asmCallTargetsObservedEffectsEnv(ctx, externalReason, nil, dir, env, files, buildFlags...)
 }
 
-func asmCallTargetsObservedEffectsEnv(externalReason *string, externalEffects *[]externalEffect, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
+func asmCallTargetsObservedEffectsEnv(ctx context.Context, externalReason *string, externalEffects *[]externalEffect, dir string, env []string, files []string, buildFlags ...string) ([]string, bool, bool, []string, error) {
 	var targets []string
 	var includes []string
 	computed := false
 	opaque := false
-	goFlags, err := buildflags.EffectiveGOFLAGSEnv(dir, env)
+	goFlags, err := buildflags.EffectiveGOFLAGSEnv(ctx, dir, env)
 	if err != nil {
 		return nil, false, false, nil, err
 	}

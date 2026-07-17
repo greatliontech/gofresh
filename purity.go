@@ -56,7 +56,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("gofresh: %w", err)
 	}
-	if err := buildflags.ValidateEnv(dir, env, buildFlags); err != nil {
+	if err := buildflags.ValidateEnv(ctx, dir, env, buildFlags); err != nil {
 		return nil, nil, nil, err
 	}
 	cfg := &packages.Config{

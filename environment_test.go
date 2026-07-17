@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,7 +78,7 @@ func environmentWith(values map[string]string) []string {
 
 func viewUsesSource(t *testing.T, engine *Engine, fixture workspaceEnvironmentFixture, want, notWant string) {
 	t.Helper()
-	view, err := engine.NewView([]Subject{fixture.subject}, fixture.consumer)
+	view, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestEnginesWithDifferentEnvironmentsConstructViewsConcurrently(t *testing.T
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			view, err := engine.NewView([]Subject{fixture.subject}, fixture.consumer)
+			view, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
 			results[i].err = err
 			if err == nil {
 				results[i].files = view.SourceFiles()
@@ -214,7 +215,7 @@ func TestWithEnvDoesNotSelectGoLauncherFromSuppliedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host go launcher was not used: %v", err)
 	}
-	if _, err := engine.NewView([]Subject{fixture.subject}, fixture.consumer); err != nil {
+	if _, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer); err != nil {
 		t.Fatalf("view did not retain host go launcher: %v", err)
 	}
 }
@@ -238,7 +239,7 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/driverenv", Symbol: "F"}
-	view, err := engine.NewView([]Subject{subject}, dir)
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	verdict, err := view.Check(fingerprint, subject)
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
