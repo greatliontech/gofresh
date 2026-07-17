@@ -340,10 +340,6 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 
-	type packageBatch struct {
-		path     string
-		subjects []Subject
-	}
 	var groups []*packageBatch
 	byPackage := make(map[string]*packageBatch)
 	seen := make(map[Subject]bool)
@@ -425,48 +421,93 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 	return results, nil
 }
 
-// ComputeObservabilityBatch computes caller-selected per-subject observation proofs.
-// It intentionally performs subject-local analysis: proof cost is caller-selected,
-// while batching equivalence is retained by the attributed RTA implementation.
+// packageBatch groups one package's requested subjects for shared analysis.
+type packageBatch struct {
+	path     string
+	subjects []Subject
+}
+
+// ComputeObservabilityBatch computes caller-selected per-subject observation
+// proofs, sharing the loaded program, attributed reachability masks, and
+// package effect scans across each package's subjects. Every disposition
+// equals independent per-subject analysis
+// (REQ-closure-observability-batch-equivalence).
 func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
 	results := make(map[Subject]Observability, len(subjects))
+	byPackage := map[string]*packageBatch{}
+	var groups []*packageBatch
+	seen := map[Subject]bool{}
 	for _, subject := range subjects {
-		if _, ok := results[subject]; ok {
+		if seen[subject] {
 			continue
 		}
-		result, err := h.computeObservability(subject)
+		seen[subject] = true
+		group := byPackage[subject.Package]
+		if group == nil {
+			group = &packageBatch{path: subject.Package}
+			byPackage[subject.Package] = group
+			groups = append(groups, group)
+		}
+		group.subjects = append(group.subjects, subject)
+	}
+	for _, group := range groups {
+		if err := h.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		prog, err := h.loadCached(group.path)
 		if err != nil {
 			return nil, err
 		}
-		results[subject] = result
+		for _, subject := range group.subjects {
+			if prog.roots[subject.Symbol] == nil {
+				return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+			}
+		}
+		metas, err := h.list(group.path)
+		if err != nil {
+			return nil, err
+		}
+		base := newTier2Base(h, prog, metas)
+		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
+			if err := h.ctx.Err(); err != nil {
+				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+			}
+			end := min(start+maxAttributedSubjects, len(group.subjects))
+			batch := group.subjects[start:end]
+			reachable, err := attributedReachableSets(h.ctx, prog, batch)
+			if err != nil {
+				return nil, err
+			}
+			for i, subject := range batch {
+				if err := h.ctx.Err(); err != nil {
+					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+				}
+				result, err := h.observabilityFromReachability(base, subject.Package, reachable[i])
+				if err != nil {
+					return nil, err
+				}
+				results[subject] = result
+			}
+		}
+	}
+	if err := h.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 	return results, nil
 }
 
-func (h *Hasher) computeObservability(subject Subject) (Observability, error) {
-	prog, err := h.loadCached(subject.Package)
-	if err != nil {
-		return Observability{}, err
-	}
-	if prog.roots[subject.Symbol] == nil {
-		return Observability{}, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, subject.Package)
-	}
-	metas, err := h.list(subject.Package)
-	if err != nil {
-		return Observability{}, err
-	}
-	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{subject})
-	if err != nil {
-		return Observability{}, err
-	}
-	base := newTier2Base(h, prog, metas)
-	subjectReach := reachable[0]
+// observabilityFromReachability classifies one subject's attributed
+// reachability exactly as independent analysis would: startup effects, then
+// closure of the subject world, then package-level blockers, then the
+// subject's own effect set (REQ-closure-observability-analysis).
+func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
+	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
 	subjectResult, err := h.tier2Reachable(base, subjectReach)
 	if err != nil {
 		return Observability{}, err
 	}
-	startupReach := reachable[0]
+	startupReach := reach
 	startupReach.functions = nonStandardFunctions(startupReach.startupFunctions)
 	startupResult := directExternalEffects(base, startupReach)
 	if startupResult.unverifiable {
@@ -483,7 +524,7 @@ func (h *Hasher) computeObservability(subject Subject) (Observability, error) {
 		}
 		return Observability{Reason: "subject reachability is not closed: " + reason}, nil
 	}
-	maximalEffects, _, _, err := h.maximalExternalEffects(subject.Package)
+	maximalEffects, _, _, err := h.maximalExternalEffects(pkgPath)
 	if err != nil {
 		return Observability{}, err
 	}

@@ -1818,11 +1818,30 @@ func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
 }
 
 func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
+	// The corpus spans every disposition class the observability fixtures pin —
+	// observable subjects, startup and subject effect rejections, callback and
+	// concurrency escapes, mutation and process effects — with several subjects
+	// sharing one package so shared reachability masks and package effect scans
+	// are genuinely exercised (REQ-closure-observability-batch-equivalence).
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	subjects := []Subject{
 		{Package: base + "observable", Symbol: "TestReadFile"},
 		{Package: base + "observable", Symbol: "TestReadDir"},
+		{Package: base + "observable", Symbol: "TestGetenv"},
+		{Package: base + "observable", Symbol: "TestOpen"},
+		{Package: base + "observable", Symbol: "TestLookupEnv"},
+		{Package: base + "observablebad", Symbol: "TestOpenStat"},
+		{Package: base + "observablebad", Symbol: "TestReadDirInfo"},
 		{Package: base + "observablecallbackbad", Symbol: "TestSubtestRead"},
+		{Package: base + "observableconcurrent", Symbol: "TestConcurrentFileRead"},
+		{Package: base + "observablefresh", Symbol: "TestAncestorCleanupBeforeRead"},
+		{Package: base + "observablefresh", Symbol: "TestFreshFileNameEscape"},
+		{Package: base + "observablemutation", Symbol: "TestRemove"},
+		{Package: base + "observableopenfile", Symbol: "TestOpenFile"},
+		{Package: base + "observableprocess", Symbol: "TestCommand"},
+		{Package: base + "observablestat", Symbol: "TestStat"},
+		{Package: base + "initfile", Symbol: "TestInitFile"},
+		{Package: base + "initfile", Symbol: "BenchmarkInitFile"},
 	}
 	batchHasher, err := New()
 	if err != nil {
@@ -1832,6 +1851,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	statuses := map[bool]int{}
 	for _, subject := range subjects {
 		independentHasher, err := New()
 		if err != nil {
@@ -1843,6 +1863,50 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 		}
 		if batch[subject] != independent[subject] {
 			t.Errorf("%s.%s batch=%+v independent=%+v", subject.Package, subject.Symbol, batch[subject], independent[subject])
+		}
+		statuses[independent[subject].Observable]++
+	}
+	if statuses[true] == 0 || statuses[false] == 0 {
+		t.Fatalf("corpus lost its disposition spread: %v", statuses)
+	}
+	// Subject-local attribution inside one package's shared mask is witnessed
+	// only if some package's subjects disagree; a corpus refactor must not
+	// silently lose that witness.
+	bad1 := batch[Subject{Package: base + "observablebad", Symbol: "TestOpenStat"}]
+	bad2 := batch[Subject{Package: base + "observablebad", Symbol: "TestReadDirInfo"}]
+	if bad1 == bad2 {
+		t.Fatalf("observablebad subjects share one disposition (%+v); the corpus lost its within-package variance witness", bad1)
+	}
+	if startup := batch[Subject{Package: base + "initfile", Symbol: "TestInitFile"}]; !strings.HasPrefix(startup.Reason, "startup effect:") {
+		t.Fatalf("initfile subject = %+v, want a startup-effect rejection", startup)
+	}
+
+	// One shared Hasher running the production prime→refine→observe sequence
+	// over warm program, list, and effect caches must yield the same
+	// dispositions as the fresh batch above.
+	packages := map[string]bool{}
+	primed := []string{}
+	for _, subject := range subjects {
+		if !packages[subject.Package] {
+			packages[subject.Package] = true
+			primed = append(primed, subject.Package)
+		}
+	}
+	sharedHasher, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedHasher.Prime(primed)
+	if _, err := sharedHasher.ComputeBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := sharedHasher.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range subjects {
+		if shared[subject] != batch[subject] {
+			t.Errorf("%s.%s shared-sequence=%+v batch=%+v", subject.Package, subject.Symbol, shared[subject], batch[subject])
 		}
 	}
 }

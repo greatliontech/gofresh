@@ -58,6 +58,8 @@ type Hasher struct {
 	progs          map[string]*program          // by package import path
 	lists          map[string][]listPkg         // parsed `go list -deps -test`, by package import path
 	maximalTesting map[string]maximalEffectScan // typed testing-runtime effects by requested package
+	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
+	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
 }
 
 func New() (*Hasher, error) { return NewAt("") }
@@ -109,6 +111,7 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
 		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{},
 	}, nil
 }
 

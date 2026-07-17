@@ -104,7 +104,22 @@ func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, bool, error)
 	return len(effects) != 0, selected, unrefinable, err
 }
 
+// maximalEffectsResult memoizes one package's complete external-effect scan
+// within a Hasher: the scan depends only on the package's listed sources, so
+// every subject sharing the package shares one scan.
+type maximalEffectsResult struct {
+	effects     []externalEffect
+	selected    string
+	unrefinable bool
+}
+
+// maximalExternalEffects returns the package's complete external-effect scan.
+// The returned effects slice aliases the Hasher's memo — callers must treat it
+// as read-only.
 func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, string, bool, error) {
+	if cached, ok := h.maximalEffects[pkgPath]; ok {
+		return cached.effects, cached.selected, cached.unrefinable, nil
+	}
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
 		return nil, "", false, err
@@ -143,14 +158,29 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			if err := h.contextErr(); err != nil {
 				return nil, "", false, err
 			}
-			scan, err := maximalFileEffects(filepath.Join(pkg.Dir, name))
+			scan, err := h.maximalFileEffectsCached(filepath.Join(pkg.Dir, name))
 			if err != nil {
 				return nil, "", false, err
 			}
 			record(scan)
 		}
 	}
+	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected, unrefinable: unrefinable}
 	return effects, selected, unrefinable, nil
+}
+
+// maximalFileEffectsCached memoizes one file's effect scan within a Hasher: a
+// file shared by several packages' closures is read and parsed once.
+func (h *Hasher) maximalFileEffectsCached(path string) (maximalEffectScan, error) {
+	if scan, ok := h.maximalFiles[path]; ok {
+		return scan, nil
+	}
+	scan, err := maximalFileEffects(path)
+	if err != nil {
+		return maximalEffectScan{}, err
+	}
+	h.maximalFiles[path] = scan
+	return scan, nil
 }
 
 func preferMaximalReason(candidate, current string) bool {
