@@ -116,6 +116,23 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	}, nil
 }
 
+// BoundAnalysis narrows the context governing this Hasher's subsequent
+// analysis work, typically to carry a caller-supplied analysis budget whose
+// deadline should bound computation but not the surrounding operation. The
+// bound context must descend from the construction context; it is refused
+// once any analysis has been memoized, because already-computed results would
+// have observed the wider context.
+func (h *Hasher) BoundAnalysis(bound context.Context) error {
+	if bound == nil {
+		return errors.New("closure: nil analysis bound")
+	}
+	if len(h.progs) != 0 || len(h.progErrs) != 0 || len(h.lists) != 0 || len(h.maximalEffects) != 0 {
+		return errors.New("closure: analysis already begun; bound the Hasher before its first compute")
+	}
+	h.ctx = bound
+	return nil
+}
+
 type listPkg struct {
 	ImportPath   string
 	Name         string

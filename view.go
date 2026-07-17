@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -30,6 +31,13 @@ var ErrObservedValidationRequired = errors.New("gofresh: observed producer view 
 
 // ErrViewSealed reports a capture attempted after producer validation started.
 var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
+
+// ErrAnalysisUnavailable reports that producer validation could not
+// re-establish a captured observation proof because the current analysis was
+// unavailable — an exhausted analysis budget or a failed load — never because
+// the view drifted. The evidence is not persisted; the caller may retry with a
+// larger budget or record the run without observation evidence.
+var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailable during validation")
 
 // View is one immutable observation of the source, build, guards, and purity
 // behind a caller-supplied subject set. It can serve a current check batch or a
@@ -1029,13 +1037,39 @@ func (v *View) ValidateObserved(ctx context.Context) error {
 	}
 	current.mu.RLock()
 	for _, subject := range subjects {
-		if current.observable[subject] != expected[subject] {
+		if err := compareObservationProof(subject, current.observable[subject], expected[subject]); err != nil {
 			current.mu.RUnlock()
-			return fmt.Errorf("%w: observation proof for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+			return err
 		}
 	}
 	current.mu.RUnlock()
 	return v.compareAttachedObservations(ctx, attached, subjects)
+}
+
+// compareObservationProof re-establishes one captured observation disposition
+// against the post-execution analysis. Unavailable analysis is compared by
+// class, never by error text: a re-establishment the current analysis cannot
+// perform is an availability failure, not evidence of drift, and an
+// unavailable captured proof — which confers nothing whatever the current
+// analysis says — is consistent with any current disposition.
+func compareObservationProof(subject Subject, observed, captured closure.Observability) error {
+	if analysisUnavailable(captured.Reason) {
+		return nil
+	}
+	if analysisUnavailable(observed.Reason) {
+		return fmt.Errorf("%w: observation proof for %s.%s: %s", ErrAnalysisUnavailable, subject.Package, subject.Symbol, observed.Reason)
+	}
+	if observed != captured {
+		return fmt.Errorf("%w: observation proof for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+	}
+	return nil
+}
+
+// analysisUnavailable reports whether an observability disposition records
+// analysis unavailability rather than an analyzed rejection. The prefix is the
+// one vocabulary both the closure analysis and the isolation fallback emit.
+func analysisUnavailable(reason string) bool {
+	return strings.HasPrefix(reason, "observation analysis unavailable")
 }
 
 func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
@@ -1209,6 +1243,18 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 	if err != nil {
 		return err
 	}
+	// The caller's analysis budget bounds only the precise analysis itself: the
+	// Hasher's analysis context carries the budget deadline, so exhaustion
+	// surfaces as analysis failure — degrading to unavailable evidence, never
+	// validity — while the operation, its brackets, and Hasher construction
+	// stay governed by the caller's context alone.
+	if budget := v.engine.analysisBudget; budget > 0 {
+		analysisCtx, cancelBudget := context.WithTimeout(ctx, budget)
+		defer cancelBudget()
+		if err := hasher.BoundAnalysis(analysisCtx); err != nil {
+			return err
+		}
+	}
 	if len(refinedRequests) > 0 && len(observableRequests) > 0 {
 		// Priming retains a package's program for the Hasher's lifetime, so
 		// prime exactly the packages both tiers analyze: sharing one load and
@@ -1243,9 +1289,11 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 				return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 			}
 			// Isolation retries per subject so a fact reached only by one
-			// subject can never deny a sibling's proof; the Hasher memoizes
-			// load failures, so a failing package's load still runs exactly
-			// once per analysis however many of its subjects retry.
+			// subject can never deny a sibling's proof. While the analysis
+			// context lives, the Hasher memoizes load failures, so a failing
+			// package's load runs once per analysis however many subjects
+			// retry; once the analysis budget expires, retries fail at the
+			// subprocess boundary without real work.
 			observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
 			for _, request := range observableRequests {
 				isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})

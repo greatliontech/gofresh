@@ -2653,6 +2653,119 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 	}
 }
 
+func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	unbudgeted, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := unbudgeted.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := producer.CaptureObservedRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	budgeted, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Capture under an exhausted budget still lands a fingerprint carrying an
+	// unavailable proof — never an operation error while the caller's context
+	// is live, and never observable evidence.
+	captureView, err := budgeted.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := captureView.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("budget-exhausted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
+	}
+
+	// A drift-forced check under an exhausted budget degrades to unverifiable,
+	// never valid and never an operation error.
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() {}\nfunc G() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkView, err := budgeted.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := checkView.CheckObserved(context.Background(), recorded, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "precise analysis unavailable") {
+		t.Fatalf("budget-exhausted drifted check = %+v, want unverifiable via unavailable analysis", verdict)
+	}
+}
+
+func TestValidationComparesObservationProofsByAvailabilityClass(t *testing.T) {
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	analyzed := closure.Observability{Observable: true}
+	rejected := closure.Observability{Reason: "startup effect: external dependence"}
+	unavailableA := closure.Observability{Reason: "observation analysis unavailable: analysis budget exhausted"}
+	unavailableB := closure.Observability{Reason: "observation analysis unavailable: load failed"}
+	if err := compareObservationProof(subject, unavailableA, analyzed); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("unavailable re-establishment of an analyzed proof = %v, want ErrAnalysisUnavailable", err)
+	}
+	if err := compareObservationProof(subject, unavailableA, unavailableB); err != nil {
+		t.Fatalf("two unavailable dispositions with different error text = %v, want consistent", err)
+	}
+	if err := compareObservationProof(subject, analyzed, unavailableA); err != nil {
+		t.Fatalf("unavailable captured proof against current analyzed = %v, want consistent (the recording confers nothing)", err)
+	}
+	if err := compareObservationProof(subject, rejected, analyzed); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("analyzed dispositions differing = %v, want ErrViewChanged", err)
+	}
+	if err := compareObservationProof(subject, analyzed, analyzed); err != nil {
+		t.Fatalf("identical analyzed dispositions = %v, want consistent", err)
+	}
+}
+
+func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	fixture := filepath.Join(dir, "fixture")
+	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("budgeted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+		t.Fatal(err)
+	}
+	// The captured proof is unavailable, so validation re-establishes it by
+	// class regardless of where the fresh budget expires — never a spurious
+	// view-changed error from mismatched error text.
+	if err := producer.ValidateObserved(context.Background()); err != nil {
+		t.Fatalf("budgeted validation of an unavailable proof = %v, want success", err)
+	}
+}
+
 func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")

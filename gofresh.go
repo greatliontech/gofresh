@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
@@ -110,12 +111,13 @@ type Verdict struct {
 // and derived analysis state live in an explicit View and never cross view
 // boundaries (REQ-fresh-coherent-view).
 type Engine struct {
-	assumePure  func(Subject) bool
-	buildFlags  []string
-	buildInputs []string
-	dir         string
-	env         []string
-	envSet      bool
+	assumePure     func(Subject) bool
+	buildFlags     []string
+	buildInputs    []string
+	dir            string
+	env            []string
+	envSet         bool
+	analysisBudget time.Duration
 	// observeHook observes every source/guard/purity observation pass. Tests use
 	// it to pin how many observations an operation performs.
 	observeHook func()
@@ -138,6 +140,20 @@ func WithBuildFlags(flags ...string) Option {
 // WithBuildFlags; presenting one here is refused when New applies the options.
 func WithBuildInputs(inputs ...string) Option {
 	return func(e *Engine) { e.buildInputs = append([]string(nil), inputs...) }
+}
+
+// WithAnalysisBudget bounds each precise-analysis phase — declaration-RTA
+// refinement and observability proving, whether selected at capture, forced by
+// drift at check, or re-established at validation — to d of wall clock. A
+// batched operation's shared analysis draws on one budget; each operation
+// derives a fresh one. An exhausted budget yields unavailable evidence for the
+// affected subjects — checks report unverifiable and never valid
+// (REQ-fresh-refinement-failclosed), validation reports
+// ErrAnalysisUnavailable, refined-mode captures fail — and it never cancels
+// the operation itself, which remains governed solely by the caller's context
+// (REQ-fresh-context). Zero means unbounded.
+func WithAnalysisBudget(d time.Duration) Option {
+	return func(e *Engine) { e.analysisBudget = d }
 }
 
 // WithAssumePure supplies the caller's purity predicate: a subject for which it

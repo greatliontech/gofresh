@@ -227,7 +227,6 @@ uncancellable context. The context bounds observation work; a producer validatio
 attempt still seals its original view against later capture. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
 expressed through a caller-supplied analysis budget, never through cancellation.
-Lands: when the caller-supplied analysis budget operation exists.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's
