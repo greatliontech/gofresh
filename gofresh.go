@@ -270,7 +270,7 @@ func (e *Engine) CaptureFor(subject Subject, moduleDir string, kind Kind) (Finge
 // under ctx. The caller selects refinement explicitly and owns its cancellation or
 // budget.
 func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.NewView([]Subject{subject}, moduleDir)
+	view, err := e.NewViewContext(ctx, []Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -279,7 +279,7 @@ func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir 
 
 // CaptureRefinedFor captures refined evidence with the guards applicable to kind.
 func (e *Engine) CaptureRefinedFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.NewViewFor([]Subject{subject}, moduleDir, kind)
+	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, kind)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -308,7 +308,7 @@ func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewFor([]Subject{subject}, moduleDir, recorded.ResultKind)
+	view, err := e.NewViewForContext(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}

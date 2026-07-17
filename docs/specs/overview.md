@@ -107,7 +107,7 @@ separate, broader caller-responsible override.
 MUST be usable only when its non-empty recognized strategy/version, subject identity,
 maximal closure hash, assertion attribution, and complete disposition agree with its
 integrity evidence. An unchanged maximal hash may retain compatible evidence; maximal
-drift requires current caller-selected proof analysis, and missing, cancelled,
+drift requires current caller-selected proof analysis, and missing,
 unrecognized, incomplete, or inconsistent evidence never suppresses
 unverifiability. Changing any proof rule that can change a disposition requires a new
 strategy/version identity even when source is unchanged.
@@ -160,9 +160,10 @@ normally after source equivalence is established.
 a caller-selected refined operation, under the caller's cancellation or budget;
 gofresh MUST NOT infer whether a subject is expensive enough to refine. Missing,
 incomplete, or incompatible recorded refinement after maximal drift is stale. A
-current refinement that is unavailable, fails, is cancelled, or exhausts its
-caller-supplied budget is unverifiable or stale, never valid. A caller can select an
-unbounded refinement operation explicitly.
+current refinement that is unavailable, fails, or exhausts its caller-supplied
+budget is unverifiable or stale, never valid; caller cancellation returns the
+context error rather than a verdict. A caller can select an unbounded refinement
+operation explicitly.
 
 **REQ-fresh-refinement-disposition** (invariant): When a compatible refined recording
 avoids current refinement because the maximal closure is unchanged, its recorded
@@ -210,12 +211,17 @@ the view is constructed and the producing build is read; validation detects ordi
 drift but cannot prove the absence of a change-and-restore interval the caller
 allowed.
 
-**REQ-fresh-context** (behavior): Context-aware analysis-view construction,
-maximal checking, and producer validation MUST honor caller cancellation before
-and between source, guard, runtime-input, and comparison observations, returning
-the context error rather than a partial view, verdict, or successful validation.
-The context bounds observation work; a producer validation attempt still seals
-its original view against later capture.
+**REQ-fresh-context** (behavior): Analysis-view construction, checking —
+maximal, refined, and observed alike — and producer validation MUST honor caller
+cancellation before and between source, guard, runtime-input, precise-analysis,
+and comparison observations, returning the context error rather than a partial
+view, verdict, or successful validation. One operation observes one caller
+context: no observation phase of a cancelled operation continues under a private
+uncancellable context. The context bounds observation work; a producer validation
+attempt still seals its original view against later capture. Bounding only the
+optional precise-analysis tier while still answering from cheaper evidence is
+expressed through a caller-supplied analysis budget, never through cancellation.
+Lands: when the caller-supplied analysis budget operation exists.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's

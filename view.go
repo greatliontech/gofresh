@@ -52,6 +52,10 @@ type View struct {
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
 	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
+	// beforePreciseAnalysis observes the start of drift-forced precise analysis
+	// (refinement or observability). Tests use it to pin which check paths run
+	// analysis and to inject cancellation at the analysis boundary.
+	beforePreciseAnalysis func()
 }
 
 // NewView observes subjects and moduleDir as one code-result analysis view.
@@ -648,24 +652,38 @@ func (v *View) CheckRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 }
 
 func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	verdicts := make(map[Subject]Verdict, len(recorded))
-	observationCtx := context.Background()
 	hasRuntimeInputs := false
 	for _, fingerprint := range recorded {
 		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
 	}
 	if hasRuntimeInputs {
-		if err := v.reobserveBase(observationCtx); err != nil {
+		if err := v.reobserveBase(ctx); err != nil {
 			return nil, err
 		}
 	}
-	runtimeBefore := v.observeRuntimeInputs(recorded)
+	runtimeBefore, err := v.observeRuntimeInputs(ctx, recorded)
+	if err != nil {
+		return nil, err
+	}
 	finish := func() (map[Subject]Verdict, error) {
-		finished := v.finishRuntimeObservation(recorded, runtimeBefore, verdicts)
+		finished, err := v.finishRuntimeObservation(ctx, recorded, runtimeBefore, verdicts)
+		if err != nil {
+			return nil, err
+		}
 		if hasRuntimeInputs {
-			if err := v.reobserveBase(observationCtx); err != nil {
+			if err := v.reobserveBase(ctx); err != nil {
 				return nil, err
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		return finished, nil
 	}
@@ -758,20 +776,23 @@ func validPurityAssertion(assertion string) bool {
 	}
 }
 
-func (v *View) knownGuardVerdict(recorded Fingerprint) (Verdict, bool) {
-	return decideKnownGuards(recorded, v.guards, v.currentRuntime(recorded), v.kind)
-}
-
-func (v *View) observeRuntimeInputs(recorded map[Subject]Fingerprint) map[Subject]runtimeinput.State {
+func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
 	observed := make(map[Subject]runtimeinput.State, len(recorded))
 	for subject, fingerprint := range recorded {
-		observed[subject] = v.currentRuntime(fingerprint)
+		state, err := v.currentRuntimeContext(ctx, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		observed[subject] = state
 	}
-	return observed
+	return observed, nil
 }
 
-func (v *View) finishRuntimeObservation(recorded map[Subject]Fingerprint, before map[Subject]runtimeinput.State, verdicts map[Subject]Verdict) map[Subject]Verdict {
-	after := v.observeRuntimeInputs(recorded)
+func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subject]Fingerprint, before map[Subject]runtimeinput.State, verdicts map[Subject]Verdict) (map[Subject]Verdict, error) {
+	after, err := v.observeRuntimeInputs(ctx, recorded)
+	if err != nil {
+		return nil, err
+	}
 	for subject, fingerprint := range recorded {
 		if fingerprint.RuntimeInputs != "" && before[subject] != after[subject] {
 			if verdicts[subject].Status != Stale {
@@ -779,7 +800,7 @@ func (v *View) finishRuntimeObservation(recorded map[Subject]Fingerprint, before
 			}
 		}
 	}
-	return verdicts
+	return verdicts, nil
 }
 
 func (v *View) currentRuntime(recorded Fingerprint) runtimeinput.State {
@@ -1026,10 +1047,6 @@ func (v *View) reobserveBase(ctx context.Context) error {
 	return v.compareBaseContext(ctx, current)
 }
 
-func (v *View) compareBase(current *View) error {
-	return v.compareBaseContext(context.Background(), current)
-}
-
 func (v *View) compareBaseContext(ctx context.Context, current *View) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
@@ -1100,6 +1117,9 @@ func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
 	if len(requests) == 0 {
 		return nil
 	}
+	if v.beforePreciseAnalysis != nil {
+		v.beforePreciseAnalysis()
+	}
 	beforeView, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
 		return err
@@ -1159,6 +1179,9 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	v.mu.RUnlock()
 	if len(requests) == 0 {
 		return nil
+	}
+	if v.beforePreciseAnalysis != nil {
+		v.beforePreciseAnalysis()
 	}
 	before, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {

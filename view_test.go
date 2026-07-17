@@ -280,6 +280,8 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	analyses := 0
+	current.beforePreciseAnalysis = func() { analyses++ }
 	ordinary, err := current.Check(fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
@@ -293,6 +295,9 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	}
 	if observed.Status != Valid {
 		t.Fatalf("observed check = %+v, want valid", observed)
+	}
+	if analyses != 0 {
+		t.Fatalf("unchanged-maximal observed check invoked precise analysis %d times, want 0", analyses)
 	}
 	tampered := fingerprint
 	tampered.ObservationProof.Evidence = "tampered"
@@ -1470,11 +1475,17 @@ func TestRefinedBatchMarksRuntimeInputDriftStale(t *testing.T) {
 		RuntimeDigest: state.Digest,
 	}}
 	view := &View{moduleDir: dir}
-	before := view.observeRuntimeInputs(recorded)
+	before, err := view.observeRuntimeInputs(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdicts := view.finishRuntimeObservation(recorded, before, map[Subject]Verdict{subject: {Status: Valid}})
+	verdicts, err := view.finishRuntimeObservation(context.Background(), recorded, before, map[Subject]Verdict{subject: {Status: Valid}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := verdicts[subject]; got.Status != Stale || got.Reason != "runtimeinputs" {
 		t.Fatalf("runtime-input drift verdict = %+v, want stale runtimeinputs", got)
 	}
@@ -1502,14 +1513,20 @@ func TestRuntimeInputDriftIsSubjectLocal(t *testing.T) {
 		g: {RuntimeInputs: stateB.Manifest, RuntimeDigest: stateB.Digest},
 	}
 	view := &View{moduleDir: dir}
-	before := view.observeRuntimeInputs(recorded)
+	before, err := view.observeRuntimeInputs(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdicts := view.finishRuntimeObservation(recorded, before, map[Subject]Verdict{
+	verdicts, err := view.finishRuntimeObservation(context.Background(), recorded, before, map[Subject]Verdict{
 		f: {Status: Valid},
 		g: {Status: Valid},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if verdicts[f].Status != Stale || verdicts[g].Status != Valid {
 		t.Fatalf("subject-local runtime drift = F:%+v G:%+v, want stale/valid", verdicts[f], verdicts[g])
 	}
@@ -1599,17 +1616,23 @@ func TestRuntimeInputDriftDoesNotOverrideStale(t *testing.T) {
 		RuntimeDigest: "already-stale",
 	}}
 	view := &View{moduleDir: dir}
-	before := view.observeRuntimeInputs(recorded)
+	before, err := view.observeRuntimeInputs(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdicts := view.finishRuntimeObservation(recorded, before, map[Subject]Verdict{subject: {Status: Stale, Reason: "closure"}})
+	verdicts, err := view.finishRuntimeObservation(context.Background(), recorded, before, map[Subject]Verdict{subject: {Status: Stale, Reason: "closure"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := verdicts[subject]; got.Status != Stale || got.Reason != "closure" {
 		t.Fatalf("runtime drift overwrote stale verdict: %+v", got)
 	}
 }
 
-func TestCancelledRefinementContextDoesNotAbortUnchangedRuntimeCheck(t *testing.T) {
+func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -1640,12 +1663,101 @@ func TestCancelledRefinementContextDoesNotAbortUnchangedRuntimeCheck(t *testing.
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	verdict, err := current.CheckRefined(ctx, fingerprint, subject)
+	if _, err := current.CheckRefined(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckRefined under cancelled context = %v, want context.Canceled", err)
+	}
+	verdict, err := current.CheckRefined(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Valid {
-		t.Fatalf("unchanged runtime check with cancelled refinement context = %+v, want valid", verdict)
+		t.Fatalf("unchanged runtime check = %+v, want valid", verdict)
+	}
+}
+
+func TestCheckRefinedBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
+	fixture := filepath.Join(dir, "fixture")
+	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := Subject{Package: "example.com/view", Symbol: "F"}
+	g := Subject{Package: "example.com/view", Symbol: "G"}
+	producer, err := engine.NewView([]Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := map[Subject]Fingerprint{}
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []Subject{f, g} {
+		fingerprint, err := producer.CaptureRefined(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint.RuntimeInputs = state.Manifest
+		fingerprint.RuntimeDigest = state.Digest
+		recorded[subject] = fingerprint
+	}
+	current, err := engine.NewView([]Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Cancel from inside the first runtime-input observation: the batch must
+	// stop between observations with the context error — never observe the
+	// second record or finish under a private uncancelled context.
+	observations := 0
+	current.runtimeCurrent = func(hookCtx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
+		observations++
+		cancel()
+		return runtimeinput.CurrentContext(hookCtx, encoded, moduleDir)
+	}
+	if _, err := current.CheckRefinedBatch(ctx, recorded); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckRefinedBatch cancelled during runtime observation = %v, want context.Canceled", err)
+	}
+	if observations != 1 {
+		t.Fatalf("runtime observations after mid-observation cancel = %d, want 1", observations)
+	}
+}
+
+func TestCheckRefinedBatchReturnsContextErrorDuringRefinement(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() {}\nfunc G() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cancellation injected exactly when the drift-forced refinement begins must
+	// surface as the context error, never as unverifiable verdicts from a
+	// partially cancelled analysis.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	current.beforePreciseAnalysis = cancel
+	if _, err := current.CheckRefinedBatch(ctx, map[Subject]Fingerprint{subject: fingerprint}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckRefinedBatch cancelled during refinement = %v, want context.Canceled", err)
 	}
 }
 
@@ -1693,16 +1805,21 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := unchanged.CheckRefined(nil, refined, subject)
+	// The precise-analysis seam pins REQ-fresh-hierarchical-check's "does not
+	// run refinement analysis" clauses: every verdict below must be decided
+	// from recorded evidence alone.
+	analyses := 0
+	unchanged.beforePreciseAnalysis = func() { analyses++ }
+	verdict, err := unchanged.CheckRefined(context.Background(), refined, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Valid {
-		t.Fatalf("unchanged maximal invoked refinement or lost recorded disposition: %+v", verdict)
+		t.Fatalf("unchanged maximal lost recorded disposition: %+v", verdict)
 	}
 	incompatible := refined
 	incompatible.Refinement.Strategy = "gofresh/unknown@1"
-	verdict, err = unchanged.CheckRefined(cancelled, incompatible, subject)
+	verdict, err = unchanged.CheckRefined(context.Background(), incompatible, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1713,12 +1830,15 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	transferred.Refinement.Subject = Subject{Package: "example.com/view", Symbol: "G"}
 	transferred.Refinement.Unverifiable = false
 	transferred.Refinement.Reason = ""
-	verdict, err = unchanged.CheckRefined(nil, transferred, subject)
+	verdict, err = unchanged.CheckRefined(context.Background(), transferred, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "refinement" {
 		t.Fatalf("transferred refinement accepted with matching maximal closure: %+v", verdict)
+	}
+	if analyses != 0 {
+		t.Fatalf("unchanged-maximal checks invoked precise analysis %d times, want 0", analyses)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\nfunc F() int { return 1 }\nfunc G() { _, _ = os.ReadFile(\"changed\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1741,7 +1861,16 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if verdict.Status != Valid {
 		t.Fatalf("refined policy after irrelevant sibling edit = %+v, want valid", verdict)
 	}
-	verdict, err = current.CheckRefined(cancelled, maximalOnly, subject)
+	// A cold view pins that these drifted recordings are refused before any
+	// precise analysis: a warm refined cache would mask an analysis invocation
+	// from the seam.
+	coldCurrent, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyses = 0
+	coldCurrent.beforePreciseAnalysis = func() { analyses++ }
+	verdict, err = coldCurrent.CheckRefined(context.Background(), maximalOnly, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1750,12 +1879,15 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	}
 	incompatible = refined
 	incompatible.Refinement.Strategy = "gofresh/unknown@1"
-	verdict, err = current.CheckRefined(cancelled, incompatible, subject)
+	verdict, err = coldCurrent.CheckRefined(context.Background(), incompatible, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "refinement" {
 		t.Fatalf("incompatible refinement after drift = %+v, want stale refinement", verdict)
+	}
+	if analyses != 0 {
+		t.Fatalf("drifted checks without compatible refined evidence invoked precise analysis %d times, want 0", analyses)
 	}
 	mismatched := refined
 	mismatched.Refinement.Closure = "different"
@@ -1770,21 +1902,27 @@ func TestRefinedViewChecksMaximalBeforeDeclarationRTA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = cancelledCurrent.CheckRefined(cancelled, refined, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "refinement unavailable") {
-		t.Fatalf("cancelled refinement = %+v, want safely unverifiable", verdict)
+	// Cancellation injected at the precise-analysis boundary surfaces as the
+	// context error, never as a verdict from a partially cancelled analysis.
+	analysisCtx, cancelAnalysis := context.WithCancel(context.Background())
+	defer cancelAnalysis()
+	cancelledCurrent.beforePreciseAnalysis = cancelAnalysis
+	if _, err := cancelledCurrent.CheckRefined(analysisCtx, refined, subject); !errors.Is(err, context.Canceled) {
+		t.Fatalf("refinement cancelled at the analysis boundary = %v, want context.Canceled", err)
 	}
 	guardDrift := refined
 	guardDrift.Guards.BuildConfig = "different"
-	verdict, err = cancelledCurrent.CheckRefined(cancelled, guardDrift, subject)
+	analyses = 0
+	cancelledCurrent.beforePreciseAnalysis = func() { analyses++ }
+	verdict, err = cancelledCurrent.CheckRefined(context.Background(), guardDrift, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "buildconfig" {
-		t.Fatalf("cancelled refinement with guard drift = %+v, want stale buildconfig", verdict)
+		t.Fatalf("drifted recording with failed known guard = %+v, want stale buildconfig", verdict)
+	}
+	if analyses != 0 {
+		t.Fatalf("failed known guard invoked precise analysis %d times, want 0", analyses)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nimport \"os\"\n\nfunc F() int { return 2 }\nfunc G() { _, _ = os.ReadFile(\"changed\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1826,7 +1964,7 @@ func TestRefinementDispositionIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := current.CheckRefined(nil, fingerprint, subject)
+	verdict, err := current.CheckRefined(context.Background(), fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1862,7 +2000,7 @@ func TestRefinementEvidenceBindsMaximalGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	maximal.Refinement = refined.Refinement
-	verdict, err := second.CheckRefined(nil, maximal, subject)
+	verdict, err := second.CheckRefined(context.Background(), maximal, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2241,12 +2379,13 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A drifted recording carrying the sibling's refined closure must never be
+	// served by it: the refined hash is bound to the subject identity.
 	drifted := fingerprints[g]
 	drifted.MaximalClosure = "different"
+	drifted.Refinement.Closure = fingerprints[f].Refinement.Closure
 	drifted.Refinement.Evidence = refinementEvidence(drifted.MaximalClosure, drifted.Refinement)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	verdicts, err := current.CheckRefinedBatch(ctx, map[Subject]Fingerprint{
+	verdicts, err := current.CheckRefinedBatch(context.Background(), map[Subject]Fingerprint{
 		f: fingerprints[f],
 		g: drifted,
 	})
@@ -2254,9 +2393,54 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if verdicts[f].Status != Valid {
-		t.Fatalf("unchanged subject was coupled to failed refinement: %+v", verdicts[f])
+		t.Fatalf("unchanged subject was coupled to sibling drift: %+v", verdicts[f])
+	}
+	if verdicts[g].Status != Stale || verdicts[g].Reason != "refinement" {
+		t.Fatalf("drifted subject carrying the sibling's refined closure = %+v, want stale refinement", verdicts[g])
+	}
+}
+
+func TestRefinementUnavailabilityIsSubjectLocal(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\nfunc G() int { return 1 }\n")
+	f := Subject{Package: "example.com/view", Symbol: "F"}
+	g := Subject{Package: "example.com/view", Symbol: "G"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprints, err := producer.CaptureRefinedBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Breaking the tree after view construction makes the drift-forced
+	// refinement analysis unavailable without cancelling the caller's context:
+	// the drifted subject degrades to unverifiable while the unchanged sibling,
+	// whose evidence needs no current analysis, still answers.
+	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package view\n\nfunc {"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drifted := fingerprints[g]
+	drifted.MaximalClosure = "different"
+	drifted.Refinement.Evidence = refinementEvidence(drifted.MaximalClosure, drifted.Refinement)
+	verdicts, err := current.CheckRefinedBatch(context.Background(), map[Subject]Fingerprint{
+		f: fingerprints[f],
+		g: drifted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdicts[f].Status != Valid {
+		t.Fatalf("unchanged subject was coupled to unavailable refinement: %+v", verdicts[f])
 	}
 	if verdicts[g].Status != Unverifiable {
-		t.Fatalf("drifted subject with cancelled refinement = %+v, want unverifiable", verdicts[g])
+		t.Fatalf("drifted subject with unavailable refinement = %+v, want unverifiable", verdicts[g])
 	}
 }
