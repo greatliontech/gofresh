@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -1260,6 +1261,10 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 			if ctx.Err() != nil {
 				return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 			}
+			// Isolation retries per subject so a fact reached only by one
+			// subject can never deny a sibling's proof; the Hasher memoizes
+			// load failures, so a failing package's load still runs exactly
+			// once per analysis however many of its subjects retry.
 			observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
 			for _, request := range observableRequests {
 				isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
@@ -1270,7 +1275,7 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 					observableComputed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
 					continue
 				}
-				observableComputed[request] = isolated[request]
+				maps.Copy(observableComputed, isolated)
 			}
 		}
 	}

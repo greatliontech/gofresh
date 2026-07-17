@@ -38,13 +38,22 @@ type program struct {
 	testMain *ssa.Function
 }
 
-// loadCached loads (once) and returns the whole-program SSA for pkgPath.
+// loadCached loads (once) and returns the whole-program SSA for pkgPath. Load
+// failures are memoized for the Hasher's lifetime alongside successes: one
+// analysis observes one load outcome per package, so retrying subjects of a
+// failing package never repeats its failing load.
 func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
+	if err, ok := h.progErrs[pkgPath]; ok {
+		return nil, err
+	}
 	p, err := loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 	if err != nil {
+		if h.ctx.Err() == nil {
+			h.progErrs[pkgPath] = err
+		}
 		return nil, err
 	}
 	h.progs[pkgPath] = p
@@ -458,10 +467,21 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		if err != nil {
 			return nil, err
 		}
+		// A symbol absent from the loaded program's roots is a subject-local
+		// fact — a production symbol can be unreachable as a root of its
+		// external-test binary — so it degrades to an unavailable proof for
+		// that subject alone and never denies a sibling's analysis.
+		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
 			if prog.roots[subject.Symbol] == nil {
-				return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+				results[subject] = Observability{Reason: fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)}
+				continue
 			}
+			rooted = append(rooted, subject)
+		}
+		group.subjects = rooted
+		if len(group.subjects) == 0 {
+			continue
 		}
 		metas, err := h.list(group.path)
 		if err != nil {

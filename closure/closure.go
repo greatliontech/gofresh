@@ -56,6 +56,7 @@ type Hasher struct {
 	// every package and dependency load used to construct this closure.
 	buildFlags     []string
 	progs          map[string]*program          // by package import path
+	progErrs       map[string]error             // memoized load failures, by package import path
 	lists          map[string][]listPkg         // parsed `go list -deps -test`, by package import path
 	maximalTesting map[string]maximalEffectScan // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
@@ -110,7 +111,7 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	}
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
-		progs: map[string]*program{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
+		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{},
 	}, nil
 }

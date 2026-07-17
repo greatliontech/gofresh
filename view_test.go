@@ -128,6 +128,22 @@ func TestExternal(t *testing.T) {
 	if verdict.Status != Unverifiable {
 		t.Fatalf("verdict = %+v, want unverifiable", verdict)
 	}
+	// One batched capture over both subjects preserves the same isolation: the
+	// unrootable subject degrades alone while its package sibling analyzes.
+	batchProducer, err := engine.NewView([]Subject{subject, oracle}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := batchProducer.CaptureObservedBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(batch[subject].ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("batched unrootable proof = %+v, want unavailable disposition", batch[subject].ObservationProof)
+	}
+	if strings.Contains(batch[oracle].ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("batched oracle proof = %+v, want isolated analyzed disposition", batch[oracle].ObservationProof)
+	}
 }
 
 func TestObservedCaptureRequiresObservedValidation(t *testing.T) {
