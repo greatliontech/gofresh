@@ -55,6 +55,70 @@ func writeObservedViewModule(t *testing.T) string {
 	return dir
 }
 
+func TestUnavailableObservationAnalysisIsUnverifiable(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":      "module example.com/external\n\ngo 1.26\n",
+		"external.go": "package external\n\nimport \"os\"\n\nfunc Ok() bool { return os.Getenv(\"OK\") == \"\" }\n",
+		"external_test.go": `package external_test
+
+import (
+	"testing"
+
+	"example.com/external"
+)
+
+func TestExternal(t *testing.T) {
+	if !external.Ok() {
+		t.Fatal("not ok")
+	}
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subject := Subject{Package: "example.com/external", Symbol: "Ok"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("observation proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
+	}
+	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("external test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.ValidateObserved(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable {
+		t.Fatalf("verdict = %+v, want unverifiable", verdict)
+	}
+}
+
 func TestObservedCaptureRequiresObservedValidation(t *testing.T) {
 	view := &View{capturedObserved: map[Subject]bool{{}: true}}
 	if err := view.ValidateContext(context.Background()); !errors.Is(err, ErrObservedValidationRequired) {

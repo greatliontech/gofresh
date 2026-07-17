@@ -149,7 +149,7 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@2" {
+	if ObservationRTA != "gofresh/observation-rta@3" {
 		t.Fatalf("ObservationRTA = %q, want fresh-mutation proof semantics", ObservationRTA)
 	}
 }
