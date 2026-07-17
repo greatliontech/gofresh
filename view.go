@@ -402,10 +402,7 @@ func (v *View) CaptureObservedRefined(ctx context.Context, subject Subject) (Fin
 	if _, ok := v.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	if err := v.ensureRefined(ctx, []Subject{subject}); err != nil {
-		return Fingerprint{}, err
-	}
-	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+	if err := v.ensurePrecise(ctx, []Subject{subject}, true, true); err != nil {
 		return Fingerprint{}, err
 	}
 	v.mu.Lock()
@@ -559,81 +556,131 @@ func (v *View) CheckContext(ctx context.Context, recorded Fingerprint, subject S
 
 // CheckObserved explicitly checks a fingerprint under its recorded observation
 // assertion and proof. Ordinary Check never infers this policy from evidence.
+// It is the single-record form of CheckObservedBatch, so both share one window
+// semantics: a runtime input moving mid-check stales a record whose verdict is
+// not already stale, and demonstrated staleness is preferred over
+// unverifiability.
 func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if ctx == nil {
-		return Verdict{}, errors.New("gofresh: nil observation proof context")
-	}
-	if err := ctx.Err(); err != nil {
-		return Verdict{}, err
-	}
-	if err := validateRecordedKind(recorded); err != nil {
-		return Verdict{}, err
-	}
-	if recorded.ResultKind != v.kind {
-		return Verdict{}, fmt.Errorf("gofresh: recorded result kind %d does not match view kind %d", recorded.ResultKind, v.kind)
-	}
-	cl, ok := v.maximal[subject]
-	if !ok {
+	if _, ok := v.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	if recorded.MaximalClosure == "" {
-		return Verdict{Stale, "closure"}, nil
+	verdicts, err := v.CheckObservedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
+	if err != nil {
+		return Verdict{}, err
 	}
-	compatible := compatibleObservationProof(recorded.ObservationProof, recorded.ObservationAssertion, subject, recorded.MaximalClosure)
-	positive := compatible && recorded.ObservationProof.Observable
-	effective := cl
-	drifted := recorded.MaximalClosure != cl.Hash
-	if drifted && !compatibleRefinement(recorded.Refinement, subject, recorded.MaximalClosure) {
-		return Verdict{Stale, "refinement"}, nil
-	}
-	var before runtimeinput.State
-	if recorded.RuntimeInputs != "" {
-		if err := v.reobserveBase(ctx); err != nil {
-			return Verdict{}, err
-		}
-		var err error
-		before, err = v.currentRuntimeContext(ctx, recorded)
-		if err != nil {
-			return Verdict{}, err
-		}
-	}
-	if drifted {
-		if verdict, failed := decideKnownGuards(recorded, v.guards, before, v.kind); failed {
-			return verdict, nil
-		}
-		if err := v.ensurePrecise(ctx, []Subject{subject}, true, true); err != nil {
-			return unavailableObservedAnalysis(ctx, "precise analysis", err)
-		}
-		v.mu.RLock()
-		effective = v.refined[subject]
-		currentObservable := v.observable[subject]
-		v.mu.RUnlock()
-		if recorded.Refinement.Closure != refinedSubjectHash(subject, effective.Hash) {
-			return Verdict{Stale, "refinement"}, nil
-		}
-		positive = positive && currentObservable.Observable
-	}
-	if recorded.RuntimeInputs != "" {
-		after, err := v.currentRuntimeContext(ctx, recorded)
-		if err != nil {
-			return Verdict{}, err
-		}
-		if err := v.reobserveBase(ctx); err != nil {
-			return Verdict{}, err
-		}
-		if before != after {
-			return Verdict{Stale, "runtimeinputs"}, nil
-		}
-		return decideAfterClosureObserved(recorded, effective, v.guards, before, v.kind, v.purityMatches(recorded, subject), positive), nil
-	}
-	return decideAfterClosureObserved(recorded, effective, v.guards, runtimeinput.State{}, v.kind, v.purityMatches(recorded, subject), false), nil
+	return verdicts[subject], nil
 }
 
-func unavailableObservedAnalysis(ctx context.Context, analysis string, err error) (Verdict, error) {
-	if contextErr := ctx.Err(); contextErr != nil {
-		return Verdict{}, contextErr
+// CheckObservedBatch checks a caller-supplied recording set under the explicit
+// observed policy, sharing one drift bracket pair, one runtime-input
+// observation window, and one drift-forced precise analysis across the set.
+// Every subject's verdict equals a single CheckObserved of its recording over
+// the same view; an unavailable shared analysis degrades only the drifted
+// subjects, and caller cancellation returns the context error.
+func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil observation proof context")
 	}
-	return Verdict{Unverifiable, analysis + " unavailable: " + err.Error()}, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	verdicts := make(map[Subject]Verdict, len(recorded))
+	// Records whose staleness follows from their evidence alone are decided
+	// before the observation window opens: their verdicts never consult runtime
+	// state, so observing for them would only add cost and failure modes.
+	pending := make(map[Subject]Fingerprint, len(recorded))
+	positives := make(map[Subject]bool, len(recorded))
+	for subject, rec := range recorded {
+		if err := validateRecordedKind(rec); err != nil {
+			return nil, err
+		}
+		if rec.ResultKind != v.kind {
+			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
+		}
+		cl, ok := v.maximal[subject]
+		if !ok {
+			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+		}
+		if rec.MaximalClosure == "" {
+			verdicts[subject] = Verdict{Stale, "closure"}
+			continue
+		}
+		if rec.MaximalClosure != cl.Hash && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
+			verdicts[subject] = Verdict{Stale, "refinement"}
+			continue
+		}
+		pending[subject] = rec
+		positives[subject] = compatibleObservationProof(rec.ObservationProof, rec.ObservationAssertion, subject, rec.MaximalClosure) && rec.ObservationProof.Observable
+	}
+	hasRuntimeInputs := false
+	for _, fingerprint := range pending {
+		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
+	}
+	if hasRuntimeInputs {
+		if err := v.reobserveBase(ctx); err != nil {
+			return nil, err
+		}
+	}
+	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
+	if err != nil {
+		return nil, err
+	}
+	finish := func() (map[Subject]Verdict, error) {
+		finished, err := v.finishRuntimeObservation(ctx, pending, runtimeBefore, verdicts)
+		if err != nil {
+			return nil, err
+		}
+		if hasRuntimeInputs {
+			if err := v.reobserveBase(ctx); err != nil {
+				return nil, err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return finished, nil
+	}
+	var drifted []Subject
+	for subject, rec := range pending {
+		cl := v.maximal[subject]
+		if rec.MaximalClosure != cl.Hash {
+			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
+				verdicts[subject] = verdict
+				continue
+			}
+			drifted = append(drifted, subject)
+			continue
+		}
+		verdicts[subject] = decideAfterClosureObserved(rec, cl, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != "")
+	}
+	if len(drifted) == 0 {
+		return finish()
+	}
+	if err := v.ensurePrecise(ctx, drifted, true, true); err != nil {
+		for _, subject := range drifted {
+			verdicts[subject] = Verdict{Unverifiable, "precise analysis unavailable: " + err.Error()}
+		}
+		return finish()
+	}
+	v.mu.RLock()
+	currentRefined := make(map[Subject]closure.Closure, len(drifted))
+	currentObservable := make(map[Subject]closure.Observability, len(drifted))
+	for _, subject := range drifted {
+		currentRefined[subject] = v.refined[subject]
+		currentObservable[subject] = v.observable[subject]
+	}
+	v.mu.RUnlock()
+	for _, subject := range drifted {
+		rec := recorded[subject]
+		effective := currentRefined[subject]
+		if rec.Refinement.Closure != refinedSubjectHash(subject, effective.Hash) {
+			verdicts[subject] = Verdict{Stale, "refinement"}
+			continue
+		}
+		positive := positives[subject] && currentObservable[subject].Observable
+		verdicts[subject] = decideAfterClosureObserved(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positive && rec.RuntimeInputs != "")
+	}
+	return finish()
 }
 
 // CheckRefined compares maximal evidence first. It invokes declaration-RTA under
@@ -663,35 +710,9 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 		return nil, err
 	}
 	verdicts := make(map[Subject]Verdict, len(recorded))
-	hasRuntimeInputs := false
-	for _, fingerprint := range recorded {
-		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
-	}
-	if hasRuntimeInputs {
-		if err := v.reobserveBase(ctx); err != nil {
-			return nil, err
-		}
-	}
-	runtimeBefore, err := v.observeRuntimeInputs(ctx, recorded)
-	if err != nil {
-		return nil, err
-	}
-	finish := func() (map[Subject]Verdict, error) {
-		finished, err := v.finishRuntimeObservation(ctx, recorded, runtimeBefore, verdicts)
-		if err != nil {
-			return nil, err
-		}
-		if hasRuntimeInputs {
-			if err := v.reobserveBase(ctx); err != nil {
-				return nil, err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return finished, nil
-	}
-	var drifted []Subject
+	// Evidence-only staleness is decided before the observation window opens;
+	// those verdicts never consult runtime state.
+	pending := make(map[Subject]Fingerprint, len(recorded))
 	for subject, rec := range recorded {
 		if err := validateRecordedKind(rec); err != nil {
 			return nil, err
@@ -711,11 +732,44 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			verdicts[subject] = Verdict{Stale, "refinement"}
 			continue
 		}
-		if rec.MaximalClosure != maximal.Hash {
-			if rec.Refinement == (Refinement{}) {
-				verdicts[subject] = Verdict{Stale, "refinement"}
-				continue
+		if rec.MaximalClosure != maximal.Hash && rec.Refinement == (Refinement{}) {
+			verdicts[subject] = Verdict{Stale, "refinement"}
+			continue
+		}
+		pending[subject] = rec
+	}
+	hasRuntimeInputs := false
+	for _, fingerprint := range pending {
+		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
+	}
+	if hasRuntimeInputs {
+		if err := v.reobserveBase(ctx); err != nil {
+			return nil, err
+		}
+	}
+	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
+	if err != nil {
+		return nil, err
+	}
+	finish := func() (map[Subject]Verdict, error) {
+		finished, err := v.finishRuntimeObservation(ctx, pending, runtimeBefore, verdicts)
+		if err != nil {
+			return nil, err
+		}
+		if hasRuntimeInputs {
+			if err := v.reobserveBase(ctx); err != nil {
+				return nil, err
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return finished, nil
+	}
+	var drifted []Subject
+	for subject, rec := range pending {
+		maximal := v.maximal[subject]
+		if rec.MaximalClosure != maximal.Hash {
 			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
 				verdicts[subject] = verdict
 				continue

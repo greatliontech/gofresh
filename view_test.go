@@ -232,14 +232,6 @@ func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
 	}
 }
 
-func TestUnavailableObservedAnalysisPrefersContextError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if verdict, err := unavailableObservedAnalysis(ctx, "refinement", errors.New("failed")); !errors.Is(err, context.Canceled) || verdict != (Verdict{}) {
-		t.Fatalf("unavailable analysis = %+v, %v; want zero verdict and context.Canceled", verdict, err)
-	}
-}
-
 func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
@@ -2402,6 +2394,246 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 	}
 	if verdicts[g].Status != Stale || verdicts[g].Reason != "refinement" {
 		t.Fatalf("drifted subject carrying the sibling's refined closure = %+v, want stale refinement", verdicts[g])
+	}
+}
+
+func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":             "module example.com/batch\n\ngo 1.26\n",
+		"a/a.go":             "package a\n\nfunc F() int { return 1 }\n",
+		"b/b.go":             "package b\n\nfunc H() int { return 2 }\n",
+		"b/observed_test.go": "package b\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n",
+		"b/fixture":          "one",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aF := Subject{Package: "example.com/batch/a", Symbol: "F"}
+	bRead := Subject{Package: "example.com/batch/b", Symbol: "TestRead"}
+	bH := Subject{Package: "example.com/batch/b", Symbol: "H"}
+	subjects := []Subject{aF, bRead, bH}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView(subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := map[Subject]Fingerprint{}
+	for _, subject := range subjects {
+		fingerprint, err := producer.CaptureObservedRefined(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		captured[subject] = fingerprint
+	}
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), filepath.Join(dir, "b"), dir, runtimeinput.WithCompletedProcess("b test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withRuntime := captured[bRead]
+	withRuntime.RuntimeInputs = state.Manifest
+	withRuntime.RuntimeDigest = state.Digest
+	captured[bRead] = withRuntime
+
+	// Drift package b only: TestRead's refined closure is unchanged while H's
+	// moves, so the batch mixes an unchanged subject, a drift-recovered one,
+	// and a drift-staled one.
+	if err := os.WriteFile(filepath.Join(dir, "b", "b.go"), []byte("package b\n\nfunc H() int { return 3 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	singleView, err := engine.NewView(subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchView, err := engine.NewView(subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rounds := []map[Subject]Fingerprint{
+		{aF: captured[aF], bRead: captured[bRead], bH: captured[bH]},
+	}
+	guardDrift := captured[aF]
+	guardDrift.Guards.BuildConfig = "different"
+	// Tampering the lift-bearing record pins proof denial changing a verdict:
+	// intact evidence serves this subject valid through its observation lift.
+	tampered := captured[bRead]
+	tampered.ObservationProof.Evidence = "tampered"
+	maximalOnly := captured[bH]
+	maximalOnly.Refinement = Refinement{}
+	maximalOnly.ObservationAssertion = ""
+	maximalOnly.ObservationProof = ObservationProof{}
+	rounds = append(rounds, map[Subject]Fingerprint{aF: guardDrift, bRead: tampered, bH: maximalOnly})
+
+	observations := 0
+	engine.observeHook = func() { observations++ }
+	for i, recorded := range rounds {
+		singles := map[Subject]Verdict{}
+		for subject, fingerprint := range recorded {
+			verdict, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			singles[subject] = verdict
+		}
+		observations = 0
+		batch, err := batchView.CheckObservedBatch(context.Background(), recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for subject := range recorded {
+			if batch[subject] != singles[subject] {
+				t.Fatalf("round %d: batch verdict for %s.%s = %+v, single = %+v", i, subject.Package, subject.Symbol, batch[subject], singles[subject])
+			}
+		}
+		if i == 0 {
+			// The first round genuinely exercises every disposition class: the
+			// unchanged subject answers, the drift-recovered subject is served
+			// by its observation lift, the sibling stales on refined drift —
+			// and the whole batch shares one bracket pair and one analysis.
+			if singles[aF].Status != Valid {
+				t.Fatalf("unchanged subject = %+v, want valid", singles[aF])
+			}
+			if singles[bRead].Status != Valid {
+				t.Fatalf("drift-recovered observed subject = %+v, want valid", singles[bRead])
+			}
+			if singles[bH].Status != Stale || singles[bH].Reason != "refinement" {
+				t.Fatalf("drift-staled subject = %+v, want stale refinement", singles[bH])
+			}
+			if observations != 4 {
+				t.Fatalf("batched observed check performed %d observations, want 4", observations)
+			}
+		}
+		if i == 1 && singles[bRead].Status != Unverifiable {
+			t.Fatalf("tampered lift-bearing record = %+v, want unverifiable", singles[bRead])
+		}
+	}
+
+	// An all-unchanged manifest-less batch answers without observations or
+	// precise analysis, and a cancelled caller context aborts the batch.
+	engine.observeHook = nil
+	quietView, err := engine.NewView(subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations = 0
+	analyses := 0
+	engine.observeHook = func() { observations++ }
+	quietView.beforePreciseAnalysis = func() { analyses++ }
+	quiet, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{aF: captured[aF]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quiet[aF].Status != Valid || observations != 0 || analyses != 0 {
+		t.Fatalf("all-unchanged batch = %+v with %d observations and %d analyses, want valid with none", quiet[aF], observations, analyses)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := quietView.CheckObservedBatch(cancelled, map[Subject]Fingerprint{aF: captured[aF]}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled observed batch = %v, want context.Canceled", err)
+	}
+	// Evidence-only staleness — even with a runtime manifest attached — is
+	// decided without opening the observation window.
+	earlyStale := captured[bRead]
+	earlyStale.MaximalClosure = ""
+	earlyStale.RuntimeInputs = state.Manifest
+	earlyStale.RuntimeDigest = state.Digest
+	observations = 0
+	early, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{bRead: earlyStale})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := early[bRead]; got.Status != Stale || got.Reason != "closure" || observations != 0 {
+		t.Fatalf("early-stale record = %+v with %d observations, want stale closure with none", got, observations)
+	}
+}
+
+func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
+	// Both batch tails — the undrifted early finish and the post-analysis
+	// drifted finish — must re-observe the runtime window and stale a record
+	// whose runtime input moved mid-check even when the before state agreed
+	// with the recording. The guard-drift case additionally pins one window
+	// semantics across the single and batch forms: an already-stale verdict is
+	// not overridden by window movement, in either form.
+	for _, scenario := range []string{"unchanged", "drifted", "guard drift"} {
+		t.Run(scenario, func(t *testing.T) {
+			drift := scenario == "drifted"
+			dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+			fixture := filepath.Join(dir, "fixture")
+			if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			engine, err := New(WithDir(dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			producer, err := engine.NewView([]Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := producer.CaptureObservedRefined(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint.RuntimeInputs = state.Manifest
+			fingerprint.RuntimeDigest = state.Digest
+			if drift {
+				if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() {}\nfunc G() {}\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := Verdict{Stale, "runtimeinputs"}
+			if scenario == "guard drift" {
+				fingerprint.Guards.BuildConfig = "different"
+				want = Verdict{Stale, "buildconfig"}
+			}
+			movingRuntime := func(v *View) {
+				calls := 0
+				v.runtimeCurrent = func(ctx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
+					calls++
+					if calls == 1 {
+						return runtimeinput.CurrentContext(ctx, encoded, moduleDir)
+					}
+					return runtimeinput.State{}, nil
+				}
+			}
+			current, err := engine.NewView([]Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			movingRuntime(current)
+			verdicts, err := current.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdicts[subject] != want {
+				t.Fatalf("moving runtime input in observed batch = %+v, want %+v", verdicts[subject], want)
+			}
+			singleView, err := engine.NewView([]Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			movingRuntime(singleView)
+			single, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if single != verdicts[subject] {
+				t.Fatalf("single verdict %+v diverges from batch %+v under a moving window", single, verdicts[subject])
+			}
+		})
 	}
 }
 
