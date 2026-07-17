@@ -8,5 +8,5 @@
 - [x] 6. Make the API context-first: remove the `context.Background()` convenience wrappers from view construction, checking, and validation; every operation takes the caller's context.
 - [x] 7. Add a caller-supplied analysis budget for observed proving that yields an unavailable proof on exhaustion, never validity, with the budget rule stated in the overview spec.
 - [x] 8. Add an engine progress hook emitting phase and per-package analysis events for long operations.
-- [ ] 9. Share one package load per observation between the purity scan and the testing-type effect scan if their load modes can be unified without changing either scan's facts; otherwise record why not.
+- [x] 9. Share one package load per observation between the purity scan and the testing-type effect scan if their load modes can be unified without changing either scan's facts; otherwise record why not.
 - [ ] 10. Close out: re-measure suite and representative workload timings against the pre-plan baseline, restore the full suite under its timeout, release, and delete this plan.
