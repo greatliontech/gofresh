@@ -116,6 +116,9 @@ type Engine struct {
 	dir         string
 	env         []string
 	envSet      bool
+	// observeHook observes every source/guard/purity observation pass. Tests use
+	// it to pin how many observations an operation performs.
+	observeHook func()
 }
 
 // Option configures an Engine.

@@ -82,7 +82,9 @@ applicable guard holds over a sound over-approximation of the source closure, so
 the stored result may be reused; stale when some applicable guard demonstrably
 fails, so the result is recomputed; unverifiable when every guard would hold but
 the source closure reaches an unverifiable dependence, so validity can be neither
-proven nor refuted and the result is recomputed with the reason recorded.
+proven nor refuted and the result is recomputed with the reason recorded. A
+verdict's reason is human-oriented diagnostic data: its wording is not a stable
+vocabulary and carries no contract beyond accompanying its status.
 
 **REQ-fresh-sound** (invariant): A subject MUST be reported valid only when every
 applicable guard provably holds over a source closure that is a superset of the
@@ -196,7 +198,11 @@ path that could select a different automatic workspace. External
 and absent driver configuration is pinned off only in the internal package-loader
 environment, without changing the caller environment observed by commands, guards,
 or runtime inputs, because the ordinary Go loader is the source model the closure and
-guards represent.
+guards represent. Checking re-observes the view's inputs around its
+runtime-input and precise-analysis windows to detect ordinary drift — any change
+persisting to an observation makes the check fail with the view-changed error —
+but, like producer validation, it cannot prove the absence of a
+mutation-and-restore interval between agreeing observations.
 
 **REQ-fresh-producer-view** (behavior): A caller producing results for several
 subjects MUST persist fingerprints captured before execution, with runtime-input

@@ -37,6 +37,8 @@ type View struct {
 	mu                   sync.RWMutex
 	engine               *Engine
 	subjects             []Subject
+	requests             []closure.Subject
+	packages             []string
 	moduleDir            string
 	kind                 Kind
 	maximal              map[Subject]closure.Closure
@@ -174,6 +176,8 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 	v := &View{
 		engine:               e,
 		subjects:             unique,
+		requests:             requests,
+		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
 		maximal:              first.maximal,
@@ -201,6 +205,9 @@ type viewObservation struct {
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
+	if e.observeHook != nil {
+		e.observeHook()
+	}
 	hasher, err := closure.NewAtContextEnv(ctx, e.dir, e.env, e.buildFlags...)
 	if err != nil {
 		return viewObservation{}, err
@@ -594,11 +601,8 @@ func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject 
 		if verdict, failed := decideKnownGuards(recorded, v.guards, before, v.kind); failed {
 			return verdict, nil
 		}
-		if err := v.ensureRefined(ctx, []Subject{subject}); err != nil {
-			return unavailableObservedAnalysis(ctx, "refinement", err)
-		}
-		if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
-			return unavailableObservedAnalysis(ctx, "observation proof", err)
+		if err := v.ensurePrecise(ctx, []Subject{subject}, true, true); err != nil {
+			return unavailableObservedAnalysis(ctx, "precise analysis", err)
 		}
 		v.mu.RLock()
 		effective = v.refined[subject]
@@ -1039,22 +1043,36 @@ func compareRefinedContext(ctx context.Context, current, expected map[Subject]cl
 	return ctx.Err()
 }
 
+// reobserveBase detects source, guard, or purity drift since view construction
+// with one fresh observation compared against the constructing view. This
+// provides the same ordinary-drift guarantee as a full double-observed view per
+// side: any change persisting to an observation is caught, while a
+// mutation-and-restore interval between agreeing observations is not guaranteed
+// detectable under either shape (REQ-inputs-observation-coherence).
 func (v *View) reobserveBase(ctx context.Context) error {
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	observation, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	return v.compareBaseContext(ctx, current)
+	return v.compareObservationContext(ctx, observation)
 }
 
 func (v *View) compareBaseContext(ctx context.Context, current *View) error {
+	return v.compareFactsContext(ctx, current.guards, current.sourceFiles, current.maximal, current.purity, current.sourceFilesBySubject)
+}
+
+func (v *View) compareObservationContext(ctx context.Context, observation viewObservation) error {
+	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject)
+}
+
+func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if current.guards != v.guards {
+	if guards != v.guards {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1063,7 +1081,7 @@ func (v *View) compareBaseContext(ctx context.Context, current *View) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !slices.Equal(current.sourceFiles, v.sourceFiles) {
+	if !slices.Equal(sourceFiles, v.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1073,19 +1091,19 @@ func (v *View) compareBaseContext(ctx context.Context, current *View) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !slices.Equal(current.sourceFilesBySubject[subject], v.sourceFilesBySubject[subject]) {
+		if !slices.Equal(sourceFilesBySubject[subject], v.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: maximal source identities for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if current.maximal[subject] != v.maximal[subject] {
+		if maximal[subject] != v.maximal[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: closure for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if current.purity[subject] != v.purity[subject] {
+		if purity[subject] != v.purity[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -1096,137 +1114,136 @@ func (v *View) compareBaseContext(ctx context.Context, current *View) error {
 }
 
 func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
-	if ctx == nil {
-		return errors.New("gofresh: nil refinement context")
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
-	v.mu.RLock()
-	requests := make([]closure.Subject, 0, len(subjects))
-	expected := make(map[closure.Subject]closure.Closure, len(subjects))
-	for _, subject := range subjects {
-		if _, ok := v.refined[subject]; ok {
-			continue
-		}
-		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-		requests = append(requests, request)
-		expected[request] = v.maximal[subject]
-	}
-	v.mu.RUnlock()
-	if len(requests) == 0 {
-		return nil
-	}
-	if v.beforePreciseAnalysis != nil {
-		v.beforePreciseAnalysis()
-	}
-	beforeView, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
-	if err != nil {
-		return err
-	}
-	if err := v.compareBaseContext(ctx, beforeView); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
-	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
-	if err != nil {
-		return err
-	}
-	computed, err := hasher.ComputeBatch(requests)
-	if err != nil {
-		return err
-	}
-	afterView, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
-	if err := v.compareBaseContext(ctx, afterView); err != nil {
-		return err
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
-	for _, request := range requests {
-		subject := Subject{Package: request.Package, Symbol: request.Symbol}
-		if _, ok := v.refined[subject]; !ok {
-			v.refined[subject] = retainMaximalDisposition(expected[request], computed[request], v.openWorld[subject])
-		}
-	}
-	return nil
+	return v.ensurePrecise(ctx, subjects, true, false)
 }
 
 func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
+	return v.ensurePrecise(ctx, subjects, false, true)
+}
+
+// ensurePrecise runs the requested drift-forced precise tiers — declaration-RTA
+// refinement and observability proof — for subjects not yet computed, inside one
+// single-observation drift bracket pair and over one shared closure Hasher, so a
+// check needing both tiers loads and analyzes the program once
+// (REQ-fresh-coherent-view attribution; equivalence per
+// REQ-closure-batch-equivalence and REQ-closure-observability-batch-equivalence).
+func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefined, wantObservable bool) error {
 	if ctx == nil {
-		return errors.New("gofresh: nil observation proof context")
+		return errors.New("gofresh: nil precise-analysis context")
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("gofresh: observation proof cancelled: %w", err)
+		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
 	v.mu.RLock()
-	requests := make([]closure.Subject, 0, len(subjects))
+	refinedRequests := make([]closure.Subject, 0, len(subjects))
+	observableRequests := make([]closure.Subject, 0, len(subjects))
+	expected := make(map[closure.Subject]closure.Closure, len(subjects))
 	for _, subject := range subjects {
-		if _, ok := v.observable[subject]; !ok {
-			requests = append(requests, closure.Subject{Package: subject.Package, Symbol: subject.Symbol})
+		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
+		if wantRefined {
+			if _, ok := v.refined[subject]; !ok {
+				refinedRequests = append(refinedRequests, request)
+				expected[request] = v.maximal[subject]
+			}
+		}
+		if wantObservable {
+			if _, ok := v.observable[subject]; !ok {
+				observableRequests = append(observableRequests, request)
+			}
 		}
 	}
 	v.mu.RUnlock()
-	if len(requests) == 0 {
+	if len(refinedRequests) == 0 && len(observableRequests) == 0 {
 		return nil
 	}
 	if v.beforePreciseAnalysis != nil {
 		v.beforePreciseAnalysis()
 	}
-	before, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	before, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	if err := v.compareBaseContext(ctx, before); err != nil {
+	if err := v.compareObservationContext(ctx, before); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
 	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
 	if err != nil {
 		return err
 	}
-	computed, err := hasher.ComputeObservabilityBatch(requests)
-	if err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
+	if len(refinedRequests) > 0 && len(observableRequests) > 0 {
+		// Priming retains a package's program for the Hasher's lifetime, so
+		// prime exactly the packages both tiers analyze: sharing one load and
+		// SSA build helps only there, and retaining single-tier packages would
+		// defeat the batch computation's bounded-peak release discipline.
+		refinedPackages := map[string]bool{}
+		for _, request := range refinedRequests {
+			refinedPackages[request.Package] = true
 		}
-		computed = make(map[closure.Subject]closure.Observability, len(requests))
-		for _, request := range requests {
-			isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
-			if isolatedErr != nil {
-				if ctx.Err() != nil {
-					return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
-				}
-				computed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
-				continue
+		primed := make([]string, 0, len(observableRequests))
+		seen := map[string]bool{}
+		for _, request := range observableRequests {
+			if refinedPackages[request.Package] && !seen[request.Package] {
+				seen[request.Package] = true
+				primed = append(primed, request.Package)
 			}
-			computed[request] = isolated[request]
+		}
+		hasher.Prime(primed)
+	}
+	var refinedComputed map[closure.Subject]closure.Closure
+	if len(refinedRequests) > 0 {
+		refinedComputed, err = hasher.ComputeBatch(refinedRequests)
+		if err != nil {
+			return err
 		}
 	}
-	after, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	var observableComputed map[closure.Subject]closure.Observability
+	if len(observableRequests) > 0 {
+		observableComputed, err = hasher.ComputeObservabilityBatch(observableRequests)
+		if err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
+			}
+			observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
+			for _, request := range observableRequests {
+				isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
+				if isolatedErr != nil {
+					if ctx.Err() != nil {
+						return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
+					}
+					observableComputed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
+					continue
+				}
+				observableComputed[request] = isolated[request]
+			}
+		}
+	}
+	after, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	if err := v.compareBaseContext(ctx, after); err != nil {
+	if err := v.compareObservationContext(ctx, after); err != nil {
 		return err
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.sealed {
+	if len(observableRequests) > 0 && v.sealed {
 		return ErrViewSealed
 	}
-	for _, request := range requests {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
+	}
+	for _, request := range refinedRequests {
 		subject := Subject{Package: request.Package, Symbol: request.Symbol}
-		v.observable[subject] = computed[request]
+		if _, ok := v.refined[subject]; !ok {
+			v.refined[subject] = retainMaximalDisposition(expected[request], refinedComputed[request], v.openWorld[subject])
+		}
+	}
+	for _, request := range observableRequests {
+		subject := Subject{Package: request.Package, Symbol: request.Symbol}
+		v.observable[subject] = observableComputed[request]
 	}
 	return ctx.Err()
 }

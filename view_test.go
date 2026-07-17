@@ -2223,12 +2223,17 @@ func TestRefinedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *tes
 func TestValidateRefinedReobservesPurityAfterAnalysis(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	// The purity assertion flips during ValidateRefined's final re-observation
+	// and nowhere earlier. Observation count to that point: view construction 2,
+	// refined capture bracket pair 2, validation's current view 2, its analysis
+	// bracket pair 2 — so the flip lands on observation 9, the final
+	// double-observed validation view.
 	calls := 0
 	engine, err := New(
 		WithDir(dir),
 		WithAssumePure(func(Subject) bool {
 			calls++
-			return calls > 12
+			return calls > 8
 		}),
 	)
 	if err != nil {
@@ -2397,6 +2402,65 @@ func TestRefinedFingerprintBindsSubjectIdentity(t *testing.T) {
 	}
 	if verdicts[g].Status != Stale || verdicts[g].Reason != "refinement" {
 		t.Fatalf("drifted subject carrying the sibling's refined closure = %+v, want stale refinement", verdicts[g])
+	}
+}
+
+func TestDriftBracketsObserveOncePerSide(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	fixture := filepath.Join(dir, "fixture")
+	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	producer, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.Capture(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint.RuntimeInputs = state.Manifest
+	fingerprint.RuntimeDigest = state.Digest
+	current, err := engine.NewView([]Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A runtime-input check brackets its observation window with exactly one
+	// fresh observation per side; a full double-observed view per side doubles
+	// the dominant cost without adding drift-detection power.
+	observations := 0
+	engine.observeHook = func() { observations++ }
+	if _, err := current.CheckContext(context.Background(), fingerprint, subject); err != nil {
+		t.Fatal(err)
+	}
+	if observations != 2 {
+		t.Fatalf("runtime-input check performed %d observations, want 2", observations)
+	}
+	// Refinement and observability requested together share one bracket pair
+	// and one analysis program.
+	observations = 0
+	if err := current.ensurePrecise(context.Background(), []Subject{subject}, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if observations != 2 {
+		t.Fatalf("combined precise analysis performed %d observations, want 2", observations)
+	}
+	// Already-computed tiers re-observe nothing.
+	observations = 0
+	if err := current.ensurePrecise(context.Background(), []Subject{subject}, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if observations != 0 {
+		t.Fatalf("cached precise analysis performed %d observations, want 0", observations)
 	}
 }
 
