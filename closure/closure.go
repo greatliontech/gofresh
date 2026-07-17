@@ -55,10 +55,10 @@ type Hasher struct {
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
 	buildFlags     []string
-	progs          map[string]*program          // by package import path
-	progErrs       map[string]error             // memoized load failures, by package import path
-	lists          map[string][]listPkg         // parsed `go list -deps -test`, by package import path
-	maximalTesting map[string]maximalEffectScan // typed testing-runtime effects by requested package
+	progs          map[string]*program             // by package import path
+	progErrs       map[string]error                // memoized load failures, by package import path
+	lists          map[string][]listPkg            // parsed `go list -deps -test`, by package import path
+	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
 	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
