@@ -190,6 +190,7 @@ type TestLogOption func(*testLogConfig)
 type testLogConfig struct {
 	excluded []pathID
 	process  string
+	bracket  *Bracket
 	err      error
 }
 
@@ -208,6 +209,31 @@ func WithCompletedProcess(process string) TestLogOption {
 			return
 		}
 		c.process = process
+	}
+}
+
+// WithBracket supplies the observation bracket a completed observation is
+// constructed against (REQ-inputs-value-binding): a fingerprint the caller
+// captured with CaptureBracket before the producing process started, under
+// the same module view the observation is constructed under. Construction
+// revalidates the bracket strictly after the manifest digest's last input
+// read: an unchanged bracket binds the digest of every covered recorded
+// identity to the values read at any time in the capture-to-revalidation
+// span, while a moved or capture-unverifiable bracket seals the observation
+// as attributable unverifiable evidence and a recorded identity covered by no
+// declared root seals per-identity unverifiable — in every case the
+// observation still constructs, converts, merges, and checks, never as bound.
+// A bracket captured under a different module view than the construction, or
+// one CaptureBracket did not produce, is refused. Passing a bracket captured
+// after the producing process started is the caller's violation of the
+// capture-before-start obligation; it cannot be detected here.
+func WithBracket(bracket Bracket) TestLogOption {
+	return func(c *testLogConfig) {
+		if c.bracket != nil {
+			c.err = errors.New("runtimeinputs: duplicate observation bracket")
+			return
+		}
+		c.bracket = &bracket
 	}
 }
 
@@ -292,6 +318,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	if cfg.process == "" {
 		return Observation{}, errors.New("runtimeinputs: completed observation needs a process assertion")
 	}
+	if cfg.bracket == nil {
+		return Observation{}, errors.New("runtimeinputs: completed observation needs an observation bracket")
+	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
 		return Observation{}, err
@@ -302,6 +331,12 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	}
 	packageDir, err = filepath.Abs(packageDir)
 	if err != nil {
+		return Observation{}, err
+	}
+	if err := cfg.bracket.checkSealed(); err != nil {
+		return Observation{}, err
+	}
+	if err := cfg.bracket.checkModuleView(moduleDir); err != nil {
 		return Observation{}, err
 	}
 
@@ -420,6 +455,29 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	if len(log) != 0 && log[len(log)-1] != '\n' {
 		addUnverifiable(&m, unverifiableSeen, "malformed testlog line")
 	}
+	// Resolution-based per-identity coverage (REQ-inputs-value-binding,
+	// REQ-inputs-bracket-coverage): a recorded identity is bracket-covered
+	// only when the object it materializes to resolves, after every symlink
+	// in the walk, under a declared root's own resolved path, and every
+	// symlink the walk traverses itself lies under a declared root's resolved
+	// path. An uncovered identity — excluded, resolving outside every root,
+	// traversing an out-of-root link, or unresolvable — seals per-identity
+	// unverifiable, never bound. The reasons enter the manifest before
+	// encoding, so they persist and merge with the evidence.
+	coverage := cfg.bracket.coverage()
+	for _, id := range m.Paths {
+		covered, escapedLink, err := coverage.covers(id)
+		if err != nil {
+			return Observation{}, err
+		}
+		if !covered {
+			reason := "runtime input not covered by observation bracket: " + id.displayPath()
+			if escapedLink != "" && utf8.ValidString(escapedLink) && !strings.ContainsAny(escapedLink, "\x00\r\n") {
+				reason += " (symlink outside every bracket root: " + escapedLink + ")"
+			}
+			addUnverifiable(&m, unverifiableSeen, reason)
+		}
+	}
 	sortManifest(&m)
 	encoded, err := encode(m)
 	if err != nil {
@@ -428,6 +486,30 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	st, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
+	}
+	// The bracket is revalidated strictly after the manifest digest's last
+	// input read (REQ-inputs-value-binding). A moved bracket — or one already
+	// unverifiable at capture — seals the whole observation as attributable
+	// unverifiable evidence: it still constructs, converts, merges, and
+	// checks, never as bound, so the failure direction is recomputation. The
+	// reason enters the persisted manifest, so the recomputed state is the
+	// one every later revalidation reproduces; the bracket only ever adds
+	// unverifiable reasons, never removes one.
+	unchanged, reason, err := cfg.bracket.revalidate(context.Background(), moduleDir)
+	if err != nil {
+		return Observation{}, err
+	}
+	if !unchanged {
+		if !strings.HasPrefix(reason, "observation bracket") {
+			reason = "observation bracket unverifiable: " + reason
+		}
+		addUnverifiable(&m, unverifiableSeen, reason)
+		if encoded, err = encode(m); err != nil {
+			return Observation{}, err
+		}
+		if st, err = currentWithNormalizedEnv(encoded, moduleDir, normalized); err != nil {
+			return Observation{}, err
+		}
 	}
 	return newObservation(st, cfg.process, "complete"), nil
 }

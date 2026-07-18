@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -138,6 +139,25 @@ func CaptureBracketContext(ctx context.Context, moduleDir string, roots []string
 	return b, nil
 }
 
+// checkSealed refuses a bracket that capture did not produce: a zero value or
+// a copied-and-altered one fails its seal rather than reading as unchanged
+// (REQ-inputs-value-binding).
+func (b Bracket) checkSealed() error {
+	if b.seal == "" || sealBracket(b) != b.seal {
+		return errors.New("runtimeinputs: bracket seal is invalid")
+	}
+	return nil
+}
+
+// checkModuleView refuses a bracket interpreted under a different module view
+// than its capture (REQ-inputs-value-binding). moduleDir must be absolute.
+func (b Bracket) checkModuleView(moduleDir string) error {
+	if moduleDir != b.moduleDir {
+		return fmt.Errorf("runtimeinputs: bracket captured under module view %q interpreted under %q", b.moduleDir, moduleDir)
+	}
+	return nil
+}
+
 // revalidate re-fingerprints the bracket with the same hashing semantics as
 // its capture; the caller runs it strictly after the manifest digest's last
 // input read (REQ-inputs-value-binding). It reports unchanged, or an
@@ -150,15 +170,15 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 	if ctx == nil {
 		return false, "", errors.New("runtimeinputs: nil context")
 	}
-	if b.seal == "" || sealBracket(b) != b.seal {
-		return false, "", errors.New("runtimeinputs: bracket seal is invalid")
+	if err := b.checkSealed(); err != nil {
+		return false, "", err
 	}
 	moduleDir, err := filepath.Abs(moduleDir)
 	if err != nil {
 		return false, "", fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
-	if moduleDir != b.moduleDir {
-		return false, "", fmt.Errorf("runtimeinputs: bracket captured under module view %q revalidated under %q", b.moduleDir, moduleDir)
+	if err := b.checkModuleView(moduleDir); err != nil {
+		return false, "", err
 	}
 	if b.reason != "" {
 		return false, b.reason, nil
@@ -269,6 +289,259 @@ func bracketSkip(root pathID, exclusions []pathID) func(rel string) bool {
 	return func(rel string) bool {
 		return excludesIdentity(exclusions, pathID{Kind: pathRel, Path: path.Join(root.Path, rel)})
 	}
+}
+
+// bracketCoverage is a bracket's per-identity coverage view: the module
+// view's resolved root and every declared root's own resolved path, computed
+// once so each recorded identity's resolution chain is compared against the
+// same root positions (REQ-inputs-value-binding).
+type bracketCoverage struct {
+	bracket Bracket
+	// moduleRoot is the module view's resolved root. Module-relative walks
+	// start here: the module directory's own materialization is the caller's
+	// fixed frame, shared by every root fingerprint, so its links are
+	// content-pinned by construction and never part of an identity's chain.
+	moduleRoot string
+	// resolved holds each root's own resolved path, index-aligned with
+	// bracket.roots; empty when the root does not resolve, in which case it
+	// covers nothing.
+	resolved []string
+}
+
+// coverage resolves the module view and every declared root's own path for
+// per-identity coverage decisions. The caller must have checked the seal and
+// module view first. A root's own resolution chain needs no residence check:
+// the root fingerprint follows the same chain at hash time, so a retarget
+// anywhere along it moves the digest of the content it reaches.
+func (b Bracket) coverage() bracketCoverage {
+	c := bracketCoverage{bracket: b, resolved: make([]string, len(b.roots))}
+	if moduleRoot, _, ok := chainResolve(b.moduleDir); ok {
+		c.moduleRoot = moduleRoot
+	} else {
+		c.moduleRoot = b.moduleDir
+	}
+	for i, root := range b.roots {
+		start := root.id.Path
+		if root.id.Kind == pathRel {
+			start = filepath.Join(c.moduleRoot, filepath.FromSlash(root.id.Path))
+		}
+		if resolved, _, ok := chainResolve(start); ok {
+			c.resolved[i] = resolved
+		}
+	}
+	return c
+}
+
+// covers reports whether a recorded identity is bracket-covered
+// (REQ-inputs-value-binding, REQ-inputs-bracket-coverage): the object it
+// materializes to under kernel path-walk semantics resolves, after every
+// symlink in the walk, to a path under a declared root's own resolved path,
+// and every symlink the walk traverses — directory components included —
+// itself lies under a declared root's resolved path. A within-root link's
+// target string is recorded by the root's directory fingerprint (or its
+// content is follow-hashed when the link is the root itself), so a retarget
+// moves the bracket; a link outside every root is invisible to the
+// fingerprint, so a mid-span retarget would silently rebind the identity —
+// that identity is uncovered, never bound, and the offending link's path is
+// returned for the attributable reason. An excluded identity, or one whose
+// resolved object or traversed link sits in a root subtree the bracket's
+// exclusions removed from the fingerprint, is uncovered however near a root
+// it lies.
+func (c bracketCoverage) covers(id pathID) (bool, string, error) {
+	b := c.bracket
+	if excludesIdentity(b.exclusions, id) {
+		return false, "", nil
+	}
+	if _, err := materializePath(b.moduleDir, id); err != nil {
+		return false, "", err
+	}
+	if id.Kind == pathAbs {
+		covered, escaped := c.coversAbsolute(id)
+		return covered, escaped, nil
+	}
+	start := filepath.Join(c.moduleRoot, filepath.FromSlash(id.Path))
+	resolved, links, ok := chainResolve(start)
+	if !ok {
+		return false, "", nil
+	}
+	if !c.contains(resolved, false) {
+		return false, "", nil
+	}
+	for _, link := range links {
+		if !c.contains(link, false) {
+			return false, link, nil
+		}
+	}
+	return true, "", nil
+}
+
+// coversAbsolute is the absolute-identity leg of covers: only an absolute
+// root can cover, and the walk is read from the covering root's own resolved
+// position. An absolute root is follow-hashed through its full chain
+// (hashPath resolves it with os.Stat), so a retarget of any link above the
+// root already moves the root digest — the prefix needs no residence check,
+// which keeps identities under symlinked host prefixes (macOS /var and /tmp,
+// merged-usr Linux) coverable. Links at or below the root's position remain
+// subject to the residence rule exactly as for relative identities. An
+// identity lexically under no declared absolute root is uncovered: its own
+// prefix chain is pinned by nothing.
+func (c bracketCoverage) coversAbsolute(id pathID) (bool, string) {
+	b := c.bracket
+	escaped := ""
+	for i, root := range b.roots {
+		if root.id.Kind != pathAbs || c.resolved[i] == "" {
+			continue
+		}
+		offset, under := pathOffset(root.id.Path, id.Path)
+		if !under {
+			continue
+		}
+		start := c.resolved[i]
+		if offset != "." {
+			start = filepath.Join(start, filepath.FromSlash(offset))
+		}
+		resolved, links, ok := chainResolve(start)
+		if !ok {
+			continue
+		}
+		if !c.contains(resolved, true) {
+			continue
+		}
+		rootEscaped := ""
+		for _, link := range links {
+			if !c.contains(link, false) {
+				rootEscaped = link
+				break
+			}
+		}
+		if rootEscaped == "" {
+			return true, ""
+		}
+		if escaped == "" {
+			escaped = rootEscaped
+		}
+	}
+	return false, escaped
+}
+
+// contains reports whether target lies at or under a declared root's own
+// resolved path, outside every excluded subtree; absOnly restricts the
+// candidate roots to absolute ones.
+func (c bracketCoverage) contains(target string, absOnly bool) bool {
+	b := c.bracket
+	for i, root := range b.roots {
+		if c.resolved[i] == "" {
+			continue
+		}
+		if absOnly && root.id.Kind != pathAbs {
+			continue
+		}
+		offset, under := pathOffset(c.resolved[i], target)
+		if !under {
+			continue
+		}
+		if excludesIdentity(b.exclusions, walkIdentity(root.id, offset)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// chainResolve resolves the object p materializes to under kernel path-walk
+// semantics, reporting the final resolved path and the path of every symlink
+// the walk traverses — directory components included — in walk order. A
+// missing suffix joins lexically: nothing at or beneath a missing component
+// exists, so no remaining step can traverse a symlink, and the absent object
+// stays coverable by the root whose fingerprint pins its absence. The lexical
+// join also collapses a dot-dot past a missing component where the kernel
+// would report the path nonexistent — a harmless divergence: either way the
+// object hashes as missing and its appearance moves a covering root's
+// fingerprint, so no value is ever falsely bound. A dot-dot step on the
+// existing portion is taken on the resolved prefix, which contains no
+// symlink, so its lexical parent is the object the kernel reaches. A walk
+// that cannot be inspected or exceeds the link-hop budget reports no
+// resolution, leaving the identity uncovered rather than guessed.
+func chainResolve(p string) (string, []string, bool) {
+	// maxLinkHops mirrors filepath.EvalSymlinks' link budget; the kernel's
+	// own limit is lower (40 on Linux), so exhausting it here is only ever
+	// more conservative.
+	const maxLinkHops = 255
+	sep := string(filepath.Separator)
+	volume := filepath.VolumeName(p)
+	resolved := volume + sep
+	pending := strings.Split(p[len(volume):], sep)
+	var links []string
+	hops := 0
+	for len(pending) > 0 {
+		component := pending[0]
+		pending = pending[1:]
+		switch component {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, component)
+		info, err := os.Lstat(next)
+		if os.IsNotExist(err) {
+			return filepath.Join(append([]string{next}, pending...)...), links, true
+		}
+		if err != nil {
+			return "", nil, false
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		hops++
+		if hops > maxLinkHops {
+			return "", nil, false
+		}
+		links = append(links, next)
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", nil, false
+		}
+		// An empty target — not creatable via os.Symlink, but representable
+		// on disk — splits to one empty component and resolves to the link's
+		// parent.
+		if filepath.IsAbs(target) {
+			volume = filepath.VolumeName(target)
+			resolved = volume + sep
+			pending = append(strings.Split(target[len(volume):], sep), pending...)
+			continue
+		}
+		pending = append(strings.Split(target, sep), pending...)
+	}
+	return resolved, links, true
+}
+
+// pathOffset reports whether p is root itself or lies beneath it, returning
+// the slash-form offset ("." for root itself).
+func pathOffset(root, p string) (string, bool) {
+	if p == root {
+		return ".", true
+	}
+	sep := string(filepath.Separator)
+	if strings.HasPrefix(p, root+sep) {
+		return filepath.ToSlash(p[len(root)+len(sep):]), true
+	}
+	return "", false
+}
+
+// walkIdentity is the identity the bracket fingerprint walk assigns the
+// object at offset beneath root — the position exclusion patterns are matched
+// against.
+func walkIdentity(root pathID, offset string) pathID {
+	if offset == "." {
+		return root
+	}
+	if root.Kind == pathRel {
+		return pathID{Kind: pathRel, Path: path.Join(root.Path, offset)}
+	}
+	return pathID{Kind: pathAbs, Path: filepath.Join(root.Path, filepath.FromSlash(offset))}
 }
 
 // sealBracket pins every capture-derived field, so revalidation can refuse a

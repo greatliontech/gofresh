@@ -247,7 +247,7 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLogEnv([]byte("getenv GOPACKAGESDRIVER\n"), dir, dir, env, runtimeinput.WithCompletedProcess("worker"))
+	state, err := runtimeinput.FromTestLogEnv([]byte("getenv GOPACKAGESDRIVER\n"), dir, dir, env, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

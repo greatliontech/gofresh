@@ -180,9 +180,20 @@ mutation-and-restore interval — the residual REQ-inputs-observation-coherence
 already declares unprovable; a restore is tolerated only when it reproduces content
 and metadata alike. An observed identity is bracket-covered only when the object it
 materializes to under kernel path-walk semantics resolves, after every symlink in
-the walk, to a path under a declared root's own resolved path; an identity
-lexically under a root but resolving outside it is unverifiable, never bound; and
-an unchanged bracket binds only covered identities carrying no other unverifiable
+the walk, to a path under a declared root's own resolved path, and every symlink
+the walk traverses — directory components included — itself lies under a
+declared root's resolved path, so each traversed link's target is fingerprinted
+and a retarget moves the bracket rather than silently rebinding the identity.
+The walk is read from the capture module view's resolved root for a
+module-relative identity and, for an absolute one, from the resolved position
+of its covering root — the declared absolute root whose path lexically
+contains the identity. An absolute root is fingerprinted through its full
+chain, so a retarget above the root moves its digest unless the new object is
+content-and-metadata identical — the tolerated-restore class, under which the
+bound values are identical by construction. An identity whose
+resolution chain leaves every root at any step, or that is lexically under a
+root but resolving outside every root, is unverifiable, never bound; and an
+unchanged bracket binds only covered identities carrying no other unverifiable
 disposition. A revalidation finding the bracket moved — including a root whose
 object changed type, appeared, or disappeared — records an attributable
 unverifiable reason for the observation, and a recorded path identity covered by no

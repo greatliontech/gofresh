@@ -1,6 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-value-binding"
-reason: "only the capture and revalidation primitive exists; constructibility-only-against-a-pre-start-bracket, resolution-based per-identity coverage, and moved-reason propagation into observations are unbuilt"
-lands { manual { condition: "completed-observation construction requires an observation bracket and seals moved-bracket and uncovered identities unverifiable" } }

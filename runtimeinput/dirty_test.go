@@ -25,7 +25,7 @@ func TestDirtyEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "fixture.dat"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"))
+	st, err := FromTestLog([]byte("# test log\nopen fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -66,11 +66,11 @@ func TestMergedManifestDirtyEvidenceIsMonotone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	committed, err := FromTestLog([]byte("open committed.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-committed"))
+	committed, err := FromTestLog([]byte("open committed.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-committed"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated, err := FromTestLog([]byte("open generated.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-generated"))
+	generated, err := FromTestLog([]byte("open generated.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-generated"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestMergedManifestDirtyEvidenceIsMonotone(t *testing.T) {
 
 func TestDirtyDoesNotHideInspectionFailure(t *testing.T) {
 	moduleDir := t.TempDir()
-	state, err := FromTestLog([]byte("open absent\nopen broken\n"), moduleDir, moduleDir, WithCompletedProcess("worker"))
+	state, err := FromTestLog([]byte("open absent\nopen broken\n"), moduleDir, moduleDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestDirtyRejectsStateThatMovedBeforeInspection(t *testing.T) {
 	if err := os.WriteFile(path, []byte("recorded"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := FromTestLog([]byte("open fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"))
+	state, err := FromTestLog([]byte("open fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestDirtyEnvRevalidatesWithSuppliedEnvironment(t *testing.T) {
 	}
 	t.Setenv("GOWORK", "/ambient/workspace")
 	env := []string{"GOWORK=/explicit/workspace"}
-	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.dat\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"))
+	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.dat\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
