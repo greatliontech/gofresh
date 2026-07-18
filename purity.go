@@ -291,6 +291,13 @@ func typeMayCarryUnknownDynamic(t types.Type, seen map[types.Type]bool) bool {
 	return false
 }
 
+// nodeDeclarationKey and objectDeclarationKey derive the identity the
+// ambiguous-subject refusal compares: one declaration must yield one key no
+// matter which build variant sights it. Under Tests: true the same source
+// package is visited once per variant with distinct pkg.IDs ("p" and
+// "p [p.test]"), so no key may incorporate the sighting variant's identity —
+// a variant-dependent key manufactures ambiguity for a single declaration and
+// fails the whole package.
 func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
 	if pkg != nil && pkg.Fset != nil && node != nil {
 		position := pkg.Fset.PositionFor(node.Pos(), false)
@@ -298,7 +305,7 @@ func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
 			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
 		}
 	}
-	return fmt.Sprintf("%s:%d", pkg.ID, node.Pos())
+	return fmt.Sprintf("%s:%d", pkg.PkgPath, node.Pos())
 }
 
 func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
@@ -311,7 +318,12 @@ func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
 	if obj != nil && obj.Pkg() != nil {
 		return obj.Pkg().Path() + "." + obj.Name()
 	}
-	return fmt.Sprintf("%s:%v", pkg.ID, obj)
+	// Position-less and package-less means a universe declaration — the
+	// canonical case is error's Error method promoted through embedding. The
+	// object's own description identifies it fully; genuinely distinct
+	// declarations never reach this branch (real declarations carry a position
+	// or a defining package).
+	return fmt.Sprintf("universe:%v", obj)
 }
 
 // hasPureDirective reports whether a doc comment group carries the //gofresh:pure
