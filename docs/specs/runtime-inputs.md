@@ -35,6 +35,15 @@ rather than silently dropping evidence.
 reproducible from its recorded commit, usable for working-tree reuse but barred as a
 baseline.
 
+**observation bracket** (term): a fingerprint over a caller-declared set of
+candidate runtime-input roots — module-relative or clean absolute paths, each a
+regular file, a directory tree, or absent — captured before the producing process
+starts and revalidated when its testlog becomes an observation, so a change to any
+bracketed object persisting across the run-to-observation span is detected. The
+fingerprint observes content and metadata together, so a restoration that does not
+reproduce the recorded metadata still moves the bracket — toward recomputation,
+never reuse.
+
 ## The guard
 
 **REQ-inputs-guard** (behavior): The runtime-inputs guard MUST record a
@@ -152,13 +161,58 @@ matching diagnostic string.
 
 **REQ-inputs-completed-observation** (invariant): Testlog bytes MUST become a completed
 observation only through a construction path gated by the caller's verified normal
-termination of that producing process and its evidence that every behavior-affecting
-admitted-operation outcome agreed with the guarded value. EOF, including EOF exactly
-at a line boundary, is neither termination nor outcome evidence. Exactly one completed
+termination of that producing process, its evidence that every behavior-affecting
+admitted-operation outcome agreed with the guarded value, and an observation bracket
+satisfying REQ-inputs-value-binding. EOF, including EOF exactly at a line boundary,
+is neither termination nor outcome evidence. Exactly one completed
 or incomplete observation is required for every process contributing to the result. A
-process without both gates is represented through the incomplete-observation
+process without every gate is represented through the incomplete-observation
 constructor; merge refuses a state that claims completion without them, and one
 incomplete child keeps the deterministic union unverifiable.
+
+**REQ-inputs-value-binding** (invariant): A completed observation MUST be
+constructible only against an observation bracket captured before its producing
+process started. Strictly after the manifest digest's last input read, the bracket
+is revalidated with the same hashing semantics as its capture: an unchanged
+fingerprint binds the digest of every bracket-covered recorded path identity to the
+values read at any time in the capture-to-revalidation span, up to an intra-span
+mutation-and-restore interval — the residual REQ-inputs-observation-coherence
+already declares unprovable; a restore is tolerated only when it reproduces content
+and metadata alike. An observed identity is bracket-covered only when the object it
+materializes to under kernel path-walk semantics resolves, after every symlink in
+the walk, to a path under a declared root's own resolved path; an identity
+lexically under a root but resolving outside it is unverifiable, never bound; and
+an unchanged bracket binds only covered identities carrying no other unverifiable
+disposition. A revalidation finding the bracket moved — including a root whose
+object changed type, appeared, or disappeared — records an attributable
+unverifiable reason for the observation, and a recorded path identity covered by no
+root records an attributable per-identity unverifiable reason; in both cases the
+observation still constructs, converts, merges, and checks as unverifiable
+evidence, never as bound, so the failure direction is always recomputation. A
+bracket captured after the process started, interpreted under a different module
+view than its capture, or revalidated with different hashing semantics is refused
+rather than read as unchanged. Environment identities require no bracket:
+observation coherence already requires digesting from the exact complete
+environment the producing process inherited, which binds their observed values by
+construction.
+
+**REQ-inputs-bracket-coverage** (invariant): A declared root MUST be fingerprinted
+with the hashing semantics its materialized object would receive as an observed
+identity of its kind; a root those semantics refuse to hash makes the bracket unverifiable
+rather than silently narrowing coverage. A declared root that is absent
+fingerprints as absent, so an input created, deleted, rewritten, or retyped under a
+root during the span moves the bracket. Coverage is per declared root, never
+inferred: an observed identity resolving under no root is uncovered however near a
+root it lies, and declaring a root is the caller's assertion that the surface it
+names was mutation-free for the span, carrying the same soundness responsibility as
+an exclusion. A bracket accepts caller-declared root exclusions with the semantics
+and responsibility of REQ-inputs-exclusions — the identical identity and every
+identity extending it past a separator — removing the excluded subtree from the
+fingerprint and from coverage alike, so a volatile bookkeeping tree under a
+module-scale root does not make every bracket environmental noise; an excluded
+identity a run then observes is uncovered, never bound. The bracket never weakens a
+disposition: every observation the manifest treats as unverifiable remains
+unverifiable when bracketed.
 
 **REQ-inputs-observation-disposition** (invariant): Runtime-manifest
 unverifiability MUST NOT be suppressible by an observability proof. Malformed or unrecognized

@@ -228,25 +228,43 @@ func WithCompletedProcess(process string) TestLogOption {
 // nothing. Environment identities are never excluded.
 func WithExcludedPaths(patterns ...string) TestLogOption {
 	return func(c *testLogConfig) {
-		for _, q := range patterns {
-			if q == "" {
-				c.err = errors.New("runtimeinputs: empty exclusion pattern")
-				return
-			}
-			if filepath.IsAbs(q) {
-				c.excluded = append(c.excluded, pathID{Kind: pathAbs, Path: filepath.Clean(q)})
-				continue
-			}
-			c.excluded = append(c.excluded, pathID{Kind: pathRel, Path: path.Clean(filepath.ToSlash(q))})
+		excluded, err := exclusionPatterns(patterns)
+		if err != nil {
+			c.err = err
+			return
 		}
+		c.excluded = append(c.excluded, excluded...)
 	}
 }
 
-// excludes reports whether id falls under any declared exclusion:
+// exclusionPatterns normalizes exclusion patterns to identity form: a non-empty
+// module-relative or clean absolute path (REQ-inputs-exclusions). An empty
+// pattern is refused rather than read as anything.
+func exclusionPatterns(patterns []string) ([]pathID, error) {
+	var excluded []pathID
+	for _, q := range patterns {
+		if q == "" {
+			return nil, errors.New("runtimeinputs: empty exclusion pattern")
+		}
+		if filepath.IsAbs(q) {
+			excluded = append(excluded, pathID{Kind: pathAbs, Path: filepath.Clean(q)})
+			continue
+		}
+		excluded = append(excluded, pathID{Kind: pathRel, Path: path.Clean(filepath.ToSlash(q))})
+	}
+	return excluded, nil
+}
+
+// excludes reports whether id falls under any declared exclusion.
+func (c *testLogConfig) excludes(id pathID) bool {
+	return excludesIdentity(c.excluded, id)
+}
+
+// excludesIdentity reports whether id falls under any declared exclusion:
 // equal, or extending it past a separator. Relative identities are
 // slash-separated; absolute identities carry the host separator.
-func (c *testLogConfig) excludes(id pathID) bool {
-	for _, q := range c.excluded {
+func excludesIdentity(excluded []pathID, id pathID) bool {
+	for _, q := range excluded {
 		if q.Kind != id.Kind {
 			continue
 		}
@@ -626,7 +644,10 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 		if err != nil {
 			return State{}, err
 		}
-		pathUnverifiable, pathReason, err := hashPath(ctx, h, id, path, moduleDir)
+		// Manifest hashing never filters: exclusion is per identity, never per
+		// content (REQ-inputs-exclusions), so a recorded directory identity
+		// digests everything its hash walks.
+		pathUnverifiable, pathReason, err := hashPath(ctx, h, id, path, moduleDir, nil)
 		if err != nil {
 			return State{}, err
 		}
@@ -719,7 +740,10 @@ func materializePath(moduleDir string, id pathID) (string, error) {
 	}
 }
 
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string) (bool, string, error) {
+// hashPath writes the digest stream for one path identity. A non-nil skip
+// filters directory-walk entries by their slash-form path relative to the walk
+// root; identity-level hashing is unaffected by it.
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -761,7 +785,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string) 
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && id.Kind == pathRel:
-		sum, unv, reason, err := dirHash(ctx, target)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, skip)
 		if err != nil {
 			return false, "", err
 		}
@@ -831,12 +855,29 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 }
 
 func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
+	return dirHashFiltered(ctx, root, nil)
+}
+
+// dirHashFiltered is dirHash with a skip predicate over the slash-form path of
+// each entry relative to root; a skipped directory's subtree contributes
+// nothing to the digest. A nil skip digests the complete tree.
+func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool) ([32]byte, bool, string, error) {
 	h := sha256.New()
 	unverifiable := false
 	reason := ""
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return contextErr
+		}
+		if skip != nil {
+			if rel, relErr := filepath.Rel(root, path); relErr == nil {
+				if s := filepath.ToSlash(rel); s != "." && skip(s) {
+					if err == nil && d.IsDir() {
+						return fs.SkipDir
+					}
+					return nil
+				}
+			}
 		}
 		if err != nil {
 			unverifiable = true
