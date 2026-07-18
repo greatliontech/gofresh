@@ -3,7 +3,7 @@
 
 bindings {
   requirement_id: "REQ-fresh-verdict"
-  content_hash: "0e7e9a34100b7a28592100cabcb282cc6227b384f8ffc0b1650e4b45eabfd973"
+  content_hash: "9ce478ed2d04c837476602deab36df3a75d26fe12648b4d75b25382a703eadb8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "83305fae9bb978b09ea94f2d33964e17a4286c527c54d2f024128e8b2b125421"
+  content_hash: "9f58896fe9193c1edcb2d97131308c181e9cd6e7c71bb7cdd5d6305361356f86"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS
@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-refinement-failclosed"
-  content_hash: "917c62a080d3f21fc39ce221c550ca1d53358120981ed0b14856da603b1388cd"
+  content_hash: "c0a29d9b36f74feef4cead0ff600bf7a1108bfc33960101d912f1429ee877856"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestRefinedViewChecksMaximalBeforeDeclarationRTA"
   role: BINDING_ROLE_TESTS
@@ -156,7 +156,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-observation-compatibility"
-  content_hash: "84fa16b7746c48d8d76a7680d9abd806c5ed519a218a13861794ea1ec0a19b0b"
+  content_hash: "8bd19bc15407904696dce492385ff4be1ae9ceb5dc2ed62bfd42c702fbc45e17"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.compatibleObservationProof"
   role: BINDING_ROLE_IMPLEMENTS
@@ -165,7 +165,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-observation-compatibility"
-  content_hash: "84fa16b7746c48d8d76a7680d9abd806c5ed519a218a13861794ea1ec0a19b0b"
+  content_hash: "8bd19bc15407904696dce492385ff4be1ae9ceb5dc2ed62bfd42c702fbc45e17"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestObservedRefinementRecomputesProofAfterMaximalDrift"
   role: BINDING_ROLE_TESTS

@@ -131,15 +131,6 @@ bindings {
   requirement_id: "REQ-guard-buildconfig"
   content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/buildflags.Validate"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "6da0721bd6e2c6e67c4288efd0719394d99f0239b3b35a290756619af1c7c7d0"
-}
-
-bindings {
-  requirement_id: "REQ-guard-buildconfig"
-  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
-  backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/buildflags.TestValidateRejectsOverlay"
   role: BINDING_ROLE_TESTS
   shape_hash: "2828e375039e45d4c5cdd9cd393a109af027b5bd2afa37a3f3b2f41e7c77f1cd"
@@ -187,7 +178,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.Engine.NewViewFor"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "ab41bf63ccec06d2a1fc41bfb1618028d0a8cf59edff6e6eeee20e392860a7fe"
+  shape_hash: "abe89b7c28fe68ed88e3835510ed244bbd6420f7c3c7711fc5a953137d430929"
 }
 
 bindings {
@@ -233,4 +224,13 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestResultKindIsBoundToFingerprint"
   role: BINDING_ROLE_TESTS
   shape_hash: "863259dd8c2b9e6a4355f1ed9e73c955153ca069bf1e69d1bbec4aae05d42895"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "9f89cb34670ba62503861fd147f0d4cb0e9dba348261f523128f9485402a820e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/buildflags.ValidateEnv"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "f05636dd5be594b49c04db3f8c0f93b9f21908fa74adee33e46c08da730fc258"
 }

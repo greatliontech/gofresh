@@ -124,7 +124,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.finishRuntimeObservation"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "053a9cc150852460c689980e6c3f79dc71fdbbd858c047c772c7c3509df090a5"
+  shape_hash: "18d957df92d71080bc84efa36d6253763b3f885999e0ee332f097d41f6e7e8e9"
 }
 
 bindings {
