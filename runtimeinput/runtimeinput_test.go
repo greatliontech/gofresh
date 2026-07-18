@@ -1189,16 +1189,29 @@ func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 func FuzzMergeAlgebra(f *testing.F) {
 	f.Add([]byte("a"), []byte("b"), []byte("c"))
 	f.Add([]byte("same"), []byte("same"), []byte{})
+	f.Add([]byte{1, 'm'}, []byte{2, 'u'}, []byte{3, 'b'})
+	f.Add([]byte{3}, []byte{3}, []byte{0})
 	f.Fuzz(func(t *testing.T, a, b, c []byte) {
 		moduleDir := t.TempDir()
 		manifestFor := func(value []byte) Observation {
 			t.Helper()
 			token := base64.RawURLEncoding.EncodeToString(value)
+			// Bracket-binding unverifiable reasons ride the manifest like any
+			// other reason: the low bits of the first input byte select the
+			// moved-bracket observation-level class and the uncovered
+			// per-identity class (REQ-inputs-value-binding).
+			unverifiable := []string{"fuzz reason " + token}
+			if len(value) > 0 && value[0]&1 != 0 {
+				unverifiable = append(unverifiable, "observation bracket moved: fuzzroot"+token)
+			}
+			if len(value) > 0 && value[0]&2 != 0 {
+				unverifiable = append(unverifiable, "runtime input not covered by observation bracket: fuzz/x"+token)
+			}
 			encoded, err := encode(manifest{
 				Version:      manifestVersion,
 				Env:          []string{"FUZZ_" + token},
 				Paths:        []pathID{{Kind: pathRel, Path: "fuzz/x" + token}},
-				Unverifiable: []string{"fuzz reason " + token},
+				Unverifiable: unverifiable,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1209,11 +1222,34 @@ func FuzzMergeAlgebra(f *testing.F) {
 			}
 			return newObservation(state, "worker-"+token, "complete")
 		}
+		reasons := func(o Observation) map[string]bool {
+			t.Helper()
+			m, err := decode(o.Manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			set := make(map[string]bool, len(m.Unverifiable))
+			for _, reason := range m.Unverifiable {
+				set[reason] = true
+			}
+			return set
+		}
 		merge := func(inputs ...Observation) Observation {
 			t.Helper()
 			st, err := Merge(moduleDir, inputs...)
 			if err != nil {
 				t.Fatal(err)
+			}
+			// The merged union's unverifiable set contains every input's
+			// reasons: merge never drops a binding reason
+			// (REQ-inputs-merge, REQ-inputs-value-binding).
+			got := reasons(st)
+			for _, input := range inputs {
+				for reason := range reasons(input) {
+					if !got[reason] {
+						t.Fatalf("merge dropped unverifiable reason %q", reason)
+					}
+				}
 			}
 			return st
 		}
@@ -1230,6 +1266,13 @@ func FuzzMergeAlgebra(f *testing.F) {
 		right := merge(ma, bc)
 		if !reflect.DeepEqual(left, right) {
 			t.Fatalf("associativity: %+v != %+v", left, right)
+		}
+		// A completed state without sealed construction provenance — the only
+		// way one can lack bracket provenance, since the bracket-gated
+		// constructor is the sole completed path — is refused, never merged
+		// silently (REQ-inputs-completed-observation).
+		if _, err := Merge(moduleDir, Observation{State: ma.State}); err == nil {
+			t.Fatal("merge accepted a completed state without construction provenance")
 		}
 	})
 }

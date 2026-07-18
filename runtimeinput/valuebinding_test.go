@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -475,6 +476,138 @@ func TestAbsoluteIdentitySubRootChainStaysEnforced(t *testing.T) {
 	if !strings.Contains(joined, "runtime input not covered by observation bracket: "+hop1) ||
 		!strings.Contains(joined, "symlink outside every bracket root: "+hop2) {
 		t.Fatalf("reasons = %q, want uncovered %s naming out-of-root link %s", joined, hop1, hop2)
+	}
+}
+
+// bindingReasonObservations builds one observation per binding-reason class
+// under one module view: a moved-bracket observation carrying the
+// observation-level reason "observation bracket moved: data", an
+// uncovered-identity observation carrying the per-identity reason
+// "runtime input not covered by observation bracket: other.txt", and a bound
+// sibling carrying no reason.
+func bindingReasonObservations(t *testing.T, moduleDir string) (moved, uncovered, bound Observation) {
+	t.Helper()
+	movedBracket := testBracket(t, moduleDir, "data")
+	if err := os.WriteFile(filepath.Join(moduleDir, "data", "fixture.txt"), []byte("edited between run and ingest"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-moved"), WithBracket(movedBracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "other.txt"), []byte("out of root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uncovered, err = FromTestLogEnv([]byte("open other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-uncovered"), WithBracket(testBracket(t, moduleDir, "data")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err = FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-bound"), WithBracket(testBracket(t, moduleDir, "data")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moved.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, moved.State), "\n"), "observation bracket moved: data") {
+		t.Fatalf("precondition: moved observation = %+v, want moved-bracket reason", moved.State)
+	}
+	if !uncovered.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, uncovered.State), "\n"), "runtime input not covered by observation bracket: other.txt") {
+		t.Fatalf("precondition: uncovered observation = %+v, want uncovered-identity reason", uncovered.State)
+	}
+	if bound.Unverifiable || bound.Reason != "" {
+		t.Fatalf("precondition: bound sibling = %+v, want bound", bound.State)
+	}
+	return moved, uncovered, bound
+}
+
+// TestBindingReasonsSurviveMergeUnion pins the merge leg of
+// REQ-inputs-value-binding under the union clause of REQ-inputs-merge: the
+// moved-bracket observation-level reason and the uncovered per-identity
+// reason each appear verbatim in the merged manifest's unverifiable set, in
+// either merge order, alongside a bound sibling — the merged union's
+// unverifiable set contains every input's binding reasons, so merge never
+// weakens a binding disposition (REQ-inputs-bracket-coverage).
+func TestBindingReasonsSurviveMergeUnion(t *testing.T) {
+	moduleDir := bindingModule(t)
+	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
+	merged, err := MergeEnv(moduleDir, nil, moved, uncovered, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, err := MergeEnv(moduleDir, nil, bound, uncovered, moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(merged, reversed) {
+		t.Fatalf("binding-reason merge is not commutative:\n%+v\n%+v", merged, reversed)
+	}
+	got := map[string]bool{}
+	for _, reason := range manifestReasons(t, merged.State) {
+		got[reason] = true
+	}
+	for _, input := range []Observation{moved, uncovered, bound} {
+		for _, reason := range manifestReasons(t, input.State) {
+			if !got[reason] {
+				t.Errorf("merge dropped binding reason %q", reason)
+			}
+		}
+	}
+	if !got["observation bracket moved: data"] || !got["runtime input not covered by observation bracket: other.txt"] {
+		t.Fatalf("merged reasons = %v, want both binding classes verbatim", got)
+	}
+	if !merged.Unverifiable {
+		t.Fatal("binding-unverifiable union merged as bound")
+	}
+}
+
+// TestBindingReasonsSurviveAbsoluteConversion pins the conversion leg of
+// REQ-inputs-value-binding under REQ-inputs-absolute-identities: absolute
+// conversion carries both binding-reason classes into the converted manifest
+// verbatim — path identities convert, recorded reasons never do — and the
+// converted evidence stays unverifiable, never weakened.
+func TestBindingReasonsSurviveAbsoluteConversion(t *testing.T) {
+	moduleDir := bindingModule(t)
+	moved, uncovered, _ := bindingReasonObservations(t, moduleDir)
+	for name, observation := range map[string]Observation{
+		"moved":     moved,
+		"uncovered": uncovered,
+	} {
+		converted, err := AbsoluteEnv(observation, moduleDir, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := map[string]bool{}
+		for _, reason := range manifestReasons(t, converted.State) {
+			got[reason] = true
+		}
+		for _, reason := range manifestReasons(t, observation.State) {
+			if !got[reason] {
+				t.Errorf("%s: absolute conversion dropped binding reason %q", name, reason)
+			}
+		}
+		if !converted.Unverifiable {
+			t.Fatalf("%s: absolute conversion weakened the binding disposition", name)
+		}
+	}
+}
+
+// TestDirtyInspectsBindingUnverifiableState pins the dirty leg of
+// REQ-inputs-value-binding under REQ-inputs-dirty: a state carrying binding
+// reasons — including through a prior merge — still revalidates and yields
+// dirty evidence from every module-relative identity's reproducibility alone;
+// the binding disposition neither fakes nor suppresses dirt.
+func TestDirtyInspectsBindingUnverifiableState(t *testing.T) {
+	moduleDir := bindingModule(t)
+	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
+	merged, err := MergeEnv(moduleDir, nil, moved, uncovered, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reproducible := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true, "other.txt": true}}
+	if dirty, err := DirtyEnv(merged, moduleDir, "commit", reproducible, nil); err != nil || dirty {
+		t.Fatalf("reproducible binding-unverifiable state: dirty=%v err=%v, want false, nil", dirty, err)
+	}
+	partial := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true}}
+	if dirty, err := DirtyEnv(merged, moduleDir, "commit", partial, nil); err != nil || !dirty {
+		t.Fatalf("non-reproducible binding-unverifiable state: dirty=%v err=%v, want true, nil", dirty, err)
 	}
 }
 

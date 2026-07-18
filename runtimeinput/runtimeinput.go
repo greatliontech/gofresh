@@ -1,5 +1,30 @@
-// Package runtimeinputs records and re-hashes non-source inputs observed by a
+// Package runtimeinput records and re-hashes non-source inputs observed by a
 // measured process through Go's testlog channel (spec REQ-inputs-guard).
+//
+// Completed observations bind observed values through an observation bracket
+// (REQ-inputs-value-binding): a fingerprint over caller-declared candidate
+// roots, captured before the producing process starts and revalidated
+// strictly after the manifest digest's last input read. Capture over declared
+// roots is the only pre-run surface available — the observed path set exists
+// only in the testlog the run produces, so hashing each observed path before
+// the run is structurally unavailable, and digesting the recorded paths twice
+// after the run observes only post-run values twice: neither digest connects
+// to what the run read. Bracketing the whole span instead makes an unchanged
+// fingerprint evidence that every covered value persisted from before the
+// first read to after the last hash. Coverage is resolution-based and
+// chain-complete: an identity is bound only when its kernel path walk — every
+// traversed symlink included — stays under a declared root's resolved path,
+// because a link outside every root is invisible to the fingerprint and could
+// be retargeted between two in-root objects mid-span without moving it.
+//
+// A completed observation exists only as a live sealed value from the
+// bracket-gated constructor. Observation's provenance fields are unexported
+// and no persisted or decoded Observation form exists — the manifest string
+// in State is the only wire form, and recomputing it yields a State, never an
+// Observation — while merge, absolute conversion, and dirty inspection each
+// refuse a value whose seal construction did not produce. A completed state
+// lacking bracket provenance is therefore unrepresentable at those
+// boundaries rather than checked for at each one.
 package runtimeinput
 
 import (
