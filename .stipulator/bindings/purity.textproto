@@ -81,3 +81,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "44518f4af9eb96078e82508a2539b10c0e37055a76c10a0e3b27b997e13410cc"
 }
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4251b44b5fe0a6ea1a192b45b3db35fbd3720d57892f88f9755e7a6875981403"
+}

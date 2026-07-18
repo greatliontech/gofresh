@@ -107,13 +107,22 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 		}
 	})
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
-		// A subject's package is the import path the engine resolves it under. A
-		// test variant (in-package or external "pkg_test") declares subjects of the
-		// package under test, so key by ForTest there — keying by the variant's own
-		// PkgPath would silently drop a directive on an external-test-file subject
-		// (REQ-purity-directive).
+		// A subject's package is the import path the engine resolves it under. The
+		// package under test's own test variants declare subjects of the package
+		// under test, so key those by ForTest — keying by the variant's own PkgPath
+		// would silently drop a directive on an external-test-file subject
+		// (REQ-purity-directive). But ForTest alone is not that discriminator: the
+		// go tool sets it on every package recompiled into the test binary,
+		// including intermediate dependencies (r imports a, a's external test
+		// imports r → "r [a.test]" carries ForTest=a). Only the in-package variant
+		// (PkgPath == ForTest) and the external test package (PkgPath is the tested
+		// path + "_test", the go tool's naming for it) declare the tested package's
+		// subjects; a recompiled dependency keeps its own PkgPath identity —
+		// otherwise its declarations enter the scan as subjects of the tested
+		// package and a shared top-level name fails the whole request as an
+		// ambiguous subject.
 		pkgPath := p.PkgPath
-		if p.ForTest != "" {
+		if p.ForTest != "" && (p.PkgPath == p.ForTest || p.PkgPath == p.ForTest+"_test") {
 			pkgPath = p.ForTest
 		}
 		if requestedPackages[pkgPath] {
@@ -181,6 +190,9 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	}
 	for _, root := range pkgs {
 		rootPath := root.PkgPath
+		// Bare ForTest keying is exact here, unlike in the visit above: pkgs holds
+		// only packages.Load roots — the requested patterns' own variants, never
+		// an intermediate dependency recompiled for another package's test binary.
 		if root.ForTest != "" {
 			rootPath = root.ForTest
 		}

@@ -1298,6 +1298,97 @@ func TestComputeRootsAnySubject(t *testing.T) {
 	}
 }
 
+// TestComputeKeepsRecompiledDependencyOutOfSubjectRoots pins subject rooting
+// (REQ-closure-analysis): the reachability walk roots at the subject, so the
+// candidate-root index for a package must come only from that package's own
+// variants. `go list` marks every package recompiled into the test binary with
+// ForTest — including an intermediate dependency (a's external test imports r,
+// r imports a → "r [a.test]") — but the dependency's top-level functions are
+// not subjects of the tested package: a name shared with the tested package
+// must not read as an ambiguous root, and a name the tested package never
+// declares must be refused, never silently resolved to the dependency's
+// closure.
+func TestComputeKeepsRecompiledDependencyOutOfSubjectRoots(t *testing.T) {
+	writeTriangle := func(t *testing.T, aSource, rSource string) string {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod": "module example.com/triangle\n\ngo 1.26\n",
+			"a/a.go": aSource,
+			// The in-package test file makes "a [a.test]" a distinct variant, so
+			// r — importing a, imported by a's external test — is recompiled
+			// against it as "r [a.test]" with ForTest set.
+			"a/in_test.go":  "package a\n\nimport \"testing\"\n\nfunc TestInternal(t *testing.T) {}\n",
+			"a/ext_test.go": "package a_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/triangle/r\"\n)\n\nfunc TestExternal(t *testing.T) { r.Use() }\n",
+			"r/r.go":        rSource,
+		} {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The assertions below hold vacuously if the recompiled dependency
+		// variant stops materializing, so its presence is load-bearing.
+		cfg := &packages.Config{
+			Mode:  packages.NeedName | packages.NeedForTest | packages.NeedImports | packages.NeedDeps,
+			Tests: true,
+			Dir:   dir,
+		}
+		loaded, err := packages.Load(cfg, "example.com/triangle/a")
+		if err != nil {
+			t.Fatalf("variant guard load: %v", err)
+		}
+		variant := false
+		packages.Visit(loaded, nil, func(p *packages.Package) {
+			if p.PkgPath == "example.com/triangle/r" && p.ForTest == "example.com/triangle/a" {
+				variant = true
+			}
+		})
+		if !variant {
+			t.Fatal("fixture no longer yields the recompiled dependency variant r [a.test]; the assertions below would hold vacuously")
+		}
+		return dir
+	}
+
+	t.Run("shared name is no root collision", func(t *testing.T) {
+		dir := writeTriangle(t,
+			"package a\n\nfunc G() {}\n",
+			"package r\n\nimport \"example.com/triangle/a\"\n\nfunc Use() { a.G() }\n\nfunc G() {}\n",
+		)
+		h, err := NewAt(dir)
+		if err != nil {
+			t.Fatalf("NewAt: %v", err)
+		}
+		cl, err := h.Compute("example.com/triangle/a", "G")
+		if err != nil {
+			t.Fatalf("Compute a.G with a same-named dependency symbol: %v", err)
+		}
+		if cl.Hash == "" {
+			t.Fatal("empty closure hash for a's own G")
+		}
+	})
+
+	t.Run("dependency symbol is not rootable under the tested package", func(t *testing.T) {
+		dir := writeTriangle(t,
+			"package a\n\nfunc A() {}\n",
+			"package r\n\nimport \"example.com/triangle/a\"\n\nfunc Use() { a.A() }\n",
+		)
+		h, err := NewAt(dir)
+		if err != nil {
+			t.Fatalf("NewAt: %v", err)
+		}
+		if cl, err := h.Compute("example.com/triangle/a", "A"); err != nil || cl.Hash == "" {
+			t.Fatalf("Compute a.A: %+v, %v; want a's own subject to resolve", cl, err)
+		}
+		if _, err := h.Compute("example.com/triangle/a", "Use"); err == nil {
+			t.Fatal("Compute a.Use: want an error (a never declares Use), got the recompiled dependency's closure")
+		}
+	})
+}
+
 // TestComputeRootsMethods pins method-subject resolution: a method is named
 // "Type.Method" (matching the consumer symbol grammar with the package prefix
 // stripped), resolves through both value- and pointer-receiver method sets, roots

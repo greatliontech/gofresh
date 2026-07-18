@@ -198,3 +198,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "52b1f8e63b19bd5d1a5410f54a01d0d0ce207da7588a6f97e8570122ab618365"
 }
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "2b2ff5c96e1de3afc0758ef7518413512ae62f0f6b009aa3c6a46c2a190d305d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeKeepsRecompiledDependencyOutOfSubjectRoots"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5214629324954e6dc11f2669d55267eecbb189e770e17998e10519b3d876e163"
+}

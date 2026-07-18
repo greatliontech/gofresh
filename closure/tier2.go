@@ -197,17 +197,26 @@ func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package
 
 	// Index every top-level function as a candidate root, keyed by name, so any
 	// subject — a benchmark, a test, or a production function — is rootable by name
-	// (§ closure REQ-closure-analysis). Collect from the test-variant packages
-	// (ForTest == pkgPath): each compiles the package WITH its test files, so it
-	// holds both the production symbols and the test/benchmark symbols. Fall back to
-	// the plain package only when no test variant exists — collecting a production
-	// symbol from both the plain package and its test variant would key one name to
-	// two distinct ssa.Functions and read as an ambiguous root.
+	// (§ closure REQ-closure-analysis). Collect from the package's own test-variant
+	// packages: each compiles the package WITH its test files, so it holds both the
+	// production symbols and the test/benchmark symbols. Fall back to the plain
+	// package only when no test variant exists — collecting a production symbol from
+	// both the plain package and its test variant would key one name to two distinct
+	// ssa.Functions and read as an ambiguous root. ForTest alone does not identify
+	// the package's own variants: the go tool sets it on every package recompiled
+	// into the test binary, including intermediate dependencies (r imports a, a's
+	// external test imports r → "r [a.test]" carries ForTest=a), and `all` here
+	// spans the full dependency graph. Only the in-package variant (PkgPath ==
+	// pkgPath) and the external test package (PkgPath is the tested path + "_test",
+	// the go tool's naming for it) declare this package's subjects; admitting a
+	// recompiled dependency would root a dependency's function under a name the
+	// package never declares — a shared top-level name reads as an ambiguous root,
+	// and an unshared one silently resolves a subject to the dependency's closure.
 	funcRoots := map[string]*ssa.Function{}
 	var testMain *ssa.Function
 	var rootPkgs []*packages.Package
 	for _, p := range all {
-		if p.ForTest == pkgPath {
+		if p.ForTest == pkgPath && (p.PkgPath == pkgPath || p.PkgPath == pkgPath+"_test") {
 			rootPkgs = append(rootPkgs, p)
 		}
 	}

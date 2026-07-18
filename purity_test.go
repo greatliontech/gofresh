@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"context"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -79,6 +80,83 @@ func TestScanAcceptsUniverseMethodAcrossTestVariants(t *testing.T) {
 	}
 	if !pred(Subject{Package: "example.com/universe", Symbol: "F"}) {
 		t.Errorf("F: pure=false, want true")
+	}
+}
+
+// TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage pins the subject
+// attribution boundary of the scan (REQ-purity-directive with the subject
+// identity of the overview spec): `go list -test` marks every package
+// recompiled into a test binary with ForTest — including intermediate
+// dependencies — but only the package under test's own variants declare
+// subjects of the package under test. A dependency recompiled for the test
+// binary (external test of a imports r, r imports a — so r is rebuilt against
+// a's test variant) keeps its declarations under its own import path: they
+// never appear as subjects of the tested package, and a top-level symbol name
+// shared between the two packages is two distinct subjects, not an ambiguity.
+func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.26\n",
+		"a/a.go": "package a\n\n//gofresh:pure\nfunc G() {}\n",
+		// The in-package test file makes "a [a.test]" a distinct variant, so r —
+		// importing a, imported by a's external test — is recompiled against it
+		// as "r [a.test]" with ForTest set.
+		"a/in_test.go":  "package a\n\nimport \"testing\"\n\nfunc TestInternal(t *testing.T) { G() }\n",
+		"a/ext_test.go": "package a_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/m/r\"\n)\n\nfunc TestG(t *testing.T) { r.Use() }\n",
+		"r/r.go":        "package r\n\nimport \"example.com/m/a\"\n\nfunc Use() { a.G() }\n\nfunc G() {}\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The attribution assertions below hold vacuously if the recompiled
+	// dependency variant ("r [a.test]") stops materializing, so its presence is
+	// load-bearing.
+	cfg := &packages.Config{
+		Mode:  packages.NeedName | packages.NeedForTest | packages.NeedImports | packages.NeedDeps,
+		Tests: true,
+		Dir:   dir,
+	}
+	loaded, err := packages.Load(cfg, "example.com/m/a")
+	if err != nil {
+		t.Fatalf("variant guard load: %v", err)
+	}
+	variant := false
+	packages.Visit(loaded, nil, func(p *packages.Package) {
+		if p.PkgPath == "example.com/m/r" && p.ForTest == "example.com/m/a" {
+			variant = true
+		}
+	})
+	if !variant {
+		t.Fatal("fixture no longer yields the recompiled dependency variant r [a.test]; the attribution assertions below would hold vacuously")
+	}
+	pred, known, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, nil, "example.com/m/a", "example.com/m/r")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	for subject, want := range map[Subject]bool{
+		{Package: "example.com/m/a", Symbol: "G"}:   true,
+		{Package: "example.com/m/r", Symbol: "G"}:   true,
+		{Package: "example.com/m/r", Symbol: "Use"}: true,
+		// r's declaration, recompiled as "r [a.test]", is never a subject of a.
+		{Package: "example.com/m/a", Symbol: "Use"}: false,
+	} {
+		if known[subject] != want {
+			t.Errorf("known[%s.%s]=%v, want %v", subject.Package, subject.Symbol, known[subject], want)
+		}
+	}
+	if !pred(Subject{Package: "example.com/m/a", Symbol: "G"}) {
+		t.Errorf("a.G: pure=false, want true (directive on a's own declaration)")
+	}
+	if pred(Subject{Package: "example.com/m/r", Symbol: "G"}) {
+		t.Errorf("r.G: pure=true, want false (a's directive must not leak to r's same-named symbol)")
 	}
 }
 
