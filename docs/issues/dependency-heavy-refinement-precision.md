@@ -6,54 +6,54 @@ dependency-heavy benchmark package.
 ## Context
 
 The representative Observer package `./tests/benchmarks` contains 39 benchmarks
-and the durable L/XL workloads for which Pew refinement is intended. Maximal
-capture of all 39 subjects completed in 14.66 seconds at about 20.6 MB peak RSS.
-The attributed declaration-RTA capture exceeded a caller-supplied 25-minute
-budget at about 3.24 GB peak RSS and returned cancellation safely after
-cancellation checkpoints were added between subject projections.
+and the durable L/XL workloads for which Pew refinement is intended. Widening
+sources already eliminated: the generated test-main registration initializer
+and `go_asm.h` whole-closure widening; cache interface methods now attribute
+through their declaring interface; generic cache functions normalize through
+both SSA and go/types origins. The bounded non-standard-library SSA experiment
+was rejected (every subject reached an unsummarized standard-library body and
+widened; the leaf-frontier variant failed the unavailable-not-crash criterion;
+omitting standard-library bodies would need complete toolchain-derived
+summaries to avoid false valid results).
 
-A one-subject capture of
-`BenchmarkDashboard_P95LatencyByRoute_Long` completed in 1m40s–2m11s at about
-3.0–3.15 GB peak RSS. An equal-length edit confined to sibling
-`BenchmarkDashboard_LogVolumeBySeverity` made both maximal and refined evidence
-stale. The refinement had widened to maximal after reaching a pinned Pebble
-interface method whose cache declaration index did not contain a direct function
-declaration. On this bounded realistic sample, maximal false-staled 1/1 irrelevant
-edits and the current refinement recovered 0/1.
+## Current-engine evaluation
 
-The generated test-main registration initializer and generated `go_asm.h`
-handling were separately removed as unnecessary whole-closure widening sources.
-Cache interface methods are now attributed through their declaring interface,
-generic cache functions normalize through both SSA and go/types origins, and
-computed/interface sites carry per-subject RTA resolution evidence while roots
-that can receive unknown callable state remain open-world. The first surviving
-Observer widening is an unassigned package test-hook function variable in
-`x/net/http2`; proving it immutable requires whole-program store, alias, assembly,
-unsafe, and linkname analysis rather than a package-specific exception. Existing
-differential and closure correctness tests continue to require every uncertain
-edge to widen rather than under-cover.
+Measured on the Observer sample, single process:
 
-The bounded non-standard-library SSA experiment was rejected. Loading every
-non-standard dependency as a source root completed all 39 subjects in 2m50s at
-about 3.97 GB peak RSS under default GC, but every subject reached an unsummarized
-standard-library body and therefore widened safely to maximal plus unverifiable.
-Restricting source roots to the non-standard import leaf frontier produced an
-incoherent test-variant graph that panicked during SSA construction, so it failed
-the unavailable-not-crash criterion before measurement. Omitting standard-library
-bodies cannot become a recording strategy without complete toolchain-derived
-callback, interface, external-effect, registry, reflection, assembly, and linkname
-summaries; signature heuristics or API allowlists would admit false valid results.
+- Maximal view of all 39 subjects: 1m39s cold / 17.4s warm, ~1.7–1.85 GB peak
+  RSS.
+- Refined capture of `BenchmarkDashboard_P95LatencyByRoute_Long`: 1m24s within
+  a 6-minute budget; the recording is unverifiable with reason "subject
+  accepts caller-supplied dynamic behavior".
+- False-stale recovery on an equal-length edit proven confined to sibling
+  `BenchmarkDashboard_LogVolumeBySeverity` (argument-order swap in its query
+  call): 0/1 — the check returned `stale refinement` after 1m25s. An earlier
+  run of the same probe agreed on every disposition (capture 1m16s
+  unverifiable with the same reason, check 1m20s stale). Process-wide peak
+  across view constructions, capture, and check: ~4.9–5.0 GB.
+
+The surviving blocker is structural, not a single widener: one package-scope
+variable whose type can carry callable state anywhere in the subject's
+module-scoped import graph marks every subject of the package open-world, and
+open-world refined evidence is unverifiable regardless of what declaration-RTA
+proves. The Observer benchmark graph contains 2,486 such variables across 233
+of its 460 module-scoped packages (696 packages in the full import graph
+including the standard library). Top offenders in order: otel semconv v1.41.0
+(615), protobuf internal/impl (173), x/text/language (86),
+x/text/internal/language/compact (81), gogoproto (76), arrow-go
+internal/utils (73),
+gogo/protobuf types (56), GoSQLX sql/ast (54), parquet-go (52), x/net/http2
+(52). Clearing open-world therefore requires proving immutability for the
+reachable portion of that population — whole-program store, alias, assembly,
+unsafe, and linkname analysis, as previously concluded for the single
+x/net/http2 test-hook variable.
 
 ## Resolution
 
-Evaluate this remaining strategy shape against the existing precise closure corpus
-and Observer sample:
-
-1. Retain declaration-RTA and prove immutable callable globals through complete
-   store, alias, assembly, unsafe, and linkname analysis where that proof is
-   available.
-
-Accept a refinement for consumer use only when it remains differential-equivalent
-to the sound corpus, completes under an explicit caller budget, and demonstrates
-false-stale recovery on realistic relevant and irrelevant edits. Any uncertain
-prototype result remains unavailable rather than valid.
+Unchanged acceptance bar: retain declaration-RTA; a refinement becomes
+consumer-usable only when it is differential-equivalent to the sound corpus,
+completes under an explicit caller budget, and demonstrates false-stale
+recovery on realistic relevant and irrelevant edits — with the immutability
+proof above as the identified mechanism and its measured proof surface as the
+cost anchor. Any uncertain prototype result remains unavailable rather than
+valid.
