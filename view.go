@@ -138,7 +138,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: guards during construction", ErrViewChanged)
+		return nil, fmt.Errorf("%w: guards during construction (%s)", ErrViewChanged, differingGuard(first.guards, second.guards))
 	}
 	for _, subject := range unique {
 		if err := ctx.Err(); err != nil {
@@ -550,9 +550,9 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 			if err := ctx.Err(); err != nil {
 				return Verdict{}, err
 			}
-			return Verdict{Stale, "runtimeinputs"}, nil
+			return v.withMovedInputs(ctx, Verdict{Stale, "runtimeinputs"}, recorded), nil
 		}
-		verdict := decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject))
+		verdict := v.withMovedInputs(ctx, decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject)), recorded)
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
@@ -656,13 +656,14 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		cl := v.maximal[subject]
 		if rec.MaximalClosure != cl.Hash {
 			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
+				verdict = v.withMovedInputs(ctx, verdict, rec)
 				verdicts[subject] = verdict
 				continue
 			}
 			drifted = append(drifted, subject)
 			continue
 		}
-		verdicts[subject] = decideAfterClosureObserved(rec, cl, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != "")
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != ""), rec)
 	}
 	if len(drifted) == 0 {
 		return finish()
@@ -689,7 +690,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 			continue
 		}
 		positive := positives[subject] && currentObservable[subject].Observable
-		verdicts[subject] = decideAfterClosureObserved(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positive && rec.RuntimeInputs != "")
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positive && rec.RuntimeInputs != ""), rec)
 	}
 	return finish()
 }
@@ -782,6 +783,7 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 		maximal := v.maximal[subject]
 		if rec.MaximalClosure != maximal.Hash {
 			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
+				verdict = v.withMovedInputs(ctx, verdict, rec)
 				verdicts[subject] = verdict
 				continue
 			}
@@ -796,7 +798,7 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			effective.Unverifiable = rec.Refinement.Unverifiable
 			effective.Reason = rec.Refinement.Reason
 		}
-		verdicts[subject] = decideAfterClosure(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject))
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
 	}
 
 	if len(drifted) == 0 {
@@ -821,14 +823,14 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			verdicts[subject] = Verdict{Stale, "refinement"}
 			continue
 		}
-		verdicts[subject] = decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject))
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
 	}
 	return finish()
 }
 
 // checkAfterClosure decides a manifest-less recording: its only caller reaches
-// it with RuntimeInputs empty, so the runtime state is the zero value and no
-// observation runs.
+// it with RuntimeInputs empty, so the runtime state is the zero value, no
+// observation runs, and there is no manifest to attribute movers from.
 func (v *View) checkAfterClosure(recorded Fingerprint, subject Subject, cl closure.Closure) Verdict {
 	var rt runtimeinput.State
 	return decideAfterClosure(recorded, cl, v.guards, rt, v.kind, v.purityMatches(recorded, subject))
@@ -876,7 +878,7 @@ func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subjec
 	for subject, fingerprint := range recorded {
 		if fingerprint.RuntimeInputs != "" && before[subject] != after[subject] {
 			if verdicts[subject].Status != Stale {
-				verdicts[subject] = Verdict{Stale, "runtimeinputs"}
+				verdicts[subject] = v.withMovedInputs(ctx, Verdict{Stale, "runtimeinputs"}, fingerprint)
 			}
 		}
 	}
@@ -1083,7 +1085,7 @@ func compareObservationProof(subject Subject, observed, captured closure.Observa
 		return fmt.Errorf("%w: observation proof for %s.%s: %s", ErrAnalysisUnavailable, subject.Package, subject.Symbol, observed.Reason)
 	}
 	if observed != captured {
-		return fmt.Errorf("%w: observation proof for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+		return fmt.Errorf("%w: observation proof for %s.%s (captured %s, now %s)", ErrViewChanged, subject.Package, subject.Symbol, describeObservability(captured), describeObservability(observed))
 	}
 	return nil
 }
@@ -1093,6 +1095,71 @@ func compareObservationProof(subject Subject, observed, captured closure.Observa
 // one vocabulary both the closure analysis and the isolation fallback emit.
 func analysisUnavailable(reason string) bool {
 	return strings.HasPrefix(reason, "observation analysis unavailable")
+}
+
+// differingGuard names the first environment guard whose two construction
+// observations disagreed — the actionable component behind a bare "guards
+// moved".
+func differingGuard(a, b guard.Guards) string {
+	switch {
+	case a.Toolchain != b.Toolchain:
+		return "toolchain"
+	case a.BuildConfig != b.BuildConfig:
+		return "buildconfig"
+	case a.Machine != b.Machine:
+		return "machine"
+	case a.RuntimeConfig != b.RuntimeConfig:
+		return "runtimeconfig"
+	default:
+		return "guards"
+	}
+}
+
+// describeObservability renders an observability disposition for drift
+// refusals: the verdict class and its reason, compact.
+func describeObservability(o closure.Observability) string {
+	if o.Observable {
+		return "observable"
+	}
+	if o.Reason == "" {
+		return "not observable"
+	}
+	return "not observable: " + o.Reason
+}
+
+// movedSummary renders a bounded mover list for refusal texts: enough to act
+// on, never a wall of paths.
+func movedSummary(movers []string) string {
+	const limit = 3
+	if len(movers) <= limit {
+		return strings.Join(movers, ", ")
+	}
+	return strings.Join(movers[:limit], ", ") + fmt.Sprintf(", and %d more", len(movers)-limit)
+}
+
+// movedInputsForView attributes against the view's own environment, degrading
+// to no attribution on an engine-less view (the direct-construct test shape).
+func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string, error) {
+	if v.engine == nil {
+		return nil, nil
+	}
+	return runtimeinput.MovedInputsContext(ctx, encoded, v.moduleDir, v.engine.env)
+}
+
+// withMovedInputs names the movers behind a stale runtime-inputs verdict
+// (REQ-inputs-path-identities attribution): the one-word reason stays for
+// undecodable or moverless manifests — an older recording regenerates either
+// way — and gains "(moved: …)" whenever attribution is derivable.
+func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
+	if verdict.Status != Stale || verdict.Reason != "runtimeinputs" || recorded.RuntimeInputs == "" || v.engine == nil {
+		return verdict
+	}
+	movers, err := movedInputsForView(ctx, v, recorded.RuntimeInputs)
+	if err != nil || len(movers) == 0 {
+		return verdict
+	}
+	verdict.Reason = "runtimeinputs (moved: " + movedSummary(movers) + ")"
+	return verdict
 }
 
 func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
@@ -1112,7 +1179,11 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 			return err
 		}
 		if observed != state {
-			return fmt.Errorf("%w: runtime inputs for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+			detail := ""
+			if movers, moveErr := movedInputsForView(ctx, v, state.Manifest); moveErr == nil && len(movers) > 0 {
+				detail = " (moved: " + movedSummary(movers) + ")"
+			}
+			return fmt.Errorf("%w: runtime inputs for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, detail)
 		}
 	}
 	return ctx.Err()
@@ -1169,7 +1240,7 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: guards", ErrViewChanged)
+		return fmt.Errorf("%w: guards (%s)", ErrViewChanged, differingGuard(guards, v.guards))
 	}
 	if err := ctx.Err(); err != nil {
 		return err

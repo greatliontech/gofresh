@@ -355,8 +355,8 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Stale || verdict.Reason != "runtimeinputs" {
-		t.Fatalf("changed observed input = %+v, want stale runtimeinputs", verdict)
+	if verdict.Status != Stale || !strings.HasPrefix(verdict.Reason, "runtimeinputs") || !strings.Contains(verdict.Reason, "moved: path fixture") {
+		t.Fatalf("changed observed input = %+v, want stale runtimeinputs naming the mover", verdict)
 	}
 }
 

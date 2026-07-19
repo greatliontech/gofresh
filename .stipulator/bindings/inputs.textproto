@@ -657,3 +657,21 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cb07f927d8a6860ccf12ebe4b5289694bf5e473d0f434e4f9c0b01eaf15437cb"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-path-identities"
+  content_hash: "9c4bc95498fd7ee3f95fe7d5c0ba1112060d562d71bbd6a6ce30f565871f4cc2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestStaleRuntimeInputsNamesTheMover"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "87eba09bb334f558eea414315a0d6f64cd69cd5843fc2ee1cdba15c4014bab8b"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-identities"
+  content_hash: "9c4bc95498fd7ee3f95fe7d5c0ba1112060d562d71bbd6a6ce30f565871f4cc2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMovedInputsNamesTheMover"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f10f3365f1b630214fa0ff942b30a6ed0454d1984189b63e56b33828ed165940"
+}
