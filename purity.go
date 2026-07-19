@@ -43,21 +43,21 @@ func ScanPureDirectivesWithBuildFlags(buildFlags []string, pkgPaths ...string) (
 // ScanPureDirectivesInWithBuildFlags scans under an explicit tree root and the
 // producing build's executable flags.
 func ScanPureDirectivesInWithBuildFlags(dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
-	pure, _, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, buildFlags, pkgPaths...)
+	pure, _, _, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, buildFlags, pkgPaths...)
 	return pure, err
 }
 
-func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, error) {
+func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
 	return scanSubjectsInWithBuildFlagsEnv(ctx, dir, os.Environ(), buildFlags, pkgPaths...)
 }
 
-func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, error) {
+func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
 	packageEnv, err := processenv.ForGoPackages(env)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("gofresh: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("gofresh: %w", err)
 	}
 	if err := buildflags.ValidateEnv(ctx, dir, env, buildFlags); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cfg := &packages.Config{
 		Context:    ctx,
@@ -69,9 +69,10 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	}
 	pkgs, err := packages.Load(cfg, pkgPaths...)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	pure := map[Subject]bool{}
+	external := map[Subject]bool{}
 	known := map[Subject]bool{}
 	openWorld := map[Subject]bool{}
 	packageOpenWorld := map[string]bool{}
@@ -93,15 +94,26 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 		known[subject] = true
 	}
 	pureMethods := map[*types.Func]bool{}
+	externalMethods := map[*types.Func]bool{}
+	methodKeys := map[*types.Func]string{}
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		for _, file := range p.Syntax {
 			for _, declaration := range file.Decls {
 				function, ok := declaration.(*ast.FuncDecl)
-				if !ok || !hasPureDirective(function.Doc) {
+				if !ok {
 					continue
 				}
-				if method, ok := p.TypesInfo.Defs[function.Name].(*types.Func); ok && method.Type().(*types.Signature).Recv() != nil {
+				method, ok := p.TypesInfo.Defs[function.Name].(*types.Func)
+				if !ok || method.Type().(*types.Signature).Recv() == nil {
+					continue
+				}
+				if hasDirective(function.Doc, "//gofresh:pure") {
 					pureMethods[method] = true
+					methodKeys[method] = nodeDeclarationKey(p, function.Name)
+				}
+				if hasDirective(function.Doc, "//gofresh:external") {
+					externalMethods[method] = true
+					methodKeys[method] = nodeDeclarationKey(p, function.Name)
 				}
 			}
 		}
@@ -138,8 +150,21 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 					}
 					subject := Subject{Package: pkgPath, Symbol: sym}
 					record(subject, nodeDeclarationKey(p, fd.Name))
-					if hasPureDirective(fd.Doc) {
+					isPure, isExternal := hasDirective(fd.Doc, "//gofresh:pure"), hasDirective(fd.Doc, "//gofresh:external")
+					if isPure && isExternal && scanErr == nil {
+						// The declarations contradict: pure vouches reuse,
+						// external forbids it (REQ-external-precedence). The
+						// refusal is scoped to declarations yielding this
+						// scan's subjects — a conflicted declaration deeper
+						// in the loaded graph is its own package's defect,
+						// surfacing when that package is scanned.
+						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", nodeDeclarationKey(p, fd.Name))
+					}
+					if isPure {
 						pure[subject] = true
+					}
+					if isExternal {
+						external[subject] = true
 					}
 					if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok && signatureMayReceiveUnknownDynamic(fn.Type().(*types.Signature)) {
 						openWorld[subject] = true
@@ -178,15 +203,21 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(sig) {
 						openWorld[subject] = true
 					}
+					if pureMethods[method] && externalMethods[method] && scanErr == nil {
+						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", methodKeys[method])
+					}
 					if pureMethods[method] {
 						pure[subject] = true
+					}
+					if externalMethods[method] {
+						external[subject] = true
 					}
 				}
 			}
 		}
 	})
 	if scanErr != nil {
-		return nil, nil, nil, scanErr
+		return nil, nil, nil, nil, scanErr
 	}
 	for _, root := range pkgs {
 		rootPath := root.PkgPath
@@ -204,7 +235,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 			}
 		}
 	}
-	return func(s Subject) bool { return pure[s] }, known, openWorld, nil
+	return func(s Subject) bool { return pure[s] }, known, openWorld, external, nil
 }
 
 func packageGraphHasOpenWorld(pkg *packages.Package, openWorld, seen map[string]bool) bool {
@@ -338,15 +369,15 @@ func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
 	return fmt.Sprintf("universe:%v", obj)
 }
 
-// hasPureDirective reports whether a doc comment group carries the //gofresh:pure
-// directive — a comment line whose text (after the slashes) is exactly gofresh:pure,
-// the Go directive form with no leading space.
-func hasPureDirective(doc *ast.CommentGroup) bool {
+// hasDirective reports whether a doc comment group carries the named gofresh
+// directive — a comment line whose text is exactly the directive, the Go
+// directive form with no leading space.
+func hasDirective(doc *ast.CommentGroup, directive string) bool {
 	if doc == nil {
 		return false
 	}
 	for _, c := range doc.List {
-		if c.Text == "//gofresh:pure" {
+		if c.Text == directive {
 			return true
 		}
 	}

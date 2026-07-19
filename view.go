@@ -223,7 +223,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	directivePure, known, openWorld, err := scanSubjectsInWithBuildFlagsEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
+	directivePure, known, openWorld, external, err := scanSubjectsInWithBuildFlagsEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -254,10 +254,22 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			maximal.Reason = "subject accepts caller-supplied dynamic behavior"
 			observation.openWorld[subject] = true
 		}
+		if external[subject] {
+			// The author declared external state: unverifiable by
+			// declaration, and no purity attribution is recorded — a purity
+			// assertion confers nothing on an external-state subject
+			// (REQ-external-directive, REQ-external-precedence).
+			maximal.External = true
+			maximal.Unverifiable = true
+			maximal.Reason = "external directive"
+		}
 		observation.maximal[subject] = maximal
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 		observation.sourceFilesBySubject[subject] = slices.Clone(sources[request])
 		sort.Strings(observation.sourceFilesBySubject[subject])
+		if external[subject] {
+			continue
+		}
 		switch caller, directive := e.assumePure(subject), directivePure(subject); {
 		case caller && directive:
 			observation.purity[subject] = "caller assertion and source directive"
@@ -1353,6 +1365,16 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 }
 
 func retainMaximalDisposition(maximal, refined closure.Closure, openWorld bool) closure.Closure {
+	// Declared externality survives refinement unconditionally: the author's
+	// external-state assertion is a property of the subject, not of what the
+	// analysis could or could not prove about its body
+	// (REQ-external-directive, REQ-external-precedence).
+	if maximal.External {
+		refined.External = true
+		refined.Unverifiable = true
+		refined.Reason = maximal.Reason
+		return refined
+	}
 	if maximal.Unverifiable && (openWorld || refined.Widened || maximal.Unrefinable) {
 		refined.Unverifiable = true
 		refined.Reason = maximal.Reason

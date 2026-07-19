@@ -137,7 +137,7 @@ func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
 	if !variant {
 		t.Fatal("fixture no longer yields the recompiled dependency variant r [a.test]; the attribution assertions below would hold vacuously")
 	}
-	pred, known, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, nil, "example.com/m/a", "example.com/m/r")
+	pred, known, _, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, nil, "example.com/m/a", "example.com/m/r")
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}

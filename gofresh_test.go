@@ -486,3 +486,233 @@ func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
 		t.Fatalf("symlink-divergent trees accepted: %v", err)
 	}
 }
+
+// TestExternalDirectiveWithholdsReuse pins REQ-external-directive and
+// REQ-external-precedence end to end: a subject carrying //gofresh:external is
+// unverifiable "external directive" whenever its guards hold, a caller purity
+// assertion confers nothing (and records no attribution), and a real source
+// change still reports stale — externality never masks guard information.
+func TestExternalDirectiveWithholdsReuse(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/ext\n\ngo 1.26\n")
+	write("ext.go", "package ext\n\n//gofresh:external\nfunc Reads() int { return 1 }\n")
+
+	const pkg = "example.com/ext"
+	subj := Subject{Package: pkg, Symbol: "Reads"}
+	e, err := New(WithDir(tmp), WithAssumePure(func(Subject) bool { return true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := e.Capture(context.Background(), subj, tmp)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if fp.PurityAssertion != "" {
+		t.Fatalf("purity assertion on an external subject = %q, want none (REQ-external-precedence)", fp.PurityAssertion)
+	}
+	if v, err := e.Check(context.Background(), fp, subj, tmp); err != nil {
+		t.Fatalf("Check: %v", err)
+	} else if v.Status != Unverifiable || v.Reason != "external directive" {
+		t.Fatalf("verdict = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
+	}
+
+	// A source change stales — externality withholds reuse, never guard info.
+	write("ext.go", "package ext\n\n//gofresh:external\nfunc Reads() int { return 2 }\n")
+	changed, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := changed.Check(context.Background(), fp, subj, tmp); err != nil {
+		t.Fatalf("Check changed: %v", err)
+	} else if v.Status != Stale || v.Reason != "closure" {
+		t.Fatalf("changed-source verdict = {%s %q}, want {stale closure}", v.Status, v.Reason)
+	}
+}
+
+// TestExternalDirectiveConflictRefused pins the contradiction refusal
+// (REQ-external-precedence): one declaration carrying both //gofresh:pure and
+// //gofresh:external fails observation rather than picking a winner.
+func TestExternalDirectiveConflictRefused(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module example.com/conflict\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "c.go"), []byte("package conflict\n\n//gofresh:pure\n//gofresh:external\nfunc Torn() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Capture(context.Background(), Subject{Package: "example.com/conflict", Symbol: "Torn"}, tmp)
+	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
+		t.Fatalf("Capture = %v, want the contradiction refusal", err)
+	}
+}
+
+// TestExternalDirectiveImmuneToObservationEvidence pins the observation half of
+// REQ-external-precedence at the verdict function: completed observation
+// evidence upgrades inferred closure unverifiability, never a declared
+// external subject.
+func TestExternalDirectiveImmuneToObservationEvidence(t *testing.T) {
+	rec := Fingerprint{
+		MaximalClosure: "h",
+		Guards:         guard.Guards{Toolchain: "tc", BuildConfig: "bc"},
+		RuntimeInputs:  "manifest",
+		RuntimeDigest:  "d",
+	}
+	rt := runtimeinput.State{Manifest: "manifest", Digest: "d", OK: true}
+	inferred := closure.Closure{Hash: "h", Unverifiable: true, Reason: "reaches os.Open"}
+	if v := decideAfterClosureObserved(rec, inferred, rec.Guards, rt, CodeResult, false, true); v.Status != Valid {
+		t.Fatalf("observed inferred unverifiability = {%s %q}, want valid (the upgrade this test contrasts)", v.Status, v.Reason)
+	}
+	declared := closure.Closure{Hash: "h", Unverifiable: true, External: true, Reason: "external directive"}
+	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, false, true); v.Status != Unverifiable || v.Reason != "external directive" {
+		t.Fatalf("observed external subject = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
+	}
+	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, true, true); v.Status != Unverifiable || v.Reason != "external directive" {
+		t.Fatalf("pure external subject = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
+	}
+}
+
+// TestExternalDirectiveFixtureScan pins the scanner surface over the committed
+// fixture package: exact-form directives on functions and methods mark their
+// subjects, near-miss forms do not.
+func TestExternalDirectiveFixtureScan(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	const pkg = "github.com/greatliontech/gofresh/internal/externaldirective"
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for symbol, wantExternal := range map[string]bool{
+		"Declared":        true,
+		"T.Declared":      true,
+		"NotDeclared":     false,
+		"SpacedDirective": false,
+		"T.NotDeclared":   false,
+	} {
+		subj := Subject{Package: pkg, Symbol: symbol}
+		fp, err := e.Capture(context.Background(), subj, ".")
+		if err != nil {
+			t.Fatalf("Capture %s: %v", symbol, err)
+		}
+		v, err := e.Check(context.Background(), fp, subj, ".")
+		if err != nil {
+			t.Fatalf("Check %s: %v", symbol, err)
+		}
+		if wantExternal && (v.Status != Unverifiable || v.Reason != "external directive") {
+			t.Errorf("%s = {%s %q}, want {unverifiable external directive}", symbol, v.Status, v.Reason)
+		}
+		if !wantExternal && v.Reason == "external directive" {
+			t.Errorf("%s marked external without the directive", symbol)
+		}
+	}
+}
+
+// TestExternalDirectiveSurvivesRefinementDrift pins REQ-external-directive
+// across the refined tier: a declared-external subject whose maximal closure
+// drifts while its declaration-RTA refinement still matches must stay
+// unverifiable "external directive" — never valid on the refined hash alone.
+// The sibling edit moves only the maximal hash, which is exactly the drift
+// that routes CheckRefined onto the refined closure.
+func TestExternalDirectiveSurvivesRefinementDrift(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/extdrift\n\ngo 1.26\n")
+	write("ext.go", "package extdrift\n\n//gofresh:external\nfunc Reads() int { return 1 }\n\nfunc Sibling() int { return 10 }\n")
+
+	subj := Subject{Package: "example.com/extdrift", Symbol: "Reads"}
+	e, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := e.CaptureRefined(context.Background(), subj, tmp)
+	if err != nil {
+		t.Fatalf("CaptureRefined: %v", err)
+	}
+	write("ext.go", "package extdrift\n\n//gofresh:external\nfunc Reads() int { return 1 }\n\nfunc Sibling() int { return 20 }\n")
+	drifted, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := drifted.CheckRefined(context.Background(), fp, subj, tmp)
+	if err != nil {
+		t.Fatalf("CheckRefined: %v", err)
+	}
+	if v.Status != Unverifiable || v.Reason != "external directive" {
+		t.Fatalf("drifted refined verdict = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
+	}
+}
+
+// TestExternalDirectiveConflictScopedToScanSubjects pins the refusal scope
+// (REQ-external-precedence): a contradiction in a dependency that yields no
+// subject of the scan does not brick its dependents; scanning the conflicted
+// package itself refuses.
+func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	tmp := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(tmp, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/scoped\n\ngo 1.26\n")
+	write("dep/dep.go", "package dep\n\n//gofresh:pure\n//gofresh:external\nfunc Torn() int { return 1 }\n")
+	write("top.go", "package scoped\n\nimport \"example.com/scoped/dep\"\n\nfunc Uses() int { return dep.Torn() }\n")
+
+	e, err := New(WithDir(tmp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Capture(context.Background(), Subject{Package: "example.com/scoped", Symbol: "Uses"}, tmp); err != nil {
+		t.Fatalf("dependent capture refused by a dependency's conflict: %v", err)
+	}
+	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/dep", Symbol: "Torn"}, tmp)
+	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
+		t.Fatalf("conflicted package's own capture = %v, want the contradiction refusal", err)
+	}
+
+	// A conflicted METHOD promoting into a requested subject refuses too —
+	// including one declared in another package and promoted through
+	// embedding, which only the method-set path can sight.
+	write("meth/meth.go", "package meth\n\ntype T struct{}\n\n//gofresh:pure\n//gofresh:external\nfunc (T) Torn() int { return 1 }\n")
+	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/meth", Symbol: "T.Torn"}, tmp)
+	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
+		t.Fatalf("conflicted method capture = %v, want the contradiction refusal", err)
+	}
+	write("embed/embed.go", "package embed\n\nimport \"example.com/scoped/meth\"\n\ntype W struct{ meth.T }\n")
+	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/embed", Symbol: "W.Torn"}, tmp)
+	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
+		t.Fatalf("promoted conflicted method capture = %v, want the contradiction refusal", err)
+	}
+}

@@ -19,7 +19,7 @@ func TestPurityScanUsesSuppliedEnvironment(t *testing.T) {
 	write("default.go", "//go:build !special\n\npackage envpurity\n\nfunc F() {}\n")
 	write("special.go", "//go:build special\n\npackage envpurity\n\n//gofresh:pure\nfunc F() {}\n")
 	env := environmentWith(map[string]string{"GOFLAGS": "-tags=special", "GOWORK": "off"})
-	pure, known, _, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, env, nil, "example.com/envpurity")
+	pure, known, _, _, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, env, nil, "example.com/envpurity")
 	if err != nil {
 		t.Fatal(err)
 	}

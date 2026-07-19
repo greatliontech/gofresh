@@ -90,3 +90,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "4251b44b5fe0a6ea1a192b45b3db35fbd3720d57892f88f9755e7a6875981403"
 }
+
+bindings {
+  requirement_id: "REQ-purity-override"
+  content_hash: "a45eba84aa3df948d8852642d3bb22f9f6a665e6eceb1c9a49dc4f974d2505fc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveImmuneToObservationEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ed2d12aab779ed23d734e5b481eedd316543ce6694c757d615d7430732b5dcd5"
+}

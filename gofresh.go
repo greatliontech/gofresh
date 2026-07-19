@@ -418,6 +418,14 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 	if verdict, failed := decideKnownGuards(rec, cur, rt, kind); failed {
 		return verdict
 	}
+	// An external-state declaration withholds reuse whenever the guards hold:
+	// unverifiability by the author's word, immune to purity overrides and
+	// observation evidence alike (REQ-external-directive,
+	// REQ-external-precedence). A failing guard above still reported stale —
+	// externality never masks guard information.
+	if cl.External {
+		return Verdict{Unverifiable, "external directive"}
+	}
 	// Guards hold. Absent a purity override, an unhashable observed input or an
 	// unverifiable closure dependence makes validity unprovable (REQ-fresh-sound).
 	if !pure {

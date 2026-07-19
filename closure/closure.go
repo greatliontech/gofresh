@@ -39,6 +39,10 @@ type Closure struct {
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
 	Widened      bool   // declaration refinement fell back to the maximal package closure
 	Unrefinable  bool   // refinement cannot prove this opaque maximal dependence absent
+	// External marks a subject the author declared external-state via
+	// //gofresh:external: unverifiability by declaration, never suppressible
+	// by a purity assertion or observation evidence (REQ-external-precedence).
+	External bool
 }
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
