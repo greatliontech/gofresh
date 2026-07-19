@@ -352,7 +352,10 @@ func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
 
 // ComputeBatch returns each distinct subject's source closure. Reachability is
 // shared in package-local batches while retaining independent subject results.
-// Empty input returns an empty map.
+// A subject that cannot be rooted in its package's loaded program degrades to
+// unavailable refined evidence — the maximal package closure, widened and
+// unverifiable — for that subject alone; it never fails the batch or a
+// sibling's analysis. Empty input returns an empty map.
 func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 	results := make(map[Subject]Closure)
 	if len(subjects) == 0 {
@@ -396,14 +399,44 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 				return nil, err
 			}
 		}
-		// Resolve every root before listing or analyzing, preserving the clear
-		// one-subject error for a symbol that does not exist.
+		// Read before any listing below (maximalHash included): a list entry
+		// present now was caller-primed and stays retained; one loaded here is
+		// released with the group.
+		_, retainList := h.lists[group.path]
+		// A symbol absent from the loaded program's roots is a subject-local
+		// fact — a production symbol can be unreachable as a root of its
+		// external-test binary — so it degrades to unavailable refined
+		// evidence for that subject alone: the maximal package closure, the
+		// sound floor, recorded widened and unverifiable. Sibling subjects
+		// analyze normally (REQ-closure-batch-equivalence).
+		floorHash := ""
+		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
 			if prog.roots[subject.Symbol] == nil {
-				return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+				if floorHash == "" {
+					var floorErr error
+					floorHash, floorErr = h.maximalHash(group.path)
+					if floorErr != nil {
+						return nil, floorErr
+					}
+				}
+				results[subject] = Closure{
+					Hash:         floorHash,
+					Widened:      true,
+					Unverifiable: true,
+					Reason:       fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path),
+				}
+				continue
 			}
+			rooted = append(rooted, subject)
 		}
-		_, retainList := h.lists[group.path]
+		group.subjects = rooted
+		if len(group.subjects) == 0 {
+			if !retainList {
+				delete(h.lists, group.path)
+			}
+			continue
+		}
 		metas, err := h.list(group.path)
 		if err != nil {
 			return nil, err

@@ -781,7 +781,7 @@ func TestModuleRelPaths(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "hosts")
 	enc, err := encode(manifest{
 		Version: manifestVersion,
-		Env: []envInput{{Name: "PEW_X", Digest: testEntryDigest}},
+		Env:     []envInput{{Name: "PEW_X", Digest: testEntryDigest}},
 		Paths: []pathInput{
 			{pathID: pathID{Kind: pathRel, Path: "data/fixture.txt"}, Digest: testEntryDigest},
 			{pathID: pathID{Kind: pathRel, Path: "a.txt"}, Digest: testEntryDigest},
@@ -1141,7 +1141,7 @@ func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
 func TestManifestEncodingIsCanonical(t *testing.T) {
 	got, err := encode(manifest{
 		Version: manifestVersion,
-		Env: []envInput{{Name: "B", Digest: testEntryDigest}, {Name: "A", Digest: testEntryDigest}, {Name: "B", Digest: testEntryDigest}},
+		Env:     []envInput{{Name: "B", Digest: testEntryDigest}, {Name: "A", Digest: testEntryDigest}, {Name: "B", Digest: testEntryDigest}},
 		Paths: []pathInput{
 			{pathID: pathID{Kind: pathRel, Path: "z"}, Digest: testEntryDigest},
 			{pathID: pathID{Kind: pathRel, Path: "z"}, Digest: testEntryDigest},
@@ -1217,8 +1217,8 @@ func FuzzMergeAlgebra(f *testing.F) {
 			}
 			encoded, err := encode(manifest{
 				Version:      manifestVersion,
-				Env: []envInput{{Name: "FUZZ_" + token, Digest: testEntryDigest}},
-				Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "fuzz/x" + token}, Digest: testEntryDigest}},
+				Env:          []envInput{{Name: "FUZZ_" + token, Digest: testEntryDigest}},
+				Paths:        []pathInput{{pathID: pathID{Kind: pathRel, Path: "fuzz/x" + token}, Digest: testEntryDigest}},
 				Unverifiable: unverifiable,
 			})
 			if err != nil {
