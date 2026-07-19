@@ -133,6 +133,27 @@ conservative, but never weakens it. The converted states then participate in ord
 merge under any caller root without interpreting one module's relative path under
 another module.
 
+**REQ-inputs-adoption** (behavior): A caller holding a persisted encoded manifest
+MUST be able to re-admit it as a completed observation under an attributable
+process identity of the caller's choosing. Adoption validates the manifest
+against the one canonical encoding, re-evaluates every recorded identity's
+digest against the adoption-time module view and environment, and refuses any
+disagreement naming the moved inputs — a persisted union whose evidence the
+current view contradicts never re-enters silently. The adopted state
+participates in ordinary merge, and its digest semantics are identical to a
+fresh observation of the same identities under the same view, so a consumer
+re-executing a subset of contributing processes widens a persisted union by
+merging the adopted state with the fresh completed observations. Adoption
+re-admits recorded evidence; it observes nothing new and confers no
+completeness beyond what the persisted manifest recorded. Its trust posture is
+the caller-trusted persistence class recorded fingerprints already occupy on
+the check path: the manifest's producer-provenance is unauthenticatable, no
+observation bracket backs the re-admitted values (value-binding governs fresh
+observation only), and a caller who fabricates persisted evidence deceives
+only itself — exactly as with a fabricated recorded fingerprint. An adopted
+observation's process identity therefore attributes the adoption, never a
+verified producing process.
+
 **REQ-inputs-evidence-not-proof** (invariant): A runtime-input manifest MUST be
 treated as evidence of the identities it observed, never as proof that every
 reachable input was observed — so a matching digest can move a logged input change to
@@ -191,7 +212,9 @@ process without every gate is represented through the incomplete-observation
 constructor; merge refuses a state that claims completion without them, and one
 incomplete child keeps the deterministic union unverifiable.
 
-**REQ-inputs-value-binding** (invariant): A completed observation MUST be
+**REQ-inputs-value-binding** (invariant): A completed observation of newly read
+values — one whose evidence originates from a producing process's testlog rather
+than from re-admitted persisted evidence (REQ-inputs-adoption) — MUST be
 constructible only against an observation bracket captured before its producing
 process started. Strictly after the manifest digest's last input read, the bracket
 is revalidated with the same hashing semantics as its capture: an unchanged

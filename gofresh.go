@@ -286,7 +286,8 @@ func canonicalDir(dir string) (string, error) {
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
 // inputs are added by the caller from the run's completion-asserted testlog
 // (runtimeinput.FromTestLogEnv), from an incomplete process
-// (runtimeinput.IncompleteEnv), or by combining several process observations
+// (runtimeinput.IncompleteEnv), by re-admitting a persisted manifest union
+// (runtimeinput.AdoptEnv), or by combining several process observations
 // (runtimeinput.MergeEnv) under the same environment supplied to
 // WithEnv, into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the

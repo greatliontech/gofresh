@@ -12,5 +12,5 @@ refusals can name the moved input, and clears the parked engine issues.
 - [x] 5. Moving-identity refusals: view-change and unverifiable errors name the subject, observation class, and — via per-input digests — the moved input
 - [x] 6. Refined tier: missing-root degradation becomes subject-local instead of failing the batch
 - [x] 7. Refined tier: precision/cost evaluation on the dependency-heavy sample; disposition surfaced with numbers
-- [ ] 8. Sealed-observation manifest union gap
+- [x] 8. Sealed-observation manifest union gap
 - [ ] 9. Close-out gate

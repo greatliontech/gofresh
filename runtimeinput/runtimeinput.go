@@ -17,14 +17,19 @@
 // because a link outside every root is invisible to the fingerprint and could
 // be retargeted between two in-root objects mid-span without moving it.
 //
-// A completed observation exists only as a live sealed value from the
-// bracket-gated constructor. Observation's provenance fields are unexported
-// and no persisted or decoded Observation form exists — the manifest string
-// in State is the only wire form, and recomputing it yields a State, never an
-// Observation — while merge, absolute conversion, and dirty inspection each
-// refuse a value whose seal construction did not produce. A completed state
-// lacking bracket provenance is therefore unrepresentable at those
-// boundaries rather than checked for at each one.
+// A completed observation of newly read values exists only as a live sealed
+// value from the bracket-gated constructor. Observation's provenance fields
+// are unexported; the manifest string in State is the only wire form, and
+// merge, absolute conversion, and dirty inspection each refuse a value whose
+// seal construction did not produce. The one re-entry from the wire form is
+// Adopt (REQ-inputs-adoption): it re-admits a persisted manifest as a sealed
+// observation in the caller-trusted persistence class recorded fingerprints
+// already occupy — provenance unauthenticatable, no bracket behind the
+// re-admitted values, every recorded identity re-evaluated against the
+// adoption-time view and refused on disagreement. Bracket-backed value
+// binding therefore remains unrepresentable to fabricate for fresh
+// observations, while adopted evidence is exactly as trustworthy as the
+// caller's own store.
 package runtimeinput
 
 import (
@@ -654,6 +659,46 @@ func validateObservation(observation Observation, _ bool) error {
 		return errors.New("runtimeinputs: observation seal is invalid")
 	}
 	return nil
+}
+
+// Adopt re-admits a persisted encoded manifest as a completed observation
+// under process, an attributable identity of the caller's choosing
+// (REQ-inputs-adoption). The manifest must be the canonical encoding; every
+// recorded identity re-evaluates against the current module view, and any
+// disagreement is refused naming the moved inputs. Adoption re-admits recorded
+// evidence — it observes nothing new and confers no completeness beyond what
+// the manifest recorded. The result participates in ordinary Merge.
+func Adopt(encoded, moduleDir, process string) (Observation, error) {
+	return AdoptEnv(encoded, moduleDir, process, os.Environ())
+}
+
+// AdoptEnv is Adopt with env as the complete process environment used to
+// re-evaluate the persisted evidence. Canonical-encoding enforcement lives in
+// decode — the one gate every manifest string passes.
+func AdoptEnv(encoded, moduleDir, process string, env []string) (Observation, error) {
+	if err := validateProcess(process); err != nil {
+		return Observation{}, err
+	}
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return Observation{}, err
+	}
+	current, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	if err != nil {
+		return Observation{}, err
+	}
+	if current.Manifest != encoded {
+		movers, moveErr := MovedInputs(encoded, moduleDir, env)
+		switch {
+		case moveErr != nil:
+			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved; attribution unavailable: %w", moveErr)
+		case len(movers) > 0:
+			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved: %s", strings.Join(movers, ", "))
+		default:
+			return Observation{}, errors.New("runtimeinputs: adopted manifest moved")
+		}
+	}
+	return newObservation(current, process, "adopted"), nil
 }
 
 // Merge revalidates independently completed runtime-input observations against one

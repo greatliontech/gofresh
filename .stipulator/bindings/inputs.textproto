@@ -675,3 +675,30 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "f10f3365f1b630214fa0ff942b30a6ed0454d1984189b63e56b33828ed165940"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-adoption"
+  content_hash: "ceb9df70dd8c15b55bcfbc4e2c83c2063d6799042a4efffc223d20719c6deb24"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAdoptedUnionMergesLikeFreshObservations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4a66fc78aea58db0ec0b756650ee2abb7a010eb3ee418f5e85cf0970e9c4dba1"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-adoption"
+  content_hash: "ceb9df70dd8c15b55bcfbc4e2c83c2063d6799042a4efffc223d20719c6deb24"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAdoptRefusesMovedManifestNamingTheMover"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1f99a1478d8c842c3763d5fe2d0abaa275e1d361f882bcd27a11af4b6e078f87"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-adoption"
+  content_hash: "799f96d266643ee86dc77bdd5501d87b19b3379204e60c18feb5476f43bf5b68"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAdoptBoundaryValidationAndProvenance"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e42fce3c6e27c1f0816bc42038a2ae3ea83ca84f278afcdff59919272938a834"
+}
