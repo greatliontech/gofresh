@@ -1122,6 +1122,43 @@ func ModuleRelPaths(encoded string) ([]string, error) {
 	return out, nil
 }
 
+// Description is a validated manifest's observable identity set: what a run
+// was recorded to observe, disclosed as identities only — environment values
+// are never stored or reported in clear text (REQ-inputs-path-identities).
+type Description struct {
+	EnvNames     []string // observed environment-variable names, manifest order
+	Paths        []string // materialized absolute path identities, manifest order
+	Unverifiable []string // unverifiable observation dispositions, manifest order
+}
+
+// Describe decodes a canonical manifest into its identity set, materializing
+// path identities under moduleDir exactly as Paths does. It lets a consumer
+// explain a runtime-input digest mismatch by naming what is being watched;
+// per-input movement attribution is not derivable — the manifest records
+// identities and one combined digest, not per-input digests.
+func Describe(encoded, moduleDir string) (Description, error) {
+	m, err := decode(encoded)
+	if err != nil {
+		return Description{}, err
+	}
+	abs, err := filepath.Abs(moduleDir)
+	if err != nil {
+		return Description{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	d := Description{
+		EnvNames:     append([]string(nil), m.Env...),
+		Unverifiable: append([]string(nil), m.Unverifiable...),
+	}
+	for _, id := range m.Paths {
+		path, err := materializePath(abs, id)
+		if err != nil {
+			return Description{}, err
+		}
+		d.Paths = append(d.Paths, path)
+	}
+	return d, nil
+}
+
 // Paths returns every path identity in a canonical manifest as an absolute path,
 // preserving manifest order. Module-relative identities are rooted at moduleDir;
 // external identities remain absolute.

@@ -57,7 +57,12 @@ missing so an input appearing or disappearing moves the guard.
 path identity in a validated runtime-input manifest as its materialized absolute
 path under a supplied module directory, preserving canonical manifest order and
 including both module-relative and external identities, so caller-owned producer
-actions can reject mutations that would invalidate their completed observation.
+actions can reject mutations that would invalidate their completed observation. The
+same enumeration surface discloses the manifest's environment-variable names and
+unverifiable observation dispositions — identities only, environment values never in
+clear text — so a consumer can explain a digest mismatch by naming what the run was
+recorded to observe. Per-input movement attribution is outside the manifest's
+evidence: it records identities and one combined digest, not per-input digests.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and

@@ -3,6 +3,11 @@
 Parked deferrals. Each entry carries a `Lands:` trigger; the doc is deleted
 when its work lands (git holds history).
 
+- **[manifest-per-input-digests](manifest-per-input-digests.md)** — the runtime-input manifest
+  records identities and one combined digest, so a mismatch never names *which* input moved; a
+  version-2 encoding with per-input digests is a cross-consumer store break deserving its own
+  migration moment. *Lands: when a consumer needs moved-input attribution, or when the manifest
+  encoding is next revised.*
 - **[dependency-heavy-refinement-precision](dependency-heavy-refinement-precision.md)** — the
   declaration-RTA refinement exceeds a 25-minute all-benchmark budget and recovers no reuse on
   the bounded Observer sibling-edit sample. *Lands: before a consumer relies on refined mode to
