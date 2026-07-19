@@ -585,3 +585,75 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "16f138fb9a42f646048ac3ecc79770c4636629905482971d7e1d3bd9ada1bea4"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRootsSkipPinnedReads"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8ef50f4d16c0be8cf5880d83e209d65b08cb9d835143b63b211755bddeb6ce60"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredResolutionIsFailClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "765db77015e402a9762b7a8ca6a82cd3f48a9972e7da2ec744ff403f0706ee3e"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredSymlinkedRoot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2e105d6f641bd59efa48809abc9e98861dd4669ffc79bb8af302a2941b679b7e"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRootValidation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f84e38262a63bbcec05f276f959a8bca591e7c688eadde9c5082e704e157a046"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestModuleCacheRootExcludesDownloadCache"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "77ce50971452b2803415079495ed96a13e7c070e162941e7238064bd3118ec71"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRefusesOutAndBackChain"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3c614348496ee75b771547e70707fa8ea44f03f72ef8835f810da43274602009"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRelativeAfterChdirStaysObserved"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c351fea1b53dcb32cabab026eec74235237d634d26d8a7e5660a9aa0eada122e"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredUnresolvableRootDeclaresNothing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cb07f927d8a6860ccf12ebe4b5289694bf5e473d0f434e4f9c0b01eaf15437cb"
+}

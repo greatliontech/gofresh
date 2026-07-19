@@ -213,10 +213,16 @@ func FromTestLog(log []byte, moduleDir, packageDir string, opts ...TestLogOption
 type TestLogOption func(*testLogConfig)
 
 type testLogConfig struct {
-	excluded []pathID
-	process  string
-	bracket  *Bracket
-	err      error
+	excluded   []pathID
+	guardRoots []guardRootDecl
+	process    string
+	bracket    *Bracket
+	err        error
+}
+
+type guardRootDecl struct {
+	path         string
+	excludeCache bool
 }
 
 // WithCompletedProcess asserts that process terminated normally and every
@@ -259,6 +265,37 @@ func WithBracket(bracket Bracket) TestLogOption {
 			return
 		}
 		c.bracket = &bracket
+	}
+}
+
+// WithToolchainRoot declares the producing toolchain's GOROOT as a
+// guard-covered root (REQ-inputs-guard-covered): a clean absolute path
+// resolved from the same environment the producing run used. Reads provably
+// inside it record neither a path identity nor a per-path disposition — the
+// toolchain guard already pins that content, the closure model's own stdlib
+// collapse. The skip is fail-closed: symlink chains touching anything outside
+// the root, ambiguous resolutions, and missing objects stay observed.
+func WithToolchainRoot(root string) TestLogOption {
+	return guardRootOption(root, false)
+}
+
+// WithModuleCacheRoot declares the producing environment's GOMODCACHE as a
+// guard-covered root (REQ-inputs-guard-covered) for its version-addressed
+// extracted module trees, which immutable version pinning already covers. The
+// download cache subtree (`cache/`) holds mutable metadata no guard pins —
+// version lists, lock files — and stays observed. The same fail-closed
+// resolution rules as the toolchain root apply.
+func WithModuleCacheRoot(root string) TestLogOption {
+	return guardRootOption(root, true)
+}
+
+func guardRootOption(root string, excludeCache bool) TestLogOption {
+	return func(c *testLogConfig) {
+		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+			c.err = fmt.Errorf("runtimeinputs: guard-covered root must be a clean absolute path, got %q", root)
+			return
+		}
+		c.guardRoots = append(c.guardRoots, guardRootDecl{path: root, excludeCache: excludeCache})
 	}
 }
 
@@ -369,6 +406,8 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	envSeen := map[string]bool{}
 	pathSeen := map[pathID]bool{}
 	unverifiableSeen := map[string]bool{}
+	guardRoots := resolveGuardRoots(cfg.guardRoots)
+	guardMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
 
@@ -412,6 +451,13 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := hasParentTraversal(name)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
+			// Guard coverage demands an unambiguous resolution: a traversal
+			// whose lexical cleaning may not match the filesystem, or a
+			// relative read after a directory change, is never provably
+			// inside a root (REQ-inputs-guard-covered fail-closed).
+			if !ambiguousParent && !relativeAfterChdir && guardCovered(p, guardRoots, guardMemo) {
+				continue
+			}
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
@@ -434,6 +480,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := hasParentTraversal(name)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
+			if !ambiguousParent && !relativeAfterChdir && guardCovered(p, guardRoots, guardMemo) {
+				continue
+			}
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
@@ -779,6 +828,91 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 		Reason:       reason,
 		OK:           true,
 	}, nil
+}
+
+// guardRootPair carries a declared guard-covered root in both its lexical and
+// symlink-resolved forms: recorded paths may name either (a symlinked GOROOT
+// appears both ways), while the soundness check always lands on the resolved
+// form. excludeCache marks a module-cache root, whose `cache/` download
+// subtree holds mutable metadata no guard pins.
+type guardRootPair struct {
+	lexical, resolved string
+	excludeCache      bool
+}
+
+// admits reports whether path lies inside the root's covered region in either
+// form — under the root, and for a module cache outside its `cache/` subtree.
+func (r guardRootPair) admits(path string) bool {
+	for _, base := range [2]string{r.lexical, r.resolved} {
+		if !underPath(path, base) {
+			continue
+		}
+		if r.excludeCache && underPath(path, filepath.Join(base, "cache")) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// resolveGuardRoots resolves each declared root once. A root that does not
+// resolve declares nothing — nothing can be provably inside it.
+func resolveGuardRoots(decls []guardRootDecl) []guardRootPair {
+	out := make([]guardRootPair, 0, len(decls))
+	for _, d := range decls {
+		resolved, err := filepath.EvalSymlinks(d.path)
+		if err != nil {
+			continue
+		}
+		out = append(out, guardRootPair{lexical: d.path, resolved: resolved, excludeCache: d.excludeCache})
+	}
+	return out
+}
+
+// guardCovered reports whether p is provably inside a guard-covered root's
+// covered region (REQ-inputs-guard-covered): admitted in lexical form, the
+// existing object it resolves to admitted, and every symlink the kernel walk
+// traverses admitted — an out-and-back chain through anything outside the
+// region is a mutable rebinding point and stays observed, exactly as
+// value-binding coverage treats bracket roots. Missing or uninspectable
+// objects stay observed. Results are memoized per construction: one testlog
+// line's verdict cannot differ from the next's for the same path.
+func guardCovered(p string, roots []guardRootPair, memo map[string]bool) bool {
+	if v, ok := memo[p]; ok {
+		return v
+	}
+	covered := guardCoveredUncached(p, roots)
+	memo[p] = covered
+	return covered
+}
+
+func guardCoveredUncached(p string, roots []guardRootPair) bool {
+	for _, r := range roots {
+		if !r.admits(p) {
+			continue
+		}
+		resolved, links, ok := chainResolve(p)
+		if !ok {
+			return false
+		}
+		if _, err := os.Lstat(resolved); err != nil {
+			return false
+		}
+		if !r.admits(resolved) {
+			return false
+		}
+		for _, link := range links {
+			if !r.admits(link) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func underPath(p, root string) bool {
+	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
 func resolvePath(cwd, name string) string {

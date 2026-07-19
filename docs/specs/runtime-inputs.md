@@ -236,7 +236,10 @@ records, incomplete observations, `stat` metadata, `chdir`, `PWD`, unrepresentab
 identities, unhashable values, external directories or symlink targets, and unknown
 or caller-supplied reasons all remain unverifiable. Thus proof can replace only the
 closure-level conservatism for its admitted effects; the manifest must independently
-be complete, recognized, and fully hashable.
+be complete, recognized, and fully hashable. A guard-covered read
+(REQ-inputs-guard-covered) is outside this invariant's subject matter: it never
+becomes a recorded observation, so there is no disposition to suppress — the covering
+guard, not a proof, carries its evidence.
 
 **REQ-inputs-path-congruence** (invariant): A validity-bearing observed path identity
 MUST materialize to the same filesystem object under the checker that the producing
@@ -299,6 +302,30 @@ manifest, and it is how a caller meets observation coherence for volatile
 paths it cannot hold still — a VCS bookkeeping directory mutated by unrelated
 tooling makes every digest over it environmental noise rather than evidence.
 Environment identities are never excludable through path exclusions.
+
+**REQ-inputs-guard-covered** (behavior): Observation construction from a test-harness
+log MUST accept two classes of caller-declared guard-covered root — the producing
+toolchain's GOROOT, and the producing environment's GOMODCACHE covering its
+version-addressed extracted module trees while its `cache/` download subtree (version
+lists, lock files: mutable metadata no guard pins) stays observed — each a clean
+absolute path from the same environment the producing run used. A read records neither
+a path identity nor any per-path disposition when it is provably inside a declared
+root's covered region: inside in its recorded form (the declared path or its resolved
+form — a symlinked root appears both ways), the existing object it resolves to inside,
+and every symlink the kernel walk traverses inside — a chain that leaves the region
+and re-enters is a mutable rebinding point outside every guard and stays observed,
+exactly as value-binding coverage treats bracket roots. Missing, uninspectable, or
+ambiguously resolved objects stay observed. Covered content is already pinned by
+evidence the fingerprint carries — GOROOT by the toolchain guard, extracted module
+trees by immutable version pinning, the closure model's own collapse for stdlib and
+cached dependencies — so re-observing it adds no protection and forfeits reuse; a
+subject depending on a covered tree's *metadata* beyond what the covering guard pins
+is outside the collapse and outside the admitted observation set alike. The caller's
+soundness inputs are exactly two, and their blast radius is stated: a declared root
+that does not correspond to the producing environment's directory silently vacates
+observation for everything beneath it, and the declared roots' link topology rides the
+same hold-still span REQ-inputs-observation-coherence already places on the caller —
+guards pin covered content, never the shape of the path that reached it.
 
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked

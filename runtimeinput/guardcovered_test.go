@@ -1,0 +1,308 @@
+package runtimeinput
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// completedFromLog builds a completed observation over dir with the bracket
+// covering "data" — the shared harness for guard-covered classification pins.
+func completedFromLog(t *testing.T, dir, log string, opts ...TestLogOption) Observation {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bracket, err := CaptureBracket(dir, []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts = append([]TestLogOption{WithCompletedProcess("package-test-binary:guard"), WithBracket(bracket)}, opts...)
+	obs, err := FromTestLog([]byte(log), dir, dir, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return obs
+}
+
+// TestGuardCoveredRootsSkipPinnedReads pins REQ-inputs-guard-covered: opens
+// and stats provably inside a declared root record no identity and no
+// disposition — the fake GOROOT stands for any guard-pinned tree — while the
+// same reads without the declaration observe (and stat seals) as before.
+func TestGuardCoveredRootsSkipPinnedReads(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(t.TempDir(), "goroot")
+	if err := os.MkdirAll(filepath.Join(root, "src", "os"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pinned := filepath.Join(root, "src", "os", "file.go")
+	if err := os.WriteFile(pinned, []byte("package os\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := "open " + pinned + "\nstat " + pinned + "\n"
+
+	obs := completedFromLog(t, dir, log, WithToolchainRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("guard-covered reads sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 || len(d.Unverifiable) != 0 {
+		t.Fatalf("guard-covered reads recorded: %+v", d)
+	}
+
+	// The identical log without the declaration observes and seals.
+	bare := completedFromLog(t, t.TempDir(), log)
+	bareState, err := CompletedState(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bareState.Unverifiable {
+		t.Fatal("undeclared out-of-bracket reads did not seal unverifiable")
+	}
+}
+
+// TestGuardCoveredResolutionIsFailClosed pins the fail-closed boundary: a
+// module-local symlink INTO the root stays a mutable observed input, a path
+// under the root escaping OUT of it stays observed, and a missing path under
+// the root stays observed.
+func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "modcache")
+	if err := os.MkdirAll(filepath.Join(root, "dep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(root, "dep", "d.go")
+	if err := os.WriteFile(inside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "mutable.txt")
+	if err := os.WriteFile(outside, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	escape := filepath.Join(root, "escape.txt")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("module symlink into root is observed", func(t *testing.T) {
+		dir := t.TempDir()
+		link := filepath.Join(dir, "into-root")
+		if err := os.Symlink(inside, link); err != nil {
+			t.Fatal(err)
+		}
+		obs := completedFromLog(t, dir, "open "+link+"\n", WithToolchainRoot(root))
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable {
+			t.Fatal("module-local symlink into a guard root skipped observation")
+		}
+	})
+	t.Run("escape out of root is observed", func(t *testing.T) {
+		obs := completedFromLog(t, t.TempDir(), "open "+escape+"\n", WithToolchainRoot(root))
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable {
+			t.Fatal("symlink escaping the guard root skipped observation")
+		}
+	})
+	t.Run("ambiguous traversal under root is observed", func(t *testing.T) {
+		// Lexical cleaning of a parent traversal may not match the
+		// filesystem, so the read is never provably inside the root.
+		traversal := root + "/dep/../dep/d.go"
+		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", WithToolchainRoot(root))
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable {
+			t.Fatal("ambiguous traversal under the guard root skipped observation")
+		}
+	})
+	t.Run("missing path under root is observed", func(t *testing.T) {
+		obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "gone.go")+"\n", WithToolchainRoot(root))
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable {
+			t.Fatal("unresolvable path under the guard root skipped observation")
+		}
+	})
+}
+
+// TestGuardCoveredSymlinkedRoot pins both root forms: with the declared root
+// itself a symlink, reads recorded through either the link or the resolved
+// directory are covered.
+func TestGuardCoveredSymlinkedRoot(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "real-goroot")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pinned := filepath.Join(real, "a.go")
+	if err := os.WriteFile(pinned, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "goroot-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	log := "open " + filepath.Join(link, "a.go") + "\nopen " + pinned + "\n"
+	obs := completedFromLog(t, t.TempDir(), log, WithToolchainRoot(link))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("symlinked-root reads sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 {
+		t.Fatalf("symlinked-root reads recorded: %v", d.Paths)
+	}
+}
+
+// TestGuardCoveredRootValidation pins the option contract: relative, empty,
+// or unclean roots are refused at construction.
+func TestGuardCoveredRootValidation(t *testing.T) {
+	for _, bad := range []string{"", "relative/root", "/unclean//root", "/trail/"} {
+		_, err := FromTestLog([]byte(""), t.TempDir(), ".", WithCompletedProcess("package-test-binary:x"), WithToolchainRoot(bad))
+		if err == nil || !strings.Contains(err.Error(), "guard-covered root") {
+			t.Fatalf("root %q accepted: %v", bad, err)
+		}
+	}
+}
+
+// TestModuleCacheRootExcludesDownloadCache pins the module-cache class
+// (REQ-inputs-guard-covered): version-addressed extracted trees skip, while
+// the download cache's mutable metadata — version lists, lock files — stays
+// observed even though it lies under the declared root.
+func TestModuleCacheRootExcludesDownloadCache(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "modcache")
+	extracted := filepath.Join(root, "example.com", "dep@v1.2.3", "d.go")
+	if err := os.MkdirAll(filepath.Dir(extracted), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extracted, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	metadata := filepath.Join(root, "cache", "download", "example.com", "dep", "@v", "list")
+	if err := os.MkdirAll(filepath.Dir(metadata), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadata, []byte("v1.2.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	obs := completedFromLog(t, t.TempDir(), "open "+extracted+"\nopen "+metadata+"\n", WithModuleCacheRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Describe(st.Manifest, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 || d.Paths[0] != metadata {
+		t.Fatalf("paths = %v, want exactly the download-cache metadata observed", d.Paths)
+	}
+	if !st.Unverifiable {
+		t.Fatal("out-of-bracket metadata read did not seal unverifiable")
+	}
+}
+
+// TestGuardCoveredRefusesOutAndBackChain pins the per-link rule: a symlink
+// chain that leaves the covered region and re-enters is a mutable rebinding
+// point outside every guard, so the read stays observed even though its final
+// resolution lands inside the root.
+func TestGuardCoveredRefusesOutAndBackChain(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "goroot")
+	real := filepath.Join(root, "realdir")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "f.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hop := filepath.Join(t.TempDir(), "hop")
+	if err := os.Symlink(real, hop); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(hop, filepath.Join(root, "hopdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "hopdir", "f.go")+"\n", WithToolchainRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("out-and-back symlink chain skipped observation")
+	}
+	d, err := Describe(st.Manifest, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 {
+		t.Fatalf("paths = %v, want the chained read observed", d.Paths)
+	}
+}
+
+// TestGuardCoveredRelativeAfterChdirStaysObserved pins the untested gate arm:
+// a relative read after a working-directory change is never provably inside a
+// root, even when its lexical resolution lands there.
+func TestGuardCoveredRelativeAfterChdirStaysObserved(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "goroot")
+	sub := filepath.Join(root, "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := "chdir " + sub + "\nopen f.go\n"
+	obs := completedFromLog(t, t.TempDir(), log, WithToolchainRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("relative read after chdir skipped observation")
+	}
+	d, err := Describe(st.Manifest, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 {
+		t.Fatalf("paths = %v, want the post-chdir read observed", d.Paths)
+	}
+}
+
+// TestGuardCoveredUnresolvableRootDeclaresNothing pins resolveGuardRoots'
+// fail-closed arm: a declared root that does not exist covers nothing, so
+// reads lexically under it stay observed.
+func TestGuardCoveredUnresolvableRootDeclaresNothing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "never-created")
+	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "f.go")+"\n", WithToolchainRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("read under an unresolvable root skipped observation")
+	}
+}
