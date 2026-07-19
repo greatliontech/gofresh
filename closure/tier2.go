@@ -413,6 +413,14 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
 			if prog.roots[subject.Symbol] == nil {
+				// Degradation is only for symbols the package under test
+				// declares: a name it never declares — a typo, a non-function,
+				// or a recompiled dependency's symbol — is a caller error, not
+				// subject-local unavailability, and widened evidence for it
+				// would attribute a phantom subject.
+				if !declaresSymbol(prog, group.path, subject.Symbol) {
+					return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+				}
 				if floorHash == "" {
 					var floorErr error
 					floorHash, floorErr = h.maximalHash(group.path)
@@ -475,6 +483,37 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 	return results, nil
+}
+
+// declaresSymbol reports whether the package under test or its external test
+// variant declares symbol as a function or method — distinguishing a subject
+// that exists but cannot root in this test binary (degradable) from a name the
+// package never declares (a caller error).
+func declaresSymbol(prog *program, pkgPath, symbol string) bool {
+	recv, method, isMethod := strings.Cut(symbol, ".")
+	for _, p := range prog.pkgs {
+		if p.Types == nil || (p.PkgPath != pkgPath && p.PkgPath != pkgPath+"_test") {
+			continue
+		}
+		scope := p.Types.Scope()
+		if !isMethod {
+			if _, ok := scope.Lookup(symbol).(*types.Func); ok {
+				return true
+			}
+			continue
+		}
+		tn, ok := scope.Lookup(recv).(*types.TypeName)
+		if !ok {
+			continue
+		}
+		ms := types.NewMethodSet(types.NewPointer(tn.Type()))
+		for i := 0; i < ms.Len(); i++ {
+			if ms.At(i).Obj().Name() == method {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // packageBatch groups one package's requested subjects for shared analysis.
