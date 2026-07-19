@@ -15,6 +15,10 @@ import (
 	"testing"
 )
 
+// testEntryDigest satisfies the entry-digest shape for hand-built manifests;
+// state computation always recomputes real digests over current content.
+const testEntryDigest = "00000000000000000000000000000000"
+
 type cancelAfterChecks struct {
 	context.Context
 	after, checks int
@@ -43,7 +47,7 @@ func TestCurrentContextHonorsCancellation(t *testing.T) {
 
 func TestCurrentContextStopsBetweenInputsAndFileChunks(t *testing.T) {
 	moduleDir := t.TempDir()
-	encoded, err := encode(manifest{Version: manifestVersion, Env: []string{"A", "B"}})
+	encoded, err := encode(manifest{Version: manifestVersion, Env: []envInput{{Name: "A", Digest: testEntryDigest}, {Name: "B", Digest: testEntryDigest}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +583,7 @@ func TestSymlinkDirectoryToExternalTargetIsUnverifiable(t *testing.T) {
 	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: pkg/data") {
 		t.Fatalf("got unverifiable=%v reason=%q, want uncovered escaping identity", st.Unverifiable, st.Reason)
 	}
-	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "pkg/data"}}}), moduleDir)
+	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data"}, Digest: testEntryDigest}}}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,7 +612,7 @@ func TestSymlinkFileToExternalTargetIsUnverifiable(t *testing.T) {
 	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: pkg/data.txt") {
 		t.Fatalf("state = %+v, want uncovered escaping identity", st)
 	}
-	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "pkg/data.txt"}}}), moduleDir)
+	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data.txt"}, Digest: testEntryDigest}}}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +757,7 @@ func TestAbsolutePathAfterChdirDoesNotAcquireRelativeDisposition(t *testing.T) {
 
 func TestCurrentRejectsRelativePathTraversal(t *testing.T) {
 	moduleDir, _ := testDirs(t)
-	encoded := rawManifest(t, manifest{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "../secret.txt"}}})
+	encoded := rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "../secret.txt"}, Digest: testEntryDigest}}})
 	if _, err := Current(encoded, moduleDir); err == nil {
 		t.Fatal("Current accepted a relative path escaping the module")
 	}
@@ -762,9 +766,9 @@ func TestCurrentRejectsRelativePathTraversal(t *testing.T) {
 func TestCurrentRejectsMalformedManifestIdentities(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	for _, m := range []manifest{
-		{Version: manifestVersion, Env: []string{"BAD\nNAME"}},
-		{Version: manifestVersion, Paths: []pathID{{Kind: pathRel, Path: "bad\npath"}}},
-		{Version: manifestVersion, Paths: []pathID{{Kind: pathAbs, Path: "relative"}}},
+		{Version: manifestVersion, Env: []envInput{{Name: "BAD\nNAME", Digest: testEntryDigest}}},
+		{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "bad\npath"}, Digest: testEntryDigest}}},
+		{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathAbs, Path: "relative"}, Digest: testEntryDigest}}},
 	} {
 		encoded := rawManifest(t, m)
 		if _, err := Current(encoded, moduleDir); err == nil {
@@ -777,11 +781,11 @@ func TestModuleRelPaths(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "hosts")
 	enc, err := encode(manifest{
 		Version: manifestVersion,
-		Env:     []string{"PEW_X"},
-		Paths: []pathID{
-			{Kind: pathRel, Path: "data/fixture.txt"},
-			{Kind: pathRel, Path: "a.txt"},
-			{Kind: pathAbs, Path: abs},
+		Env: []envInput{{Name: "PEW_X", Digest: testEntryDigest}},
+		Paths: []pathInput{
+			{pathID: pathID{Kind: pathRel, Path: "data/fixture.txt"}, Digest: testEntryDigest},
+			{pathID: pathID{Kind: pathRel, Path: "a.txt"}, Digest: testEntryDigest},
+			{pathID: pathID{Kind: pathAbs, Path: abs}, Digest: testEntryDigest},
 		},
 	})
 	if err != nil {
@@ -813,9 +817,9 @@ func TestPathsMaterializesRelativeAndExternalIdentities(t *testing.T) {
 	external := filepath.Join(t.TempDir(), "external.txt")
 	encoded := rawManifest(t, manifest{
 		Version: manifestVersion,
-		Paths: []pathID{
-			{Kind: pathAbs, Path: external},
-			{Kind: pathRel, Path: "fixtures/input.txt"},
+		Paths: []pathInput{
+			{pathID: pathID{Kind: pathAbs, Path: external}, Digest: testEntryDigest},
+			{pathID: pathID{Kind: pathRel, Path: "fixtures/input.txt"}, Digest: testEntryDigest},
 		},
 	})
 	got, err := Paths(encoded, "module")
@@ -854,7 +858,11 @@ func TestMergeUnionsIndependentProcessManifests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(m.Env, ","); got != "MERGE_A,MERGE_B" {
+	var envNames []string
+	for _, entry := range m.Env {
+		envNames = append(envNames, entry.Name)
+	}
+	if got := strings.Join(envNames, ","); got != "MERGE_A,MERGE_B" {
 		t.Fatalf("merged env = %q", got)
 	}
 	if len(m.Paths) != 2 || m.Paths[0].Path != "pkg/a.txt" || m.Paths[1].Path != "pkg/b.txt" {
@@ -1133,17 +1141,17 @@ func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
 func TestManifestEncodingIsCanonical(t *testing.T) {
 	got, err := encode(manifest{
 		Version: manifestVersion,
-		Env:     []string{"B", "A", "B"},
-		Paths: []pathID{
-			{Kind: pathRel, Path: "z"},
-			{Kind: pathRel, Path: "z"},
+		Env: []envInput{{Name: "B", Digest: testEntryDigest}, {Name: "A", Digest: testEntryDigest}, {Name: "B", Digest: testEntryDigest}},
+		Paths: []pathInput{
+			{pathID: pathID{Kind: pathRel, Path: "z"}, Digest: testEntryDigest},
+			{pathID: pathID{Kind: pathRel, Path: "z"}, Digest: testEntryDigest},
 		},
 		Unverifiable: []string{"z", "a", "z"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantJSON := `{"v":1,"env":["A","B"],"paths":[{"k":"rel","p":"z"}],"unverifiable":["a","z"]}`
+	wantJSON := `{"v":1,"env":[{"n":"A","d":"00000000000000000000000000000000"},{"n":"B","d":"00000000000000000000000000000000"}],"paths":[{"k":"rel","p":"z","d":"00000000000000000000000000000000"}],"unverifiable":["a","z"]}`
 	want := base64.RawURLEncoding.EncodeToString([]byte(wantJSON))
 	if got != want {
 		decoded, _ := base64.RawURLEncoding.DecodeString(got)
@@ -1209,8 +1217,8 @@ func FuzzMergeAlgebra(f *testing.F) {
 			}
 			encoded, err := encode(manifest{
 				Version:      manifestVersion,
-				Env:          []string{"FUZZ_" + token},
-				Paths:        []pathID{{Kind: pathRel, Path: "fuzz/x" + token}},
+				Env: []envInput{{Name: "FUZZ_" + token, Digest: testEntryDigest}},
+				Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "fuzz/x" + token}, Digest: testEntryDigest}},
 				Unverifiable: unverifiable,
 			})
 			if err != nil {

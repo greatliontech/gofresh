@@ -94,15 +94,30 @@ func CompletedState(observation Observation) (State, error) {
 }
 
 type manifest struct {
-	Version      int      `json:"v"`
-	Env          []string `json:"env,omitempty"`
-	Paths        []pathID `json:"paths,omitempty"`
-	Unverifiable []string `json:"unverifiable,omitempty"`
+	Version      int         `json:"v"`
+	Env          []envInput  `json:"env,omitempty"`
+	Paths        []pathInput `json:"paths,omitempty"`
+	Unverifiable []string    `json:"unverifiable,omitempty"`
+}
+
+// envInput is one observed environment identity with the digest of the value
+// the producing run saw — names and digests only, values never in clear text.
+type envInput struct {
+	Name   string `json:"n"`
+	Digest string `json:"d"`
 }
 
 type pathID struct {
 	Kind string `json:"k"`
 	Path string `json:"p"`
+}
+
+// pathInput is one observed path identity with the digest of the object state
+// the producing run saw. The identity is the embedded pathID alone — the
+// digest is evidence about it, never part of its key.
+type pathInput struct {
+	pathID
+	Digest string `json:"d"`
 }
 
 // Incomplete constructs canonical evidence for a process whose runtime-input
@@ -177,18 +192,18 @@ func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Obser
 	if err != nil {
 		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
-	for i, id := range m.Paths {
-		path, err := materializePath(moduleDir, id)
+	for i, entry := range m.Paths {
+		path, err := materializePath(moduleDir, entry.pathID)
 		if err != nil {
 			return Observation{}, err
 		}
-		m.Paths[i] = pathID{Kind: pathAbs, Path: path}
+		// The digest is recomputed by the converted state below: the framed
+		// stream is identity-dependent, so a converted identity's digest is
+		// never carried over.
+		m.Paths[i] = pathInput{pathID: pathID{Kind: pathAbs, Path: path}}
 	}
-	encoded, err := encode(m)
-	if err != nil {
-		return Observation{}, err
-	}
-	converted, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	sortManifest(&m)
+	converted, err := stateFromManifest(context.Background(), m, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -445,7 +460,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			}
 			if !envSeen[name] {
 				envSeen[name] = true
-				m.Env = append(m.Env, name)
+				m.Env = append(m.Env, envInput{Name: name})
 			}
 		case "open":
 			ambiguousParent := hasParentTraversal(name)
@@ -468,7 +483,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			}
 			if !pathSeen[id] {
 				pathSeen[id] = true
-				m.Paths = append(m.Paths, id)
+				m.Paths = append(m.Paths, pathInput{pathID: id})
 			}
 			if ambiguousParent {
 				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
@@ -493,7 +508,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			}
 			if !pathSeen[id] {
 				pathSeen[id] = true
-				m.Paths = append(m.Paths, id)
+				m.Paths = append(m.Paths, pathInput{pathID: id})
 			}
 			addUnverifiable(&m, unverifiableSeen, "stat metadata input: "+id.displayPath())
 			if ambiguousParent {
@@ -510,7 +525,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				addUnverifiable(&m, unverifiableSeen, reason)
 			} else if !cfg.excludes(id) && !pathSeen[id] {
 				pathSeen[id] = true
-				m.Paths = append(m.Paths, id)
+				m.Paths = append(m.Paths, pathInput{pathID: id})
 			}
 			addUnverifiable(&m, unverifiableSeen, "working-directory change")
 			if reason == "" && !cfg.excludes(id) && ambiguousParent {
@@ -539,7 +554,8 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	// unverifiable, never bound. The reasons enter the manifest before
 	// encoding, so they persist and merge with the evidence.
 	coverage := cfg.bracket.coverage()
-	for _, id := range m.Paths {
+	for _, entry := range m.Paths {
+		id := entry.pathID
 		covered, escapedLink, err := coverage.covers(id)
 		if err != nil {
 			return Observation{}, err
@@ -553,11 +569,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		}
 	}
 	sortManifest(&m)
-	encoded, err := encode(m)
-	if err != nil {
-		return Observation{}, err
-	}
-	st, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	st, err := stateFromManifest(context.Background(), m, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -578,10 +590,8 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			reason = "observation bracket unverifiable: " + reason
 		}
 		addUnverifiable(&m, unverifiableSeen, reason)
-		if encoded, err = encode(m); err != nil {
-			return Observation{}, err
-		}
-		if st, err = currentWithNormalizedEnv(encoded, moduleDir, normalized); err != nil {
+		sortManifest(&m)
+		if st, err = stateFromManifest(context.Background(), m, moduleDir, normalized); err != nil {
 			return Observation{}, err
 		}
 	}
@@ -693,16 +703,16 @@ func MergeEnv(moduleDir string, env []string, observations ...Observation) (Obse
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
-		for _, name := range m.Env {
-			if !envSeen[name] {
-				envSeen[name] = true
-				merged.Env = append(merged.Env, name)
+		for _, entry := range m.Env {
+			if !envSeen[entry.Name] {
+				envSeen[entry.Name] = true
+				merged.Env = append(merged.Env, entry)
 			}
 		}
-		for _, id := range m.Paths {
-			if !pathSeen[id] {
-				pathSeen[id] = true
-				merged.Paths = append(merged.Paths, id)
+		for _, entry := range m.Paths {
+			if !pathSeen[entry.pathID] {
+				pathSeen[entry.pathID] = true
+				merged.Paths = append(merged.Paths, entry)
 			}
 		}
 		for _, reason := range m.Unverifiable {
@@ -775,38 +785,73 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 	if err != nil {
 		return State{OK: false}, err
 	}
-	moduleDir, err = filepath.Abs(moduleDir)
+	return stateFromManifest(ctx, m, moduleDir, env)
+}
+
+// envEntryDigest digests one environment input: presence and value, names
+// only ever disclosed.
+func envEntryDigest(env []string, name string) string {
+	value, ok := processenv.Lookup(env, name)
+	valueHash := sha256.Sum256([]byte(value))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%t %x", ok, valueHash))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// pathEntryDigest digests one path input's observed object state through the
+// same framed stream hashPath has always produced, into its own hasher.
+func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string) (string, bool, string, error) {
+	h := sha256.New()
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil)
+	if err != nil {
+		return "", false, "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:32], unverifiable, reason, nil
+}
+
+// stateFromManifest computes every input's current digest, writes it into the
+// manifest's entries, folds the combined digest over identities and entry
+// digests, and encodes — construction and check share it, so a recorded
+// manifest whose inputs are unmoved re-encodes byte-identically
+// (REQ-inputs-guard) and per-input attribution falls out of comparing a
+// recorded entry's digest with the recomputed one.
+func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []string) (State, error) {
+	// The fold runs in canonical order regardless of the caller's collection
+	// order — encode re-sorts anyway, and a fold that disagreed with the
+	// encoded order would silently decouple digest from manifest.
+	sortManifest(&m)
+	moduleDir, err := filepath.Abs(moduleDir)
 	if err != nil {
 		return State{}, err
 	}
-
 	h := sha256.New()
 	fprintf(h, "version %d\n", m.Version)
-	for _, name := range m.Env {
+	for i, entry := range m.Env {
 		if err := ctx.Err(); err != nil {
 			return State{OK: false}, err
 		}
-		value, ok := processenv.Lookup(env, name)
-		valueHash := sha256.Sum256([]byte(value))
-		fprintf(h, "env %s %t %x\n", name, ok, valueHash)
+		d := envEntryDigest(env, entry.Name)
+		m.Env[i].Digest = d
+		fprintf(h, "env %s %s\n", entry.Name, d)
 	}
 	unverifiable := len(m.Unverifiable) > 0
 	reason := firstReason(m.Unverifiable)
-	for _, id := range m.Paths {
+	for i, entry := range m.Paths {
 		if err := ctx.Err(); err != nil {
 			return State{OK: false}, err
 		}
-		path, err := materializePath(moduleDir, id)
+		path, err := materializePath(moduleDir, entry.pathID)
 		if err != nil {
 			return State{}, err
 		}
 		// Manifest hashing never filters: exclusion is per identity, never per
 		// content (REQ-inputs-exclusions), so a recorded directory identity
 		// digests everything its hash walks.
-		pathUnverifiable, pathReason, err := hashPath(ctx, h, id, path, moduleDir, nil)
+		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleDir)
 		if err != nil {
 			return State{}, err
 		}
+		m.Paths[i].Digest = d
+		fprintf(h, "path %s %s %s\n", entry.Kind, entry.Path, d)
 		if pathUnverifiable {
 			unverifiable = true
 			if reason == "" {
@@ -814,11 +859,15 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 			}
 		}
 	}
-	for _, reason := range m.Unverifiable {
-		fprintf(h, "unverifiable %s\n", reason)
+	for _, r := range m.Unverifiable {
+		fprintf(h, "unverifiable %s\n", r)
 	}
 	if err := ctx.Err(); err != nil {
 		return State{OK: false}, err
+	}
+	encoded, err := encode(m)
+	if err != nil {
+		return State{}, err
 	}
 	sum := h.Sum(nil)
 	return State{
@@ -1198,7 +1247,7 @@ func firstReason(reasons []string) string {
 }
 
 func sortManifest(m *manifest) {
-	sort.Strings(m.Env)
+	sort.Slice(m.Env, func(i, j int) bool { return m.Env[i].Name < m.Env[j].Name })
 	m.Env = compact(m.Env)
 	sort.Slice(m.Paths, func(i, j int) bool {
 		if m.Paths[i].Kind != m.Paths[j].Kind {
@@ -1266,10 +1315,8 @@ type Description struct {
 }
 
 // Describe decodes a canonical manifest into its identity set, materializing
-// path identities under moduleDir exactly as Paths does. It lets a consumer
-// explain a runtime-input digest mismatch by naming what is being watched;
-// per-input movement attribution is not derivable — the manifest records
-// identities and one combined digest, not per-input digests.
+// path identities under moduleDir exactly as Paths does. It names what a run
+// was recorded to observe; MovedInputs names which of it moved.
 func Describe(encoded, moduleDir string) (Description, error) {
 	m, err := decode(encoded)
 	if err != nil {
@@ -1280,17 +1327,75 @@ func Describe(encoded, moduleDir string) (Description, error) {
 		return Description{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
 	d := Description{
-		EnvNames:     append([]string(nil), m.Env...),
 		Unverifiable: append([]string(nil), m.Unverifiable...),
 	}
-	for _, id := range m.Paths {
-		path, err := materializePath(abs, id)
+	for _, entry := range m.Env {
+		d.EnvNames = append(d.EnvNames, entry.Name)
+	}
+	for _, entry := range m.Paths {
+		path, err := materializePath(abs, entry.pathID)
 		if err != nil {
 			return Description{}, err
 		}
 		d.Paths = append(d.Paths, path)
 	}
 	return d, nil
+}
+
+// MovedInputs names every input in a recorded manifest whose current digest
+// differs from the recorded one — the attribution behind a runtime-input
+// digest mismatch (REQ-inputs-guard): environment inputs as "env <name>"
+// (values never disclosed), path inputs by their display identity. An empty
+// result with a moved combined digest cannot occur: beyond the entries, the
+// combined digest folds only recorded-verbatim data (the version and the
+// unverifiable reasons), which cannot move at check time.
+func MovedInputs(encoded, moduleDir string, env []string) ([]string, error) {
+	return MovedInputsContext(context.Background(), encoded, moduleDir, env)
+}
+
+// MovedInputsContext is MovedInputs under caller-owned cancellation.
+func MovedInputsContext(ctx context.Context, encoded, moduleDir string, env []string) ([]string, error) {
+	if ctx == nil {
+		return nil, errors.New("runtimeinputs: nil context")
+	}
+	m, err := decode(encoded)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(moduleDir)
+	if err != nil {
+		return nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	var moved []string
+	for _, entry := range m.Env {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if envEntryDigest(normalized, entry.Name) != entry.Digest {
+			moved = append(moved, "env "+entry.Name)
+		}
+	}
+	for _, entry := range m.Paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		path, err := materializePath(abs, entry.pathID)
+		if err != nil {
+			return nil, err
+		}
+		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, abs)
+		if err != nil {
+			return nil, err
+		}
+		if d != entry.Digest {
+			moved = append(moved, "path "+entry.displayPath())
+		}
+	}
+	return moved, nil
 }
 
 // Paths returns every path identity in a canonical manifest as an absolute path,
@@ -1306,8 +1411,8 @@ func Paths(encoded, moduleDir string) ([]string, error) {
 		return nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
 	out := make([]string, 0, len(m.Paths))
-	for _, id := range m.Paths {
-		path, err := materializePath(moduleDir, id)
+	for _, entry := range m.Paths {
+		path, err := materializePath(moduleDir, entry.pathID)
 		if err != nil {
 			return nil, err
 		}
@@ -1353,13 +1458,46 @@ func decode(s string) (manifest, error) {
 	return m, nil
 }
 
+// validEntryDigest is the per-input digest shape: 32 lowercase hex characters
+// (a truncated SHA-256), exactly as the combined digest renders.
+func validEntryDigest(d string) bool {
+	if len(d) != 32 {
+		return false
+	}
+	for _, r := range d {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func validateManifest(m manifest) error {
-	for _, name := range m.Env {
+	for i, entry := range m.Env {
+		name := entry.Name
 		if name == "" || !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n") {
 			return fmt.Errorf("runtimeinputs: invalid env name %q", name)
 		}
+		if !validEntryDigest(entry.Digest) {
+			return fmt.Errorf("runtimeinputs: invalid env input digest for %q", name)
+		}
+		// Each array is a set once per IDENTITY: entries compact only when
+		// byte-identical, so a duplicate identity with a differing digest
+		// would otherwise survive into an accepted manifest.
+		if i > 0 && m.Env[i-1].Name == name {
+			return fmt.Errorf("runtimeinputs: duplicate env identity %q", name)
+		}
 	}
-	for _, id := range m.Paths {
+	for i, entry := range m.Paths {
+		if !validEntryDigest(entry.Digest) {
+			return fmt.Errorf("runtimeinputs: invalid path input digest for %q", entry.Path)
+		}
+		if i > 0 && m.Paths[i-1].pathID == entry.pathID {
+			return fmt.Errorf("runtimeinputs: duplicate path identity %q", entry.Path)
+		}
+	}
+	for _, entry := range m.Paths {
+		id := entry.pathID
 		if id.Path == "" || !utf8.ValidString(id.Path) || strings.ContainsAny(id.Path, "\x00\r\n") {
 			return fmt.Errorf("runtimeinputs: invalid path %q", id.Path)
 		}

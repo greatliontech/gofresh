@@ -14,22 +14,36 @@ with no source change.
 
 **runtime-input manifest** (term): the recorded set of observed runtime-input
 identities — environment variable names and file paths, values never stored in clear
-text — re-hashed at check time to detect a change.
+text — each carrying the digest of the input state the producing run saw, re-hashed
+at check time to detect a change and to name which input moved.
 
-**runtime-input manifest encoding** (term): version 1 is the unpadded base64url
-encoding of a compact JSON object whose keys, in order, are `v`, optional `env`,
-optional `paths`, and optional `unverifiable`; `v` is `1`, `env` and `unverifiable`
-are arrays of strings, and `paths` is an array of objects with keys `k` and `p`,
-where `k` is `rel` for a slash-separated module-relative path or `abs` for a clean
-absolute host path. Each array is a set encoded once per member in lexical order;
-paths order first by `k`, then `p`, comparing valid UTF-8 bytes. JSON strings use the
-compact escaping emitted by Go's `encoding/json`: quote, reverse solidus, and control
-characters are escaped; less-than, greater-than, ampersand, U+2028, and U+2029 use
-lowercase `\u` escapes; other non-control Unicode is UTF-8. Producers emit only this
-canonical form. Readers require the complete base64url and decoded JSON bytes to be
-canonical, rejecting malformed or duplicate identities, duplicate or unknown fields,
-invalid UTF-8, alternate ordering or escaping, trailing data, and unsupported versions
-rather than silently dropping evidence.
+**runtime-input manifest encoding** (term): the one canonical encoding is the unpadded
+base64url encoding of a compact JSON object whose keys, in order, are `v`, optional
+`env`, optional `paths`, and optional `unverifiable`; `v` is `1`, `unverifiable` is an
+array of strings, `env` is an array of objects with keys `n` (the variable name) and
+`d`, and `paths` is an array of objects with keys `k`, `p`, and `d`, where `k` is
+`rel` for a slash-separated module-relative path or `abs` for a clean absolute host
+path. Each `d` is that input's entry digest: 32 lowercase hex characters of truncated
+SHA-256 — for an environment input over its presence and value hash, for a path input
+over the identity-framed object-state stream (content, mode, size, modification time;
+a directory's membership walk) — so the combined state digest is the fold, in
+canonical manifest order, of the version, each identity with its entry digest, and
+each recorded unverifiable reason, and a mismatch attributes to named inputs. The
+per-entry digest is a deterministic function of one input's state: whoever holds a
+manifest can confirm a guessed value of a single low-entropy environment input
+offline, a narrower confirmation than the whole-fold guess the combined digest alone
+permitted — callers holding secret environment values exclude them from observation
+or treat the manifest itself as sensitive. Each
+array is a set encoded once per identity in lexical order; paths order first by `k`,
+then `p`, comparing valid UTF-8 bytes. JSON strings use the compact escaping emitted
+by Go's `encoding/json`: quote, reverse solidus, and control characters are escaped;
+less-than, greater-than, ampersand, U+2028, and U+2029 use lowercase `\u` escapes;
+other non-control Unicode is UTF-8. Producers emit only this canonical form. Readers
+require the complete base64url and decoded JSON bytes to be canonical, rejecting
+malformed or duplicate identities, malformed digests, duplicate or unknown fields,
+invalid UTF-8, alternate ordering or escaping, trailing data, and unsupported
+versions rather than silently dropping evidence — exactly one schema is ever
+readable, and an encoding produced by an older tool fails validation and regenerates.
 
 **dirty recording** (term): a recording whose source or inputs are not faithfully
 reproducible from its recorded commit, usable for working-tree reuse but barred as a
@@ -61,8 +75,10 @@ actions can reject mutations that would invalidate their completed observation. 
 same enumeration surface discloses the manifest's environment-variable names and
 unverifiable observation dispositions — identities only, environment values never in
 clear text — so a consumer can explain a digest mismatch by naming what the run was
-recorded to observe. Per-input movement attribution is outside the manifest's
-evidence: it records identities and one combined digest, not per-input digests.
+recorded to observe. The same surface attributes a digest mismatch to the moved
+inputs by identity: each entry's recorded digest compared against its current
+recompute names exactly the movers, environment inputs by name alone with values
+undisclosed.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
