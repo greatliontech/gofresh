@@ -15,3 +15,4 @@ when its work lands (git holds history).
   packages' drifted subjects unverifiable, where the observability tier isolates per subject.
   *Lands: when refined batch analysis degrades a package-local load or analysis failure to
   subject-local unavailable evidence the way the observability tier's isolation retry does.*
+- **[observability-toolchain-accessors-unaudited](observability-toolchain-accessors-unaudited.md)** — runtime.GOROOT and toolchain-derived paths fail observability audit, so non-pure toolchain-reading witnesses cannot carry proofs though their reads are guard-covered. *Lands: when the observability audit next extends, or when a consumer needs those proofs.*
