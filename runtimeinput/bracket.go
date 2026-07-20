@@ -271,7 +271,7 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, ex
 		return "", false, "", err
 	}
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions))
+	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), false)
 	if err != nil {
 		return "", false, "", err
 	}

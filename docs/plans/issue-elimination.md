@@ -32,7 +32,7 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
   inputs every run; classify creation-observed scratch as non-input
 - [x] 4.5 Residue disposition: PWD process-local env reads and /home
   external-directory inputs — eliminate, admit, or accept as genuine
-- [ ] 5. Observability audit: toolchain accessors (runtime.GOROOT class) in
+- [x] 5. Observability audit: toolchain accessors (runtime.GOROOT class) in
   the observability analyzer's proof leg; the dynamic-behavior and
   os.ReadFile proof refusals, the purity-suppression-vs-proof-leg
   interaction, and the /home external-directory MkdirAll-ancestor class

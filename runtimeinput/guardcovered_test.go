@@ -834,3 +834,104 @@ func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 		}
 	}
 }
+
+// An external directory's stat binds existence alone: the entry
+// revalidates equal while the directory exists, moves when it vanishes
+// or becomes a file, and the open/listing form keeps ordinary
+// classification (REQ-inputs-external-dir-existence).
+func TestExternalDirectoryStatBindsExistence(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "ancestor")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	obs := completedFromLog(t, dir, "stat "+outside+"\n")
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("external dir stat sealed: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 || !strings.Contains(d.Paths[0], "ancestor") || len(d.Unverifiable) != 0 {
+		t.Fatalf("existence entry not recorded cleanly: %+v", d)
+	}
+	for i := 0; i < 2; i++ {
+		cur, err := CurrentEnv(st.Manifest, dir, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cur.Digest != st.Digest {
+			t.Fatalf("recomputation %d moved while the directory exists", i)
+		}
+	}
+	// Vanishing moves the digest.
+	if err := os.RemoveAll(outside); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := CurrentEnv(st.Manifest, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Digest == st.Digest {
+		t.Fatal("vanished directory did not move the digest")
+	}
+	// Becoming a file moves it too.
+	if err := os.WriteFile(outside, []byte("now a file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cur, err = CurrentEnv(st.Manifest, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Digest == st.Digest {
+		t.Fatal("directory replaced by a file did not move the digest")
+	}
+
+	// The open/listing form keeps ordinary classification.
+	if err := os.Remove(outside); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+outside+"\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable || !strings.Contains(st.Reason, "external directory input") {
+		t.Fatalf("external dir open lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	}
+
+	// An external FILE stat still seals metadata dependence.
+	file := filepath.Join(filepath.Dir(outside), "plain.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "stat "+file+"\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("external file stat lost its seal")
+	}
+	dFile, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := false
+	for _, reason := range dFile.Unverifiable {
+		if strings.Contains(reason, "stat metadata input") {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatalf("external file stat lost the metadata seal: %v", dFile.Unverifiable)
+	}
+}

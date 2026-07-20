@@ -26,7 +26,8 @@ array of strings, `env` is an array of objects with keys `n` (the variable name)
 path. Each `d` is that input's entry digest: 32 lowercase hex characters of truncated
 SHA-256 — for an environment input over its presence and value hash, for a path input
 over the identity-framed object-state stream (content, mode, size, modification time;
-a directory's membership walk) — so the combined state digest is the fold, in
+a module-relative directory's membership walk; an external directory's existence
+marker) — so the combined state digest is the fold, in
 canonical manifest order, of the version, each identity with its entry digest, and
 each recorded unverifiable reason, and a mismatch attributes to named inputs. The
 per-entry digest is a deterministic function of one input's state: whoever holds a
@@ -427,6 +428,22 @@ device topology. A subject depending on the sink's metadata beyond its
 existence is outside the admitted observation set, exactly as covered-tree
 metadata dependence already is.
 
+**REQ-inputs-external-dir-existence** (behavior): A `stat` of an absolute directory
+outside the module tree MUST record an ordinary absolute-path identity whose digest
+binds existence-as-a-directory alone: path-creation machinery probes ancestors —
+`/home` on the way to a user cache directory — consuming exactly "exists and is a
+directory", so the record revalidates equal while the directory exists and moves
+when it vanishes or becomes a non-directory. The entry is exempt from value-binding
+bracket coverage exactly as machine-fact identities are — existence equality at
+revalidation is its binding, with the same one-process-run in-window residual;
+that residual also covers an external object recorded as a file or absence that a
+third party turns into a directory inside the ingest's own classify-to-digest
+window, which rebinds as existence instead of sealing.
+Opening or listing an external directory keeps ordinary classification
+(listing-as-data stays outside the admitted observation set), and metadata
+dependence beyond existence is outside the admitted observation set exactly as
+covered-tree metadata already is.
+
 **REQ-inputs-machine-identity** (behavior): The allowlisted stable-machine-fact
 identities — `/proc/cpuinfo`, `/proc/meminfo`, and `/proc/sys/kernel/osrelease`,
 the sources the projection's own gatherer reads — MUST digest as the stable
@@ -471,8 +488,9 @@ comparison is returned rather than interpreted as clean.
 
 **REQ-inputs-unbounded** (behavior): An observed input whose full observed value the
 analysis cannot bound — a metadata-only inspection, a directory or symlink resolving
-outside the module, a relative path under a working-directory change the run stream
-cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
+outside the module (the existence-bound stat form of an external directory
+excepted, REQ-inputs-external-dir-existence), a relative path under a
+working-directory change the run stream cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
 for each package process — MUST be treated as unverifiable rather than valid, since an
 input identity that cannot be pinned under the shared checking environment is not
 proof of a stable input. One `PWD` posture IS bounded and admits recordless: a

@@ -479,6 +479,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	}
 	guardMemo := map[string]bool{}
 	scratchMemo := map[string]bool{}
+	dirExistence := map[pathID]bool{}
 	cwd := packageDir
 	cwdChanged := false
 	// PWD's runtime value is the spawn directory, which no env-name
@@ -565,6 +566,23 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
 				continue
 			}
+			// An external directory's stat binds existence alone — an
+			// ancestor probe from path-creation machinery — recording a
+			// revalidatable identity instead of sealing metadata
+			// (REQ-inputs-external-dir-existence).
+			if !ambiguousParent && !relativeAfterChdir && filepath.IsAbs(p) {
+				if _, inModule := relUnder(moduleDir, p); !inModule {
+					if info, statErr := os.Stat(p); statErr == nil && info.IsDir() {
+						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
+						if !pathSeen[id] {
+							pathSeen[id] = true
+							m.Paths = append(m.Paths, pathInput{pathID: id})
+						}
+						dirExistence[id] = true
+						continue
+					}
+				}
+			}
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
@@ -633,6 +651,12 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		// process — the projection equality at revalidation IS their
 		// binding (REQ-inputs-machine-identity).
 		if id.Kind == pathAbs && machineFactIdentities[id.Path] {
+			continue
+		}
+		// Existence-bound external directories: existence equality at
+		// revalidation is their binding, exactly as the machine-fact
+		// projection is (REQ-inputs-external-dir-existence).
+		if dirExistence[id] {
 			continue
 		}
 		covered, escapedLink, err := coverage.covers(id)
@@ -920,7 +944,7 @@ func envEntryDigest(env []string, name string) string {
 // same framed stream hashPath has always produced, into its own hasher.
 func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string) (string, bool, string, error) {
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil)
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, true)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -1290,7 +1314,13 @@ var machineFactIdentities = func() map[string]bool {
 // ungatherable arm is testable; production always points at the guard.
 var currentMachineFacts = guard.CurrentMachineFacts
 
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool) (bool, string, error) {
+// existenceBindsExternalDirs distinguishes the two hashing consumers:
+// manifest entries bind an external directory's existence
+// (REQ-inputs-external-dir-existence), while a value-binding bracket
+// root must fingerprint content — an existence-bound root would hold
+// still while everything beneath it churns — so bracket hashing keeps
+// the refusal.
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, existenceBindsExternalDirs bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -1348,8 +1378,22 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		fprintf(h, "path %s %s dir %x\n", id.Kind, id.Path, sum)
 		return unv, reason, nil
 	case info.IsDir():
-		fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-		return true, "external directory input: " + p, nil
+		// An absolute external directory binds existence alone:
+		// ancestor stats from path-creation machinery consume only
+		// "exists as a directory"; listing and metadata dependence
+		// beyond that are outside the admitted observation set.
+		// Existing external dirs never mint identities — classifyPath
+		// refuses them at parse time — so entries reaching this arm are
+		// stat-admitted or since-materialized within the ingest's own
+		// classify-to-digest window, the clause's accepted residual
+		// (REQ-inputs-external-dir-existence). Bracket roots never
+		// existence-bind — see the parameter.
+		if !existenceBindsExternalDirs {
+			fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
+			return true, "external directory input: " + p, nil
+		}
+		fprintf(h, "path %s %s direxists\n", id.Kind, id.Path)
+		return false, "", nil
 	default:
 		fprintf(h, "path %s %s unhashable-mode %s\n", id.Kind, id.Path, mode.String())
 		return true, "unhashable runtime input: " + p, nil
