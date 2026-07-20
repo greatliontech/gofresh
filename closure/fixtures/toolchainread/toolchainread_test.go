@@ -32,7 +32,11 @@ func TestReadDirUnderToolchain(*testing.T) {
 }
 
 func TestWriteIntoToolchain(*testing.T) {
-	_ = os.WriteFile(filepath.Join(runtime.GOROOT(), "scratch.txt"), []byte("x"), 0o644)
+	// The nonexistent intermediate directory makes the write fail on
+	// every host - executing this fixture must never touch a writable
+	// toolchain tree - while the analyzer still sees the os.WriteFile
+	// shape it must refuse.
+	_ = os.WriteFile(filepath.Join(runtime.GOROOT(), "gofresh-fixture-never-created", "scratch.txt"), []byte("x"), 0o644)
 }
 
 func TestDynamicComponent(*testing.T) {
