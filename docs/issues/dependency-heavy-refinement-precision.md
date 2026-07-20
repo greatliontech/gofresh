@@ -1,7 +1,10 @@
 # Declaration refinement widens on dependency-heavy benchmark programs
 
 Lands: before a consumer relies on refined mode to recover reuse for a
-dependency-heavy benchmark package.
+dependency-heavy benchmark package, and only after re-measuring the
+open-world population under the shared-dynamic-state mutation analysis
+(REQ-closure-shared-dynamic-state) shows the residual is worth the
+alias-level extension below.
 
 ## Context
 
@@ -32,11 +35,16 @@ Measured on the Observer sample, single process:
   unverifiable with the same reason, check 1m20s stale). Process-wide peak
   across view constructions, capture, and check: ~4.9–5.0 GB.
 
-The surviving blocker is structural, not a single widener: one package-scope
-variable whose type can carry callable state anywhere in the subject's
-module-scoped import graph marks every subject of the package open-world, and
-open-world refined evidence is unverifiable regardless of what declaration-RTA
-proves. The Observer benchmark graph contains 2,486 such variables across 233
+The surviving blocker is structural, not a single widener. Since this was
+measured, the type-level blanket has been narrowed: only variables the
+program can mutate after initialization downgrade
+(REQ-closure-shared-dynamic-state) — by-value carriers clear when no write,
+address capture, or pointer-receiver method use exists, while alias-handing
+carriers (interface values, pointers/maps/slices reaching dynamic state)
+still downgrade on ANY use, fail-closed. The dependency-heavy population
+below is dominated by alias-handing shapes (interface-typed registries,
+unsafe-laden protobuf internals), so clearing it still requires the
+SSA-level value-flow analysis previously concluded: The Observer benchmark graph contains 2,486 such variables across 233
 of its 460 module-scoped packages (696 packages in the full import graph
 including the standard library). Top offenders in order: otel semconv v1.41.0
 (615), protobuf internal/impl (173), x/text/language (86),
