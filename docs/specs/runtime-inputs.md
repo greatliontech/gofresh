@@ -343,11 +343,26 @@ tooling makes every digest over it environmental noise rather than evidence.
 Environment identities are never excludable through path exclusions.
 
 **REQ-inputs-guard-covered** (behavior): Observation construction from a test-harness
-log MUST accept two classes of caller-declared guard-covered root — the producing
-toolchain's GOROOT, and the producing environment's GOMODCACHE covering its
+log MUST accept three classes of caller-declared guard-covered root — the producing
+toolchain's GOROOT; the producing environment's GOMODCACHE covering its
 version-addressed extracted module trees while its `cache/` download subtree (version
-lists, lock files: mutable metadata no guard pins) stays observed — each a clean
-absolute path from the same environment the producing run used. A read records neither
+lists, lock files: mutable metadata no guard pins) stays observed; and the producing
+environment's GOCACHE, its discovered `fuzz` corpus excepted — each a clean
+absolute path from the same environment the producing run used. The build
+cache's admission is toolchain-mediated observational equivalence rather than
+per-object immutability: everything else under it, the mutable action index and
+its bookkeeping included, is machinery whose consumption through the go
+toolchain yields behavior determined by inputs the fingerprint already pins —
+sources through the closure, the toolchain through its guard, the build
+configuration — so any correct cache state is observationally equivalent,
+re-observing it adds no protection, and its churn under concurrent builds
+forfeits reuse for free. The `fuzz` subtree is the counterexample and stays
+observed: a discovered corpus a `-fuzz` producing run consumes semantically,
+derivable from nothing the fingerprint pins. A cache violating Go's contract
+is outside this model's trust boundary exactly as a corrupted GOROOT is, and a
+subject reading cache objects as data rather than through the toolchain is
+outside the admitted observation set exactly as covered-tree metadata
+dependence already is. A read records neither
 a path identity nor any per-path disposition when it is provably inside a declared
 root's covered region: inside in its recorded form (the declared path or its resolved
 form — a symlinked root appears both ways), the existing object it resolves to inside,

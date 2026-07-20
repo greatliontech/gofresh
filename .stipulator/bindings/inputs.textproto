@@ -588,7 +588,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRootsSkipPinnedReads"
   role: BINDING_ROLE_TESTS
@@ -597,7 +597,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredResolutionIsFailClosed"
   role: BINDING_ROLE_TESTS
@@ -606,7 +606,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredSymlinkedRoot"
   role: BINDING_ROLE_TESTS
@@ -615,7 +615,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "d69d1a93e792d708927269203e07e69f84f0317de176d6497084c66e85a51289"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRootValidation"
   role: BINDING_ROLE_TESTS
@@ -624,7 +624,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestModuleCacheRootExcludesDownloadCache"
   role: BINDING_ROLE_TESTS
@@ -633,7 +633,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRefusesOutAndBackChain"
   role: BINDING_ROLE_TESTS
@@ -642,7 +642,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredRelativeAfterChdirStaysObserved"
   role: BINDING_ROLE_TESTS
@@ -651,7 +651,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-guard-covered"
-  content_hash: "76334e129ef9780ff9ca0ba560ac0dbab0e875ab394bb7d0d8e5439eaf72c50b"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestGuardCoveredUnresolvableRootDeclaresNothing"
   role: BINDING_ROLE_TESTS
@@ -701,4 +701,22 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAdoptBoundaryValidationAndProvenance"
   role: BINDING_ROLE_TESTS
   shape_hash: "e42fce3c6e27c1f0816bc42038a2ae3ea83ca84f278afcdff59919272938a834"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.WithBuildCacheRoot"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "9cc46060e146189c80149dbb8ed1fa09deec74e39c4d35096b03e929dd0266c6"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "3bdd6612165dfd60bd48f6a0bce75634fce13a10f6573b15ae36d4466416bf90"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBuildCacheRootCoversToolchainMediatedReads"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "13f00d4ca27a6a1649da5e6f9428bcfe999217c8af91db17d373a97d07e7daeb"
 }

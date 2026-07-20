@@ -306,3 +306,106 @@ func TestGuardCoveredUnresolvableRootDeclaresNothing(t *testing.T) {
 		t.Fatal("read under an unresolvable root skipped observation")
 	}
 }
+
+// The build-cache root covers every toolchain-mediated read — the
+// mutable action index (-a entries) and root bookkeeping included, which
+// per-object immutability could never admit — while the discovered fuzz
+// corpus stays observed (REQ-inputs-guard-covered). Without the
+// declaration the same reads observe as before, and a symlink escaping
+// the root stays observed.
+func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(filepath.Join(root, "0d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	derived := filepath.Join(root, "0d", "0d1bed3295c5eb6e-d")
+	index := filepath.Join(root, "0d", "0d1bed3295c5eb6e-a")
+	trim := filepath.Join(root, "trim.txt")
+	for _, p := range []string{derived, index, trim} {
+		if err := os.WriteFile(p, []byte("cache object"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	log := "open " + derived + "\nopen " + index + "\nopen " + trim + "\nstat " + derived + "\n"
+
+	obs := completedFromLog(t, dir, log, WithBuildCacheRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("build-cache reads sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 || len(d.Unverifiable) != 0 {
+		t.Fatalf("build-cache reads recorded: %+v", d)
+	}
+
+	// The fuzz corpus is the carve-out: discovered machine-local state a
+	// -fuzz run consumes semantically, staying observed under the
+	// declared root exactly as the module cache's cache/ subtree does.
+	if err := os.MkdirAll(filepath.Join(root, "fuzz", "corpus"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(root, "fuzz", "corpus", "seed1")
+	if err := os.WriteFile(seed, []byte("interesting input"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obsFuzz := completedFromLog(t, dir, "open "+seed+"\n", WithBuildCacheRoot(root))
+	stFuzz, err := CompletedState(obsFuzz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dFuzz, err := Describe(stFuzz.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dFuzz.Paths)+len(dFuzz.Unverifiable) == 0 {
+		t.Fatal("fuzz corpus read skipped — discovered state must stay observed")
+	}
+
+	// Undeclared, the identical reads observe.
+	obs = completedFromLog(t, dir, log)
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) == 0 {
+		t.Fatal("undeclared build-cache reads recorded nothing")
+	}
+
+	// Fail-closed: a link under the root escaping it stays observed.
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("mutable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "0d", "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+link+"\n", WithBuildCacheRoot(root))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) == 0 {
+		t.Fatal("escaping link skipped — the fail-closed walk must observe it")
+	}
+
+	// A relative root is refused exactly as the sibling classes refuse it.
+	if _, err := FromTestLog([]byte("open x\n"), dir, dir, WithBuildCacheRoot("relative/path")); err == nil {
+		t.Fatal("relative build-cache root accepted")
+	}
+}

@@ -241,8 +241,11 @@ type testLogConfig struct {
 }
 
 type guardRootDecl struct {
-	path         string
-	excludeCache bool
+	path string
+	// excludeSub names one direct subtree that stays observed — the
+	// module cache's mutable "cache" metadata, the build cache's
+	// discovered "fuzz" corpus; empty covers the whole root.
+	excludeSub string
 }
 
 // WithCompletedProcess asserts that process terminated normally and every
@@ -296,7 +299,7 @@ func WithBracket(bracket Bracket) TestLogOption {
 // collapse. The skip is fail-closed: symlink chains touching anything outside
 // the root, ambiguous resolutions, and missing objects stay observed.
 func WithToolchainRoot(root string) TestLogOption {
-	return guardRootOption(root, false)
+	return guardRootOption(root, "")
 }
 
 // WithModuleCacheRoot declares the producing environment's GOMODCACHE as a
@@ -306,16 +309,35 @@ func WithToolchainRoot(root string) TestLogOption {
 // version lists, lock files — and stays observed. The same fail-closed
 // resolution rules as the toolchain root apply.
 func WithModuleCacheRoot(root string) TestLogOption {
-	return guardRootOption(root, true)
+	return guardRootOption(root, "cache")
 }
 
-func guardRootOption(root string, excludeCache bool) TestLogOption {
+// WithBuildCacheRoot declares the producing environment's GOCACHE as a
+// guard-covered root (REQ-inputs-guard-covered), its discovered `fuzz`
+// corpus excepted. The admission is toolchain-mediated observational
+// equivalence, not per-object immutability: everything else under the
+// build cache — the mutable action index and its bookkeeping included —
+// is machinery whose consumption through the go toolchain yields
+// behavior determined by inputs the fingerprint already pins (sources
+// through the closure, the toolchain through its guard, the build
+// configuration), so any correct cache state is observationally
+// equivalent and re-observing adds no protection while churn under
+// concurrent builds forfeits reuse for free. The fuzz corpus is the
+// counterexample that stays observed: discovered machine-local state a
+// -fuzz run consumes semantically, derivable from nothing the
+// fingerprint pins. The same fail-closed resolution rules as the
+// toolchain root apply.
+func WithBuildCacheRoot(root string) TestLogOption {
+	return guardRootOption(root, "fuzz")
+}
+
+func guardRootOption(root, excludeSub string) TestLogOption {
 	return func(c *testLogConfig) {
 		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 			c.err = fmt.Errorf("runtimeinputs: guard-covered root must be a clean absolute path, got %q", root)
 			return
 		}
-		c.guardRoots = append(c.guardRoots, guardRootDecl{path: root, excludeCache: excludeCache})
+		c.guardRoots = append(c.guardRoots, guardRootDecl{path: root, excludeSub: excludeSub})
 	}
 }
 
@@ -927,21 +949,22 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 // guardRootPair carries a declared guard-covered root in both its lexical and
 // symlink-resolved forms: recorded paths may name either (a symlinked GOROOT
 // appears both ways), while the soundness check always lands on the resolved
-// form. excludeCache marks a module-cache root, whose `cache/` download
-// subtree holds mutable metadata no guard pins.
+// form. excludeSub names the root's one uncovered direct subtree — the
+// module cache's mutable `cache/` metadata, the build cache's discovered
+// `fuzz/` corpus — which stays observed.
 type guardRootPair struct {
 	lexical, resolved string
-	excludeCache      bool
+	excludeSub        string
 }
 
 // admits reports whether path lies inside the root's covered region in either
-// form — under the root, and for a module cache outside its `cache/` subtree.
+// form — under the root and outside its excluded subtree, when one is named.
 func (r guardRootPair) admits(path string) bool {
 	for _, base := range [2]string{r.lexical, r.resolved} {
 		if !underPath(path, base) {
 			continue
 		}
-		if r.excludeCache && underPath(path, filepath.Join(base, "cache")) {
+		if r.excludeSub != "" && underPath(path, filepath.Join(base, r.excludeSub)) {
 			return false
 		}
 		return true
@@ -958,7 +981,7 @@ func resolveGuardRoots(decls []guardRootDecl) []guardRootPair {
 		if err != nil {
 			continue
 		}
-		out = append(out, guardRootPair{lexical: d.path, resolved: resolved, excludeCache: d.excludeCache})
+		out = append(out, guardRootPair{lexical: d.path, resolved: resolved, excludeSub: d.excludeSub})
 	}
 	return out
 }
