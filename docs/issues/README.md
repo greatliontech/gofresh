@@ -25,3 +25,9 @@ when its work lands (git holds history).
   gatherer opens only listed files; a new unlisted fact source would silently stall every
   machine-fact-gathering witness again. *Lands: when gatherFacts next gains or changes a
   fact source, or when the observation harness gains a self-tracing test surface.*
+- **[interprocedural-fresh-path-proofs](interprocedural-fresh-path-proofs.md)** — the
+  fresh-path observability grammar is intraprocedural: scratch paths built in or passed
+  through helpers refuse the proof (28 corpus witnesses); propagation needs an
+  attributed interprocedural extension of the SSA walk. *Lands: when the observability
+  audit next extends beyond admission classes, or when a consuming corpus's serving is
+  demonstrably gated on helper-mediated scratch patterns.*
