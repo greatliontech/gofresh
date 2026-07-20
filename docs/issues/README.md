@@ -16,3 +16,4 @@ when its work lands (git holds history).
   *Lands: when refined batch analysis degrades a package-local load or analysis failure to
   subject-local unavailable evidence the way the observability tier's isolation retry does.*
 - **[observability-toolchain-accessors-unaudited](observability-toolchain-accessors-unaudited.md)** — runtime.GOROOT and toolchain-derived paths fail observability audit, so non-pure toolchain-reading witnesses cannot carry proofs though their reads are guard-covered. *Lands: when the observability audit next extends, or when a consumer needs those proofs.*
+- **[observation-guard-classes-ranked](observation-guard-classes-ranked.md)** — per-test attribution ranks three fixable observation classes blocking ~97% of gofresh witness serving: GOCACHE (~300, deferred guard class), /tmp ephemeral (128), machine-guard proc reads (18). *Lands: when observation next gains a guard-covered or ephemeral class, or a consumer prioritizes warming.*
