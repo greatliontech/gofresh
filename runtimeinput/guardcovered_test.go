@@ -684,3 +684,103 @@ func TestNullSinkRecordsNothing(t *testing.T) {
 		t.Fatalf("sink alias lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
 	}
 }
+
+// Deeper reads under a declared ephemeral root whose object is absent
+// at ingest admit as per-run scratch — state that outlived the run
+// would still be present — while a persistent deeper file stays
+// observed, an existing escaping link on the path stays observed, and
+// the same vanished path without the declaration stays observed
+// (REQ-inputs-ephemeral-root).
+func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(t.TempDir(), "scratch")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(root, "run123", "deep", "data.txt")
+	obs := completedFromLog(t, dir, "open "+gone+"\nstat "+filepath.Join(root, "run123")+"\n", WithEphemeralTempRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("vanished scratch sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 || len(d.Unverifiable) != 0 {
+		t.Fatalf("vanished scratch recorded: %+v", d)
+	}
+
+	// A persistent deeper file is state flowing between runs: observed.
+	kept := filepath.Join(root, "kept.txt")
+	if err := os.WriteFile(kept, []byte("outlived the run"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+kept+"\n", WithEphemeralTempRoot(root))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dKept, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dKept.Paths)+len(dKept.Unverifiable) == 0 {
+		t.Fatal("persistent deeper file skipped observation")
+	}
+
+	// An existing link escaping the root redirects the runtime read
+	// outside it: the absent leaf under the link stays observed.
+	outside := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+filepath.Join(link, "gone.txt")+"\n", WithEphemeralTempRoot(root))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("absent leaf behind an escaping link skipped observation")
+	}
+
+	// A DANGLING link ancestor is detectable evidence the runtime read
+	// escaped the root: it exists, does not resolve, and must refuse —
+	// ascending past it would admit genuine external input.
+	dangle := filepath.Join(root, "dangle")
+	target := filepath.Join(t.TempDir(), "vanishing")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, dangle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+filepath.Join(dangle, "gone.txt")+"\n", WithEphemeralTempRoot(root))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("absent leaf behind a dangling link skipped observation")
+	}
+
+	// Undeclared, the identical vanished path observes and seals.
+	obs = completedFromLog(t, dir, "open "+gone+"\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("undeclared vanished path skipped observation")
+	}
+}

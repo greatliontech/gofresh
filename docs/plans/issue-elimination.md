@@ -25,9 +25,9 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
 - [x] 4.2 Machine-fact allowlist completion: /proc/sys/kernel/osrelease
   (the guard's own KernelVersion read) joins the projection identities;
   /proc/stat gets a class decision
-- [ ] 4.3 /dev/null identity admission: contentless kernel sink read/written
+- [x] 4.3 /dev/null identity admission: contentless kernel sink read/written
   across the corpus; identity-only, nothing to digest
-- [ ] 4.4 Self-created temp scratch: paths the test process itself creates
+- [x] 4.4 Self-created temp scratch: paths the test process itself creates
   under the ephemeral root (t.TempDir randomized names) observed as moved
   inputs every run; classify creation-observed scratch as non-input
 - [ ] 4.5 Residue disposition: PWD process-local env reads and /home

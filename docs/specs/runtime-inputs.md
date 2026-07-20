@@ -390,14 +390,28 @@ root to mint fresh per-run subtrees, no state a subject observes flows from
 the root's existing content (name-collision retries are invisible salt), and
 the root's listing is volatile machine noise no guard could pin — so any
 writable root is observationally equivalent and re-observing it converts
-environmental machinery into a standing refusal. The admission is the root
-identity alone: every deeper read stays observed, an unresolvable root
-declares nothing, a root lying inside the module tree in either form is
-refused outright — it would vacate a content-bearing module digest, not an
-external refusal — and the wrong-root blast radius for admissible roots is
-one external identity wide by construction. A subject reading the root's
-listing as data is outside the admitted observation set, exactly as
-covered-tree metadata and cache-objects-as-data dependence already are.
+environmental machinery into a standing refusal. Beyond the root identity,
+a deeper read under a declared root whose object is ABSENT at observation
+ingest MUST also record nothing: it is per-run scratch by construction —
+state that outlived the run would still be present, and a pre-existing file
+a subject read still exists at ingest and stays observed and digested. The
+scratch admission is fail-closed on resolution: the absent path's nearest
+existing ancestor must itself resolve under the root's resolved form, so a
+traversal through an existing link escaping the root stays observed; a
+since-vanished link component that redirected the runtime read is the
+class's accepted residual, one process run wide, alongside the stated
+assumption that concurrently executing witnesses do not mutate one
+another's inputs. A subject consuming-and-removing persistent external
+state under the root — making external input masquerade as scratch — is
+outside the admitted observation set (such a subject is not rerunnable
+deterministically regardless). Otherwise every deeper read stays observed,
+an unresolvable root declares nothing, a root lying inside the module tree
+in either form is refused outright — it would vacate a content-bearing
+module digest, not an external refusal — and the wrong-root blast radius
+for admissible roots is one external identity wide by construction. A
+subject reading the root's listing as data is outside the admitted
+observation set, exactly as covered-tree metadata and
+cache-objects-as-data dependence already are.
 
 **REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
 the unix contentless sink device; on platforms whose sink is not an absolute

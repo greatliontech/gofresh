@@ -474,6 +474,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		return Observation{}, err
 	}
 	guardMemo := map[string]bool{}
+	scratchMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
 
@@ -521,7 +522,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -546,7 +547,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := hasParentTraversal(name)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -1037,6 +1038,68 @@ func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error
 		out = append(out, [2]string{r, resolved})
 	}
 	return out, nil
+}
+
+// ephemeralScratch reports whether p lies under a declared ephemeral
+// root with its object absent at ingest: per-run scratch by
+// construction — state that outlived the run would still be present and
+// stay observed. (Callers test ephemeralRoot first, so the root's own
+// identity never reaches here; underPath alone would also admit
+// p == root.) Fail-closed on resolution: the nearest existing ancestor
+// must resolve under a root's resolved form — an existing-but-dangling
+// link ancestor refuses — so a traversal through an existing escaping
+// link stays observed; a since-vanished redirecting link component is
+// the class's accepted one-run residual (REQ-inputs-ephemeral-root).
+func ephemeralScratch(p string, roots [][2]string, memo map[string]bool) bool {
+	if len(roots) == 0 {
+		return false
+	}
+	if v, ok := memo[p]; ok {
+		return v
+	}
+	res := func() bool {
+		under := false
+		for _, r := range roots {
+			if underPath(p, r[0]) || underPath(p, r[1]) {
+				under = true
+				break
+			}
+		}
+		if !under {
+			return false
+		}
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			return false
+		}
+		// Walk to the nearest existing ancestor and demand it resolve
+		// inside a declared root: an existing out-of-root link on the
+		// path means the runtime read escaped and must stay observed.
+		anc := filepath.Dir(p)
+		for {
+			resolved, err := filepath.EvalSymlinks(anc)
+			if err == nil {
+				for _, r := range roots {
+					if underPath(resolved, r[1]) {
+						return true
+					}
+				}
+				return false
+			}
+			// An ancestor that EXISTS but does not resolve — a dangling
+			// link — is detectable evidence the runtime read escaped the
+			// root: refuse. Only a truly absent ancestor ascends.
+			if _, lerr := os.Lstat(anc); !os.IsNotExist(lerr) {
+				return false
+			}
+			parent := filepath.Dir(anc)
+			if parent == anc {
+				return false
+			}
+			anc = parent
+		}
+	}()
+	memo[p] = res
+	return res
 }
 
 // nullSink reports whether p is exactly the contentless sink device:
