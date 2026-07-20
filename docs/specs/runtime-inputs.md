@@ -438,11 +438,28 @@ bracket coverage exactly as machine-fact identities are — existence equality a
 revalidation is its binding, with the same one-process-run in-window residual;
 that residual also covers an external object recorded as a file or absence that a
 third party turns into a directory inside the ingest's own classify-to-digest
-window, which rebinds as existence instead of sealing.
+window, which rebinds as existence instead of sealing, and — via the
+absent-stat clause's vanish direction — a directory vanishing between the
+probe and ingest, which binds absence.
 Opening or listing an external directory keeps ordinary classification
 (listing-as-data stays outside the admitted observation set), and metadata
 dependence beyond existence is outside the admitted observation set exactly as
 covered-tree metadata already is.
+
+**REQ-inputs-absent-stat** (behavior): A `stat` resolving to an ABSENT identity
+outside the module tree MUST record the identity with no metadata disposition:
+absence is the entire observable state, the missing-arm digest revalidates equal
+while the identity stays absent and stales exactly when it appears, and the
+entry is exempt from value-binding bracket coverage exactly as the other
+existence bindings are, with an in-window residual that is WIDER here than the
+sibling classes' and is accepted by name: an identity appearing between the
+probe and ingest binds presence the run never saw, and — the vanish direction —
+an identity present at the probe that vanishes before ingest binds absence
+although the run may have consumed it, a probe-to-ingest window as wide as the
+run itself, realistic as a package upgrade or uninstall racing a test run; both
+serve until the identity next moves. Executable PATH-probe misses — every
+`LookPath` candidate that is not there — are the motivating class; a present
+target keeps ordinary stat classification.
 
 **REQ-inputs-machine-identity** (behavior): The allowlisted stable-machine-fact
 identities — `/proc/cpuinfo`, `/proc/meminfo`, and `/proc/sys/kernel/osrelease`,

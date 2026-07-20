@@ -935,3 +935,48 @@ func TestExternalDirectoryStatBindsExistence(t *testing.T) {
 		t.Fatalf("external file stat lost the metadata seal: %v", dFile.Unverifiable)
 	}
 }
+
+// A stat of an absent external identity binds absence alone: recorded,
+// no seal, digest stable while absent, staled by appearance - the
+// LookPath-miss class - while a PRESENT external file's stat keeps the
+// metadata seal (REQ-inputs-absent-stat).
+func TestAbsentExternalStatBindsAbsence(t *testing.T) {
+	dir := t.TempDir()
+	probe := filepath.Join(t.TempDir(), "bin", "git")
+	if err := os.MkdirAll(filepath.Dir(probe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	obs := completedFromLog(t, dir, "stat "+probe+"\n")
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("absent stat sealed: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 || len(d.Unverifiable) != 0 {
+		t.Fatalf("absence entry not recorded cleanly: %+v", d)
+	}
+	cur, err := CurrentEnv(st.Manifest, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Digest != st.Digest {
+		t.Fatal("recomputation moved while the identity stays absent")
+	}
+	// Appearance stales.
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cur, err = CurrentEnv(st.Manifest, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Digest == st.Digest {
+		t.Fatal("appeared identity did not move the digest")
+	}
+}

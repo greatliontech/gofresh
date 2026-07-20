@@ -479,7 +479,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	}
 	guardMemo := map[string]bool{}
 	scratchMemo := map[string]bool{}
-	dirExistence := map[pathID]bool{}
+	existenceBound := map[pathID]bool{}
 	cwd := packageDir
 	cwdChanged := false
 	// PWD's runtime value is the spawn directory, which no env-name
@@ -578,7 +578,23 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 							pathSeen[id] = true
 							m.Paths = append(m.Paths, pathInput{pathID: id})
 						}
-						dirExistence[id] = true
+						existenceBound[id] = true
+						continue
+					} else if os.IsNotExist(statErr) {
+						// A stat of an ABSENT external identity binds
+						// absence alone — absence IS the whole observable,
+						// so no metadata seal applies, and the missing-arm
+						// digest stales exactly when the identity appears.
+						// The class every executable PATH probe's misses
+						// fall into; the run-wide vanish-direction residual
+						// is named and accepted in the spec
+						// (REQ-inputs-absent-stat).
+						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
+						if !pathSeen[id] {
+							pathSeen[id] = true
+							m.Paths = append(m.Paths, pathInput{pathID: id})
+						}
+						existenceBound[id] = true
 						continue
 					}
 				}
@@ -653,10 +669,11 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		if id.Kind == pathAbs && machineFactIdentities[id.Path] {
 			continue
 		}
-		// Existence-bound external directories: existence equality at
-		// revalidation is their binding, exactly as the machine-fact
-		// projection is (REQ-inputs-external-dir-existence).
-		if dirExistence[id] {
+		// Existence-bound identities - external directories and absent
+		// stat targets: existence equality at revalidation is their
+		// binding, exactly as the machine-fact projection is
+		// (REQ-inputs-external-dir-existence, REQ-inputs-absent-stat).
+		if existenceBound[id] {
 			continue
 		}
 		covered, escapedLink, err := coverage.covers(id)
