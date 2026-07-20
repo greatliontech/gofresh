@@ -1,10 +1,14 @@
 package runtimeinput
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/guard"
 )
 
 // completedFromLog builds a completed observation over dir with the bracket
@@ -535,5 +539,96 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 		WithCompletedProcess("package-test-binary:guard"), WithBracket(missingBracket),
 		WithEphemeralTempRoot(filepath.Join(dir, "missing"))); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
 		t.Fatalf("unresolvable interior root error = %v", err)
+	}
+}
+
+// The allowlisted machine-fact identities digest as the stable machine
+// projection, never as raw content or stat metadata: a record naming
+// them revalidates equal on the same machine even though the files'
+// bytes and mtimes move on every read (REQ-inputs-machine-identity).
+// Linux-only: the identities exist only there.
+func TestMachineFactIdentitiesDigestAsStableProjection(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("machine-fact identities are Linux proc files")
+	}
+	dir := t.TempDir()
+	obs := completedFromLog(t, dir, "open /proc/cpuinfo\nopen /proc/meminfo\n")
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("machine-fact reads sealed unverifiable: %s", st.Reason)
+	}
+	// Two later recomputations: proc mtimes have moved (they stamp at
+	// stat time) and the MHz lines may have — the projection digest
+	// must hold all three equal.
+	for i := 0; i < 2; i++ {
+		cur, err := CurrentEnv(st.Manifest, dir, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cur.Digest != st.Digest {
+			t.Fatalf("recomputation %d moved: %s vs %s", i, cur.Digest, st.Digest)
+		}
+	}
+}
+
+// The clause's remaining arms: an ungatherable projection is unhashable
+// and unverifiable, never silently skipped; a moved projection moves the
+// digest (frame-level: two fingerprints, two frames); and a
+// non-allowlisted proc identity keeps ordinary classification.
+func TestMachineFactArmsAndContrast(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("machine-fact identities are Linux proc files")
+	}
+	dir := t.TempDir()
+
+	// Ungatherable: the injected failure surfaces as unverifiable.
+	prev := currentMachineFacts
+	currentMachineFacts = func() (guard.MachineFacts, error) {
+		return guard.MachineFacts{}, errors.New("injected gather failure")
+	}
+	obs := completedFromLog(t, dir, "open /proc/cpuinfo\n")
+	currentMachineFacts = prev
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable || !strings.Contains(st.Reason, "unhashable runtime input: /proc/cpuinfo") {
+		t.Fatalf("ungatherable projection not surfaced: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	}
+
+	// Movement: two distinct projections produce two distinct digests.
+	sealDigest := func(facts guard.MachineFacts) string {
+		prev := currentMachineFacts
+		currentMachineFacts = func() (guard.MachineFacts, error) { return facts, nil }
+		defer func() { currentMachineFacts = prev }()
+		obs := completedFromLog(t, dir, "open /proc/cpuinfo\n")
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Digest
+	}
+	small := guard.MachineFacts{CPUModel: "m", PhysicalCores: 2, LogicalCores: 4, TotalRAMBytes: 1, OS: "linux", KernelVersion: "k"}
+	big := small
+	big.LogicalCores = 32
+	if sealDigest(small) == sealDigest(big) {
+		t.Fatal("a changed projection did not move the digest")
+	}
+
+	// Contrast: a non-allowlisted proc identity keeps ordinary
+	// classification (recorded, bracket-uncovered → unverifiable).
+	obs = completedFromLog(t, dir, "open /proc/stat\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The assertion pins ORDINARY classification, not mere presence: an
+	// allowlist widened to /proc/stat would record it verifiably and
+	// still pass a presence check.
+	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: /proc/stat") {
+		t.Fatalf("non-allowlisted proc identity lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
 	}
 }

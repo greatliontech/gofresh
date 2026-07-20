@@ -17,7 +17,7 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
 - [x] 2. Ephemeral temp-tree class: run-created per-process temp trees are
   fresh by construction; spec clause + classification clearing the ambient
   temp-root reads
-- [ ] 3. Machine-guard-covered proc reads: /proc/cpuinfo, /proc/meminfo pin
+- [x] 3. Machine-identity proc digests: /proc/cpuinfo, /proc/meminfo pin
   under the machine guard's identity; spec clause + classification
 - [ ] 4. Residue review (~14 genuine refusals: /dev/null, stat metadata,
   file-I/O proofs) + measurement: gofresh self-suite uncacheable count and

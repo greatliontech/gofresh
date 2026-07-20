@@ -51,6 +51,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
@@ -609,6 +610,15 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	coverage := cfg.bracket.coverage()
 	for _, entry := range m.Paths {
 		id := entry.pathID
+		// Machine-fact identities are exempt from bracket coverage: the
+		// bracket binds values that could change across the run span, and
+		// the stable projection these identities digest as (CPU model,
+		// cores, memory, kernel) cannot hot-change under a running test
+		// process — the projection equality at revalidation IS their
+		// binding (REQ-inputs-machine-identity).
+		if id.Kind == pathAbs && machineFactIdentities[id.Path] {
+			continue
+		}
 		covered, escapedLink, err := coverage.covers(id)
 		if err != nil {
 			return Observation{}, err
@@ -1170,9 +1180,35 @@ func materializePath(moduleDir string, id pathID) (string, error) {
 // hashPath writes the digest stream for one path identity. A non-nil skip
 // filters directory-walk entries by their slash-form path relative to the walk
 // root; identity-level hashing is unaffected by it.
+// machineFactIdentities are the allowlisted stable-machine-fact files:
+// their raw bytes and stat metadata are volatile on every read (cpu MHz
+// lines, available-memory counters, proc mtimes stamped at stat time),
+// while everything a subject could branch on is the stable projection
+// REQ-guard-machine defines — so they digest as that projection's
+// fingerprint, never as content, and revalidation recomputes the same
+// projection: equal on the same machine, moved exactly when the
+// hardware or kernel actually changed (REQ-inputs-machine-identity).
+var machineFactIdentities = map[string]bool{
+	"/proc/cpuinfo": true,
+	"/proc/meminfo": true,
+}
+
+// currentMachineFacts is the projection source, a variable so the
+// ungatherable arm is testable; production always points at the guard.
+var currentMachineFacts = guard.CurrentMachineFacts
+
 func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
+	}
+	if id.Kind == pathAbs && machineFactIdentities[id.Path] {
+		facts, err := currentMachineFacts()
+		if err != nil {
+			fprintf(h, "path %s %s machine-unhashable\n", id.Kind, id.Path)
+			return true, "unhashable runtime input: " + p, nil
+		}
+		fprintf(h, "path %s %s machine %s\n", id.Kind, id.Path, facts.Fingerprint())
+		return false, "", nil
 	}
 	info, err := os.Stat(p)
 	if os.IsNotExist(err) {

@@ -234,3 +234,12 @@ bindings {
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "f05636dd5be594b49c04db3f8c0f93b9f21908fa74adee33e46c08da730fc258"
 }
+
+bindings {
+  requirement_id: "REQ-guard-machine"
+  content_hash: "e8703aa4fb99888639025983bcb8ec92e3ff4eec77caa201e99815a82eaa746b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestLogicalCoresIgnoreProcessAffinity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3e5dfb22f889f01e2e5e44f201fb5f99befc2573507378dd4adc0ec4ec907472"
+}

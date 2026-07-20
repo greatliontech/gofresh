@@ -399,6 +399,33 @@ one external identity wide by construction. A subject reading the root's
 listing as data is outside the admitted observation set, exactly as
 covered-tree metadata and cache-objects-as-data dependence already are.
 
+**REQ-inputs-machine-identity** (behavior): The allowlisted stable-machine-fact
+identities — `/proc/cpuinfo` and `/proc/meminfo` — MUST digest as the stable
+machine projection REQ-guard-machine defines (CPU model and microarchitecture,
+core counts, total memory, operating system and kernel version), never as raw
+content or stat metadata: their bytes and mtimes are volatile on every read
+while everything a subject could branch on — a core-count skip, a memory-gated
+path — is the projection, so a record over them revalidates equal on the same
+machine and moves exactly when the hardware or kernel actually changed. The
+entry stays an ordinary absolute-path input on the wire; only its digest
+function differs, and an ungatherable projection is unhashable, never silently
+skipped. A subject branching on the allowlisted files' transient content —
+cpu MHz lines, flag details, available-memory counters — is outside the
+admitted observation set, exactly as covered-tree metadata and
+listing-as-data dependence already are. The allowlisted identities are exempt
+from value-binding bracket coverage: the binding they get is projection
+equality at revalidation, which catches every change landing after the seal.
+The residual is a projection change inside the read-to-seal window that
+persists — seal and every later check are both post-change, so equality
+holds while the subject branched on the pre-change value; memory hot-add on
+a resizing virtual machine is the realistic instance — a case a pre-run
+bracket would catch, accepted here because the window is one process run
+wide and the facts change only by operator action; a change that reverts
+before the next check evades the bracket and the projection alike. Identities
+outside the allowlist keep ordinary classification — the
+transient-condition surfaces REQ-guard-machine-transient excludes from machine
+identity are exactly what this clause must never absorb.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked
 as a dirty recording, because the recording is not faithful to that commit; the mark

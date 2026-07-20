@@ -738,3 +738,30 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7f47c2f274aa308130393fad2b03c75722b355aacad4c28f80256d0d73982b49"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-machine-identity"
+  content_hash: "73d47b8e8997c0f6a573625fd958a84865e580e49814bc3f64b743804e15be7a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMachineFactIdentitiesDigestAsStableProjection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "33bdc1ae8c875b5663683a102f02a12b98daa9021a4342d99df021114a064c26"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-machine-identity"
+  content_hash: "73d47b8e8997c0f6a573625fd958a84865e580e49814bc3f64b743804e15be7a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.CurrentMachineFacts"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "070e58e47c532c80316fba6066da3ac963bc8c624e74f494447a537e9e32e815"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-machine-identity"
+  content_hash: "73d47b8e8997c0f6a573625fd958a84865e580e49814bc3f64b743804e15be7a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMachineFactArmsAndContrast"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d2d15892105b1e3043314a87ca6d4c4b7f6b7b6eeee00147b932bb5dc199a2eb"
+}

@@ -14,7 +14,7 @@ import (
 )
 
 func gatherFacts() (MachineFacts, error) {
-	model, phys, err := cpuInfo()
+	model, phys, logical, err := cpuInfo()
 	if err != nil {
 		return MachineFacts{}, err
 	}
@@ -23,6 +23,12 @@ func gatherFacts() (MachineFacts, error) {
 		// different machines share an empty-model fingerprint (false-valid).
 		return MachineFacts{}, fmt.Errorf("provenance: no CPU identity in /proc/cpuinfo")
 	}
+	if logical == 0 {
+		// A cpuinfo without processor blocks identifies nothing; falling
+		// back to the scheduler's view would smuggle process affinity
+		// into machine identity (REQ-guard-machine-transient).
+		return MachineFacts{}, fmt.Errorf("provenance: no processor entries in /proc/cpuinfo")
+	}
 	ram, err := memTotal()
 	if err != nil {
 		return MachineFacts{}, err
@@ -30,21 +36,21 @@ func gatherFacts() (MachineFacts, error) {
 	return MachineFacts{
 		CPUModel:      model,
 		PhysicalCores: phys,
-		LogicalCores:  runtime.NumCPU(),
+		LogicalCores:  logical,
 		TotalRAMBytes: ram,
 		OS:            runtime.GOOS,
 		KernelVersion: kernelRelease(),
 	}, nil
 }
 
-func cpuInfo() (string, int, error) {
+func cpuInfo() (string, int, int, error) {
 	file, err := os.Open("/proc/cpuinfo")
 	if err != nil {
-		return "", 0, fmt.Errorf("provenance: %w", err)
+		return "", 0, 0, fmt.Errorf("provenance: %w", err)
 	}
 	defer file.Close()
-	model, physical := parseCPUInfo(file)
-	return model, physical, nil
+	model, physical, logical := parseCPUInfo(file)
+	return model, physical, logical, nil
 }
 
 // parseCPUInfo extracts a stable CPU identity and physical-core count from
@@ -53,7 +59,7 @@ func cpuInfo() (string, int, error) {
 // unknown-arch host never yields an empty identity that would collide with a
 // different machine. Physical cores = distinct (physical id, core id) pairs,
 // falling back to the logical count when topology fields are absent.
-func parseCPUInfo(r io.Reader) (model string, physical int) {
+func parseCPUInfo(r io.Reader) (model string, physical, logical int) {
 	cores := map[string]bool{}
 	arm := map[string]string{}
 	var curPhys, curCore string
@@ -75,6 +81,12 @@ func parseCPUInfo(r io.Reader) (model string, physical int) {
 		}
 		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
 		switch key {
+		case "processor":
+			// Logical CPUs counted from the file's own processor blocks:
+			// taskset and cpuset pinning never edit /proc/cpuinfo, so the
+			// count stays machine identity, never process affinity
+			// (REQ-guard-machine-transient excludes pinning).
+			logical++
 		case "model name", "Model":
 			if model == "" {
 				model = val
@@ -96,12 +108,12 @@ func parseCPUInfo(r io.Reader) (model string, physical int) {
 	flush()
 	physical = len(cores)
 	if physical == 0 {
-		physical = runtime.NumCPU()
+		physical = logical
 	}
 	if model == "" && len(arm) > 0 {
 		model = composeARM(arm)
 	}
-	return model, physical
+	return model, physical, logical
 }
 
 func composeARM(arm map[string]string) string {
