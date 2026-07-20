@@ -216,3 +216,30 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "bde6a7c3735b6ca589e3a615239abf4065313aad85b1c1c255b22e5dde53befb"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "b341f29e92eb379af62c8747eb5bae2ab23d34b8eef8c05516c22708ad0637cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestContextAwareViewConstructionHonorsCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "abb57480379e20023031d9fcf5dd5850c26f4fee82ef5d449116af432f1ddc04"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "b341f29e92eb379af62c8747eb5bae2ab23d34b8eef8c05516c22708ad0637cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCheckRefinedBatchReturnsContextErrorDuringRefinement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6cb9656820f020c3ae533a5a088789c24ea4715c5e1cf21112054f80b01f4cf9"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "b341f29e92eb379af62c8747eb5bae2ab23d34b8eef8c05516c22708ad0637cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.Engine.NewView"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "6860d82ace64fc22ec260ca4ad858972f367b7d379753b62bf7ee5606b530112"
+}

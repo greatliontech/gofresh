@@ -1,0 +1,6 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-purity-observation-separation"
+reason: "invariant needs a property witness over the mutation-shape / assertion-separation grammar; example pins anchor the named shapes"
+lands { manual { condition: "a property-test generator over dynamic-global mutation shapes exists" } }

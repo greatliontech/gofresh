@@ -3,7 +3,7 @@
 
 bindings {
   requirement_id: "REQ-purity-override"
-  content_hash: "76d09c9f7ca741505196313245486f8a0bc0f91aa708736cbb9982ea82868bdb"
+  content_hash: "a45eba84aa3df948d8852642d3bb22f9f6a665e6eceb1c9a49dc4f974d2505fc"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAssumePureOverride"
   role: BINDING_ROLE_TESTS
