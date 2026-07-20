@@ -37,7 +37,7 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
   os.ReadFile proof refusals, the purity-suppression-vs-proof-leg
   interaction, and the /home external-directory MkdirAll-ancestor class
   fold in here
-- [ ] 6. Refined-batch load-failure coupling
+- [x] 6. Refined-batch load-failure coupling
 - [ ] 7. dependency-heavy-refinement-precision: disposition (implement or
   redefer with a sharpened trigger)
 - [ ] 8. Close-out gate: full suite, release, downstream re-measure

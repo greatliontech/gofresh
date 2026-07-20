@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/constant"
@@ -386,103 +387,154 @@ func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
-		h.emitProgress("refine", group.path)
-		// A batch view retains only final closures. Explicitly primed programs
-		// remain caller-owned; otherwise load one package program at a time and
-		// release it after this group so peak SSA memory is bounded by the largest
-		// package test binary rather than the total subject set.
-		prog := h.progs[group.path]
-		if prog == nil {
-			var err error
-			prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, group.path)
-			if err != nil {
+		if err := h.computeGroup(group, results); err != nil {
+			// Cancellation and caller errors fail the whole request. A
+			// package-local load or analysis failure retries each
+			// remaining subject alone first — a mid-group failure caused
+			// by one subject must not degrade siblings a singleton run
+			// would refine (REQ-closure-batch-equivalence) — and only a
+			// subject that still fails alone degrades, to the maximal
+			// floor: the floor HASH keeps the record source-sensitive,
+			// since hashless unavailable evidence could check valid
+			// under a purity assertion. A package whose floor cannot be
+			// computed at all fails the request instead.
+			if h.ctx.Err() != nil || errors.Is(err, errCallerSubject) {
 				return nil, err
 			}
-		}
-		// Read before any listing below (maximalHash included): a list entry
-		// present now was caller-primed and stays retained; one loaded here is
-		// released with the group.
-		_, retainList := h.lists[group.path]
-		// A symbol absent from the loaded program's roots is a subject-local
-		// fact — a production symbol can be unreachable as a root of its
-		// external-test binary — so it degrades to unavailable refined
-		// evidence for that subject alone: the maximal package closure, the
-		// sound floor, recorded widened and unverifiable. Sibling subjects
-		// analyze normally (REQ-closure-batch-equivalence).
-		floorHash := ""
-		rooted := group.subjects[:0:0]
-		for _, subject := range group.subjects {
-			if prog.roots[subject.Symbol] == nil {
-				// Degradation is only for symbols the package under test
-				// declares: a name it never declares — a typo, a non-function,
-				// or a recompiled dependency's symbol — is a caller error, not
-				// subject-local unavailability, and widened evidence for it
-				// would attribute a phantom subject.
-				if !declaresSymbol(prog, group.path, subject.Symbol) {
-					return nil, fmt.Errorf("closure: subject %s not found in %s", subject.Symbol, group.path)
+			for _, subject := range group.subjects {
+				if _, done := results[subject]; done {
+					continue
 				}
-				if floorHash == "" {
-					var floorErr error
-					floorHash, floorErr = h.maximalHash(group.path)
-					if floorErr != nil {
-						return nil, floorErr
-					}
+				single := &packageBatch{path: group.path, subjects: []Subject{subject}}
+				retryErr := h.computeGroup(single, results)
+				if retryErr == nil {
+					continue
+				}
+				if h.ctx.Err() != nil || errors.Is(retryErr, errCallerSubject) {
+					return nil, retryErr
+				}
+				floorHash, floorErr := h.maximalHash(group.path)
+				if floorErr != nil {
+					return nil, retryErr
 				}
 				results[subject] = Closure{
 					Hash:         floorHash,
 					Widened:      true,
 					Unverifiable: true,
-					Reason:       fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path),
+					Reason:       "refined analysis unavailable: " + retryErr.Error(),
 				}
-				continue
 			}
-			rooted = append(rooted, subject)
-		}
-		group.subjects = rooted
-		if len(group.subjects) == 0 {
-			if !retainList {
-				delete(h.lists, group.path)
-			}
-			continue
-		}
-		metas, err := h.list(group.path)
-		if err != nil {
-			return nil, err
-		}
-		base := newTier2Base(h, prog, metas)
-		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
-			if err := h.ctx.Err(); err != nil {
-				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-			}
-			end := min(start+maxAttributedSubjects, len(group.subjects))
-			batch := group.subjects[start:end]
-			reachable, err := attributedReachableSets(h.ctx, prog, batch)
-			if err != nil {
-				return nil, err
-			}
-			for i, subject := range batch {
-				if err := h.ctx.Err(); err != nil {
-					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-				}
-				tr, err := h.tier2Reachable(base, reachable[i])
-				if err != nil {
-					return nil, err
-				}
-				closure, err := h.closureFromTier2(group.path, tr)
-				if err != nil {
-					return nil, err
-				}
-				results[subject] = closure
-			}
-		}
-		if !retainList {
-			delete(h.lists, group.path)
 		}
 	}
 	if err := h.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 	return results, nil
+}
+
+// errCallerSubject marks request errors — a subject name its package never
+// declares — that no package-local degradation may absorb.
+var errCallerSubject = errors.New("closure: caller subject error")
+
+// computeGroup refines one package group into results. Any error return
+// with a live context and no caller-error mark is a package-local
+// failure the batch degrades group-locally.
+func (h *Hasher) computeGroup(group *packageBatch, results map[Subject]Closure) error {
+	h.emitProgress("refine", group.path)
+	// A batch view retains only final closures. Explicitly primed programs
+	// remain caller-owned; otherwise load one package program at a time and
+	// release it after this group so peak SSA memory is bounded by the largest
+	// package test binary rather than the total subject set.
+	prog := h.progs[group.path]
+	if prog == nil {
+		var err error
+		prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, group.path)
+		if err != nil {
+			return err
+		}
+	}
+	// Read before any listing below (maximalHash included): a list entry
+	// present now was caller-primed and stays retained; one loaded here is
+	// released with the group.
+	_, retainList := h.lists[group.path]
+	// A symbol absent from the loaded program's roots is a subject-local
+	// fact — a production symbol can be unreachable as a root of its
+	// external-test binary — so it degrades to unavailable refined
+	// evidence for that subject alone: the maximal package closure, the
+	// sound floor, recorded widened and unverifiable. Sibling subjects
+	// analyze normally (REQ-closure-batch-equivalence).
+	floorHash := ""
+	rooted := group.subjects[:0:0]
+	for _, subject := range group.subjects {
+		if prog.roots[subject.Symbol] == nil {
+			// Degradation is only for symbols the package under test
+			// declares: a name it never declares — a typo, a non-function,
+			// or a recompiled dependency's symbol — is a caller error, not
+			// subject-local unavailability, and widened evidence for it
+			// would attribute a phantom subject.
+			if !declaresSymbol(prog, group.path, subject.Symbol) {
+				return fmt.Errorf("%w: subject %s not found in %s", errCallerSubject, subject.Symbol, group.path)
+			}
+			if floorHash == "" {
+				var floorErr error
+				floorHash, floorErr = h.maximalHash(group.path)
+				if floorErr != nil {
+					return floorErr
+				}
+			}
+			results[subject] = Closure{
+				Hash:         floorHash,
+				Widened:      true,
+				Unverifiable: true,
+				Reason:       fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path),
+			}
+			continue
+		}
+		rooted = append(rooted, subject)
+	}
+	group.subjects = rooted
+	if len(group.subjects) == 0 {
+		if !retainList {
+			delete(h.lists, group.path)
+		}
+		return nil
+	}
+	metas, err := h.list(group.path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if !retainList {
+			delete(h.lists, group.path)
+		}
+	}()
+	base := newTier2Base(h, prog, metas)
+	for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
+		if err := h.ctx.Err(); err != nil {
+			return fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		end := min(start+maxAttributedSubjects, len(group.subjects))
+		batch := group.subjects[start:end]
+		reachable, err := attributedReachableSets(h.ctx, prog, batch)
+		if err != nil {
+			return err
+		}
+		for i, subject := range batch {
+			if err := h.ctx.Err(); err != nil {
+				return fmt.Errorf("closure: analysis cancelled: %w", err)
+			}
+			tr, err := h.tier2Reachable(base, reachable[i])
+			if err != nil {
+				return err
+			}
+			closure, err := h.closureFromTier2(group.path, tr)
+			if err != nil {
+				return err
+			}
+			results[subject] = closure
+		}
+	}
+	return nil
 }
 
 // declaresSymbol reports whether the package under test or its external test

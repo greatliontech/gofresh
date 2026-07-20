@@ -3820,3 +3820,50 @@ func BenchmarkHashFiles(b *testing.B) {
 		}
 	}
 }
+
+// A package-local load failure degrades to unavailable refined evidence
+// for exactly that package's subjects: sibling packages refine
+// normally, and a caller error - a symbol the package never declares -
+// still fails the whole request (REQ-closure-batch-equivalence).
+func TestComputeBatchIsolatesPackageLocalFailures(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":           "module example.com/iso\n\ngo 1.26\n",
+		"ok/ok.go":         "package ok\n\nfunc F() int { return 1 }\n",
+		"broken/broken.go": "package broken\n\nfunc F() int { syntax error here }\n",
+	} {
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	okSubject := Subject{Package: "example.com/iso/ok", Symbol: "F"}
+	brokenSubject := Subject{Package: "example.com/iso/broken", Symbol: "F"}
+	results, err := h.ComputeBatch([]Subject{okSubject, brokenSubject})
+	if err != nil {
+		t.Fatalf("package-local failure escalated to a batch error: %v", err)
+	}
+	if got := results[okSubject]; got.Unverifiable || got.Hash == "" {
+		t.Fatalf("healthy sibling lost its refinement: %+v", got)
+	}
+	got := results[brokenSubject]
+	if !got.Unverifiable || !got.Widened || !strings.Contains(got.Reason, "refined analysis unavailable") {
+		t.Fatalf("broken package's subject = %+v, want unavailable refined evidence", got)
+	}
+	if got.Hash == "" {
+		t.Fatal("unavailable evidence carries no floor hash - a hashless record could check valid under a purity assertion")
+	}
+
+	// A symbol the healthy package never declares stays a whole-request
+	// caller error.
+	if _, err := h.ComputeBatch([]Subject{{Package: "example.com/iso/ok", Symbol: "NoSuchSymbol"}}); err == nil {
+		t.Fatal("unknown subject did not fail the request")
+	}
+}
