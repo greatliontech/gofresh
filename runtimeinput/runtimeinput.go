@@ -521,7 +521,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -546,7 +546,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := hasParentTraversal(name)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -1038,6 +1038,15 @@ func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error
 	}
 	return out, nil
 }
+
+// nullSink reports whether p is exactly the contentless sink device:
+// every read sees immediate EOF and every write is discarded, so no
+// state a subject observes flows through the identity. Lexical identity
+// only — another name resolving to the same device stays observed. On
+// windows os.DevNull is "NUL", never an absolute cleaned path, so the
+// admission is inert there and sink reads stay observed, cost-only
+// (REQ-inputs-null-sink).
+func nullSink(p string) bool { return p == os.DevNull }
 
 // ephemeralRoot reports whether p IS a declared ephemeral root — the one
 // identity the class admits; depth is never covered

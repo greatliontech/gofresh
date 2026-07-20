@@ -399,6 +399,20 @@ one external identity wide by construction. A subject reading the root's
 listing as data is outside the admitted observation set, exactly as
 covered-tree metadata and cache-objects-as-data dependence already are.
 
+**REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
+the unix contentless sink device; on platforms whose sink is not an absolute
+path (windows `NUL`) nothing is admitted and the reads stay observed,
+cost-only — MUST record neither a path identity nor a per-path disposition: every read observes immediate end-of-file and every
+write is discarded, so no state a subject observes flows through the identity
+and any conforming kernel is observationally equivalent. The admission is the
+literal cleaned identity alone — no other device node shares it: `/dev/zero`
+is a readable value stream and the random devices are genuine nondeterministic
+inputs, all staying observed — and a path merely resolving to the same device
+through another name stays observed; the admission is lexical identity, never
+device topology. A subject depending on the sink's metadata beyond its
+existence is outside the admitted observation set, exactly as covered-tree
+metadata dependence already is.
+
 **REQ-inputs-machine-identity** (behavior): The allowlisted stable-machine-fact
 identities — `/proc/cpuinfo`, `/proc/meminfo`, and `/proc/sys/kernel/osrelease`,
 the sources the projection's own gatherer reads — MUST digest as the stable

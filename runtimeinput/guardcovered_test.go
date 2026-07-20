@@ -632,3 +632,55 @@ func TestMachineFactArmsAndContrast(t *testing.T) {
 		t.Fatalf("non-allowlisted proc identity lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
 	}
 }
+
+// The contentless sink device records nothing — reads see EOF, writes
+// are discarded, no observable state flows through the identity — while
+// its readable-value sibling stays observed and a mere name variant is
+// admitted only through lexical cleaning (REQ-inputs-null-sink).
+func TestNullSinkRecordsNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the admission is inert on windows: NUL is never an absolute cleaned path")
+	}
+	dir := t.TempDir()
+	obs := completedFromLog(t, dir, "open /dev/null\nstat /dev/null\nopen /dev//null\n")
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("sink reads sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 || len(d.Unverifiable) != 0 {
+		t.Fatalf("sink reads recorded: %+v", d)
+	}
+
+	// The readable-value sibling keeps ordinary classification: the
+	// admission is one literal identity, not the device class.
+	obs = completedFromLog(t, dir, "open /dev/zero\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable || !strings.Contains(st.Reason, "/dev/zero") {
+		t.Fatalf("sibling device lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	}
+
+	// Another name resolving to the same device stays observed: the
+	// admission is lexical identity, never device topology.
+	link := filepath.Join(t.TempDir(), "null-alias")
+	if err := os.Symlink(os.DevNull, link); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, t.TempDir(), "open "+link+"\n")
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable || !strings.Contains(st.Reason, "null-alias") {
+		t.Fatalf("sink alias lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	}
+}
