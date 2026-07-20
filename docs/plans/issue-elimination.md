@@ -30,10 +30,13 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
 - [x] 4.4 Self-created temp scratch: paths the test process itself creates
   under the ephemeral root (t.TempDir randomized names) observed as moved
   inputs every run; classify creation-observed scratch as non-input
-- [ ] 4.5 Residue disposition: PWD process-local env reads and /home
+- [x] 4.5 Residue disposition: PWD process-local env reads and /home
   external-directory inputs — eliminate, admit, or accept as genuine
 - [ ] 5. Observability audit: toolchain accessors (runtime.GOROOT class) in
-  the observability analyzer's proof leg
+  the observability analyzer's proof leg; the dynamic-behavior and
+  os.ReadFile proof refusals, the purity-suppression-vs-proof-leg
+  interaction, and the /home external-directory MkdirAll-ancestor class
+  fold in here
 - [ ] 6. Refined-batch load-failure coupling
 - [ ] 7. dependency-heavy-refinement-precision: disposition (implement or
   redefer with a sharpened trigger)

@@ -430,7 +430,11 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 }
 
 // FromTestLogEnv is FromTestLog with env as the complete process environment
-// inherited by the observed test process.
+// inherited by the observed test process. Env fidelity is a caller-side
+// soundness input: the PWD bounded admission (REQ-inputs-unbounded)
+// compares the env's PWD against the spawn directory, so an env that is
+// not byte-for-byte what the process actually inherited can admit a
+// value the process never read.
 func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
 	var cfg testLogConfig
 	for _, opt := range opts {
@@ -477,6 +481,14 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	scratchMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
+	// PWD's runtime value is the spawn directory, which no env-name
+	// binding captures. When the frozen environment carries PWD equal to
+	// the package directory the process spawned in, the value is fully
+	// determined by the frame identity the record already pins, and the
+	// read admits recordless; any other posture seals
+	// (REQ-inputs-unbounded).
+	pwdValue, pwdPresent := processenv.Lookup(normalized, "PWD")
+	pwdTruthful := pwdPresent && pwdValue == packageDir
 
 	lines := bytes.Split(log, []byte{'\n'})
 	if len(lines) != 0 && len(lines[len(lines)-1]) == 0 {
@@ -507,6 +519,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				continue
 			}
 			if processenv.EqualKey(name, "PWD") {
+				if pwdTruthful {
+					continue
+				}
 				addUnverifiable(&m, unverifiableSeen, "process-local environment input: PWD")
 				continue
 			}

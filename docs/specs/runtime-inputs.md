@@ -475,4 +475,8 @@ outside the module, a relative path under a working-directory change the run str
 cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
 for each package process — MUST be treated as unverifiable rather than valid, since an
 input identity that cannot be pinned under the shared checking environment is not
-proof of a stable input.
+proof of a stable input. One `PWD` posture IS bounded and MUST admit recordless: a
+frozen environment carrying `PWD` equal to the package directory the process spawned
+in — the value the subject reads is then fully determined by the frame identity the
+record already pins, so re-observing it adds no protection; any other posture,
+including an absent or divergent `PWD`, seals as before.

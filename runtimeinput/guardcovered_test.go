@@ -784,3 +784,53 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 		t.Fatal("undeclared vanished path skipped observation")
 	}
 }
+
+// A PWD read admits recordless exactly when the frozen environment
+// carries PWD equal to the spawn directory — the value is then fully
+// determined by the frame identity the record already pins — and seals
+// process-local in every other posture (REQ-inputs-unbounded).
+func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fromEnv := func(env []string) (bool, string, Description) {
+		t.Helper()
+		bracket, err := CaptureBracket(dir, []string{"data"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs, err := FromTestLogEnv([]byte("getenv PWD\n"), dir, dir, env,
+			WithCompletedProcess("package-test-binary:guard"), WithBracket(bracket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := Describe(st.Manifest, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Unverifiable, st.Reason, d
+	}
+
+	unv, reason, d := fromEnv([]string{"PWD=" + dir})
+	if unv {
+		t.Fatalf("truthful PWD sealed: %s", reason)
+	}
+	if len(d.EnvNames)+len(d.Paths)+len(d.Unverifiable) != 0 {
+		t.Fatalf("truthful PWD recorded: %+v", d)
+	}
+
+	for name, env := range map[string][]string{
+		"divergent": {"PWD=" + filepath.Join(dir, "elsewhere")},
+		"absent":    {"HOME=/h"},
+	} {
+		unv, reason, _ := fromEnv(env)
+		if !unv || !strings.Contains(reason, "process-local environment input: PWD") {
+			t.Fatalf("%s PWD posture not sealed: unverifiable=%v reason=%s", name, unv, reason)
+		}
+	}
+}
