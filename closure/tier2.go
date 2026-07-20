@@ -719,6 +719,11 @@ func maximalObservabilityBlocker(effect externalEffect) bool {
 	if effect.packagePath == "testing" && effect.symbol == "Run" {
 		return false
 	}
+	// The subject tier classifies the guard-pinned toolchain accessor
+	// precisely; the maximal AST scan must not pre-block it.
+	if effect.packagePath == "runtime" && effect.symbol == "GOROOT" {
+		return false
+	}
 	if effect.packagePath == "testing" && effect.symbol == "TempDir" {
 		return false
 	}
@@ -1753,11 +1758,23 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 	if call == nil {
 		return false
 	}
+	// The toolchain accessor is guard-pinned: its value is fixed by the
+	// toolchain guard the fingerprint already carries, so branching on
+	// it observes nothing the record does not pin. The audited carve-out
+	// is this exact symbol — never the runtime package, whose other
+	// surfaces stay unaudited; the enforcing precision gate is the
+	// maximal tier's exact-GOROOT exemption (the AST scan covers the
+	// whole source closure, so any other runtime selector blocks there
+	// regardless of this condition — which is why widening this exact
+	// match alone is not test-distinguishable).
+	if effect.packagePath == "runtime" && effect.symbol == "GOROOT" {
+		return true
+	}
 	if effect.packagePath == "testing" && effect.symbol == "TempDir" {
 		return observableFreshPathResult(site)
 	}
 	if effect.packagePath == "path/filepath" && effect.symbol == "Join" {
-		return observableFreshPathResult(site)
+		return observableFreshPathResult(site) || observablePinnedPathResult(site)
 	}
 	if effect.packagePath != "os" {
 		return false
@@ -1766,7 +1783,7 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 	case "Getenv", "LookupEnv":
 		return observableIdentityArgument(effect, call)
 	case "Open":
-		return observableIdentityArgument(effect, call) && observableOpenResult(site)
+		return (observableIdentityArgument(effect, call) || guardPinnedPathArgument(call)) && observableOpenResult(site)
 	case "OpenFile":
 		flags, known := openFileFlags(call)
 		if !known || !recognizedOpenFileFlags(call.StaticCallee(), flags) {
@@ -1781,9 +1798,9 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 		}
 		return observableOpenResult(site) && observableTupleError(site)
 	case "ReadFile":
-		return observableIdentityArgument(effect, call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && freshReadableTargetObservable(call.Args[0], site)
+		return observableIdentityArgument(effect, call) || guardPinnedPathArgument(call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && freshReadableTargetObservable(call.Args[0], site)
 	case "ReadDir":
-		return observableIdentityArgument(effect, call) && observableReadDirResult(site)
+		return (observableIdentityArgument(effect, call) || guardPinnedPathArgument(call)) && observableReadDirResult(site)
 	case "WriteFile":
 		return len(call.Args) >= 2 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && guardedWriteBytes(call.Args[1], make(map[ssa.Value]bool)) && observableErrorResult(site)
 	case "Remove", "RemoveAll":
@@ -1811,6 +1828,67 @@ func observableIdentityArgument(effect externalEffect, call *ssa.CallCommon) boo
 func observableFreshPathResult(site ssa.CallInstruction) bool {
 	value, ok := site.(ssa.Value)
 	return ok && !blockInCycle(site.Block()) && freshPathValue(value, make(map[ssa.Value]bool)) && observableFreshPathUses(value, make(map[ssa.Value]bool))
+}
+
+// guardPinnedPathArgument reports whether the call's path argument is a
+// guard-pinned toolchain path: the value the read observes is fixed by
+// the toolchain guard the fingerprint carries, so the read is inside
+// the admitted observation set for READ positions only — mutation
+// admissions never accept pinned paths (freshness licenses mutation;
+// pinning never does), so a write through such a path blocks on its own
+// effect.
+func guardPinnedPathArgument(call *ssa.CallCommon) bool {
+	return call != nil && len(call.Args) != 0 && guardPinnedPathValue(call.Args[0], make(map[ssa.Value]bool))
+}
+
+// guardPinnedPathValue admits exactly the toolchain accessor's result
+// and filepath.Join chains rooted at it with safe constant components —
+// the same grammar as freshPathValue with the pinned accessor as the
+// one root. Any other shape, including a component that is not a safe
+// constant, refuses.
+func guardPinnedPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+	if value == nil || seen[value] {
+		return false
+	}
+	seen[value] = true
+	call, ok := value.(*ssa.Call)
+	if !ok {
+		return false
+	}
+	callee := call.Common().StaticCallee()
+	if callee == nil {
+		return false
+	}
+	pkgPath, name := funcPkgPath(callee), callee.Name()
+	if object := callee.Object(); object != nil {
+		name = object.Name()
+	}
+	if pkgPath == "runtime" && name == "GOROOT" {
+		return true
+	}
+	if pkgPath != "path/filepath" || name != "Join" {
+		return false
+	}
+	args, ok := fixedVariadicArgs(call)
+	if !ok || len(args) < 2 || !guardPinnedPathValue(args[0], seen) {
+		return false
+	}
+	for _, arg := range args[1:] {
+		if !safeFreshPathComponent(arg) {
+			return false
+		}
+	}
+	return true
+}
+
+// observablePinnedPathResult admits a filepath.Join whose result is a
+// guard-pinned path. Unlike fresh paths, no consumer walk is needed:
+// every consumer site classifies its own effect independently, and no
+// mutation admission accepts a pinned path, so an escaping write blocks
+// there.
+func observablePinnedPathResult(site ssa.CallInstruction) bool {
+	value, ok := site.(ssa.Value)
+	return ok && guardPinnedPathValue(value, make(map[ssa.Value]bool))
 }
 
 func freshPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
@@ -2339,7 +2417,7 @@ func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
 		}
 		switch effect.symbol {
 		case "Open":
-			return observableIdentityArgument(effect, call.Common())
+			return observableIdentityArgument(effect, call.Common()) || guardPinnedPathArgument(call.Common())
 		case "OpenFile":
 			flags, known := openFileFlags(call.Common())
 			if !known || !recognizedOpenFileFlags(call.Common().StaticCallee(), flags) || len(call.Common().Args) == 0 {
@@ -2561,7 +2639,10 @@ func dirEntriesValueFromAdmittedReadDir(value ssa.Value, seen map[ssa.Value]bool
 			return false
 		}
 		effect, classified := classBEffect(funcPkgPath(call.Common().StaticCallee()), call.Common().StaticCallee().Name())
-		return classified && effect.packagePath == "os" && effect.symbol == "ReadDir" && observableIdentityArgument(effect, call.Common())
+		if !classified || effect.packagePath != "os" || effect.symbol != "ReadDir" {
+			return false
+		}
+		return observableIdentityArgument(effect, call.Common()) || guardPinnedPathArgument(call.Common())
 	case *ssa.Slice:
 		return dirEntriesValueFromAdmittedReadDir(value.X, seen)
 	case *ssa.Phi:

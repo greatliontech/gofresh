@@ -118,7 +118,18 @@ set. Every reachable call and effect is classified to the walk's end; the prefer
 human diagnostic is derived afterward and can never select which facts participate. A complete maximal-tier negative scan
 may reject opaque linkage, native code, process execution, dot imports, unaudited
 standard-library access, or other unclassified external-capable syntax, but can never
-grant the proof on its own.
+grant the proof on its own. The admitted observation set includes the guard-pinned
+toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
+surfaces — whose value the toolchain guard already fixes, together with read-position
+uses of paths derived from it through constant-component joins: reads under the
+toolchain root are guard-covered at observation, so proving them observable claims
+nothing the record does not pin. The admission is consulted at the subject-effect
+stage only: startup effects remain uniformly blocking (a package initializer
+calling the accessor blocks like any other startup effect), a dynamic reference to
+the accessor stays refused, and among handle-producing opens exactly the read-only
+`os.Open` shape is admitted. Pinned paths are never admissible in mutation
+positions — freshness licenses mutation, pinning never does — and a write through a
+pinned path blocks on its own effect.
 
 **REQ-closure-batch-equivalence** (invariant): Sharing reachability work across an
 analysis view's refined subjects MUST produce, for every subject, the same reachable
