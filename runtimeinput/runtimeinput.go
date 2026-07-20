@@ -235,6 +235,9 @@ type TestLogOption func(*testLogConfig)
 type testLogConfig struct {
 	excluded   []pathID
 	guardRoots []guardRootDecl
+	// ephemeralRoots are declared temp roots whose own identity records
+	// nothing (REQ-inputs-ephemeral-root).
+	ephemeralRoots []string
 	process    string
 	bracket    *Bracket
 	err        error
@@ -329,6 +332,22 @@ func WithModuleCacheRoot(root string) TestLogOption {
 // toolchain root apply.
 func WithBuildCacheRoot(root string) TestLogOption {
 	return guardRootOption(root, "fuzz")
+}
+
+// WithEphemeralTempRoot declares one of the producing environment's temp
+// directories as an ephemeral root (REQ-inputs-ephemeral-root): the root's
+// OWN identity — declared or resolved form — records nothing, because
+// temp-tree creation machinery stats it to mint fresh per-run subtrees and
+// no state a subject observes flows from its existing content. The
+// admission is one identity wide: every deeper read stays observed.
+func WithEphemeralTempRoot(root string) TestLogOption {
+	return func(c *testLogConfig) {
+		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+			c.err = fmt.Errorf("runtimeinputs: ephemeral temp root must be a clean absolute path, got %q", root)
+			return
+		}
+		c.ephemeralRoots = append(c.ephemeralRoots, root)
+	}
 }
 
 func guardRootOption(root, excludeSub string) TestLogOption {
@@ -449,6 +468,10 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	pathSeen := map[pathID]bool{}
 	unverifiableSeen := map[string]bool{}
 	guardRoots := resolveGuardRoots(cfg.guardRoots)
+	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir)
+	if err != nil {
+		return Observation{}, err
+	}
 	guardMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
@@ -497,7 +520,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && guardCovered(p, guardRoots, guardMemo) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -522,7 +545,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := hasParentTraversal(name)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && guardCovered(p, guardRoots, guardMemo) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -544,6 +567,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			if relativeAfterChdir {
 				addUnverifiable(&m, unverifiableSeen, "relative runtime input after working-directory change: "+id.displayPath())
 			}
+		// chdir is deliberately outside every root admission: each chdir
+		// independently seals the observation unverifiable, so admitting
+		// the identity could never clear anything.
 		case "chdir":
 			ambiguousParent := hasParentTraversal(name)
 			p := resolvePath(cwd, name)
@@ -968,6 +994,49 @@ func (r guardRootPair) admits(path string) bool {
 			return false
 		}
 		return true
+	}
+	return false
+}
+
+// resolveEphemeralRoots resolves each declared ephemeral root once into
+// its identity pair; an unresolvable root declares nothing. A root
+// equal to or inside the module tree — in either form — is refused
+// loudly: swallowing a module-relative identity would silently vacate a
+// content-bearing directory digest, the opposite of the class's
+// one-external-identity blast radius (REQ-inputs-ephemeral-root).
+func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error) {
+	resolvedModule, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		resolvedModule = moduleDir
+	}
+	out := make([][2]string, 0, len(roots))
+	for _, r := range roots {
+		// The declared form's interiority is checkable without
+		// resolution, so it refuses before the unresolvable skip — the
+		// spec promises refusal in either form outright.
+		if underPath(r, moduleDir) || underPath(r, resolvedModule) {
+			return nil, fmt.Errorf("runtimeinputs: ephemeral temp root %q lies inside the module tree; it would vacate module-relative inputs", r)
+		}
+		resolved, err := filepath.EvalSymlinks(r)
+		if err != nil {
+			continue
+		}
+		if underPath(resolved, moduleDir) || underPath(resolved, resolvedModule) {
+			return nil, fmt.Errorf("runtimeinputs: ephemeral temp root %q resolves inside the module tree; it would vacate module-relative inputs", r)
+		}
+		out = append(out, [2]string{r, resolved})
+	}
+	return out, nil
+}
+
+// ephemeralRoot reports whether p IS a declared ephemeral root — the one
+// identity the class admits; depth is never covered
+// (REQ-inputs-ephemeral-root).
+func ephemeralRoot(p string, roots [][2]string) bool {
+	for _, r := range roots {
+		if p == r[0] || p == r[1] {
+			return true
+		}
 	}
 	return false
 }

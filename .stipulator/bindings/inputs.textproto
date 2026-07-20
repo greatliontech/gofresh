@@ -720,3 +720,21 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "13f00d4ca27a6a1649da5e6f9428bcfe999217c8af91db17d373a97d07e7daeb"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-ephemeral-root"
+  content_hash: "309a4f12c31dd54c0b0ab662cf87cc5a82f93518c14320f76a1baf7008578173"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.WithEphemeralTempRoot"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "f62582946baeac27cad82aa79d14dbdad93ae5046746febf7166d3801581fef8"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-ephemeral-root"
+  content_hash: "309a4f12c31dd54c0b0ab662cf87cc5a82f93518c14320f76a1baf7008578173"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEphemeralTempRootAdmitsOnlyItsOwnIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7f47c2f274aa308130393fad2b03c75722b355aacad4c28f80256d0d73982b49"
+}

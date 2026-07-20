@@ -381,6 +381,24 @@ observation for everything beneath it, and the declared roots' link topology rid
 same hold-still span REQ-inputs-observation-coherence already places on the caller —
 guards pin covered content, never the shape of the path that reached it.
 
+**REQ-inputs-ephemeral-root** (behavior): Observation construction from a
+test-harness log MUST accept caller-declared ephemeral temp roots — the
+producing environment's temp directories, each a clean absolute path — whose
+OWN identity, in its declared or resolved form, records neither a path
+identity nor a per-path disposition: temp-tree creation machinery stats the
+root to mint fresh per-run subtrees, no state a subject observes flows from
+the root's existing content (name-collision retries are invisible salt), and
+the root's listing is volatile machine noise no guard could pin — so any
+writable root is observationally equivalent and re-observing it converts
+environmental machinery into a standing refusal. The admission is the root
+identity alone: every deeper read stays observed, an unresolvable root
+declares nothing, a root lying inside the module tree in either form is
+refused outright — it would vacate a content-bearing module digest, not an
+external refusal — and the wrong-root blast radius for admissible roots is
+one external identity wide by construction. A subject reading the root's
+listing as data is outside the admitted observation set, exactly as
+covered-tree metadata and cache-objects-as-data dependence already are.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked
 as a dirty recording, because the recording is not faithful to that commit; the mark

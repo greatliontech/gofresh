@@ -8,13 +8,13 @@ downstream serving surface (stipulator check, gomutant measurement reuse)
 is gated on them. Success metric: the serving check over this corpus
 collapses from 464 uncacheable toward the ~14-refusal residue.
 
-- [ ] 1. GOCACHE guard-covered root: spec clause extending
+- [x] 1. GOCACHE guard-covered root: spec clause extending
   REQ-inputs-guard-covered with the build cache (admission: entries are
   content-addressed derivations of already-pinned inputs — toolchain,
   sources, build config — so re-observing adds no protection), runtimeinput
   coverage, engine/recorder option, fail-closed resolution discipline as the
   toolchain root
-- [ ] 2. Ephemeral temp-tree class: run-created per-process temp trees are
+- [x] 2. Ephemeral temp-tree class: run-created per-process temp trees are
   fresh by construction; spec clause + classification clearing the ambient
   temp-root reads
 - [ ] 3. Machine-guard-covered proc reads: /proc/cpuinfo, /proc/meminfo pin

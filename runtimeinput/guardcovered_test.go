@@ -409,3 +409,131 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 		t.Fatal("relative build-cache root accepted")
 	}
 }
+
+// An ephemeral temp root admits its OWN identity only: the stat and open
+// of the root the temp machinery performs record nothing, while a file
+// one level deeper — not run-created as far as any evidence shows —
+// stays observed, an undeclared root observes as before, and a relative
+// declaration is refused (REQ-inputs-ephemeral-root).
+func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	deeper := filepath.Join(root, "left-behind.txt")
+	if err := os.WriteFile(deeper, []byte("stale state"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := "stat " + root + "\nopen " + root + "\n"
+
+	obs := completedFromLog(t, dir, log, WithEphemeralTempRoot(root))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("ephemeral root reads sealed unverifiable: %s", st.Reason)
+	}
+	d, err := Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 0 || len(d.Unverifiable) != 0 {
+		t.Fatalf("ephemeral root identity recorded: %+v", d)
+	}
+
+	// One level deeper is outside the admission.
+	obs = completedFromLog(t, dir, "open "+deeper+"\n", WithEphemeralTempRoot(root))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) == 0 {
+		t.Fatal("deeper read skipped — the admission is one identity wide")
+	}
+
+	// Undeclared, the root observes (an external directory input).
+	obs = completedFromLog(t, dir, log)
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) == 0 {
+		t.Fatal("undeclared temp root recorded nothing")
+	}
+
+	if _, err := FromTestLog([]byte("open x\n"), dir, dir, WithEphemeralTempRoot("relative/tmp")); err == nil {
+		t.Fatal("relative ephemeral root accepted")
+	}
+
+	// The resolved-form arm is load-bearing (macOS /tmp -> /private/tmp):
+	// declaring the LINK admits an open of the REAL root.
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "tmplink")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	obs = completedFromLog(t, dir, "open "+real+"\n", WithEphemeralTempRoot(link))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) != 0 {
+		t.Fatalf("resolved-form admission failed: %+v", d)
+	}
+
+	// An unresolvable root declares nothing: a read of that very
+	// identity still records.
+	gone := filepath.Join(t.TempDir(), "never-created")
+	obs = completedFromLog(t, dir, "open "+gone+"\n", WithEphemeralTempRoot(gone))
+	st, err = CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err = Describe(st.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) == 0 {
+		t.Fatal("unresolvable root admitted reads")
+	}
+
+	// A module-interior root refuses loudly: it would vacate a
+	// content-bearing module digest, not an external refusal. The root
+	// exists, so the refusal is the interior check itself, not a
+	// resolution skip.
+	interior := filepath.Join(dir, "testdata")
+	if err := os.MkdirAll(interior, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	interiorBracket, err := CaptureBracket(dir, []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
+		WithCompletedProcess("package-test-binary:guard"), WithBracket(interiorBracket),
+		WithEphemeralTempRoot(interior)); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
+		t.Fatalf("module-interior ephemeral root error = %v", err)
+	}
+	// An UNRESOLVABLE interior root refuses identically: the declared
+	// form's interiority is checkable without resolution.
+	missingBracket, err := CaptureBracket(dir, []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
+		WithCompletedProcess("package-test-binary:guard"), WithBracket(missingBracket),
+		WithEphemeralTempRoot(filepath.Join(dir, "missing"))); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
+		t.Fatalf("unresolvable interior root error = %v", err)
+	}
+}
