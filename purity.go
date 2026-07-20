@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"os"
 
@@ -96,7 +97,9 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	pureMethods := map[*types.Func]bool{}
 	externalMethods := map[*types.Func]bool{}
 	methodKeys := map[*types.Func]string{}
+	mutatedDynamicVars := map[string]bool{}
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		recordDynamicGlobalMutations(p, mutatedDynamicVars)
 		for _, file := range p.Syntax {
 			for _, declaration := range file.Decls {
 				function, ok := declaration.(*ast.FuncDecl)
@@ -177,7 +180,17 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 		}
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
-			if variable, ok := scope.Lookup(name).(*types.Var); ok && p.Module != nil && typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+			variable, ok := scope.Lookup(name).(*types.Var)
+			if !ok || p.Module == nil || !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+				continue
+			}
+			// A dynamic-capable global downgrades only when the program
+			// can mutate it after initialization: immutable-after-init
+			// hooks are ordinary source the closure hashes. Non-Go
+			// writes need no gate here - the closure tier's native-code
+			// and linkage dispositions already downgrade cgo and
+			// assembly packages (REQ-closure-shared-dynamic-state).
+			if mutatedDynamicVars[dynamicVarKey(variable)] {
 				packageOpenWorld[p.PkgPath] = true
 			}
 		}
@@ -406,4 +419,188 @@ func recvTypeName(fd *ast.FuncDecl) string {
 		return id.Name
 	}
 	return ""
+}
+
+// dynamicVarKey identifies a package-level variable stably across the
+// test-variant recompilations packages.Load produces: variant type
+// objects differ per graph, the (package path, name) pair does not. A
+// mutation recorded under any variant marks the name for all — the
+// conservative direction.
+func dynamicVarKey(variable *types.Var) string {
+	if variable.Pkg() == nil {
+		return variable.Name()
+	}
+	return variable.Pkg().Path() + "." + variable.Name()
+}
+
+// recordDynamicGlobalMutations walks one package's syntax for
+// post-initialization mutation of package-level dynamic-capable
+// variables anywhere in the program, judged fail-closed by carrier
+// shape (REQ-closure-shared-dynamic-state). By-value carriers mutate
+// exactly by a write (assignment, inc/dec, range target, send), an
+// address capture, or a pointer-receiver method use — at bind or call
+// position alike. Alias-handing carriers (interface values, channels,
+// pointers/maps/slices reaching a dynamic carrier, unsafe pointers)
+// hand shared mutable access to every reader, so any use at all marks
+// them. init functions are exempt — startup flow is deterministic,
+// source-determined state — but function bodies nested in package-level
+// declarations are program code and are walked.
+func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
+	if p == nil || p.TypesInfo == nil {
+		return
+	}
+	dynamicPackageVar := func(obj types.Object) (*types.Var, bool) {
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, false
+		}
+		if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+			return nil, false
+		}
+		return variable, true
+	}
+	resolve := func(ident *ast.Ident) (types.Object, bool) {
+		if obj, ok := p.TypesInfo.Uses[ident]; ok {
+			return obj, true
+		}
+		if obj, ok := p.TypesInfo.Defs[ident]; ok && obj != nil {
+			return obj, true
+		}
+		return nil, false
+	}
+	// markTargets marks every dynamic-capable package variable an
+	// expression subtree reaches — deliberately over-approximate: a
+	// spurious mark only keeps a variable's current conservative
+	// disposition.
+	markTargets := func(expr ast.Expr) {
+		ast.Inspect(expr, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if obj, ok := resolve(ident); ok {
+				if variable, ok := dynamicPackageVar(obj); ok {
+					mutated[dynamicVarKey(variable)] = true
+				}
+			}
+			return true
+		})
+	}
+	walkBody := func(body ast.Node) {
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range n.Lhs {
+					markTargets(lhs)
+				}
+			case *ast.IncDecStmt:
+				markTargets(n.X)
+			case *ast.RangeStmt:
+				if n.Key != nil {
+					markTargets(n.Key)
+				}
+				if n.Value != nil {
+					markTargets(n.Value)
+				}
+			case *ast.SendStmt:
+				markTargets(n.Chan)
+			case *ast.UnaryExpr:
+				if n.Op == token.AND {
+					markTargets(n.X)
+				}
+			case *ast.SelectorExpr:
+				// A pointer-receiver method USE — bind or call alike —
+				// is an implicit address capture of its receiver chain.
+				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
+					if fn, ok := selection.Obj().(*types.Func); ok {
+						if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
+							if _, pointer := types.Unalias(sig.Recv().Type()).(*types.Pointer); pointer {
+								markTargets(n.X)
+							}
+						}
+					}
+				}
+			case *ast.Ident:
+				// Alias-handing carriers: any use hands shared mutable
+				// access, so any use is mutation-equivalent.
+				if obj, ok := resolve(n); ok {
+					if variable, ok := dynamicPackageVar(obj); ok && typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+						mutated[dynamicVarKey(variable)] = true
+					}
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				if decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init" {
+					continue
+				}
+				if decl.Body != nil {
+					walkBody(decl.Body)
+				}
+			default:
+				// The declaration itself is initialization, but a
+				// function literal nested in it is callable program
+				// code — a package-level `var rebind = func() {...}`
+				// mutator must be walked.
+				ast.Inspect(decl, func(n ast.Node) bool {
+					if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
+						walkBody(lit.Body)
+						return false
+					}
+					return true
+				})
+			}
+		}
+	}
+}
+
+// typeHandsOutDynamicAlias reports whether reading the type hands out
+// shared mutable access to dynamic state: an interface value (its
+// concrete object is shared), a channel, a pointer, map, or slice
+// reaching a dynamic carrier, or an unsafe pointer. Function values
+// and by-value composites of them are copies — reading them cannot
+// reach the shared cell (REQ-closure-shared-dynamic-state).
+func typeHandsOutDynamicAlias(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Basic:
+		return t.Kind() == types.UnsafePointer
+	case *types.Interface:
+		return true
+	case *types.Chan:
+		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+	case *types.Pointer:
+		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+	case *types.Map:
+		return typeMayCarryUnknownDynamic(t.Key(), make(map[types.Type]bool)) || typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+	case *types.Slice:
+		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+	case *types.Named:
+		return typeHandsOutDynamicAlias(t.Underlying(), seen)
+	case *types.TypeParam:
+		return typeHandsOutDynamicAlias(t.Constraint(), seen)
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if typeHandsOutDynamicAlias(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+	case *types.Array:
+		return typeHandsOutDynamicAlias(t.Elem(), seen)
+	case *types.Tuple:
+		for i := 0; i < t.Len(); i++ {
+			if typeHandsOutDynamicAlias(t.At(i).Type(), seen) {
+				return true
+			}
+		}
+	}
+	return false
 }

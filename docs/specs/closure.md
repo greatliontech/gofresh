@@ -87,6 +87,29 @@ dispositions, each chosen never to under-cover:
 A blind spot is never left to silently narrow the closure; when no disposition can be
 proven, it widens.
 
+**REQ-closure-shared-dynamic-state** (invariant): A package-level variable able to
+carry dynamic behavior — a function, an interface, a channel of dynamic carriers,
+or an unsafe pointer anywhere in its type — that the analyzed program can mutate
+after initialization is
+process-shared dynamic state no per-subject closure can attribute, because a prior
+subject's execution in the same process can have changed it: every subject whose
+package graph links the owning package MUST be unverifiable. Mutation is judged
+fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
+array, or tuple of by-value carriers) is mutated exactly by a write, an address
+capture, or a pointer-receiver method use outside `init` flow anywhere in the
+program — reads copy and cannot reach the shared cell. An alias-handing carrier —
+an interface value (its concrete object is shared), a channel, or a pointer, map,
+or slice reaching a dynamic carrier, or an unsafe pointer — hands shared mutable
+access to every reader, so ANY use outside initialization is mutation-equivalent.
+Function bodies nested in package-level declarations are program code, not
+initialization; non-Go writes need no rule here — packages built with cgo or
+assembly sources are already downgraded whole by the native-code and linkage
+blind-spot dispositions. A dynamic-capable variable the program never mutates under these
+rules is ordinary source — the closure hashes its initializer like any
+declaration — and confers no downgrade; the unconditional type-level blanket would
+refuse verifiability to nearly every real program, since hook-typed package
+variables are ubiquitous.
+
 ## Analysis requirements
 
 **REQ-closure-analysis** (behavior): Declaration-RTA refinement MUST build

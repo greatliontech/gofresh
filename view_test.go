@@ -943,7 +943,9 @@ func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
 }
 
 func TestRefinementRetainsMaximalDispositionForMutableCallbackGlobal(t *testing.T) {
-	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n")
+	// Rebind mutates the callback global outside initialization, making
+	// it process-shared dynamic state (REQ-closure-shared-dynamic-state).
+	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n\nfunc Rebind(f func()) { Callback = f }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -966,12 +968,40 @@ func TestRefinementRetainsMaximalDispositionForMutableCallbackGlobal(t *testing.
 	}
 }
 
+// A dynamic-capable global the program never mutates after
+// initialization is ordinary source: the closure hashes its
+// initializer, and the subject refines valid instead of downgrading
+// (REQ-closure-shared-dynamic-state).
+func TestImmutableCallbackGlobalRefinesValid(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nvar ErrSentinel = error(nil)\n\nfunc F() { Callback() }\n")
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.CaptureRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.CheckRefined(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("immutable callback global verdict = %+v, want valid", verdict)
+	}
+}
+
 func TestRefinementPropagatesMutableCallbackGlobalFromDependency(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nimport \"example.com/view/dep\"\n\nfunc F() { dep.Run() }\n")
 	if err := os.Mkdir(filepath.Join(dir, "dep"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "dep", "dep.go"), []byte("package dep\n\nvar Hook = func() {}\n\nfunc Run() { Hook() }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dep", "dep.go"), []byte("package dep\n\nvar Hook = func() {}\n\nfunc Run() { Hook() }\n\nfunc SetHook(f func()) { Hook = f }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := New(WithDir(dir))
@@ -2958,5 +2988,72 @@ func TestRefinementUnavailabilityIsSubjectLocal(t *testing.T) {
 	}
 	if verdicts[g].Status != Unverifiable {
 		t.Fatalf("drifted subject with unavailable refinement = %+v, want unverifiable", verdicts[g])
+	}
+}
+
+// The three fail-closed mutation shapes the carrier rules must catch
+// (REQ-closure-shared-dynamic-state): a package-level function-literal
+// mutator, a pointer-receiver method VALUE bind, and read-aliasing of
+// a map-carried hook set.
+func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
+	for name, source := range map[string]string{
+		"package-level funclit mutator":      "package view\n\nvar Hook = func() {}\n\nvar Rebind = func() { Hook = func() {} }\n\nfunc F() { Rebind() }\n",
+		"pointer-receiver method value bind": "package view\n\ntype Registry struct{ hook func() }\n\nfunc (r *Registry) Set(f func()) { r.hook = f }\n\nvar Reg Registry\n\nfunc F() { set := Reg.Set; set(func() {}) }\n",
+		"map read-alias":                     "package view\n\nvar Hooks = map[string]func(){}\n\nfunc F() { m := Hooks; m[\"k\"] = func() {} }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			engine, err := New(WithDir(dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := view.CaptureRefined(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := view.CheckRefined(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "caller-supplied") {
+				t.Fatalf("verdict = %+v, want the shared-dynamic-state downgrade", verdict)
+			}
+		})
+	}
+}
+
+// A package with assembly sources stays downgraded through the closure
+// tier's native-code and linkage dispositions - the mutation analysis
+// needs no foreign-code rule of its own
+// (REQ-closure-shared-dynamic-state).
+func TestForeignCodePackageKeepsTypeLevelDowngrade(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nvar Hook = func() {}\n\nfunc F() { Hook() }\n")
+	if err := os.WriteFile(filepath.Join(dir, "empty_amd64.s"), []byte("// nothing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.CaptureRefined(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.CheckRefined(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable {
+		t.Fatalf("verdict = %+v, want the foreign-code downgrade", verdict)
 	}
 }
