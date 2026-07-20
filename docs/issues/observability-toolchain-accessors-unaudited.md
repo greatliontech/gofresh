@@ -24,3 +24,13 @@ pinned by the toolchain guard) and admit guard-pinned path provenance
 through the identity-argument walk, so a read the observation layer
 guard-covers is equally admissible to the proof. The same reasoning
 extends to the module-cache root accessors when one exists.
+
+## Measurement
+
+With the consumer wiring landed (stipulator threads both guard roots;
+manifests verified clean), the gofresh corpus still publishes 1 of 465
+witnesses across a cold and two warm passes — the observation layer is
+no longer the gate. Publication for this corpus's
+maximal-unverifiable-heavy tests hinges on the observation-proof leg,
+where the audit breadth (this issue, and whatever the per-test
+uncacheable reasons surface once they exist) decides everything.
