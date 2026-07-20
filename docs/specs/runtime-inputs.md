@@ -392,7 +392,7 @@ the root's listing is volatile machine noise no guard could pin — so any
 writable root is observationally equivalent and re-observing it converts
 environmental machinery into a standing refusal. Beyond the root identity,
 a deeper read under a declared root whose object is ABSENT at observation
-ingest MUST also record nothing: it is per-run scratch by construction —
+ingest likewise records nothing: it is per-run scratch by construction —
 state that outlived the run would still be present, and a pre-existing file
 a subject read still exists at ingest and stays observed and digested. The
 scratch admission is fail-closed on resolution: the absent path's nearest
@@ -475,7 +475,7 @@ outside the module, a relative path under a working-directory change the run str
 cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
 for each package process — MUST be treated as unverifiable rather than valid, since an
 input identity that cannot be pinned under the shared checking environment is not
-proof of a stable input. One `PWD` posture IS bounded and MUST admit recordless: a
+proof of a stable input. One `PWD` posture IS bounded and admits recordless: a
 frozen environment carrying `PWD` equal to the package directory the process spawned
 in — the value the subject reads is then fully determined by the frame identity the
 record already pins, so re-observing it adds no protection; any other posture,
