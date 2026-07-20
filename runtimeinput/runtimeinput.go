@@ -239,9 +239,9 @@ type testLogConfig struct {
 	// ephemeralRoots are declared temp roots whose own identity records
 	// nothing (REQ-inputs-ephemeral-root).
 	ephemeralRoots []string
-	process    string
-	bracket    *Bracket
-	err        error
+	process        string
+	bracket        *Bracket
+	err            error
 }
 
 type guardRootDecl struct {
@@ -1188,10 +1188,16 @@ func materializePath(moduleDir string, id pathID) (string, error) {
 // fingerprint, never as content, and revalidation recomputes the same
 // projection: equal on the same machine, moved exactly when the
 // hardware or kernel actually changed (REQ-inputs-machine-identity).
-var machineFactIdentities = map[string]bool{
-	"/proc/cpuinfo": true,
-	"/proc/meminfo": true,
-}
+// The allowlist derives from the guard's own source list, so a fact
+// source added to the gatherer is allowlisted by construction — the two
+// sets cannot diverge.
+var machineFactIdentities = func() map[string]bool {
+	m := make(map[string]bool, len(guard.MachineFactSources))
+	for _, p := range guard.MachineFactSources {
+		m[p] = true
+	}
+	return m
+}()
 
 // currentMachineFacts is the projection source, a variable so the
 // ungatherable arm is testable; production always points at the guard.

@@ -400,7 +400,8 @@ listing as data is outside the admitted observation set, exactly as
 covered-tree metadata and cache-objects-as-data dependence already are.
 
 **REQ-inputs-machine-identity** (behavior): The allowlisted stable-machine-fact
-identities — `/proc/cpuinfo` and `/proc/meminfo` — MUST digest as the stable
+identities — `/proc/cpuinfo`, `/proc/meminfo`, and `/proc/sys/kernel/osrelease`,
+the sources the projection's own gatherer reads — MUST digest as the stable
 machine projection REQ-guard-machine defines (CPU model and microarchitecture,
 core counts, total memory, operating system and kernel version), never as raw
 content or stat metadata: their bytes and mtimes are volatile on every read

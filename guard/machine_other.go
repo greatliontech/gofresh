@@ -10,3 +10,7 @@ import "fmt"
 func gatherFacts() (MachineFacts, error) {
 	return MachineFacts{}, fmt.Errorf("provenance: machine fingerprint unsupported on this OS")
 }
+
+// MachineFactSources is empty where no gatherer exists: nothing is read,
+// so nothing is allowlisted (REQ-inputs-machine-identity).
+var MachineFactSources []string

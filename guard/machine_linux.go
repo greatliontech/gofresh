@@ -13,6 +13,19 @@ import (
 	"strings"
 )
 
+const (
+	cpuinfoPath   = "/proc/cpuinfo"
+	meminfoPath   = "/proc/meminfo"
+	osreleasePath = "/proc/sys/kernel/osrelease"
+)
+
+// MachineFactSources are the files gatherFacts reads for the stable
+// machine projection. The runtime-input machine-fact allowlist derives
+// from this list, so a source added here is allowlisted by construction
+// and can never silently classify as an ordinary volatile proc read
+// (REQ-inputs-machine-identity).
+var MachineFactSources = []string{cpuinfoPath, meminfoPath, osreleasePath}
+
 func gatherFacts() (MachineFacts, error) {
 	model, phys, logical, err := cpuInfo()
 	if err != nil {
@@ -33,18 +46,25 @@ func gatherFacts() (MachineFacts, error) {
 	if err != nil {
 		return MachineFacts{}, err
 	}
+	kernel, err := readKernelRelease()
+	if err != nil {
+		// Fail loud like every other fact source: an empty kernel version
+		// would digest equal at seal and check across a kernel change —
+		// silently vacating the one fact this file carries.
+		return MachineFacts{}, err
+	}
 	return MachineFacts{
 		CPUModel:      model,
 		PhysicalCores: phys,
 		LogicalCores:  logical,
 		TotalRAMBytes: ram,
 		OS:            runtime.GOOS,
-		KernelVersion: kernelRelease(),
+		KernelVersion: kernel,
 	}, nil
 }
 
 func cpuInfo() (string, int, int, error) {
-	file, err := os.Open("/proc/cpuinfo")
+	file, err := os.Open(cpuinfoPath)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("provenance: %w", err)
 	}
@@ -130,7 +150,7 @@ func composeARM(arm map[string]string) string {
 }
 
 func memTotal() (uint64, error) {
-	file, err := os.Open("/proc/meminfo")
+	file, err := os.Open(meminfoPath)
 	if err != nil {
 		return 0, fmt.Errorf("provenance: %w", err)
 	}
@@ -157,10 +177,12 @@ func parseMemTotal(r io.Reader) (uint64, error) {
 	return 0, fmt.Errorf("provenance: MemTotal not found in /proc/meminfo")
 }
 
-func kernelRelease() string {
-	b, err := os.ReadFile("/proc/sys/kernel/osrelease")
+// readKernelRelease is a variable so the unreadable-source arm is
+// testable; production always reads the kernel's own file.
+var readKernelRelease = func() (string, error) {
+	b, err := os.ReadFile(osreleasePath)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("provenance: %w", err)
 	}
-	return strings.TrimSpace(string(b))
+	return strings.TrimSpace(string(b)), nil
 }

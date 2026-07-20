@@ -552,7 +552,7 @@ func TestMachineFactIdentitiesDigestAsStableProjection(t *testing.T) {
 		t.Skip("machine-fact identities are Linux proc files")
 	}
 	dir := t.TempDir()
-	obs := completedFromLog(t, dir, "open /proc/cpuinfo\nopen /proc/meminfo\n")
+	obs := completedFromLog(t, dir, "open /proc/cpuinfo\nopen /proc/meminfo\nopen /proc/sys/kernel/osrelease\n")
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)

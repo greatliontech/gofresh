@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,32 @@ func TestLogicalCoresIgnoreProcessAffinity(t *testing.T) {
 	}
 	if logical != full.LogicalCores {
 		t.Fatalf("pinned child gathered LogicalCores=%d, want the machine's %d — affinity leaked into machine identity", logical, full.LogicalCores)
+	}
+}
+
+// An unreadable kernel-release source fails the whole gather loud: an
+// empty KernelVersion would digest equal at seal and check across a
+// kernel change, silently vacating the one fact the file carries
+// (REQ-guard-machine; the runtime-input projection digest inherits it).
+func TestGatherFactsFailsLoudOnUnreadableKernelRelease(t *testing.T) {
+	prev := readKernelRelease
+	readKernelRelease = func() (string, error) {
+		return "", fmt.Errorf("provenance: injected unreadable osrelease")
+	}
+	defer func() { readKernelRelease = prev }()
+	if _, err := gatherFacts(); err == nil || !strings.Contains(err.Error(), "osrelease") {
+		t.Fatalf("gather error = %v, want the unreadable kernel-release source surfaced", err)
+	}
+}
+
+// The runtime-input allowlist derives from this source list; the list
+// itself must name every file the gatherer opens. The literal pin
+// catches edits to the LIST — that the gatherer opens nothing beyond
+// the list remains a reviewed convention, tracked in
+// docs/issues/machine-fact-source-list-unenforced.md.
+func TestMachineFactSourcesNameTheGathererReads(t *testing.T) {
+	want := []string{"/proc/cpuinfo", "/proc/meminfo", "/proc/sys/kernel/osrelease"}
+	if !slices.Equal(MachineFactSources, want) {
+		t.Fatalf("MachineFactSources = %v, want %v", MachineFactSources, want)
 	}
 }

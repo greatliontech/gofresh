@@ -21,3 +21,8 @@ when its work lands (git holds history).
   cover is never consulted. Conservative (stays observed); reuse lost in overlap
   topologies. *Lands: when overlapping roots occur in a real configuration, or when the
   coverage walk is next touched.*
+- **[machine-fact-source-list-unenforced](machine-fact-source-list-unenforced.md)** — the
+  allowlist derives from guard.MachineFactSources (cannot diverge), but nothing proves the
+  gatherer opens only listed files; a new unlisted fact source would silently stall every
+  machine-fact-gathering witness again. *Lands: when gatherFacts next gains or changes a
+  fact source, or when the observation harness gains a self-tracing test surface.*
