@@ -22,9 +22,9 @@ collapses from 464 uncacheable toward the ~14-refusal residue.
 - [x] 4. Residue review (~14 genuine refusals: /dev/null, stat metadata,
   file-I/O proofs) + measurement: gofresh self-suite uncacheable count and
   the stipulator serving check over this corpus, before/after
-- [ ] 4.2 Machine-fact allowlist completion: /proc/sys/kernel/osrelease
+- [x] 4.2 Machine-fact allowlist completion: /proc/sys/kernel/osrelease
   (the guard's own KernelVersion read) joins the projection identities;
-  /proc/stat (guard measurement sampling) gets a class decision
+  /proc/stat gets a class decision
 - [ ] 4.3 /dev/null identity admission: contentless kernel sink read/written
   across the corpus; identity-only, nothing to digest
 - [ ] 4.4 Self-created temp scratch: paths the test process itself creates
