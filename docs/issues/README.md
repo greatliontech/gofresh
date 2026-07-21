@@ -11,9 +11,3 @@ when its work lands (git holds history).
   dependency-heavy benchmark package, and only after re-measuring the open-world
   population under the shared-dynamic-state mutation analysis shows the residual is
   worth the alias-level extension.*
-- **[interprocedural-fresh-path-proofs](interprocedural-fresh-path-proofs.md)** — the
-  fresh-path observability grammar is intraprocedural: scratch paths built in or passed
-  through helpers refuse the proof (28 corpus witnesses); propagation needs an
-  attributed interprocedural extension of the SSA walk. *Lands: when the observability
-  audit next extends beyond admission classes, or when a consuming corpus's serving is
-  demonstrably gated on helper-mediated scratch patterns.*

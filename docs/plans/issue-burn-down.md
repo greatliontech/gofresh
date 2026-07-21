@@ -15,7 +15,7 @@ every chunk runs the adversarial loop and the corpus check stays green.
 - [x] 3. Machine-fact gatherer enforcement: every gatherer read routes
   through one membership-checked open seam
   (machine-fact-source-list-unenforced)
-- [ ] 4. Interprocedural fresh-path proofs: attributed parameter
+- [x] 4. Interprocedural fresh-path proofs: attributed parameter
   freshness across function boundaries, same consumer discipline
   (interprocedural-fresh-path-proofs; 28-witness refusal class)
 - [ ] 5. Refinement open-world re-measurement under the

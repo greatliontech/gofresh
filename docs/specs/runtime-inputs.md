@@ -307,7 +307,15 @@ introduce unobserved state.
 The recognized fresh-mutation extension treats a `testing.TempDir` result as an opaque
 fresh directory capability and derives child capabilities only by joining portable
 constant basename components. The capability may not affect behavior as a string or
-escape the recognized operation graph. A guarded `os.WriteFile` of source-constant
+escape the recognized operation graph. The graph extends across a static function
+boundary within the subject's attributed reachability: a parameter holds the
+capability when every attributed call site of its function passes a fresh capability
+at that position and the parameter's uses inside the function stay within the graph
+under the same discipline — dynamic dispatch, variadic and closure callees,
+goroutine call sites, call sites in cyclic blocks, and recursion stay outside,
+fail-closed; and guarded-creation
+facts do not cross the boundary, so a mutation inside a callee demands its creation
+inside that callee. A guarded `os.WriteFile` of source-constant
 bytes establishes its target as freshly created. `os.ReadFile` may consume a fresh
 capability. `os.Remove` and `os.RemoveAll` require the exact target to be the fresh
 directory root or to have a preceding guarded creation that applies on every path to

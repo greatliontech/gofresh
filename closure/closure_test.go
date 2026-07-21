@@ -1814,10 +1814,27 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperEscape"},
-		{fixture: "observablefresh", subject: "TestFreshPathNoopEscape", reason: "testing.TempDir"},
+		// The boundary extension admits an ignored parameter — nothing
+		// is observed — and the disciplined helper; every refusal shape
+		// (mixed callers, recursion, goroutine crossing, global leak)
+		// stays refused.
+		{fixture: "observablefresh", subject: "TestFreshPathNoopEscape", observable: true},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperFullDiscipline", observable: true},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperMixedCallers"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperRecursive"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperGoroutine"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperLeak"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperDirectGo"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperInLoop"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee"},
 		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
+		// The startup caller is invisible to per-subject call-site
+		// enumeration by design; the startup walk blocks first, and
+		// this row pins that mask (the soundness argument for
+		// callers-from-subject-reach-only).
+		{fixture: "observablefreshinit", subject: "TestFreshHelperShadowedByStartupCaller", reason: "startup effect"},
 		{fixture: "toolchainread", subject: "TestAccessorAlone", observable: true},
 		{fixture: "toolchainread", subject: "TestReadVersion", observable: true},
 		{fixture: "toolchainread", subject: "TestOpenUnderToolchain", observable: true},

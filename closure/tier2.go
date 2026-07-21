@@ -662,7 +662,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
-	subjectResult, err := h.tier2Reachable(base, subjectReach)
+	subjectResult, err := h.tier2ReachableWithFresh(base, subjectReach, true)
 	if err != nil {
 		return Observability{}, err
 	}
@@ -689,7 +689,12 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	}
 	for _, effect := range maximalEffects {
 		if maximalObservabilityBlocker(effect) {
-			return Observability{Reason: effect.reason}, nil
+			// The tier names itself: a package-scan block is the
+			// whole-package negative backstop, not the subject's own
+			// attributed flow — measurably distinct, so a corpus can
+			// tell how often the backstop alone costs a proof the walk
+			// would grant.
+			return Observability{Reason: "package scan: " + effect.reason}, nil
 		}
 	}
 	for _, effect := range subjectResult.effects {
@@ -1114,9 +1119,19 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 // analysis over a supplied per-subject RTA set. Its behavior is otherwise the
 // same as the former one-subject tier2 path.
 func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachability) (tier2Result, error) {
+	return h.tier2ReachableWithFresh(base, reachable, false)
+}
+
+// tier2ReachableWithFresh optionally carries the cross-boundary
+// fresh-path analysis: only the observability walk consults
+// effect.observable, so the refined-closure path skips the sweep.
+func (h *Hasher) tier2ReachableWithFresh(base *tier2Base, reachable attributedReachability, withFresh bool) (tier2Result, error) {
 	a := base.analyzer()
 	a.rtaResolved = reachable.resolved
 	a.openWorld = reachable.openWorld
+	if withFresh {
+		a.fresh = newFreshParamAnalysis(reachable)
+	}
 	if err := a.addLinkedCacheModules(); err != nil {
 		return tier2Result{}, err
 	}
@@ -1241,6 +1256,10 @@ type tier2Analyzer struct {
 	filePkgs    map[*pkgIndex]bool
 	rtaReach    map[*ssa.Function]bool
 	rtaResolved map[ssa.CallInstruction]bool
+	// fresh carries the subject's cross-boundary fresh-path analysis;
+	// nil outside per-subject reachability walks (maximal tier,
+	// startup effects), where the intraprocedural grammar alone applies.
+	fresh       *freshParamAnalysis
 	openWorld   bool
 	scanned     map[*ssa.Function]bool
 	seenContrib map[string]bool
@@ -1789,7 +1808,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		classified = true
 	}
 	if classified {
-		effect.observable = observableCallEffect(effect, c, site)
+		effect.observable = observableCallEffect(effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
 			return
 		}
@@ -1806,7 +1825,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 }
 
-func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction) bool {
+func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	if call == nil {
 		return false
 	}
@@ -1823,10 +1842,10 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 		return true
 	}
 	if effect.packagePath == "testing" && effect.symbol == "TempDir" {
-		return observableFreshPathResult(site)
+		return observableFreshPathResult(site, fp)
 	}
 	if effect.packagePath == "path/filepath" && effect.symbol == "Join" {
-		return observableFreshPathResult(site) || observablePinnedPathResult(site)
+		return observableFreshPathResult(site, fp) || observablePinnedPathResult(site)
 	}
 	if effect.packagePath != "os" {
 		return false
@@ -1841,7 +1860,7 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 		if !known || !recognizedOpenFileFlags(call.StaticCallee(), flags) {
 			return false
 		}
-		pathFresh := len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool))
+		pathFresh := len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil)
 		if !pathFresh && (!ordinaryOpenFileFlagsObservable(flags) || !observableIdentityArgument(effect, call)) {
 			return false
 		}
@@ -1850,13 +1869,13 @@ func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.
 		}
 		return observableOpenResult(site) && observableTupleError(site)
 	case "ReadFile":
-		return observableIdentityArgument(effect, call) || guardPinnedPathArgument(call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && freshReadableTargetObservable(call.Args[0], site)
+		return observableIdentityArgument(effect, call) || guardPinnedPathArgument(call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil) && freshReadableTargetObservable(call.Args[0], site)
 	case "ReadDir":
 		return (observableIdentityArgument(effect, call) || guardPinnedPathArgument(call)) && observableReadDirResult(site)
 	case "WriteFile":
-		return len(call.Args) >= 2 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && guardedWriteBytes(call.Args[1], make(map[ssa.Value]bool)) && observableErrorResult(site)
+		return len(call.Args) >= 2 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil) && guardedWriteBytes(call.Args[1], make(map[ssa.Value]bool)) && observableErrorResult(site)
 	case "Remove", "RemoveAll":
-		return len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool)) && freshTargetCreatedBefore(call.Args[0], site) && observableErrorResult(site)
+		return len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil) && freshTargetCreatedBefore(call.Args[0], site) && observableErrorResult(site)
 	default:
 		return false
 	}
@@ -1877,9 +1896,9 @@ func observableIdentityArgument(effect externalEffect, call *ssa.CallCommon) boo
 	return effect.kind != externalEffectFileIO || !hasParentTraversalPath(identity)
 }
 
-func observableFreshPathResult(site ssa.CallInstruction) bool {
+func observableFreshPathResult(site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	value, ok := site.(ssa.Value)
-	return ok && !blockInCycle(site.Block()) && freshPathValue(value, make(map[ssa.Value]bool)) && observableFreshPathUses(value, make(map[ssa.Value]bool))
+	return ok && !blockInCycle(site.Block()) && freshPathValue(value, make(map[ssa.Value]bool), fp, nil) && observableFreshPathUses(value, make(map[ssa.Value]bool), fp, nil)
 }
 
 // guardPinnedPathArgument reports whether the call's path argument is a
@@ -1943,12 +1962,30 @@ func observablePinnedPathResult(site ssa.CallInstruction) bool {
 	return ok && guardPinnedPathValue(value, make(map[ssa.Value]bool))
 }
 
-func freshPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
+func freshPathValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis, inProgress map[freshParamKey]bool) bool {
 	if value == nil || seen[value] {
 		return false
 	}
 	seen[value] = true
+	if inProgress == nil {
+		inProgress = map[freshParamKey]bool{}
+	}
 	switch value := value.(type) {
+	case *ssa.Parameter:
+		// A parameter holds a fresh capability when every attributed
+		// call site of its function passes one at this position
+		// (REQ-inputs-fresh-mutation's boundary extension); its own
+		// uses are audited from each origin's uses walk.
+		if fp == nil {
+			return false
+		}
+		fn := value.Parent()
+		for i, param := range fn.Params {
+			if param == value {
+				return fp.paramArgFreshMemo(freshParamKey{fn: fn, idx: i}, inProgress)
+			}
+		}
+		return false
 	case *ssa.Call:
 		callee := value.Common().StaticCallee()
 		if callee == nil {
@@ -1965,7 +2002,7 @@ func freshPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 			return false
 		}
 		args, ok := fixedVariadicArgs(value)
-		if !ok || len(args) < 2 || !freshPathValue(args[0], seen) {
+		if !ok || len(args) < 2 || !freshPathValue(args[0], seen, fp, inProgress) {
 			return false
 		}
 		for _, arg := range args[1:] {
@@ -1979,7 +2016,7 @@ func freshPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 	}
 }
 
-func observableFreshPathUses(value ssa.Value, seen map[ssa.Value]bool) bool {
+func observableFreshPathUses(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis, inProgress map[freshParamKey]bool) bool {
 	if value == nil || seen[value] || value.Referrers() == nil {
 		return value != nil
 	}
@@ -1993,11 +2030,11 @@ func observableFreshPathUses(value ssa.Value, seen map[ssa.Value]bool) bool {
 			if joinStores > 1 {
 				return false
 			}
-			if ref.Val != value || !freshPathStoreFeedsJoin(ref, value, seen) {
+			if ref.Val != value || !freshPathStoreFeedsJoin(ref, value, seen, fp, inProgress) {
 				return false
 			}
 		case ssa.CallInstruction:
-			if !observableFreshPathConsumer(ref, value) {
+			if !observableFreshPathConsumer(ref, value, fp, inProgress) {
 				return false
 			}
 		default:
@@ -2007,7 +2044,7 @@ func observableFreshPathUses(value ssa.Value, seen map[ssa.Value]bool) bool {
 	return true
 }
 
-func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value) bool {
+func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value, fp *freshParamAnalysis, inProgress map[freshParamKey]bool) bool {
 	if site == nil || site.Common() == nil || site.Common().StaticCallee() == nil {
 		return false
 	}
@@ -2022,6 +2059,13 @@ func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value) 
 	pkgPath, name := funcPkgPath(callee), callee.Name()
 	if object := callee.Object(); object != nil {
 		name = object.Name()
+	}
+	// Crossing into a static user function is admitted when every
+	// attributed call site of the callee passes fresh at the value's
+	// positions and the parameter's uses stay within the graph
+	// (REQ-inputs-fresh-mutation's boundary extension).
+	if fp.boundaryCrossingObservable(site, pathValue, inProgress) {
+		return true
 	}
 	if pkgPath != "os" || len(call.Args) == 0 || call.Args[0] != pathValue {
 		return false
@@ -2041,7 +2085,7 @@ func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value) 
 	}
 }
 
-func freshPathStoreFeedsJoin(store *ssa.Store, pathValue ssa.Value, seen map[ssa.Value]bool) bool {
+func freshPathStoreFeedsJoin(store *ssa.Store, pathValue ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis, inProgress map[freshParamKey]bool) bool {
 	address, ok := store.Addr.(*ssa.IndexAddr)
 	if !ok {
 		return false
@@ -2068,7 +2112,7 @@ func freshPathStoreFeedsJoin(store *ssa.Store, pathValue ssa.Value, seen map[ssa
 			for _, arg := range args[1:] {
 				valid = valid && safeFreshPathComponent(arg)
 			}
-			if valid && observableFreshPathUses(call, seen) {
+			if valid && observableFreshPathUses(call, seen, fp, inProgress) {
 				return true
 			}
 		}
@@ -2475,7 +2519,7 @@ func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
 			if !known || !recognizedOpenFileFlags(call.Common().StaticCallee(), flags) || len(call.Common().Args) == 0 {
 				return false
 			}
-			pathFresh := freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool))
+			pathFresh := freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool), nil, nil)
 			return pathFresh && freshOpenFileTargetObservable(flags, call.Common().Args[0], call) || ordinaryOpenFileFlagsObservable(flags) && observableIdentityArgument(effect, call.Common())
 		default:
 			return false
@@ -2761,7 +2805,7 @@ func fileValueFromFreshOpenFile(value ssa.Value, seen map[ssa.Value]bool) bool {
 		if !ok || call.Common() == nil || call.Common().StaticCallee() == nil || funcPkgPath(call.Common().StaticCallee()) != "os" || call.Common().StaticCallee().Name() != "OpenFile" || len(call.Common().Args) == 0 {
 			return false
 		}
-		return freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool))
+		return freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool), nil, nil)
 	case *ssa.Phi:
 		if len(value.Edges) == 0 {
 			return false
