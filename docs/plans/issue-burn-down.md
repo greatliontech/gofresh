@@ -6,7 +6,7 @@ facts, purity.md for fresh-path proofs, closure.md for refinement).
 Eliminates the standing issue inventory and the self-hosting serving gap;
 every chunk runs the adversarial loop and the corpus check stays green.
 
-- [ ] 1. Self-serving corpus: volatile-OS-root paths classify without
+- [x] 1. Self-serving corpus: volatile-OS-root paths classify without
   real filesystem probes — the library's own stat of a fabricated
   /proc path taints the whole test binary's observation (109 subjects
   re-execute every run)
