@@ -894,7 +894,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-volatile-os-roots"
-  content_hash: "64f8e135d9d3b2979c5b07813048e2e93da3e509fee9f83df29a28dc86dd97ab"
+  content_hash: "2ecccdb3c9307330b1a65c751c4307eb7a0944df637f40c6fb1e18999c8c64cd"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestVolatileOSPathsClassifyLexically"
   role: BINDING_ROLE_TESTS
