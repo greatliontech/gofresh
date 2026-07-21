@@ -1,13 +1,9 @@
 # Declaration refinement widens on dependency-heavy benchmark programs
 
 Lands: before a consumer relies on refined mode to recover reuse for a
-dependency-heavy benchmark package, and only after re-measuring the
-open-world population under the shared-dynamic-state mutation analysis
-(REQ-closure-shared-dynamic-state) shows the residual is worth the
-alias-level extension below. The re-measurement requires the Observer
-sample corpus, which is not on this machine: the measurement is
-blocked until that consuming corpus (or an equivalent dependency-heavy
-benchmark tree) is available locally.
+dependency-heavy benchmark package - the alias-level extension below is
+the identified mechanism, and the 2026-07-22 re-measurement confirms
+nothing short of it moves the residual.
 
 ## Context
 
@@ -21,6 +17,18 @@ was rejected (every subject reached an unsummarized standard-library body and
 widened; the leaf-frontier variant failed the unavailable-not-crash criterion;
 omitting standard-library bodies would need complete toolchain-derived
 summaries to avoid false valid results).
+
+## Re-measurement (2026-07-22, collapsed surface)
+
+All 39 Observer benchmarks captured through the one-capture surface
+under an unbounded refinement budget (view 8s, refined capture batch
+14m46s, 24-core host): 39/39 refined-unverifiable, every reason
+"subject accepts caller-supplied dynamic behavior". The
+shared-dynamic-state narrowing (by-value carriers clearing) moved
+nothing here: the population is alias-handing as profiled below, so
+the residual stands exactly as previously concluded - refined mode
+earns nothing on this corpus without the whole-program immutability
+proof.
 
 ## Current-engine evaluation
 

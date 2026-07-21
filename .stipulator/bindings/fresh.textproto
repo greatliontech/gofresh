@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-refinement-failclosed"
-  content_hash: "c0a29d9b36f74feef4cead0ff600bf7a1108bfc33960101d912f1429ee877856"
+  content_hash: "3703e896a167c3a17d2f5d94d4bb7fab902cf5d9bf0e348bdb28227e2fa8b0f5"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestRefinedViewChecksMaximalBeforeDeclarationRTA"
   role: BINDING_ROLE_TESTS
@@ -194,15 +194,6 @@ bindings {
   requirement_id: "REQ-fresh-observation-lifecycle"
   content_hash: "f98e81b0b52a00ba68c04ddf74efd7dde22f0b69e678188e983a0f868e6a6719"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.View.ValidateObserved"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "5e6d89f8bf87d461d80ee4f4da77d1f44054de64b2621de29e15c37ac06a05f8"
-}
-
-bindings {
-  requirement_id: "REQ-fresh-observation-lifecycle"
-  content_hash: "f98e81b0b52a00ba68c04ddf74efd7dde22f0b69e678188e983a0f868e6a6719"
-  backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestObservedRefinementRecomputesProofAfterMaximalDrift"
   role: BINDING_ROLE_TESTS
   shape_hash: "351a3ec5341ede9ddfd105560bd0d5171204d92bd1b97dbe40b8a0df53bb7707"
@@ -230,16 +221,25 @@ bindings {
   requirement_id: "REQ-fresh-context"
   content_hash: "b341f29e92eb379af62c8747eb5bae2ab23d34b8eef8c05516c22708ad0637cd"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.TestCheckRefinedBatchReturnsContextErrorDuringRefinement"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "6cb9656820f020c3ae533a5a088789c24ea4715c5e1cf21112054f80b01f4cf9"
+  symbol: "github.com/greatliontech/gofresh.Engine.NewView"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "147209e71ea53bf1664f73e8f4effccb854905b803f8b47809da4b7c31146e8a"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-observation-lifecycle"
+  content_hash: "f98e81b0b52a00ba68c04ddf74efd7dde22f0b69e678188e983a0f868e6a6719"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.View.Validate"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "afe69646f85d6d75f0634aeaf65794e6302902f279160de70dc9f71b41d534ea"
 }
 
 bindings {
   requirement_id: "REQ-fresh-context"
   content_hash: "b341f29e92eb379af62c8747eb5bae2ab23d34b8eef8c05516c22708ad0637cd"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.Engine.NewView"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "6860d82ace64fc22ec260ca4ad858972f367b7d379753b62bf7ee5606b530112"
+  symbol: "github.com/greatliontech/gofresh.TestCheckBatchReturnsContextErrorDuringRefinement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fddd8439ed26adf088903dc9d9e826eb6844bc8b6395854f1bf5de69602633a4"
 }

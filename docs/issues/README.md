@@ -10,5 +10,5 @@ when its work lands (git holds history).
   proofs. *Lands: before a consumer relies on refined mode for a
   dependency-heavy benchmark package, and only after re-measuring the open-world
   population under the shared-dynamic-state mutation analysis shows the residual is
-  worth the alias-level extension; the measurement itself is blocked until the Observer
-  sample corpus is locally available.*
+  worth the alias-level extension - re-measured 2026-07-22: 39/39 still open-world under
+  the narrowing, the extension is the only mover.*
