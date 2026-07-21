@@ -16,5 +16,9 @@ corpora stay green.
   checking; WithRefinementBudget option gates refined capture
 - [ ] 3. Consumer migration: stipulator to the collapsed surface;
   corpus gates green in both repos
-- [ ] 4. Final sweep + close-out gate: full suites, race, releases,
+- [ ] 4. Refinement open-world re-measurement on the Observer sample
+  (now locally available) under the shared-dynamic-state narrowing,
+  driven through the collapsed surface; disposition of
+  dependency-heavy-refinement-precision per its own acceptance bar
+- [ ] 5. Final sweep + close-out gate: full suites, race, releases,
   corpus double-checks green, plan deletion
