@@ -14,3 +14,7 @@ func gatherFacts() (MachineFacts, error) {
 // MachineFactSources is empty where no gatherer exists: nothing is read,
 // so nothing is allowlisted (REQ-inputs-machine-identity).
 var MachineFactSources []string
+
+// VolatileOSRoots is empty where no kernel-synthesized volatile
+// filesystem surface exists (REQ-inputs-volatile-os-roots).
+var VolatileOSRoots []string

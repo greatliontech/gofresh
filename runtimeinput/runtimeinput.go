@@ -571,9 +571,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// ancestor probe from path-creation machinery — recording a
 			// revalidatable identity instead of sealing metadata
 			// (REQ-inputs-external-dir-existence).
-			if !ambiguousParent && !relativeAfterChdir && filepath.IsAbs(p) {
+			if !ambiguousParent && !relativeAfterChdir && filepath.IsAbs(p) && !volatileOSPath(p) {
 				if _, inModule := relUnder(moduleDir, p); !inModule {
-					if info, statErr := os.Stat(p); statErr == nil && info.IsDir() {
+					if info, statErr := classifyProbe(p); statErr == nil && info.IsDir() {
 						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
 						if !pathSeen[id] {
 							pathSeen[id] = true
@@ -1094,6 +1094,12 @@ func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error
 		if underPath(r, moduleDir) || underPath(r, resolvedModule) {
 			return nil, fmt.Errorf("runtimeinputs: ephemeral temp root %q lies inside the module tree; it would vacate module-relative inputs", r)
 		}
+		// A volatile-OS root can never be per-run scratch, and admitting
+		// it would vacate volatile reads recordless while the scratch
+		// walk probed them (REQ-inputs-volatile-os-roots).
+		if volatileOSPath(filepath.Clean(r)) {
+			return nil, fmt.Errorf("runtimeinputs: ephemeral temp root %q lies under a volatile OS root", r)
+		}
 		resolved, err := filepath.EvalSymlinks(r)
 		if err != nil {
 			continue
@@ -1256,6 +1262,14 @@ func ephemeralRoot(p string, roots [][2]string) bool {
 func resolveGuardRoots(decls []guardRootDecl) []guardRootPair {
 	out := make([]guardRootPair, 0, len(decls))
 	for _, d := range decls {
+		// A guard root under a volatile OS root would admit volatile
+		// reads recordless and send the coverage walk probing kernel
+		// objects; skipped exactly like an unresolvable declaration —
+		// conservative, everything under it stays observed
+		// (REQ-inputs-volatile-os-roots).
+		if volatileOSPath(filepath.Clean(d.path)) {
+			continue
+		}
 		resolved, err := filepath.EvalSymlinks(d.path)
 		if err != nil {
 			continue
@@ -1341,7 +1355,16 @@ func classifyPath(moduleDir, p string) (pathID, string) {
 	if rel, ok := relUnder(moduleDir, p); ok {
 		return pathID{Kind: pathRel, Path: filepath.ToSlash(rel)}, ""
 	}
-	info, err := os.Stat(p)
+	// A volatile-OS path classifies from the path alone — no probe:
+	// the kernel fabricates these objects per read, so no binding over
+	// them revalidates, and probing would make the classifier itself a
+	// volatile read in any observing parent's evidence
+	// (REQ-inputs-volatile-os-roots). Machine-fact identities keep
+	// their projection digest.
+	if volatileOSPath(p) {
+		return pathID{}, "volatile OS input: " + p
+	}
+	info, err := classifyProbe(p)
 	if err == nil && info.IsDir() {
 		return pathID{}, "external directory input: " + p
 	}
@@ -1349,6 +1372,26 @@ func classifyPath(moduleDir, p string) (pathID, string) {
 		return pathID{}, "unhashable runtime input: " + p
 	}
 	return pathID{Kind: pathAbs, Path: filepath.Clean(p)}, ""
+}
+
+// classifyProbe is the classification-time filesystem probe, a seam so
+// tests can assert the no-probe property of volatile-OS paths
+// (REQ-inputs-volatile-os-roots): production code never replaces it.
+var classifyProbe = os.Stat
+
+// volatileOSPath reports whether p lies under a kernel-synthesized
+// volatile filesystem root without being an allowlisted machine-fact
+// identity (REQ-inputs-volatile-os-roots). Purely lexical.
+func volatileOSPath(p string) bool {
+	if machineFactIdentities[filepath.Clean(p)] {
+		return false
+	}
+	for _, root := range guard.VolatileOSRoots {
+		if underPath(p, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func relUnder(root, p string) (string, bool) {

@@ -494,6 +494,28 @@ outside the allowlist keep ordinary classification — the
 transient-condition surfaces REQ-guard-machine-transient excludes from machine
 identity are exactly what this clause must never absorb.
 
+**REQ-inputs-volatile-os-roots** (behavior): A path under a
+kernel-synthesized volatile filesystem root — `/proc` and `/sys` on
+Linux; the platform list is empty where no such surface exists — that
+is not an allowlisted machine-fact identity MUST classify from the path
+alone as an unverifiable volatile OS input: no filesystem probe, no
+existence or absence binding, no recorded identity. The kernel
+fabricates these objects per read — bytes, metadata, and existence all
+move with the kernel's own clock — so no binding over them
+revalidates; and a classifier that probed them would itself perform a
+volatile read, tainting any observing parent's evidence with the
+classification's own mechanism. The machine-fact allowlist keeps its
+projection digest (REQ-inputs-machine-identity); a declared
+observation-bracket or ephemeral-temp root under a volatile OS root is
+refused at declaration — the one would fingerprint bytes that only ever
+move, the other would vacate volatile reads recordless — and a guard
+root under one is skipped exactly like an unresolvable declaration,
+everything under it staying observed. `/dev` is deliberately outside
+the list: device nodes are stable identities whose content is the
+input, not per-read-fabricated objects — their value-volatility is
+sealed by ordinary classification, and the null-sink admission
+(REQ-inputs-null-sink) depends on `/dev` staying ordinary.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked
 as a dirty recording, because the recording is not faithful to that commit; the mark

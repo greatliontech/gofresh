@@ -891,3 +891,12 @@ bindings {
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-volatile-os-roots"
+  content_hash: "64f8e135d9d3b2979c5b07813048e2e93da3e509fee9f83df29a28dc86dd97ab"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestVolatileOSPathsClassifyLexically"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ba7313666f6c54074a2b945ca6a78e374bce7ea41e822e75ad4d090c82ae5ab"
+}

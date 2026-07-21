@@ -618,18 +618,103 @@ func TestMachineFactArmsAndContrast(t *testing.T) {
 		t.Fatal("a changed projection did not move the digest")
 	}
 
-	// Contrast: a non-allowlisted proc identity keeps ordinary
-	// classification (recorded, bracket-uncovered → unverifiable).
+	// Contrast: a non-allowlisted proc identity refuses lexically as a
+	// volatile OS input — never probed, never recorded
+	// (REQ-inputs-volatile-os-roots). The named reason pins the class:
+	// an allowlist widened to /proc/stat would digest the projection
+	// verifiably and never carry this reason.
 	obs = completedFromLog(t, dir, "open /proc/stat\n")
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The assertion pins ORDINARY classification, not mere presence: an
-	// allowlist widened to /proc/stat would record it verifiably and
-	// still pass a presence check.
-	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: /proc/stat") {
-		t.Fatalf("non-allowlisted proc identity lost ordinary classification: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	if !st.Unverifiable || !strings.Contains(st.Reason, "volatile OS input: /proc/stat") {
+		t.Fatalf("non-allowlisted proc identity not refused as volatile OS input: unverifiable=%v reason=%s", st.Unverifiable, st.Reason)
+	}
+}
+
+// A volatile-OS path classifies from the path alone
+// (REQ-inputs-volatile-os-roots): open and stat alike refuse with the
+// named class, an ABSENT proc path refuses identically — proving no
+// probe routes the decision — and /sys shares the carve. No identity
+// is recorded, so nothing over these paths is ever digested.
+func TestVolatileOSPathsClassifyLexically(t *testing.T) {
+	if len(guard.VolatileOSRoots) == 0 {
+		t.Skip("no volatile OS surface on this platform")
+	}
+	dir := t.TempDir()
+	// Any classification-time probe of a volatile-OS path is itself a
+	// volatile read in an observing parent's evidence: count them.
+	var probed []string
+	orig := classifyProbe
+	classifyProbe = func(p string) (os.FileInfo, error) {
+		if volatileOSPath(p) {
+			probed = append(probed, p)
+		}
+		return orig(p)
+	}
+	t.Cleanup(func() { classifyProbe = orig })
+	for _, log := range []string{
+		"open /proc/stat\n",
+		"stat /proc/stat\n",
+		"open /proc/definitely-not-a-real-entry-xyz\n",
+		"stat /sys/kernel/anything\n",
+	} {
+		obs := completedFromLog(t, dir, log)
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable || !strings.Contains(st.Reason, "volatile OS input: ") {
+			t.Fatalf("%q: unverifiable=%v reason=%q, want the lexical volatile-OS refusal", log, st.Unverifiable, st.Reason)
+		}
+		if strings.Contains(st.Reason, "stat metadata input") || strings.Contains(st.Reason, "external directory") {
+			t.Fatalf("%q: probe-routed classification leaked: %q", log, st.Reason)
+		}
+		// No recorded identity, never digested: the refusal is the whole
+		// disposition.
+		desc, err := Describe(st.Manifest, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, dp := range desc.Paths {
+			if strings.Contains(dp, "/proc") || strings.Contains(dp, "/sys") {
+				t.Fatalf("%q: volatile-OS identity recorded: %s", log, dp)
+			}
+		}
+	}
+
+	// An ephemeral temp root under a volatile OS root refuses at
+	// declaration: it would vacate volatile reads recordless while the
+	// scratch walk probed them.
+	leg, err := CaptureBracket(dir, []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), WithEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+		t.Fatalf("ephemeral root under /proc accepted: %v", err)
+	}
+
+	// A guard root under a volatile OS root is skipped like an
+	// unresolvable declaration: the read stays refused as volatile,
+	// never admitted recordless through the declared root.
+	obsGuard := completedFromLog(t, dir, "open /proc/stat\n", WithToolchainRoot("/proc"))
+	stGuard, err := CompletedState(obsGuard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stGuard.Unverifiable || !strings.Contains(stGuard.Reason, "volatile OS input: /proc/stat") {
+		t.Fatalf("guard root under /proc admitted a volatile read: unverifiable=%v reason=%q", stGuard.Unverifiable, stGuard.Reason)
+	}
+
+	if len(probed) != 0 {
+		t.Fatalf("classification probed volatile-OS paths: %v", probed)
+	}
+
+	// A declared bracket root under a volatile OS root fails loud at
+	// declaration: its fingerprint could only ever move.
+	if _, err := CaptureBracket(dir, []string{"/proc/stat"}); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+		t.Fatalf("bracket root under /proc accepted: %v", err)
 	}
 }
 

@@ -215,6 +215,13 @@ func bracketRootID(root string) (pathID, error) {
 		return pathID{}, fmt.Errorf("runtimeinputs: unrepresentable bracket root %q", root)
 	}
 	if filepath.IsAbs(root) {
+		// A volatile-OS root can only produce an always-moving
+		// fingerprint — the kernel fabricates its objects per read — so
+		// the declaration fails loud instead of silently staling every
+		// check (REQ-inputs-volatile-os-roots).
+		if volatileOSPath(filepath.Clean(root)) {
+			return pathID{}, fmt.Errorf("runtimeinputs: bracket root %q lies under a volatile OS root; nothing over it revalidates", root)
+		}
 		return pathID{Kind: pathAbs, Path: filepath.Clean(root)}, nil
 	}
 	clean := path.Clean(filepath.ToSlash(root))

@@ -26,6 +26,12 @@ const (
 // (REQ-inputs-machine-identity).
 var MachineFactSources = []string{cpuinfoPath, meminfoPath, osreleasePath}
 
+// VolatileOSRoots are the kernel-synthesized filesystem roots whose
+// objects are fabricated per read: paths under them (machine-fact
+// sources excepted) classify from the path alone, never probed
+// (REQ-inputs-volatile-os-roots).
+var VolatileOSRoots = []string{"/proc", "/sys"}
+
 func gatherFacts() (MachineFacts, error) {
 	model, phys, logical, err := cpuInfo()
 	if err != nil {
