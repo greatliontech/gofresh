@@ -8,10 +8,10 @@ and the only surface is an optional refinement budget (zero default —
 today's behavior). Every chunk runs the adversarial loop and both
 corpora stay green.
 
-- [ ] 1. Spec: one capture/check surface; refined evidence rides the
+- [x] 1. Spec: one capture/check surface; refined evidence rides the
   record when the view carries a refinement budget; the check is always
   hierarchical; a strategy choice can never invalidate a record
-- [ ] 2. API collapse: Refined verbs deleted from Engine and View
+- [x] 2. API collapse: Refined verbs deleted from Engine and View
   (clean break, pre-v1); Check/CheckBatch subsume hierarchical
   checking; WithRefinementBudget option gates refined capture
 - [ ] 3. Consumer migration: stipulator to the collapsed surface;

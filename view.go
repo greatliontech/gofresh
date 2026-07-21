@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
@@ -21,13 +22,34 @@ import (
 // source, build, guard, or purity state and its results must not be persisted.
 var ErrViewChanged = errors.New("gofresh: analysis view changed")
 
-// ErrRefinedValidationRequired reports that a producer captured refined evidence
-// and must validate it through ValidateRefined with caller-owned cancellation.
-var ErrRefinedValidationRequired = errors.New("gofresh: refined producer view requires refined validation")
+// ViewOption configures an analysis view at construction.
+type ViewOption func(*viewConfig)
 
-// ErrObservedValidationRequired reports that a producer captured observation proof
-// evidence and must validate it through ValidateObserved.
-var ErrObservedValidationRequired = errors.New("gofresh: observed producer view requires observation validation")
+type viewConfig struct {
+	refinementBudget    time.Duration
+	refinementUnbounded bool
+}
+
+// WithRefinementBudget declares the view's refinement budget: with it,
+// capture computes refined evidence and a check whose maximal closure
+// drifted runs current refinement to consume a recording's refined
+// evidence, each refinement operation bounded by d. Absent any budget,
+// refinement never runs - gofresh never infers whether a subject is
+// expensive enough to refine; cost consent is the caller's, declared
+// once per view (REQ-fresh-refinement-failclosed).
+func WithRefinementBudget(d time.Duration) ViewOption {
+	return func(c *viewConfig) {
+		c.refinementBudget = d
+	}
+}
+
+// WithUnboundedRefinement declares an explicitly unbounded refinement
+// budget: refinement runs under the caller's own context alone.
+func WithUnboundedRefinement() ViewOption {
+	return func(c *viewConfig) {
+		c.refinementUnbounded = true
+	}
+}
 
 // ErrViewSealed reports a capture attempted after producer validation started.
 var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
@@ -50,6 +72,7 @@ type View struct {
 	packages             []string
 	moduleDir            string
 	kind                 Kind
+	cfg                  viewConfig
 	maximal              map[Subject]closure.Closure
 	refined              map[Subject]closure.Closure
 	observable           map[Subject]closure.Observability
@@ -73,17 +96,21 @@ type View struct {
 // under the caller's context. Reachability and package loading are shared
 // across the requested set, but each subject retains its independent closure
 // semantics (REQ-closure-batch-equivalence).
-func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
-	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult)
+func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string, opts ...ViewOption) (*View, error) {
+	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult, opts...)
 }
 
 // NewViewFor observes one analysis view with the guards applicable to kind
 // under the caller's context.
-func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
-	return e.newView(ctx, subjects, moduleDir, kind)
+func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind, opts ...ViewOption) (*View, error) {
+	return e.newView(ctx, subjects, moduleDir, kind, opts...)
 }
 
-func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind, opts ...ViewOption) (*View, error) {
+	var cfg viewConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
@@ -175,6 +202,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 
 	v := &View{
 		engine:               e,
+		cfg:                  cfg,
 		subjects:             unique,
 		requests:             requests,
 		packages:             packages,
@@ -284,7 +312,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 
 // Capture returns subject's precomputed fingerprint from this View. Runtime-input
 // evidence belongs to the producing run and is attached by the caller afterward.
-func (v *View) Capture(subject Subject) (Fingerprint, error) {
+func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
+	if ctx == nil {
+		return Fingerprint{}, errors.New("gofresh: nil analysis context")
+	}
+	// Under a declared refinement budget the fingerprint carries refined
+	// evidence; without one, maximal evidence alone - the engine owns
+	// the strategy, the caller declares only the budget
+	// (REQ-fresh-refinement-failclosed).
+	if v.refinementDeclared() {
+		return v.captureRefined(ctx, subject, nil)
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if v.sealed {
@@ -317,13 +355,6 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 	return slices.Clone(files), nil
 }
 
-// CaptureRefined returns maximal and declaration-RTA evidence for subject under
-// the caller-selected ctx. Use CaptureRefinedBatch to share attributed analysis
-// across the view's complete subject set.
-func (v *View) CaptureRefined(ctx context.Context, subject Subject) (Fingerprint, error) {
-	return v.captureRefined(ctx, subject, nil)
-}
-
 func (v *View) captureRefined(ctx context.Context, subject Subject, beforePublish func()) (Fingerprint, error) {
 	if _, ok := v.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
@@ -346,8 +377,26 @@ func (v *View) captureRefined(ctx context.Context, subject Subject, beforePublis
 	return v.refinedFingerprintLocked(subject), nil
 }
 
-// CaptureRefinedBatch captures refined evidence for every subject in the view.
-func (v *View) CaptureRefinedBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+// CaptureBatch captures a fingerprint for every subject in the view,
+// sharing attributed analysis across the set; refined evidence rides
+// each fingerprint exactly when the view declares a refinement budget.
+func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil analysis context")
+	}
+	if !v.refinementDeclared() {
+		v.mu.RLock()
+		defer v.mu.RUnlock()
+		if v.sealed {
+			return nil, ErrViewSealed
+		}
+		result := make(map[Subject]Fingerprint, len(v.subjects))
+		for _, subject := range v.subjects {
+			cl := v.maximal[subject]
+			result[subject] = Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
+		}
+		return result, nil
+	}
 	if err := v.ensureRefined(ctx, v.subjects); err != nil {
 		return nil, err
 	}
@@ -396,7 +445,10 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprin
 	if _, ok := v.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+	wantRefined := v.refinementDeclared()
+	rctx, cancel := v.refinementCtx(ctx)
+	defer cancel()
+	if err := v.ensurePrecise(rctx, []Subject{subject}, wantRefined, true); err != nil {
 		return Fingerprint{}, err
 	}
 	v.mu.Lock()
@@ -408,33 +460,39 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprin
 		return Fingerprint{}, ErrViewSealed
 	}
 	v.capturedObserved[subject] = true
+	if wantRefined {
+		v.capturedRefined[subject] = true
+		return v.observedRefinedFingerprintLocked(subject), nil
+	}
 	return v.observedFingerprintLocked(subject), nil
 }
 
-// CaptureObservedRefined captures independently selected refinement and observation
-// proof evidence in one fingerprint and validates both through ValidateObserved.
-func (v *View) CaptureObservedRefined(ctx context.Context, subject Subject) (Fingerprint, error) {
-	if _, ok := v.maximal[subject]; !ok {
-		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-	}
-	if err := v.ensurePrecise(ctx, []Subject{subject}, true, true); err != nil {
-		return Fingerprint{}, err
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return Fingerprint{}, err
-	}
-	if v.sealed {
-		return Fingerprint{}, ErrViewSealed
-	}
-	v.capturedRefined[subject] = true
-	v.capturedObserved[subject] = true
-	return v.observedRefinedFingerprintLocked(subject), nil
-}
-
-// CaptureObservedBatch captures observation proof evidence for every subject.
+// CaptureObservedBatch captures observation proof evidence for every
+// subject; refined evidence rides each fingerprint exactly when the
+// view declares a refinement budget.
 func (v *View) CaptureObservedBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+	if v.refinementDeclared() {
+		rctx, cancel := v.refinementCtx(ctx)
+		defer cancel()
+		if err := v.ensurePrecise(rctx, v.subjects, true, true); err != nil {
+			return nil, err
+		}
+		v.mu.Lock()
+		defer v.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if v.sealed {
+			return nil, ErrViewSealed
+		}
+		result := make(map[Subject]Fingerprint, len(v.subjects))
+		for _, subject := range v.subjects {
+			v.capturedRefined[subject] = true
+			v.capturedObserved[subject] = true
+			result[subject] = v.observedRefinedFingerprintLocked(subject)
+		}
+		return result, nil
+	}
 	if err := v.ensureObservable(ctx, v.subjects); err != nil {
 		return nil, err
 	}
@@ -509,60 +567,23 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 // Check compares recorded against subject's current facts under this View's
 // result kind and the caller's context.
 func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if ctx == nil {
-		return Verdict{}, errors.New("gofresh: nil analysis context")
-	}
-	if err := ctx.Err(); err != nil {
-		return Verdict{}, err
-	}
-	if err := validateRecordedKind(recorded); err != nil {
-		return Verdict{}, err
-	}
-	if recorded.ResultKind != v.kind {
-		return Verdict{}, fmt.Errorf("gofresh: recorded result kind %d does not match view kind %d", recorded.ResultKind, v.kind)
-	}
-	cl, ok := v.maximal[subject]
-	if !ok {
+	if _, ok := v.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	if recorded.MaximalClosure == "" || recorded.MaximalClosure != cl.Hash {
-		if err := ctx.Err(); err != nil {
-			return Verdict{}, err
-		}
-		return Verdict{Stale, "closure"}, nil
-	}
-	if recorded.RuntimeInputs != "" {
-		if err := v.reobserveBase(ctx); err != nil {
-			return Verdict{}, err
-		}
-		runtimeState, err := v.currentRuntimeContext(ctx, recorded)
-		if err != nil {
-			return Verdict{}, err
-		}
-		afterRuntime, err := v.currentRuntimeContext(ctx, recorded)
-		if err != nil {
-			return Verdict{}, err
-		}
-		if err := v.reobserveBase(ctx); err != nil {
-			return Verdict{}, err
-		}
-		if runtimeState != afterRuntime {
-			if err := ctx.Err(); err != nil {
-				return Verdict{}, err
-			}
-			return v.withMovedInputs(ctx, Verdict{Stale, "runtimeinputs"}, recorded), nil
-		}
-		verdict := v.withMovedInputs(ctx, decideAfterClosure(recorded, cl, v.guards, runtimeState, v.kind, v.purityMatches(recorded, subject)), recorded)
-		if err := ctx.Err(); err != nil {
-			return Verdict{}, err
-		}
-		return verdict, nil
-	}
-	verdict := v.checkAfterClosure(recorded, subject, cl)
-	if err := ctx.Err(); err != nil {
+	verdicts, err := v.checkBatch(ctx, map[Subject]Fingerprint{subject: recorded})
+	if err != nil {
 		return Verdict{}, err
 	}
-	return verdict, nil
+	return verdicts[subject], nil
+}
+
+// CheckBatch checks a caller-supplied recording set, batching
+// drift-forced refinement - under the view's declared budget, for
+// recordings carrying compatible refined evidence - for subjects whose
+// maximal evidence drifted (REQ-fresh-hierarchical-check,
+// REQ-fresh-refinement-failclosed).
+func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	return v.checkBatch(ctx, recorded)
 }
 
 // CheckObserved explicitly checks a fingerprint under its recorded observation
@@ -613,6 +634,10 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
 		if rec.MaximalClosure == "" {
+			verdicts[subject] = Verdict{Stale, "closure"}
+			continue
+		}
+		if rec.MaximalClosure != cl.Hash && !v.refinementDeclared() {
 			verdicts[subject] = Verdict{Stale, "closure"}
 			continue
 		}
@@ -668,7 +693,12 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	if len(drifted) == 0 {
 		return finish()
 	}
-	if err := v.ensurePrecise(ctx, drifted, true, true); err != nil {
+	// Every drifted record here passed the no-budget gate above, so the
+	// declared budget bounds the shared precise-analysis pass
+	// (REQ-fresh-refinement-failclosed).
+	rctx, rcancel := v.refinementCtx(ctx)
+	defer rcancel()
+	if err := v.ensurePrecise(rctx, drifted, true, true); err != nil {
 		for _, subject := range drifted {
 			verdicts[subject] = Verdict{Unverifiable, "precise analysis unavailable: " + err.Error()}
 		}
@@ -695,26 +725,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	return finish()
 }
 
-// CheckRefined compares maximal evidence first. It invokes declaration-RTA under
-// ctx only after maximal drift and only for compatible refined evidence.
-func (v *View) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if _, ok := v.maximal[subject]; !ok {
-		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-	}
-	verdicts, err := v.checkRefinedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
-	if err != nil {
-		return Verdict{}, err
-	}
-	return verdicts[subject], nil
-}
-
-// CheckRefinedBatch checks a caller-supplied recording set, batching precise
-// analysis only for subjects whose maximal evidence drifted.
-func (v *View) CheckRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-	return v.checkRefinedBatch(ctx, recorded)
-}
-
-func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
@@ -740,12 +751,20 @@ func (v *View) checkRefinedBatch(ctx context.Context, recorded map[Subject]Finge
 			verdicts[subject] = Verdict{Stale, "closure"}
 			continue
 		}
+		// A drifted recording under no declared budget is stale on its
+		// maximal closure regardless of the refined evidence it carries
+		// (REQ-fresh-refinement-failclosed) - the closure staleness is
+		// stated before any evidence-tier reasoning.
+		if rec.MaximalClosure != maximal.Hash && !v.refinementDeclared() {
+			verdicts[subject] = Verdict{Stale, "closure"}
+			continue
+		}
 		if rec.Refinement != (Refinement{}) && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
 			verdicts[subject] = Verdict{Stale, "refinement"}
 			continue
 		}
 		if rec.MaximalClosure != maximal.Hash && rec.Refinement == (Refinement{}) {
-			verdicts[subject] = Verdict{Stale, "refinement"}
+			verdicts[subject] = Verdict{Stale, "closure"}
 			continue
 		}
 		pending[subject] = rec
@@ -926,11 +945,16 @@ func (v *View) Validate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// The view validates whatever it captured: observation proofs pull
+	// in the observed arm (which also revalidates refined captures),
+	// refined captures alone the refined arm, and a maximal-only
+	// producer the base comparison - the engine owns the dispatch
+	// exactly as it owns the capture strategy.
 	if hasObserved {
-		return ErrObservedValidationRequired
+		return v.validateObserved(ctx)
 	}
 	if hasRefined {
-		return ErrRefinedValidationRequired
+		return v.validateRefined(ctx)
 	}
 	current, err := v.engine.NewViewFor(ctx, v.subjects, v.moduleDir, v.kind)
 	if err != nil {
@@ -942,12 +966,24 @@ func (v *View) Validate(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// ValidateRefined re-observes the view and every refined closure captured from it
-// under ctx. A producer must use it before persisting refined results.
-func (v *View) ValidateRefined(ctx context.Context) error {
+// validateRefined re-observes the view and every refined closure captured
+// from it under ctx.
+// newValidationView re-observes the view's subjects for a validation
+// arm, carrying the producer view's declared budget: validation-time
+// refinement is a refinement operation like any other, and building the
+// view here makes budget inheritance unrepresentable to forget.
+func (v *View) newValidationView(ctx context.Context) (*View, error) {
+	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	if err != nil {
+		return nil, err
+	}
+	current.cfg = v.cfg
+	return current, nil
+}
+
+func (v *View) validateRefined(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
-	hasObserved := len(v.capturedObserved) != 0
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil refinement context")
@@ -955,10 +991,7 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if hasObserved {
-		return ErrObservedValidationRequired
-	}
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	current, err := v.newValidationView(ctx)
 	if err != nil {
 		return err
 	}
@@ -999,9 +1032,9 @@ func (v *View) ValidateRefined(ctx context.Context) error {
 	return compareRefinedContext(ctx, current.refined, expected, subjects)
 }
 
-// ValidateObserved re-establishes every captured observation proof and attached
-// runtime state after execution before the caller persists its fingerprints.
-func (v *View) ValidateObserved(ctx context.Context) error {
+// validateObserved re-establishes every captured observation proof and
+// attached runtime state, refined captures included.
+func (v *View) validateObserved(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	v.mu.Unlock()
@@ -1011,7 +1044,7 @@ func (v *View) ValidateObserved(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+	current, err := v.newValidationView(ctx)
 	if err != nil {
 		return err
 	}
@@ -1277,8 +1310,26 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 	return ctx.Err()
 }
 
+// refinementDeclared reports whether the view carries any refinement
+// budget; without one, refinement never runs
+// (REQ-fresh-refinement-failclosed).
+func (v *View) refinementDeclared() bool {
+	return v.cfg.refinementUnbounded || v.cfg.refinementBudget > 0
+}
+
+// refinementCtx bounds one refinement operation by the declared budget;
+// an unbounded declaration runs under the caller's context alone.
+func (v *View) refinementCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if v.cfg.refinementUnbounded || v.cfg.refinementBudget <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, v.cfg.refinementBudget)
+}
+
 func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
-	return v.ensurePrecise(ctx, subjects, true, false)
+	rctx, cancel := v.refinementCtx(ctx)
+	defer cancel()
+	return v.ensurePrecise(rctx, subjects, true, false)
 }
 
 func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {

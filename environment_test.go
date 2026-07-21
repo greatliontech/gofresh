@@ -243,7 +243,7 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.Capture(subject)
+	fingerprint, err := view.Capture(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -292,71 +292,37 @@ func canonicalDir(dir string) (string, error) {
 // WithEnv, into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
 // non-empty manifest those functions return.
-func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.NewView(ctx, []Subject{subject}, moduleDir)
+func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string, opts ...ViewOption) (Fingerprint, error) {
+	view, err := e.NewView(ctx, []Subject{subject}, moduleDir, opts...)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	return view.Capture(subject)
+	return view.Capture(ctx, subject)
 }
 
 // CaptureFor records subject with the guards applicable to kind. Measurements must
 // use this method so machine and runtime-configuration evidence is captured.
-func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind)
+func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind, opts ...ViewOption) (Fingerprint, error) {
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind, opts...)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	return view.Capture(subject)
-}
-
-// CaptureRefined captures maximal and declaration-RTA evidence for a code result
-// under ctx. The caller selects refinement explicitly and owns its cancellation or
-// budget.
-func (e *Engine) CaptureRefined(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.NewView(ctx, []Subject{subject}, moduleDir)
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return view.CaptureRefined(ctx, subject)
-}
-
-// CaptureRefinedFor captures refined evidence with the guards applicable to kind.
-func (e *Engine) CaptureRefinedFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind)
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return view.CaptureRefined(ctx, subject)
+	return view.Capture(ctx, subject)
 }
 
 // Check reports the freshness verdict for a recorded fingerprint against the current
 // tree under its recorded result kind. It recomputes the current closure and guards
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
-func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string, opts ...ViewOption) (Verdict, error) {
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind, opts...)
 	if err != nil {
 		return Verdict{}, err
 	}
 	return view.Check(ctx, recorded, subject)
-}
-
-// CheckRefined checks maximal evidence first under the recorded result kind and invokes declaration-RTA under ctx
-// only after maximal drift and only when recorded carries compatible refinement
-// evidence (REQ-fresh-hierarchical-check).
-func (e *Engine) CheckRefined(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := validateRecordedKind(recorded); err != nil {
-		return Verdict{}, err
-	}
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
-	if err != nil {
-		return Verdict{}, err
-	}
-	return view.CheckRefined(ctx, recorded, subject)
 }
 
 // CheckObserved checks a caller-selected observation proof under ctx. It never

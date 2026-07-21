@@ -43,20 +43,20 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(context.Background(), []Subject{unrootable, sibling}, dir)
+	producer, err := engine.NewView(context.Background(), []Subject{unrootable, sibling}, dir, WithUnboundedRefinement())
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrootableFingerprint, err := producer.CaptureRefined(context.Background(), unrootable)
+	unrootableFingerprint, err := producer.Capture(context.Background(), unrootable)
 	if err != nil {
-		t.Fatalf("CaptureRefined(unrootable): %v", err)
+		t.Fatalf("Capture(unrootable): %v", err)
 	}
 	if !unrootableFingerprint.Refinement.Unverifiable || !strings.Contains(unrootableFingerprint.Refinement.Reason, "refined analysis unavailable") {
 		t.Fatalf("unrootable refinement = %+v, want unavailable-evidence disposition", unrootableFingerprint.Refinement)
 	}
-	siblingFingerprint, err := producer.CaptureRefined(context.Background(), sibling)
+	siblingFingerprint, err := producer.Capture(context.Background(), sibling)
 	if err != nil {
-		t.Fatalf("CaptureRefined(sibling): %v", err)
+		t.Fatalf("Capture(sibling): %v", err)
 	}
 	if strings.Contains(siblingFingerprint.Refinement.Reason, "refined analysis unavailable") {
 		t.Fatalf("sibling refinement = %+v, want normal analysis undisturbed by the unrootable subject", siblingFingerprint.Refinement)
@@ -64,7 +64,7 @@ func TestExternal(t *testing.T) {
 	// With source unchanged, the degraded recording keeps its recorded
 	// fail-closed disposition: unverifiable with the unavailability reason,
 	// never valid.
-	unchanged, err := producer.CheckRefined(context.Background(), unrootableFingerprint, unrootable)
+	unchanged, err := producer.Check(context.Background(), unrootableFingerprint, unrootable)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +74,11 @@ func TestExternal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "external.go"), []byte("package external\n\nfunc Ok() bool { return 1 == 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := engine.NewView(context.Background(), []Subject{unrootable, sibling}, dir)
+	current, err := engine.NewView(context.Background(), []Subject{unrootable, sibling}, dir, WithUnboundedRefinement())
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdicts, err := current.CheckRefinedBatch(context.Background(), map[Subject]Fingerprint{
+	verdicts, err := current.CheckBatch(context.Background(), map[Subject]Fingerprint{
 		unrootable: unrootableFingerprint,
 		sibling:    siblingFingerprint,
 	})

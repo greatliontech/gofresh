@@ -158,14 +158,25 @@ current refined closure and remains reusable only when the refined hashes agree.
 A refined hash mismatch is stale. Guards other than the source closure still apply
 normally after source equivalence is established.
 
-**REQ-fresh-refinement-failclosed** (behavior): Refinement is performed only through
-a caller-selected refined operation, under the caller's cancellation or budget;
-gofresh MUST NOT infer whether a subject is expensive enough to refine. Missing,
+**REQ-fresh-refinement-failclosed** (behavior): Refinement runs only under an
+explicit caller-declared refinement budget on the analysis view — one capture and
+one check exist, with no per-operation tier selection: under a declared budget a
+capture carries refined evidence and a drifted check consumes a recording's
+compatible refined evidence by computing current refinement, each refinement
+operation bounded by the declared budget; absent any declaration refinement never
+runs and a drifted recording is stale on its maximal closure regardless of the
+refined evidence it carries — the evidence persists for a later budgeted check.
+gofresh MUST NOT infer whether a subject is expensive enough to refine: cost
+consent is the caller's, declared once per view. Missing,
 incomplete, or incompatible recorded refinement after maximal drift is stale. A
-current refinement that is unavailable, fails, or exhausts its caller-supplied
+current refinement that is unavailable, fails, or exhausts the declared
 budget is unverifiable or stale, never valid; caller cancellation returns the
-context error rather than a verdict. A caller can select an unbounded refinement
-operation explicitly.
+context error rather than a verdict. A caller can declare an unbounded budget
+explicitly. When a budgeted operation needs both refinement and an observation
+proof, the shared precise-analysis pass is one refinement operation for budget
+purposes, and validation-time refinement inherits the producer view's declared
+budget. The strategy choice can never invalidate a record: any view checks
+any recording, and validation revalidates whatever the view captured.
 
 **REQ-fresh-refinement-disposition** (invariant): When a compatible refined recording
 avoids current refinement because the maximal closure is unchanged, its recorded

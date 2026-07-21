@@ -649,18 +649,18 @@ func TestExternalDirectiveSurvivesRefinementDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := e.CaptureRefined(context.Background(), subj, tmp)
+	fp, err := e.Capture(context.Background(), subj, tmp, WithUnboundedRefinement())
 	if err != nil {
-		t.Fatalf("CaptureRefined: %v", err)
+		t.Fatalf("refined capture: %v", err)
 	}
 	write("ext.go", "package extdrift\n\n//gofresh:external\nfunc Reads() int { return 1 }\n\nfunc Sibling() int { return 20 }\n")
 	drifted, err := New(WithDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := drifted.CheckRefined(context.Background(), fp, subj, tmp)
+	v, err := drifted.Check(context.Background(), fp, subj, tmp, WithUnboundedRefinement())
 	if err != nil {
-		t.Fatalf("CheckRefined: %v", err)
+		t.Fatalf("refined check: %v", err)
 	}
 	if v.Status != Unverifiable || v.Reason != "external directive" {
 		t.Fatalf("drifted refined verdict = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
