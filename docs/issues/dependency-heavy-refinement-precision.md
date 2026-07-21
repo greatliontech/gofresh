@@ -4,7 +4,10 @@ Lands: before a consumer relies on refined mode to recover reuse for a
 dependency-heavy benchmark package, and only after re-measuring the
 open-world population under the shared-dynamic-state mutation analysis
 (REQ-closure-shared-dynamic-state) shows the residual is worth the
-alias-level extension below.
+alias-level extension below. The re-measurement requires the Observer
+sample corpus, which is not on this machine: the measurement is
+blocked until that consuming corpus (or an equivalent dependency-heavy
+benchmark tree) is available locally.
 
 ## Context
 
