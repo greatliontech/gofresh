@@ -12,7 +12,7 @@ every chunk runs the adversarial loop and the corpus check stays green.
   re-execute every run)
 - [x] 2. Guard-root overlap: a failing admitting root consults later
   overlapping roots instead of finaling (guard-root-overlap-first-match)
-- [ ] 3. Machine-fact gatherer enforcement: every gatherer read routes
+- [x] 3. Machine-fact gatherer enforcement: every gatherer read routes
   through one membership-checked open seam
   (machine-fact-source-list-unenforced)
 - [ ] 4. Interprocedural fresh-path proofs: attributed parameter

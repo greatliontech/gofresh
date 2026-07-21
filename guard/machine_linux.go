@@ -4,6 +4,7 @@ package guard
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -33,10 +34,30 @@ var MachineFactSources = []string{cpuinfoPath, meminfoPath, osreleasePath}
 var VolatileOSRoots = []string{"/proc", "/sys"}
 
 func gatherFacts() (MachineFacts, error) {
-	model, phys, logical, err := cpuInfo()
-	if err != nil {
-		return MachineFacts{}, err
+	// The gatherer's ONLY filesystem access iterates MachineFactSources
+	// itself, so an unlisted read is unrepresentable here and the
+	// runtime-input allowlist can never lag the gatherer's actual opens
+	// (REQ-inputs-machine-identity's derivation stays total). Parsing is
+	// pure over the gathered bytes.
+	contents := make(map[string][]byte, len(MachineFactSources))
+	for _, src := range MachineFactSources {
+		b, err := readFactSource(src)
+		if err != nil {
+			return MachineFacts{}, fmt.Errorf("provenance: %w", err)
+		}
+		contents[src] = b
 	}
+	return factsFromSources(contents)
+}
+
+// readFactSource is a variable so unreadable-source arms are testable;
+// production always reads the kernel's own files.
+var readFactSource = os.ReadFile
+
+// factsFromSources derives the projection from the gathered source
+// bytes alone: no filesystem access.
+func factsFromSources(contents map[string][]byte) (MachineFacts, error) {
+	model, phys, logical := parseCPUInfo(bytes.NewReader(contents[cpuinfoPath]))
 	if model == "" {
 		// No identity field for this arch: fail loud rather than let two
 		// different machines share an empty-model fingerprint (false-valid).
@@ -48,16 +69,16 @@ func gatherFacts() (MachineFacts, error) {
 		// into machine identity (REQ-guard-machine-transient).
 		return MachineFacts{}, fmt.Errorf("provenance: no processor entries in /proc/cpuinfo")
 	}
-	ram, err := memTotal()
+	ram, err := parseMemTotal(bytes.NewReader(contents[meminfoPath]))
 	if err != nil {
 		return MachineFacts{}, err
 	}
-	kernel, err := readKernelRelease()
-	if err != nil {
-		// Fail loud like every other fact source: an empty kernel version
-		// would digest equal at seal and check across a kernel change —
+	kernel := strings.TrimSpace(string(contents[osreleasePath]))
+	if kernel == "" {
+		// Fail loud like the CPU identity: an empty kernel version would
+		// digest equal at seal and check across a kernel change,
 		// silently vacating the one fact this file carries.
-		return MachineFacts{}, err
+		return MachineFacts{}, fmt.Errorf("provenance: empty kernel release in %s", osreleasePath)
 	}
 	return MachineFacts{
 		CPUModel:      model,
@@ -67,16 +88,6 @@ func gatherFacts() (MachineFacts, error) {
 		OS:            runtime.GOOS,
 		KernelVersion: kernel,
 	}, nil
-}
-
-func cpuInfo() (string, int, int, error) {
-	file, err := os.Open(cpuinfoPath)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("provenance: %w", err)
-	}
-	defer file.Close()
-	model, physical, logical := parseCPUInfo(file)
-	return model, physical, logical, nil
 }
 
 // parseCPUInfo extracts a stable CPU identity and physical-core count from
@@ -155,15 +166,6 @@ func composeARM(arm map[string]string) string {
 	return strings.Join(parts, " ")
 }
 
-func memTotal() (uint64, error) {
-	file, err := os.Open(meminfoPath)
-	if err != nil {
-		return 0, fmt.Errorf("provenance: %w", err)
-	}
-	defer file.Close()
-	return parseMemTotal(file)
-}
-
 func parseMemTotal(r io.Reader) (uint64, error) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
@@ -181,14 +183,4 @@ func parseMemTotal(r io.Reader) (uint64, error) {
 		return 0, fmt.Errorf("provenance: read meminfo: %w", err)
 	}
 	return 0, fmt.Errorf("provenance: MemTotal not found in /proc/meminfo")
-}
-
-// readKernelRelease is a variable so the unreadable-source arm is
-// testable; production always reads the kernel's own file.
-var readKernelRelease = func() (string, error) {
-	b, err := os.ReadFile(osreleasePath)
-	if err != nil {
-		return "", fmt.Errorf("provenance: %w", err)
-	}
-	return strings.TrimSpace(string(b)), nil
 }

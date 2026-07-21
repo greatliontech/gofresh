@@ -114,21 +114,57 @@ func TestLogicalCoresIgnoreProcessAffinity(t *testing.T) {
 // kernel change, silently vacating the one fact the file carries
 // (REQ-guard-machine; the runtime-input projection digest inherits it).
 func TestGatherFactsFailsLoudOnUnreadableKernelRelease(t *testing.T) {
-	prev := readKernelRelease
-	readKernelRelease = func() (string, error) {
-		return "", fmt.Errorf("provenance: injected unreadable osrelease")
+	prev := readFactSource
+	readFactSource = func(path string) ([]byte, error) {
+		if path == "/proc/sys/kernel/osrelease" {
+			return nil, fmt.Errorf("injected unreadable osrelease")
+		}
+		return prev(path)
 	}
-	defer func() { readKernelRelease = prev }()
+	defer func() { readFactSource = prev }()
 	if _, err := gatherFacts(); err == nil || !strings.Contains(err.Error(), "osrelease") {
 		t.Fatalf("gather error = %v, want the unreadable kernel-release source surfaced", err)
+	}
+
+	// Empty CONTENT fails identically: two hosts (or one host across a
+	// kernel change) must never share an empty-version fingerprint.
+	readFactSource = func(path string) ([]byte, error) {
+		if path == "/proc/sys/kernel/osrelease" {
+			return []byte("\n"), nil
+		}
+		return prev(path)
+	}
+	if _, err := gatherFacts(); err == nil || !strings.Contains(err.Error(), "empty kernel release") {
+		t.Fatalf("gather error = %v, want empty kernel content refused", err)
+	}
+}
+
+// The gatherer reads exactly MachineFactSources — no more, no fewer:
+// the seam records every requested path, so a parser regaining a
+// direct read of an unlisted file (the class the allowlist exists to
+// prevent) fails here instead of stalling every machine-fact witness.
+func TestGathererReadsExactlyTheSourceList(t *testing.T) {
+	var requested []string
+	prev := readFactSource
+	readFactSource = func(path string) ([]byte, error) {
+		requested = append(requested, path)
+		return prev(path)
+	}
+	defer func() { readFactSource = prev }()
+	if _, err := gatherFacts(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(requested, MachineFactSources) {
+		t.Fatalf("gatherer read %v, want exactly %v", requested, MachineFactSources)
 	}
 }
 
 // The runtime-input allowlist derives from this source list; the list
 // itself must name every file the gatherer opens. The literal pin
-// catches edits to the LIST — that the gatherer opens nothing beyond
-// the list remains a reviewed convention, tracked in
-// docs/issues/machine-fact-source-list-unenforced.md.
+// catches edits to the LIST — and the gatherer's only filesystem loop
+// iterates the list itself, so an unlisted read is structurally
+// unrepresentable there (its parsers are pure over the gathered
+// bytes).
 func TestMachineFactSourcesNameTheGathererReads(t *testing.T) {
 	want := []string{"/proc/cpuinfo", "/proc/meminfo", "/proc/sys/kernel/osrelease"}
 	if !slices.Equal(MachineFactSources, want) {

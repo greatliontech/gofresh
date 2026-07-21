@@ -11,11 +11,6 @@ when its work lands (git holds history).
   dependency-heavy benchmark package, and only after re-measuring the open-world
   population under the shared-dynamic-state mutation analysis shows the residual is
   worth the alias-level extension.*
-- **[machine-fact-source-list-unenforced](machine-fact-source-list-unenforced.md)** — the
-  allowlist derives from guard.MachineFactSources (cannot diverge), but nothing proves the
-  gatherer opens only listed files; a new unlisted fact source would silently stall every
-  machine-fact-gathering witness again. *Lands: when gatherFacts next gains or changes a
-  fact source, or when the observation harness gains a self-tracing test surface.*
 - **[interprocedural-fresh-path-proofs](interprocedural-fresh-path-proofs.md)** — the
   fresh-path observability grammar is intraprocedural: scratch paths built in or passed
   through helpers refuse the proof (28 corpus witnesses); propagation needs an
