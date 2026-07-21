@@ -480,6 +480,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	guardMemo := map[string]bool{}
 	scratchMemo := map[string]bool{}
 	existenceBound := map[pathID]bool{}
+	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
 	cwd := packageDir
 	cwdChanged := false
 	// PWD's runtime value is the spawn directory, which no env-name
@@ -611,7 +612,16 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				pathSeen[id] = true
 				m.Paths = append(m.Paths, pathInput{pathID: id})
 			}
-			addUnverifiable(&m, unverifiableSeen, "stat metadata input: "+id.displayPath())
+			// A stat under a DECLARED bracket root needs no metadata
+			// seal: the bracket fingerprint observes content and
+			// metadata together over the whole run-to-ingest span, and
+			// the entry digest binds both for later checks. A parse-time
+			// admission - the seal is never added - so the bracket never
+			// removes a reason (REQ-inputs-bracket-coverage's
+			// never-weakens clause holds; REQ-inputs-unbounded).
+			if !bracketStatRoots.covers(id) {
+				addUnverifiable(&m, unverifiableSeen, "stat metadata input: "+id.displayPath())
+			}
 			if ambiguousParent {
 				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
 			}
@@ -1156,6 +1166,68 @@ func ephemeralScratch(p string, roots [][2]string, memo map[string]bool) bool {
 	}()
 	memo[p] = res
 	return res
+}
+
+// bracketStatCover holds the declared bracket roots in identity form
+// for the parse-time stat-metadata admission.
+type bracketStatCover struct {
+	roots      map[pathID]bool
+	exclusions []pathID
+}
+
+// declaredBracketStatRoots lists the bracket's declared roots as
+// identities the stat arm can admit against; a nil or unverifiable
+// bracket declares nothing. Exclusions ride along: an excluded subtree
+// is outside the fingerprint and outside this admission alike.
+func declaredBracketStatRoots(b *Bracket) bracketStatCover {
+	c := bracketStatCover{roots: map[pathID]bool{}}
+	if b == nil || b.reason != "" {
+		return c
+	}
+	for _, root := range b.roots {
+		c.roots[root.id] = true
+	}
+	c.exclusions = b.exclusions
+	return c
+}
+
+// covers reports whether id is a declared bracket root or lies under a
+// declared directory root - the identities whose content and metadata
+// the bracket fingerprint spans.
+func (c bracketStatCover) covers(id pathID) bool {
+	// An excluded subtree is removed from the fingerprint and from
+	// coverage alike, so its metadata is NOT spanned and the seal
+	// stands (REQ-inputs-bracket-coverage). The admission is lexical;
+	// escaping symlinks are caught downstream by resolution-based
+	// coverage and resolvedTarget, but exclusion must hold here.
+	for _, excluded := range c.exclusions {
+		if excluded.Kind != id.Kind {
+			continue
+		}
+		sep := "/"
+		if id.Kind == pathAbs {
+			sep = string(filepath.Separator)
+		}
+		if id.Path == excluded.Path || strings.HasPrefix(id.Path, excluded.Path+sep) {
+			return false
+		}
+	}
+	if c.roots[id] {
+		return true
+	}
+	for root := range c.roots {
+		if root.Kind != id.Kind {
+			continue
+		}
+		sep := "/"
+		if id.Kind == pathAbs {
+			sep = string(filepath.Separator)
+		}
+		if strings.HasPrefix(id.Path, root.Path+sep) {
+			return true
+		}
+	}
+	return false
 }
 
 // nullSink reports whether p is exactly the contentless sink device:

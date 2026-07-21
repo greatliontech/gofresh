@@ -612,17 +612,54 @@ func TestDirtyInspectsBindingUnverifiableState(t *testing.T) {
 }
 
 // TestBracketNeverWeakensDisposition pins the never-weakens clause of
-// REQ-inputs-bracket-coverage as an example: an observation the manifest
-// treats as unverifiable stays unverifiable when bracketed by an unchanged
-// covering bracket — the bracket only ever adds unverifiable reasons.
+// REQ-inputs-bracket-coverage as an example: an out-of-root stat's
+// metadata seal stands identically with and without the bracket — the
+// bracket only ever adds unverifiable reasons. A stat UNDER a declared
+// root takes no seal at all (a parse-time admission, not a removal):
+// the bracket fingerprint spans content and metadata, and the entry
+// digest binds both thereafter (REQ-inputs-unbounded).
 func TestBracketNeverWeakensDisposition(t *testing.T) {
 	moduleDir := bindingModule(t)
 	bracket := testBracket(t, moduleDir, "data")
-	observation, err := FromTestLogEnv([]byte("stat data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLogEnv([]byte("stat other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !observation.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, observation.State), "\n"), "stat metadata input: data/fixture.txt") {
-		t.Fatalf("covered unchanged bracket weakened the stat disposition: %+v", observation.State)
+	if !observation.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, observation.State), "\n"), "stat metadata input: other.txt") {
+		t.Fatalf("out-of-root stat lost its seal under an unrelated bracket: %+v", observation.State)
+	}
+
+	inRoot, err := FromTestLogEnv([]byte("stat data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inRoot.Unverifiable {
+		t.Fatalf("declared-root stat sealed: %+v", inRoot.State)
+	}
+	if len(inRoot.State.Manifest) == 0 {
+		t.Fatal("declared-root stat lost its manifest entry")
+	}
+
+	// The root's own identity is admitted exactly like its interior.
+	rootItself, err := FromTestLogEnv([]byte("stat data\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootItself.Unverifiable {
+		t.Fatalf("declared root's own stat sealed: %+v", rootItself.State)
+	}
+
+	// An excluded subtree under a declared root is unspanned: its stat
+	// keeps the attributing metadata seal.
+	excluded, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exObs, err := FromTestLogEnv([]byte("stat data/sub/x.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(excluded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exObs.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, exObs.State), "\n"), "stat metadata input: data/sub/x.txt") {
+		t.Fatalf("excluded-subtree stat lost its metadata seal: %+v", exObs.State)
 	}
 }

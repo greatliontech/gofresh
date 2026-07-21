@@ -268,7 +268,12 @@ fingerprint and from coverage alike, so a volatile bookkeeping tree under a
 module-scale root does not make every bracket environmental noise; an excluded
 identity a run then observes is uncovered, never bound. The bracket never weakens a
 disposition: every observation the manifest treats as unverifiable remains
-unverifiable when bracketed.
+unverifiable when bracketed. The stat-metadata seal for an identity under a
+declared root — outside every declared exclusion, whose subtrees are unspanned
+and keep the seal — is decided at parse time and never recorded at all: an
+admission the manifest bakes in, not a removal (REQ-inputs-unbounded), so
+recomputation from the persisted manifest reproduces the same reasons with or
+without the bracket in hand.
 
 **REQ-inputs-observation-disposition** (invariant): Runtime-manifest
 unverifiability MUST NOT be suppressible by an observability proof. Malformed or unrecognized
@@ -504,7 +509,11 @@ fingerprint or validity predicate, and an inspection failure or unrepresentable
 comparison is returned rather than interpreted as clean.
 
 **REQ-inputs-unbounded** (behavior): An observed input whose full observed value the
-analysis cannot bound — a metadata-only inspection, a directory or symlink resolving
+analysis cannot bound — a metadata-only inspection of an identity outside every
+DECLARED bracket root (a stat under a declared root never takes the seal at all:
+the bracket fingerprint observes content and metadata together over the whole
+span, and the entry digest binds both thereafter — an admission decided at
+parse time, so the bracket never removes a recorded reason), a directory or symlink resolving
 outside the module (the existence-bound stat form of an external directory
 excepted, REQ-inputs-external-dir-existence), a relative path under a
 working-directory change the run stream cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
