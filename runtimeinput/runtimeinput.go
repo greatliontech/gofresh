@@ -1297,26 +1297,46 @@ func guardCovered(p string, roots []guardRootPair, memo map[string]bool) bool {
 }
 
 func guardCoveredUncached(p string, roots []guardRootPair) bool {
+	// One admitting root's failed leg is that root's verdict, never the
+	// walk's: a later overlapping root that admits the whole chain still
+	// covers (a build cache configured inside a module cache's covered
+	// region). Refusal stays the default when no root covers.
+	// The chain resolves lazily and once: a function of the path alone,
+	// probed only after some root admits it (non-admitted paths are
+	// never probed), reused across overlapping roots.
+	var resolved string
+	var links []string
+	resolvedOnce := false
 	for _, r := range roots {
 		if !r.admits(p) {
 			continue
 		}
-		resolved, links, ok := chainResolve(p)
-		if !ok {
-			return false
-		}
-		if _, err := os.Lstat(resolved); err != nil {
-			return false
-		}
-		if !r.admits(resolved) {
-			return false
-		}
-		for _, link := range links {
-			if !r.admits(link) {
+		if !resolvedOnce {
+			var ok bool
+			resolved, links, ok = chainResolve(p)
+			if !ok {
+				// Unresolvable for every root alike: no later root can
+				// admit a chain the kernel walk cannot produce.
 				return false
 			}
+			if _, err := os.Lstat(resolved); err != nil {
+				return false
+			}
+			resolvedOnce = true
 		}
-		return true
+		if !r.admits(resolved) {
+			continue
+		}
+		admitted := true
+		for _, link := range links {
+			if !r.admits(link) {
+				admitted = false
+				break
+			}
+		}
+		if admitted {
+			return true
+		}
 	}
 	return false
 }

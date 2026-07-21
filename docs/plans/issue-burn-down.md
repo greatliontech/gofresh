@@ -10,7 +10,7 @@ every chunk runs the adversarial loop and the corpus check stays green.
   real filesystem probes — the library's own stat of a fabricated
   /proc path taints the whole test binary's observation (109 subjects
   re-execute every run)
-- [ ] 2. Guard-root overlap: a failing admitting root consults later
+- [x] 2. Guard-root overlap: a failing admitting root consults later
   overlapping roots instead of finaling (guard-root-overlap-first-match)
 - [ ] 3. Machine-fact gatherer enforcement: every gatherer read routes
   through one membership-checked open seam

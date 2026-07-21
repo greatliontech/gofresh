@@ -73,6 +73,84 @@ func TestGuardCoveredRootsSkipPinnedReads(t *testing.T) {
 	}
 }
 
+// An overlapping later root covers what the first admitting root's
+// failed leg cannot: a symlink escaping an inner root into an outer
+// root that admits the whole chain — a build cache configured inside a
+// module cache's covered region — recovers coverage, while the same
+// chain with only the inner declaration stays observed
+// (REQ-inputs-guard-covered: per-root verdicts, refusal the default).
+func TestGuardCoveredOverlappingRootsConsultBeyondFirstMatch(t *testing.T) {
+	dir := t.TempDir()
+	outer := t.TempDir()
+	inner := filepath.Join(outer, "inner")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(outer, "target.txt")
+	if err := os.WriteFile(target, []byte("pinned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(inner, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	log := "open " + link + "\n"
+
+	// Inner root first: it admits the path, its resolution escapes it,
+	// and the outer root then admits the whole chain.
+	obs := completedFromLog(t, dir, log, WithToolchainRoot(inner), WithToolchainRoot(outer))
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("overlapping outer root not consulted after the inner root's failed leg: %s", st.Reason)
+	}
+
+	// The inner declaration alone stays observed: the escape is real.
+	only := completedFromLog(t, dir, log, WithToolchainRoot(inner))
+	onlyState, err := CompletedState(only)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !onlyState.Unverifiable {
+		t.Fatal("inner-only escaping chain did not stay observed")
+	}
+
+	// Out-and-back: the chain's TARGET is back inside the inner root but
+	// an intermediate link lies outside it — the inner root's link leg
+	// fails, and the outer root still admits the whole chain.
+	backTarget := filepath.Join(inner, "back.txt")
+	if err := os.WriteFile(backTarget, []byte("pinned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mid := filepath.Join(outer, "mid-link")
+	if err := os.Symlink(backTarget, mid); err != nil {
+		t.Fatal(err)
+	}
+	hop := filepath.Join(inner, "hop.txt")
+	if err := os.Symlink(mid, hop); err != nil {
+		t.Fatal(err)
+	}
+	hopLog := "open " + hop + "\n"
+	hopObs := completedFromLog(t, dir, hopLog, WithToolchainRoot(inner), WithToolchainRoot(outer))
+	hopState, err := CompletedState(hopObs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hopState.Unverifiable {
+		t.Fatalf("out-and-back chain not recovered by the outer root: %s", hopState.Reason)
+	}
+	hopOnly := completedFromLog(t, dir, hopLog, WithToolchainRoot(inner))
+	hopOnlyState, err := CompletedState(hopOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hopOnlyState.Unverifiable {
+		t.Fatal("inner-only out-and-back chain did not stay observed")
+	}
+}
+
 // TestGuardCoveredResolutionIsFailClosed pins the fail-closed boundary: a
 // module-local symlink INTO the root stays a mutable observed input, a path
 // under the root escaping OUT of it stays observed, and a missing path under

@@ -11,11 +11,6 @@ when its work lands (git holds history).
   dependency-heavy benchmark package, and only after re-measuring the open-world
   population under the shared-dynamic-state mutation analysis shows the residual is
   worth the alias-level extension.*
-- **[guard-root-overlap-first-match](guard-root-overlap-first-match.md)** — the first
-  admitting guard root's resolution failure is final; a later overlapping root that would
-  cover is never consulted. Conservative (stays observed); reuse lost in overlap
-  topologies. *Lands: when overlapping roots occur in a real configuration, or when the
-  coverage walk is next touched.*
 - **[machine-fact-source-list-unenforced](machine-fact-source-list-unenforced.md)** — the
   allowlist derives from guard.MachineFactSources (cannot diverge), but nothing proves the
   gatherer opens only listed files; a new unlisted fact source would silently stall every
