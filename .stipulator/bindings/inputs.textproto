@@ -12,7 +12,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-unbounded"
-  content_hash: "4eae0addd4f02fa677ebec71cacdee9276226648d467b224522660fc42d30992"
+  content_hash: "2e9c3137c339d08a498026721d93a084dc8ef331e1583651853b1531d8cc3c01"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservationIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-unbounded"
-  content_hash: "4eae0addd4f02fa677ebec71cacdee9276226648d467b224522660fc42d30992"
+  content_hash: "2e9c3137c339d08a498026721d93a084dc8ef331e1583651853b1531d8cc3c01"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.hashPath"
   role: BINDING_ROLE_IMPLEMENTS
@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-unbounded"
-  content_hash: "4eae0addd4f02fa677ebec71cacdee9276226648d467b224522660fc42d30992"
+  content_hash: "2e9c3137c339d08a498026721d93a084dc8ef331e1583651853b1531d8cc3c01"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkFileToExternalTargetIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -309,7 +309,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.CaptureBracket"
   role: BINDING_ROLE_IMPLEMENTS
@@ -318,7 +318,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBracketMovesOnPersistedMutation"
   role: BINDING_ROLE_TESTS
@@ -327,7 +327,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage"
   role: BINDING_ROLE_TESTS
@@ -336,7 +336,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBracketRootRefusedByHashingSemanticsIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -345,7 +345,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCaptureBracketRejectsMalformedRootsAndPatterns"
   role: BINDING_ROLE_TESTS
@@ -444,7 +444,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestExcludedIdentityObservedIsUncovered"
   role: BINDING_ROLE_TESTS
@@ -453,7 +453,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBracketNeverWeakensDisposition"
   role: BINDING_ROLE_TESTS
@@ -534,7 +534,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-bracket-coverage"
-  content_hash: "7e86245821530da767e847c5a38d87ed8b61f2863bfda561e5fd7e15e730217f"
+  content_hash: "d6b39f76e2b4b3fa55efd5884693f5619f3733965a2ac380f7d4edac8a06b2db"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestBindingReasonsSurviveMergeUnion"
   role: BINDING_ROLE_TESTS
@@ -786,7 +786,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-external-dir-existence"
-  content_hash: "31e00c7fa3064e9b45715c5b00d420b3aa6fefa41c98795f7d169b48e3c65da3"
+  content_hash: "90b3b59b0d03dc1e593b40a7644d030a10982f9ae5a5098c4b3aa2c715ea62a4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestExternalDirectoryStatBindsExistence"
   role: BINDING_ROLE_TESTS
@@ -795,7 +795,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-external-dir-existence"
-  content_hash: "31e00c7fa3064e9b45715c5b00d420b3aa6fefa41c98795f7d169b48e3c65da3"
+  content_hash: "90b3b59b0d03dc1e593b40a7644d030a10982f9ae5a5098c4b3aa2c715ea62a4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
@@ -872,4 +872,22 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.CurrentContext"
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "3cf9b664b91cf3c94125f2cb729791505d14272405171d74a647dc83cc395fb1"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-absent-stat"
+  content_hash: "dedf6144ede4ad043a43e80ce3a816c455c1383031e09d9c9e3e16d52f616c3f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAbsentExternalStatBindsAbsence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "34d9ce23ddf1b1c34641a4f3f359b64e6e28999f7ca985d25babca9287436659"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-absent-stat"
+  content_hash: "dedf6144ede4ad043a43e80ce3a816c455c1383031e09d9c9e3e16d52f616c3f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
 }

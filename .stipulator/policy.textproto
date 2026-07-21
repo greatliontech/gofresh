@@ -10,5 +10,17 @@ invocations {
     packages: "./..."
     race: true
     args: "-test.timeout=30m"
+    bracket_paths: "/bin/sh"
+    bracket_paths: "/usr/bin/sh"
+    bracket_paths: "/usr/bin/git"
+    bracket_paths: "/usr/bin/taskset"
+    bracket_paths: "go.work"
+    bracket_paths: "go.mod"
+    bracket_paths: "go.sum"
+    bracket_paths: "guard"
+    bracket_paths: "runtimeinput"
+    bracket_paths: "closure"
+    bracket_paths: "internal"
+    assume_pure: true
   }
 }
