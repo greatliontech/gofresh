@@ -147,7 +147,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "ed0d360508596131dfdd9d8f9617b2d048d9d417ed9feb4a61b7b90319643780"
+  content_hash: "d3bee63b21ae03475f5dc2db76f7f7296c517e15998528afe746cf6288b178ac"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
   role: BINDING_ROLE_IMPLEMENTS
@@ -156,7 +156,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "ed0d360508596131dfdd9d8f9617b2d048d9d417ed9feb4a61b7b90319643780"
+  content_hash: "d3bee63b21ae03475f5dc2db76f7f7296c517e15998528afe746cf6288b178ac"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS

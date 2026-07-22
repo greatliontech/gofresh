@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-producer-view"
-  content_hash: "7957aa191d4b40ee3809e1a5c75de7c47504868b193a2b0fe409ff7fb9f3cd6d"
+  content_hash: "b2f64799b677f5fcc356149e2a185d821e033e0e8bcfa1551ad5f95d4f868553"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS
