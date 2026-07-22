@@ -174,6 +174,33 @@ or deny another subject's proof.
 
 ## Cross-module dependencies
 
+**REQ-closure-observability-memo** (behavior): Observability proofs MAY be
+served from a persistent memo because the proof is a pure function of its
+key's complete input identity: the caller-supplied scope (the proof-strategy
+version and the code guards — toolchain and build configuration) plus the
+package test-binary closure hash, which pins every mutable source byte the
+analyzed program is built from (stdlib rides the toolchain guard,
+version-locked cache dependencies their version pins, per
+REQ-closure-mutable-local and REQ-closure-pinned-dep). A memo hit is
+byte-equivalent to recomputation — including recorded unrooted-subject
+dispositions — and a full-group hit skips the program load entirely. The
+memo is a cache, never a record: it lives under the user cache directory,
+writes atomically, and a missing, unreadable, corrupt, or key-mismatched
+entry recomputes silently; no entry is trusted beyond its key — the key IS
+the freshness. Entries accumulate one per closure version and the cache is
+deletable wholesale at any time. A violation of the caller's quiescence
+obligation (REQ-fresh-producer-view) can persist through the memo until the
+key moves — the memo widens that contract-excluded window's blast radius
+from one process to the cache, never its reachability. Changing proof
+semantics — including diagnostic text, which recorded evidence binds —
+without bumping the strategy version
+was already a violation of the recorded-evidence contract; the memo adds no
+new versioning obligation.
+
+REQ-closure-observability-memo: enforced by
+`TestObservabilityMemoServesEquivalentProofsWithoutLoading` and
+`TestObservabilityMemoMissesOnScopeAndSourceChange`.
+
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the
 subject MUST be hashed by its source content, never pinned by module version — such
 source resolves to a working directory with no version or checksum signal, so pinning

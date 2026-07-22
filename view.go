@@ -1477,6 +1477,11 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 	if err != nil {
 		return err
 	}
+	// The observability memo's scope is the analysis identity outside the
+	// source closure: the proof-strategy version plus the code guards.
+	// The memo key completes with the package test-binary closure hash
+	// inside the Hasher (REQ-closure-observability-memo).
+	hasher.SetMemoScope(ObservationRTA + "|" + v.guards.Toolchain + "|" + v.guards.BuildConfig)
 	if progress := v.engine.progress; progress != nil {
 		hasher.OnProgress(func(phase, pkgPath string) {
 			progress(Progress{Phase: phase, Package: pkgPath})

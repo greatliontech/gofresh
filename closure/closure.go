@@ -66,6 +66,10 @@ type Hasher struct {
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
 	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
+	// memoScope enables the persistent observability memo when non-empty:
+	// the caller-supplied analysis identity outside the source closure
+	// (REQ-closure-observability-memo).
+	memoScope string
 }
 
 // OnProgress supplies a callback invoked synchronously at the start of each

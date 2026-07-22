@@ -601,6 +601,26 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
+		// Memoized proofs serve before any program load: the proof is a
+		// pure function of (scope, package test-binary closure), so a hit
+		// under the complete key is byte-equivalent to recomputation
+		// (REQ-closure-observability-memo). A full-group hit skips the
+		// SSA build entirely.
+		closureHash, memoized := h.groupMemo(group.path)
+		if len(memoized) > 0 {
+			remaining := group.subjects[:0:0]
+			for _, subject := range group.subjects {
+				if proof, ok := memoized[subject.Symbol]; ok {
+					results[subject] = proof
+					continue
+				}
+				remaining = append(remaining, subject)
+			}
+			group.subjects = remaining
+			if len(group.subjects) == 0 {
+				continue
+			}
+		}
 		h.emitProgress("prove", group.path)
 		prog, err := h.loadCached(group.path)
 		if err != nil {
@@ -610,16 +630,22 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// fact — a production symbol can be unreachable as a root of its
 		// external-test binary — so it degrades to an unavailable proof for
 		// that subject alone and never denies a sibling's analysis.
+		unrooted := map[string]Observability{}
 		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
 			if prog.roots[subject.Symbol] == nil {
-				results[subject] = Observability{Reason: fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)}
+				proof := Observability{Reason: fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)}
+				results[subject] = proof
+				unrooted[subject.Symbol] = proof
 				continue
 			}
 			rooted = append(rooted, subject)
 		}
 		group.subjects = rooted
 		if len(group.subjects) == 0 {
+			if h.memoScope != "" && closureHash != "" {
+				storeMemo(h.memoScope, closureHash, unrooted)
+			}
 			continue
 		}
 		metas, err := h.list(group.path)
@@ -627,6 +653,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			return nil, err
 		}
 		base := newTier2Base(h, prog, metas)
+		computed := unrooted
 		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
 			if err := h.ctx.Err(); err != nil {
 				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -646,7 +673,11 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 					return nil, err
 				}
 				results[subject] = result
+				computed[subject.Symbol] = result
 			}
+		}
+		if h.memoScope != "" && closureHash != "" {
+			storeMemo(h.memoScope, closureHash, computed)
 		}
 	}
 	if err := h.ctx.Err(); err != nil {
