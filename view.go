@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -81,6 +82,10 @@ type View struct {
 	openWorld            map[Subject]bool
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
+	// fileDigests: construction-time content digest per source identity,
+	// for naming moved files in validation refusals
+	// (REQ-fresh-producer-view's naming arm).
+	fileDigests          map[string]string
 	capturedRefined      map[Subject]bool
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
@@ -175,7 +180,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("%w: closure for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			return nil, fmt.Errorf("%w: closure for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject], first.fileDigests, second.fileDigests))
 		}
 		if first.purity[subject] != second.purity[subject] {
 			if err := ctx.Err(); err != nil {
@@ -187,14 +192,16 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("%w: maximal source identities for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			return nil, fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject], first.fileDigests, second.fileDigests))
 		}
 	}
 	if !slices.Equal(first.sourceFiles, second.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: maximal source identities during construction", ErrViewChanged)
+		// The construction race is the one refusal with no reproduction
+		// path afterward, so naming here matters most.
+		return nil, fmt.Errorf("%w: maximal source identities during construction%s", ErrViewChanged, movedIdentitySuffix(first.sourceFiles, second.sourceFiles, first.fileDigests, second.fileDigests))
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -216,6 +223,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		openWorld:            first.openWorld,
 		sourceFiles:          first.sourceFiles,
 		sourceFilesBySubject: first.sourceFilesBySubject,
+		fileDigests:          first.fileDigests,
 		capturedRefined:      make(map[Subject]bool, len(unique)),
 		capturedObserved:     make(map[Subject]bool, len(unique)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
@@ -230,6 +238,13 @@ type viewObservation struct {
 	openWorld            map[Subject]bool
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
+	// fileDigests carries a construction-time content digest per source
+	// identity, so a later validation failure can name the moved file
+	// (REQ-fresh-producer-view's naming arm). Best-effort attribution:
+	// the digests are read moments after the closure hashes, so a file
+	// that moves inside that window names imprecisely while the closure
+	// comparison still refuses.
+	fileDigests map[string]string
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
@@ -272,6 +287,20 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 	}
 	sort.Strings(observation.sourceFiles)
+	observation.fileDigests = make(map[string]string, len(observation.sourceFiles))
+	for _, path := range observation.sourceFiles {
+		if err := ctx.Err(); err != nil {
+			return viewObservation{}, err
+		}
+		digest, err := digestFile(path)
+		if err != nil {
+			// A file the closure just read but the digest pass cannot:
+			// attribution degrades, detection does not - the closure
+			// comparison still refuses drift.
+			continue
+		}
+		observation.fileDigests[path] = digest
+	}
 	for _, subject := range subjects {
 		if !known[subject] {
 			return viewObservation{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
@@ -1133,6 +1162,66 @@ func analysisUnavailable(reason string) bool {
 // differingGuard names the first environment guard whose two construction
 // observations disagreed — the actionable component behind a bare "guards
 // moved".
+// digestFile is the construction-time content identity behind
+// validation's moved-file naming: 32 hex of SHA-256, matching the
+// closure package's per-file style.
+func digestFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])[:32], nil
+}
+
+// movedIdentitySuffix names the source identities behind a drift
+// refusal, best-effort: membership changes name added and removed
+// paths exactly; content drift names paths whose construction-time
+// digests disagree. An empty diff (a change-and-restore, or a digest
+// the capture could not read) keeps the bare refusal - naming is
+// advisory, detection is the comparison itself
+// (REQ-fresh-producer-view's naming arm).
+func movedIdentitySuffix(captured, current []string, capturedDigests, currentDigests map[string]string) string {
+	capturedSet := make(map[string]bool, len(captured))
+	for _, path := range captured {
+		capturedSet[path] = true
+	}
+	currentSet := make(map[string]bool, len(current))
+	for _, path := range current {
+		currentSet[path] = true
+	}
+	var moved []string
+	for _, path := range captured {
+		if !currentSet[path] {
+			moved = append(moved, "removed "+path)
+		}
+	}
+	for _, path := range current {
+		if !capturedSet[path] {
+			moved = append(moved, "added "+path)
+		}
+	}
+	for _, path := range captured {
+		if !currentSet[path] {
+			continue
+		}
+		was, hasWas := capturedDigests[path]
+		now, hasNow := currentDigests[path]
+		if hasWas && hasNow && was != now {
+			moved = append(moved, "changed "+path)
+		}
+	}
+	if len(moved) == 0 {
+		return ""
+	}
+	sort.Strings(moved)
+	const show = 3
+	if len(moved) > show {
+		return fmt.Sprintf(" (moved: %s, and %d more)", strings.Join(moved[:show], ", "), len(moved)-show)
+	}
+	return fmt.Sprintf(" (moved: %s)", strings.Join(moved, ", "))
+}
+
 func differingGuard(a, b guard.Guards) string {
 	switch {
 	case a.Toolchain != b.Toolchain:
@@ -1255,14 +1344,14 @@ func (v *View) reobserveBase(ctx context.Context) error {
 }
 
 func (v *View) compareBaseContext(ctx context.Context, current *View) error {
-	return v.compareFactsContext(ctx, current.guards, current.sourceFiles, current.maximal, current.purity, current.sourceFilesBySubject)
+	return v.compareFactsContext(ctx, current.guards, current.sourceFiles, current.maximal, current.purity, current.sourceFilesBySubject, current.fileDigests)
 }
 
 func (v *View) compareObservationContext(ctx context.Context, observation viewObservation) error {
-	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject)
+	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests)
 }
 
-func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string) error {
+func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
@@ -1282,7 +1371,7 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: maximal source identities", ErrViewChanged)
+		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(v.sourceFiles, sourceFiles, v.fileDigests, fileDigests))
 	}
 	for _, subject := range v.subjects {
 		if err := ctx.Err(); err != nil {
@@ -1292,13 +1381,13 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: maximal source identities for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.fileDigests, fileDigests))
 		}
 		if maximal[subject] != v.maximal[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: closure for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.fileDigests, fileDigests))
 		}
 		if purity[subject] != v.purity[subject] {
 			if err := ctx.Err(); err != nil {

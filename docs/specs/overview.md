@@ -226,7 +226,16 @@ be upgraded to refined evidence after execution, so switching policy requires on
 rerun. The caller owns execution and excludes source or build-input mutation while
 the view is constructed and the producing build is read; validation detects ordinary
 drift but cannot prove the absence of a change-and-restore interval the caller
-allowed.
+allowed. A failed validation names its drift: the class and, where
+subject-scoped, the subject, and for source and closure drift the differing
+source identities themselves — membership changes named exactly, content
+drift best-effort from construction-time per-file digests — so a consumer's
+refusal can name the moved file instead of only the subject; an unattributable
+content drift keeps the bare refusal, naming being advisory where detection
+is the comparison itself. The naming is advisory prose for a human or an
+error-wrapping consumer, never a machine grammar; construction-time
+agreement refusals name identically — the construction race is the one
+refusal with no reproduction path afterward.
 
 **REQ-fresh-context** (behavior): Analysis-view construction, checking —
 maximal, refined, and observed alike — and producer validation MUST honor caller

@@ -623,6 +623,8 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 	}
 	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("Validate after source edit = %v, want ErrViewChanged", err)
+	} else if !strings.Contains(err.Error(), "changed ") || !strings.Contains(err.Error(), "view.go") {
+		t.Fatalf("drift refusal does not name the moved file: %v", err)
 	}
 	verdict, err = engine.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
@@ -669,6 +671,9 @@ func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
 	}
 	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("Validate after source identity change = %v, want ErrViewChanged", err)
+	} else if !strings.Contains(err.Error(), "moved: ") ||
+		!strings.Contains(err.Error(), "dep-a") || !strings.Contains(err.Error(), "dep-b") {
+		t.Fatalf("identity-change refusal does not name the swapped identities: %v", err)
 	}
 }
 
