@@ -440,7 +440,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		pkgPath := aliases[ident.Name]
 		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
 			scan.add(effect)
-		} else if pkgPath != "testing" && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true
@@ -798,11 +798,35 @@ func isAlwaysExternalPackage(pkgPath string) bool {
 // packages fail closed to package-wide unverifiability; additions require a
 // source audit, not an API-name heuristic.
 func isSourceOnlyStandardPackage(pkgPath string) bool {
+	// The audited-pure set: packages that are bit-deterministic pure
+	// computation for every consumer of this audit - the observability
+	// tier, the refinement tier, and the maximal unverifiable-dependence
+	// marker share it, so membership demands the strongest reading:
+	// every ambient effect must enter via a flagged constructor or
+	// global of an effect-bearing package, no testlog-invisible input
+	// channel, and no machine-variant results. Deliberately excluded:
+	// reflect (defeats static reachability - auditing it would unsound
+	// the proof itself); flag (registration returns pointers whose
+	// values change at Parse, a testlog-invisible covert input channel);
+	// encoding/gob (Register mutates a package-global registry - the
+	// same registration-shaped covert channel: a subject's decode
+	// outcome can depend on a sibling's prior Register call);
+	// math and math/cmplx (CPU-dispatched implementations vary results
+	// across machines - the refinement tier pins the rejection); sync
+	// and sync/atomic (sync.Pool is runtime-backed and GC-coupled);
+	// time, math/rand, hash/maphash (ambient clock and entropy); and
+	// every I/O-acquiring package
+	// (REQ-closure-observability-analysis).
 	switch pkgPath {
-	case "bytes", "cmp", "encoding", "encoding/base64", "encoding/binary", "encoding/hex",
+	case "bufio", "bytes", "cmp",
+		"container/heap", "container/list", "container/ring",
+		"crypto/hmac", "crypto/md5", "crypto/sha1", "crypto/sha256", "crypto/sha512", "crypto/subtle",
+		"encoding", "encoding/asn1", "encoding/base64", "encoding/binary", "encoding/csv",
+		"encoding/hex", "encoding/json", "encoding/pem", "encoding/xml",
 		"errors", "hash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
-		"math/bits", "regexp", "regexp/syntax",
-		"slices", "sort", "strconv", "strings",
+		"io", "io/fs", "iter", "maps", "math/bits",
+		"path", "regexp", "regexp/syntax",
+		"slices", "sort", "strconv", "strings", "text/scanner",
 		"unicode", "unicode/utf16", "unicode/utf8":
 		return true
 	default:

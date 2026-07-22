@@ -49,7 +49,7 @@ type Subject struct {
 const DeclarationRTA = "gofresh/declaration-rta@1"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability proof.
-const ObservationRTA = "gofresh/observation-rta@3"
+const ObservationRTA = "gofresh/observation-rta@4"
 
 // Refinement is optional narrower closure evidence. Its zero value means the
 // recording is maximal-only. A complete value binds its closure hash and

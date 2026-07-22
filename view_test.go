@@ -2819,6 +2819,10 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 }
 
 func TestProgressReportsAnalysisPhases(t *testing.T) {
+	// A fresh cache: the observability memo legitimately swallows the
+	// prove phase on a hit, and this test pins the fresh-analysis
+	// sequence.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	var events []Progress

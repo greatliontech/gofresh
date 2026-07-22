@@ -141,7 +141,18 @@ set. Every reachable call and effect is classified to the walk's end; the prefer
 human diagnostic is derived afterward and can never select which facts participate. A complete maximal-tier negative scan
 may reject opaque linkage, native code, process execution, dot imports, unaudited
 standard-library access, or other unclassified external-capable syntax, but can never
-grant the proof on its own. The admitted observation set includes the guard-pinned
+grant the proof on its own. The audited-pure standard set — packages and named
+operations through which every ambient effect must enter via a flagged
+constructor or global of an effect-bearing package, adding no
+testlog-invisible input channel of their own (fmt's Sprint family included:
+argument methods stay visible to reachability) — is deliberately bounded by
+two exclusions that are soundness, not caution: reflect defeats static
+reachability itself, and registration-shaped covert channels — flag registration returns
+pointers whose values change at Parse, and gob registration mutates a
+package-global type registry a sibling subject's decode can depend on —
+are channels the testlog cannot audit. Widening the
+audited set changes proof semantics and rides the strategy-version bump like
+any other proof change. The admitted observation set includes the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
 surfaces — whose value the toolchain guard already fixes, together with read-position
 uses of paths derived from it through constant-component joins: reads under the

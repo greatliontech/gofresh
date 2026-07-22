@@ -122,6 +122,24 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 	return externalEffect{}, false
 }
 
+// classBPureStandard audits specific operations of effect-bearing
+// standard packages as pure: value-to-value computation with no ambient
+// acquisition and no testlog-invisible channel. fmt's Sprint family
+// qualifies (arguments' methods stay visible to reachability); its
+// Print family is classified output and its Scan family classified
+// input, so only the pure remainder lands here
+// (REQ-closure-observability-analysis).
+func classBPureStandard(pkgPath, name string) bool {
+	if pkgPath != "fmt" {
+		return false
+	}
+	switch name {
+	case "Sprint", "Sprintf", "Sprintln", "Errorf", "Append", "Appendf", "Appendln", "FormatString":
+		return true
+	}
+	return false
+}
+
 func classBReason(pkgPath, name string) string {
 	effect, ok := classBEffect(pkgPath, name)
 	if !ok {

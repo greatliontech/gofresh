@@ -776,7 +776,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
-	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
+	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) && !classBPureStandard(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}
@@ -1729,6 +1729,11 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	switch x := v.(type) {
 	case *ssa.Global:
 		if obj := x.Object(); obj != nil {
+			// No source-only exemption here, deliberately: the
+			// audited-pure packages (io, encoding/xml, ...) depend on
+			// this arm flagging their exported mutable vars (io.EOF,
+			// xml.HTMLEntity) - exempting them would unsound the
+			// audited set.
 			if callerIdx != nil && !callerIdx.std && obj.Pkg() != nil && isStdImportPath(obj.Pkg().Path()) {
 				a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
 			}
@@ -1826,7 +1831,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) && !classBPureStandard(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}
