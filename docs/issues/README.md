@@ -7,11 +7,11 @@ when its work lands (git holds history).
   moved-file naming re-reads and re-hashes files the closure tier already digested; plumbing
   the closure's own per-file digests into the view removes the cost and the attribution
   window together. *Lands: when closure per-file digests flow into fileDigests.*
-- **[purity-scan-duplicate-typed-load](purity-scan-duplicate-typed-load.md)** — observeView's
-  purity scan runs its own full typed packages.Load over packages the view already loaded;
-  a second parse+type-check per view per invocation is the measured serving floor downstream.
-  *Lands: when the purity scan consumes the view's own loaded packages, or the floor is
-  accepted.*
+- **[observation-pass-subprocess-floor](observation-pass-subprocess-floor.md)** — with
+  analysis memoized, the serving floor is per-pass toolchain subprocesses (listing, roots
+  load, guard and env probes) times the six-pass drift-refusal structure. *Lands: fewer
+  passes (observed capture sharing the construction bracket), batched probes, or the
+  floor is accepted.*
 - **[dependency-heavy-refinement-precision](dependency-heavy-refinement-precision.md)** — the
   declaration-RTA refinement recovers 0/1 irrelevant edits on the Observer sample: graph-wide
   callable-carrying package variables (2,486 across 233 of 460 module-scoped packages) make every
