@@ -8,8 +8,7 @@ import (
 	"go/types"
 	"os"
 
-	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/processenv"
+	"github.com/greatliontech/gofresh/closure"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -53,25 +52,19 @@ func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []
 }
 
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
-	packageEnv, err := processenv.ForGoPackages(env)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("gofresh: %w", err)
-	}
-	if err := buildflags.ValidateEnv(ctx, dir, env, buildFlags); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	cfg := &packages.Config{
-		Context:    ctx,
-		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedForTest,
-		Tests:      true,
-		Dir:        dir,
-		Env:        append([]string(nil), packageEnv...),
-		BuildFlags: append([]string(nil), buildFlags...),
-	}
-	pkgs, err := packages.Load(cfg, pkgPaths...)
+	load, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, pkgPaths...)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	return scanSubjectsFromLoaded(load.Packages(), pkgPaths...)
+}
+
+// scanSubjectsFromLoaded derives the subject scan — directives, subject
+// enumeration, per-subject dynamic-signature marks, and the shared-dynamic-state
+// downgrade — from an observation pass's already-loaded packages, so the scan
+// and every sibling consumer of the pass read the same load
+// (REQ-fresh-coherent-view).
+func scanSubjectsFromLoaded(pkgs []*packages.Package, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
 	pure := map[Subject]bool{}
 	external := map[Subject]bool{}
 	known := map[Subject]bool{}

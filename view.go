@@ -258,6 +258,16 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
+	// One typed load serves this whole observation pass: the closure tier's
+	// testing-type effect scan and the subject scan below read the same
+	// syntax and types, so no two derivations of one pass can straddle an
+	// edit (REQ-fresh-coherent-view). Each pass loads afresh — the paired
+	// observations stay independent witnesses.
+	viewLoad, err := closure.LoadViewPackagesEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
+	if err != nil {
+		return viewObservation{}, err
+	}
+	hasher.UseViewLoad(viewLoad)
 	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
 		return viewObservation{}, err
@@ -266,7 +276,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	directivePure, known, openWorld, external, err := scanSubjectsInWithBuildFlagsEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
+	directivePure, known, openWorld, external, err := scanSubjectsFromLoaded(viewLoad.Packages(), packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}

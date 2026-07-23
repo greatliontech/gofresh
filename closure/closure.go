@@ -70,6 +70,20 @@ type Hasher struct {
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
 	memoScope string
+	// viewLoad, when set, is the observation pass's shared typed load; the
+	// testing-type effect scan reads it instead of performing its own load
+	// (REQ-fresh-coherent-view: one load per pass, no same-pass mixture).
+	viewLoad *ViewLoad
+}
+
+// UseViewLoad supplies the observation pass's shared typed load. The caller
+// guarantees it was produced in the same pass, under the same tree root,
+// environment, and executable build flags as this Hasher, and that its
+// patterns cover every package whose closure this Hasher computes; a package
+// the load does not cover falls back to a private load with identical
+// semantics.
+func (h *Hasher) UseViewLoad(load *ViewLoad) {
+	h.viewLoad = load
 }
 
 // OnProgress supplies a callback invoked synchronously at the start of each

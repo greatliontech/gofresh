@@ -197,20 +197,31 @@ func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
 	return scan.preferred, err
 }
 
+// testingTypeOwnLoadHook observes the fallback private load for tests pinning
+// that a shared view load is actually consumed instead.
+var testingTypeOwnLoadHook func(pkgPath string)
+
 func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
 	if scan, ok := h.maximalTesting[pkgPath]; ok {
 		return scan, nil
 	}
-	loaded, err := packages.Load(&packages.Config{
-		Context:    h.ctx,
-		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedForTest,
-		Tests:      true,
-		Dir:        h.dir,
-		Env:        append([]string(nil), h.packageEnv...),
-		BuildFlags: append([]string(nil), h.buildFlags...),
-	}, pkgPath)
-	if err != nil {
-		return maximalEffectScan{}, err
+	loaded := h.viewLoadVariants(pkgPath)
+	if loaded == nil {
+		if testingTypeOwnLoadHook != nil {
+			testingTypeOwnLoadHook(pkgPath)
+		}
+		var err error
+		loaded, err = packages.Load(&packages.Config{
+			Context:    h.ctx,
+			Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedForTest,
+			Tests:      true,
+			Dir:        h.dir,
+			Env:        append([]string(nil), h.packageEnv...),
+			BuildFlags: append([]string(nil), h.buildFlags...),
+		}, pkgPath)
+		if err != nil {
+			return maximalEffectScan{}, err
+		}
 	}
 	var scan maximalEffectScan
 	for _, pkg := range loaded {
@@ -248,6 +259,25 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 	}
 	h.maximalTesting[pkgPath] = scan
 	return scan, nil
+}
+
+// viewLoadVariants selects, from the shared view load, the packages a private
+// load of pkgPath with Tests would return as pkgPath's own variants — nil when
+// no shared load is set or it does not cover pkgPath, signalling fallback.
+func (h *Hasher) viewLoadVariants(pkgPath string) []*packages.Package {
+	if h.viewLoad == nil {
+		return nil
+	}
+	var variants []*packages.Package
+	for _, pkg := range h.viewLoad.Packages() {
+		if pkg.PkgPath == pkgPath || pkg.ForTest == pkgPath {
+			variants = append(variants, pkg)
+		}
+	}
+	if len(variants) == 0 {
+		return nil
+	}
+	return variants
 }
 
 func maximalPackageExternalReason(pkg *listPkg) string {
