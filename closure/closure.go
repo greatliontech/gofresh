@@ -194,6 +194,8 @@ type listPkg struct {
 	SysoFiles    []string
 	EmbedFiles   []string
 	CgoLDFLAGS   []string
+	Imports      []string
+	ForTest      string
 	Module       *listMod
 	Error        *listErr
 }

@@ -52,24 +52,71 @@ func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []
 }
 
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
-	load, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, pkgPaths...)
+	hasher, err := closure.NewAtContextEnv(ctx, dir, env, buildFlags...)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	return scanSubjectsFromLoaded(load.Packages(), pkgPaths...)
+	pure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, pkgPaths...)
+	return pure, known, openWorld, external, err
 }
 
-// scanSubjectsFromLoaded derives the subject scan — directives, subject
-// enumeration, per-subject dynamic-signature marks, and the shared-dynamic-state
-// downgrade — from an observation pass's already-loaded packages, so the scan
-// and every sibling consumer of the pass read the same load
-// (REQ-fresh-coherent-view).
-func scanSubjectsFromLoaded(pkgs []*packages.Package, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
+// scanViewSubjects performs one observation pass's whole subject scan: the
+// metadata graph names every node and its mutability class, one typed load
+// covers the view packages' variants and every mutable-local graph package,
+// the dynamic-state derivation serves version-pinned facts from the memo, and
+// the subject walk reads that one load (REQ-fresh-coherent-view). The typed
+// load is installed on the hasher for the pass's sibling consumers. An empty
+// factScope disables fact persistence, never the derivation.
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, *closure.ViewLoad, error) {
+	meta, err := hasher.GraphMetadata(pkgPaths...)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	requested := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		requested[pkgPath] = true
+	}
+	patterns := append([]string(nil), pkgPaths...)
+	seenPattern := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		seenPattern[pkgPath] = true
+	}
+	for _, node := range meta {
+		// Plain mutable-local graph packages load as patterns; test
+		// variants of the view packages load through the view patterns, and
+		// an intermediate recompilation ("r [a.test]") is scanned from its
+		// own compilation via the dependency-expanded fallback load in
+		// deriveViewDynamicState — a plain stand-in would miss variant-only
+		// resolution and need not even compile.
+		if node.Class != closure.MutableLocalPackage || node.TestMain || node.ForTest != "" || seenPattern[node.PkgPath] {
+			continue
+		}
+		seenPattern[node.PkgPath] = true
+		patterns = append(patterns, node.PkgPath)
+	}
+	load, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, patterns...)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	hasher.UseViewLoad(load)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	pure, known, openWorld, external, err := scanSubjectsFromLoaded(load.Packages(), state, pkgPaths...)
+	return pure, known, openWorld, external, load, err
+}
+
+// scanSubjectsFromLoaded derives the subject walk — subject enumeration,
+// directives, per-subject dynamic-signature marks — from an observation
+// pass's already-loaded packages, applying the pass's dynamic-state
+// derivation for the shared-dynamic-state downgrade and promoted-method
+// directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
+func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
 	pure := map[Subject]bool{}
 	external := map[Subject]bool{}
 	known := map[Subject]bool{}
 	openWorld := map[Subject]bool{}
-	packageOpenWorld := map[string]bool{}
 	requestedPackages := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
 		requestedPackages[pkgPath] = true
@@ -87,34 +134,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, pkgPaths ...string) (func(
 		declarations[subject] = declaration
 		known[subject] = true
 	}
-	pureMethods := map[*types.Func]bool{}
-	externalMethods := map[*types.Func]bool{}
-	methodKeys := map[*types.Func]string{}
-	mutatedDynamicVars := map[string]bool{}
-	packages.Visit(pkgs, nil, func(p *packages.Package) {
-		recordDynamicGlobalMutations(p, mutatedDynamicVars)
-		for _, file := range p.Syntax {
-			for _, declaration := range file.Decls {
-				function, ok := declaration.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				method, ok := p.TypesInfo.Defs[function.Name].(*types.Func)
-				if !ok || method.Type().(*types.Signature).Recv() == nil {
-					continue
-				}
-				if hasDirective(function.Doc, "//gofresh:pure") {
-					pureMethods[method] = true
-					methodKeys[method] = nodeDeclarationKey(p, function.Name)
-				}
-				if hasDirective(function.Doc, "//gofresh:external") {
-					externalMethods[method] = true
-					methodKeys[method] = nodeDeclarationKey(p, function.Name)
-				}
-			}
-		}
-	})
-	packages.Visit(pkgs, nil, func(p *packages.Package) {
+	for _, p := range pkgs {
 		// A subject's package is the import path the engine resolves it under. The
 		// package under test's own test variants declare subjects of the package
 		// under test, so key those by ForTest — keying by the variant's own PkgPath
@@ -168,28 +188,10 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, pkgPaths ...string) (func(
 				}
 			}
 		}
-		if p.Types == nil {
-			return
+		if p.Types == nil || !requestedPackages[pkgPath] {
+			continue
 		}
 		scope := p.Types.Scope()
-		for _, name := range scope.Names() {
-			variable, ok := scope.Lookup(name).(*types.Var)
-			if !ok || p.Module == nil || !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
-				continue
-			}
-			// A dynamic-capable global downgrades only when the program
-			// can mutate it after initialization: immutable-after-init
-			// hooks are ordinary source the closure hashes. Non-Go
-			// writes need no gate here - the closure tier's native-code
-			// and linkage dispositions already downgrade cgo and
-			// assembly packages (REQ-closure-shared-dynamic-state).
-			if mutatedDynamicVars[dynamicVarKey(variable)] {
-				packageOpenWorld[p.PkgPath] = true
-			}
-		}
-		if !requestedPackages[pkgPath] {
-			return
-		}
 		for _, name := range scope.Names() {
 			typeName, ok := scope.Lookup(name).(*types.TypeName)
 			if !ok {
@@ -209,55 +211,33 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, pkgPaths ...string) (func(
 					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(sig) {
 						openWorld[subject] = true
 					}
-					if pureMethods[method] && externalMethods[method] && scanErr == nil {
-						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", methodKeys[method])
+					pureKey, externalKey := state.methodDirectives(method)
+					if pureKey != "" && externalKey != "" && scanErr == nil {
+						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", pureKey)
 					}
-					if pureMethods[method] {
+					if pureKey != "" {
 						pure[subject] = true
 					}
-					if externalMethods[method] {
+					if externalKey != "" {
 						external[subject] = true
 					}
 				}
 			}
 		}
-	})
+	}
 	if scanErr != nil {
 		return nil, nil, nil, nil, scanErr
 	}
-	for _, root := range pkgs {
-		rootPath := root.PkgPath
-		// Bare ForTest keying is exact here, unlike in the visit above: pkgs holds
-		// only packages.Load roots — the requested patterns' own variants, never
-		// an intermediate dependency recompiled for another package's test binary.
-		if root.ForTest != "" {
-			rootPath = root.ForTest
-		}
-		if packageGraphHasOpenWorld(root, packageOpenWorld, make(map[string]bool)) {
-			for subject := range known {
-				if subject.Package == rootPath {
-					openWorld[subject] = true
-				}
-			}
+	// The shared-dynamic-state downgrade: every subject of a package whose
+	// graph carries mutated shared dynamic state is unverifiable
+	// (REQ-closure-shared-dynamic-state); the reachability came from the
+	// pass's dynamic-state derivation over the metadata graph.
+	for subject := range known {
+		if state.downgraded[subject.Package] {
+			openWorld[subject] = true
 		}
 	}
 	return func(s Subject) bool { return pure[s] }, known, openWorld, external, nil
-}
-
-func packageGraphHasOpenWorld(pkg *packages.Package, openWorld, seen map[string]bool) bool {
-	if pkg == nil || seen[pkg.ID] {
-		return false
-	}
-	seen[pkg.ID] = true
-	if openWorld[pkg.PkgPath] {
-		return true
-	}
-	for _, imported := range pkg.Imports {
-		if packageGraphHasOpenWorld(imported, openWorld, seen) {
-			return true
-		}
-	}
-	return false
 }
 
 func signatureMayReceiveUnknownDynamic(sig *types.Signature) bool {

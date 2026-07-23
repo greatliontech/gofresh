@@ -34,6 +34,24 @@ func (v *ViewLoad) Packages() []*packages.Package {
 // flags — the same selection discipline as every other load of the view
 // (REQ-closure-analysis).
 func LoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
+	// Roots-only syntax: dependency types come from export data. Every
+	// consumer needing dependency-graph syntax names its packages as
+	// patterns (the view path adds mutable-local graph packages;
+	// version-pinned facts ride the dynamic-state memo instead of a load,
+	// REQ-closure-dynamic-state-memo).
+	return loadView(ctx, dir, env, buildFlags, false, pkgPaths...)
+}
+
+// LoadViewGraphEnv is LoadViewPackagesEnv with whole-graph syntax: every
+// dependency of the patterns is source-loaded too. Reserved for the shapes a
+// roots-only load cannot express — a test-cycle intermediate recompilation
+// ("r [a.test]") exists only inside a test binary's graph, so its syntax is
+// reachable solely through a dependency-expanded load of the tested package.
+func LoadViewGraphEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
+	return loadView(ctx, dir, env, buildFlags, true, pkgPaths...)
+}
+
+func loadView(ctx context.Context, dir string, env, buildFlags []string, deps bool, pkgPaths ...string) (*ViewLoad, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
@@ -51,11 +69,15 @@ func LoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []stri
 	if err := buildflags.ValidateEnv(ctx, dir, normalized, buildFlags); err != nil {
 		return nil, err
 	}
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+		packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
+		packages.NeedImports | packages.NeedModule | packages.NeedForTest
+	if deps {
+		mode |= packages.NeedDeps
+	}
 	cfg := &packages.Config{
-		Context: ctx,
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedForTest,
+		Context:    ctx,
+		Mode:       mode,
 		Tests:      true,
 		Dir:        dir,
 		Env:        append([]string(nil), packageEnv...),

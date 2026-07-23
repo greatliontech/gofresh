@@ -258,25 +258,23 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return viewObservation{}, err
 	}
-	// One typed load serves this whole observation pass: the closure tier's
-	// testing-type effect scan and the subject scan below read the same
-	// syntax and types, so no two derivations of one pass can straddle an
-	// edit (REQ-fresh-coherent-view). Each pass loads afresh — the paired
-	// observations stay independent witnesses.
-	viewLoad, err := closure.LoadViewPackagesEnv(ctx, e.dir, e.env, e.buildFlags, packages...)
-	if err != nil {
-		return viewObservation{}, err
-	}
-	hasher.UseViewLoad(viewLoad)
-	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
-	if err != nil {
-		return viewObservation{}, err
-	}
 	guards, err := guard.CaptureForContextEnv(ctx, moduleDir, e.env, kind, e.guardInputs()...)
 	if err != nil {
 		return viewObservation{}, err
 	}
-	directivePure, known, openWorld, external, err := scanSubjectsFromLoaded(viewLoad.Packages(), packages...)
+	// One typed load serves this whole observation pass: scanViewSubjects
+	// loads the view packages and every mutable-local graph package once,
+	// installs the load on the hasher for the testing-type effect scan, and
+	// serves version-pinned dynamic-state facts from the memo under the
+	// guard-derived scope — so no two derivations of one pass can straddle
+	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
+	// observations stay independent witnesses.
+	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
+	directivePure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, packages...)
+	if err != nil {
+		return viewObservation{}, err
+	}
+	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
 		return viewObservation{}, err
 	}

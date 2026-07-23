@@ -10,7 +10,7 @@ REQ-closure-observability-memo, REQ-closure-pinned-dep, REQ-closure-mutable-loca
   testing-type effect scan; environment validation and package-env derivation
   run once per pass. Behavior-identical; equivalence and single-load pinned by
   test.
-- [ ] 2. Persistent dynamic-state facts: per-package mutation/declaration facts
+- [x] 2. Persistent dynamic-state facts: per-package mutation/declaration facts
   for guard-pinned packages (stdlib keyed under the toolchain, module-cache
   packages under module version + import-cone version signature) served from
   the user-cache memo; local packages always derived fresh. The shared load

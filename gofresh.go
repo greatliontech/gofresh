@@ -48,6 +48,12 @@ type Subject struct {
 // become incompatible.
 const DeclarationRTA = "gofresh/declaration-rta@1"
 
+// DynamicStateStrategy identifies the shared-dynamic-state fact derivation
+// whose per-package facts the persistent memo serves for version-pinned
+// packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
+// this version like any other strategy change.
+const DynamicStateStrategy = "gofresh/dynamic-state@1"
+
 // ObservationRTA identifies the caller-selected declaration-RTA observability proof.
 const ObservationRTA = "gofresh/observation-rta@4"
 

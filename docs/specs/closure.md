@@ -212,6 +212,50 @@ REQ-closure-observability-memo: enforced by
 `TestObservabilityMemoServesEquivalentProofsWithoutLoading` and
 `TestObservabilityMemoMissesOnScopeAndSourceChange`.
 
+**REQ-closure-dynamic-state-memo** (behavior): Per-package shared-dynamic-state
+facts — the dynamic-capable package-level variables a package declares, the
+variable identities its code mutates after initialization
+(REQ-closure-shared-dynamic-state), and its method-directive declarations — MAY
+be served from a persistent memo for version-pinned packages, because each fact
+is a pure function of its key's complete input identity: the caller's scope
+(the fact-strategy version and the code guards — toolchain and build
+configuration) plus the module's version pin and the version signature of every
+pinned module reachable from its packages, its type environment's complete
+version surface (the standard library rides the toolchain guard). A
+mutable-local package's facts are never memoized — its source carries no
+version signal (REQ-closure-mutable-local) — and derive fresh from each
+observation pass's own load; a process-lifetime cache is sound exactly for
+keyed pinned facts and never holds a mutable-local derivation, so no stale
+process state can override newer local source. A pinned module whose import
+cone reaches any mutable-local node is unkeyable — part of its type
+environment carries no version signal — and its facts derive fresh every
+pass, entering no cache layer: a pinned key must never launder mutable-local
+state. A test-cycle intermediate recompilation is scanned from its own
+compilation through a dependency-expanded load of its tested packages,
+performed only when that shape exists — test-added declarations can lawfully
+change its resolutions, and its plain form need not compile. Module mode is
+assumed: a module-less tree classes every package standard and contributes
+no facts, exactly the analysis's declaration side, which never admitted
+module-less declarations. Standard-library packages
+contribute no facts: the analysis's declaration side excludes module-less
+packages, toolchain source cannot reach module variables (imports are
+acyclic), and toolchain source is not an authoring surface for gofresh
+directives. A memo hit is fact-equivalent to recomputation. The memo is a
+cache, never a record — the observability memo's discipline verbatim: a
+sibling user-cache directory, atomic writes, silent recomputation on any
+miss, corruption, or key mismatch, deletable wholesale at any time; changing
+fact semantics bumps the fact-strategy version.
+
+REQ-closure-dynamic-state-memo: enforced by
+`TestDynamicStateFactsServePinnedPackagesWithoutLoading`,
+`TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives`,
+`TestDynamicStateFactStoreMissesOnScopeAndBucketChange`,
+`TestPinnedBucketsMoveWithImportConeVersions`,
+`TestPinnedBucketsExcludeModulesReachingMutableLocalSource`,
+`TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass`,
+`TestIntermediateRecompilationsScanFromTheirOwnCompilation`, and
+`TestDynamicStateLocalFactsDeriveFreshEachScan`.
+
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the
 subject MUST be hashed by its source content, never pinned by module version — such
 source resolves to a working directory with no version or checksum signal, so pinning
