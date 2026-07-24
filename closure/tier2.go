@@ -39,6 +39,17 @@ type program struct {
 	testMain *ssa.Function
 }
 
+// parameterizedBody reports whether fn's body is generic (uninstantiated):
+// its types are open over type parameters, so it is not a runtime dispatch
+// surface the attributed walk can visit (REQ-closure-analysis: each
+// instantiation dispatches concretely). The RecvTypeParams arm is deliberate
+// redundancy: ssa.Function.TypeParams covers method origins today, and the
+// belt guards an upstream representation change - the generic-method row
+// pins the behavior either way.
+func parameterizedBody(fn *ssa.Function) bool {
+	return fn != nil && (fn.TypeParams().Len() > 0 || (fn.Signature != nil && fn.Signature.RecvTypeParams() != nil))
+}
+
 // loadCached loads (once) and returns the whole-program SSA for pkgPath. Load
 // failures are memoized for the Hasher's lifetime alongside successes: one
 // analysis observes one load outcome per package, so retrying subjects of a
@@ -911,7 +922,15 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	for i, subject := range subjects {
 		mask := uint64(1) << i
 		root := prog.roots[subject.Symbol]
-		roots[root] |= mask
+		// A parameterized body is open over type parameters and cannot
+		// enter the runtime-type walk (REQ-closure-analysis): it is never
+		// a traversal root. Its signature already reads open-world, so
+		// refinement widens and observability refuses exactly as for any
+		// open subject world; the origin fold below keeps its declaration
+		// in the subject's content.
+		if !parameterizedBody(root) {
+			roots[root] |= mask
+		}
 		if subjectRunsThroughHarness(prog, root) {
 			testMasks |= mask
 		}
@@ -930,6 +949,15 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	res, err := analyzeAttributed(ctx, roots)
 	if err != nil {
 		return nil, err
+	}
+	// Fold each parameterized origin into the result under its subject's
+	// mask: its declaration is the subject's own source — the refined
+	// closure must move when the generic body moves — while its body was
+	// never traversed.
+	for i, subject := range subjects {
+		if origin := prog.roots[subject.Symbol]; parameterizedBody(origin) {
+			res.Reachable[origin] |= uint64(1) << i
+		}
 	}
 	reachable := make([]attributedReachability, len(subjects))
 	for i := range reachable {
@@ -1064,6 +1092,15 @@ func isTestingMRun(fn *ssa.Function) bool {
 
 func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
 	if root == nil || root.Signature == nil {
+		return true
+	}
+	// A parameterized subject is open-world by force, not by signature
+	// walk: a zero-parameter generic (func Value[T any]() int) reads
+	// closed through Params alone, yet its instantiations are
+	// caller-chosen behavior the fold never traverses - a closed reading
+	// would grant observability and serve a refined hash that misses
+	// every callee (REQ-closure-analysis's parameterized-subject arm).
+	if parameterizedBody(root) {
 		return true
 	}
 	if subjectRunsThroughHarness(prog, root) && isHarnessSubjectSignature(root.Signature) {

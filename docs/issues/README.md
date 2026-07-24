@@ -7,6 +7,10 @@ when its work lands (git holds history).
   moved-file naming re-reads and re-hashes files the closure tier already digested; plumbing
   the closure's own per-file digests into the view removes the cost and the attribution
   window together. *Lands: when closure per-file digests flow into fileDigests.*
+- **[generic-subject-precision](generic-subject-precision.md)** — parameterized subjects
+  read open-world from their constraint, so refinement widens to maximal; constraint-aware
+  narrowing plus instantiation-rooted traversal would recover precision. *Lands: when a
+  corpus demonstrably loses serving precision to open-world generic subjects.*
 - **[observation-pass-subprocess-floor](observation-pass-subprocess-floor.md)** — with
   analysis memoized, the serving floor is per-pass toolchain subprocesses (listing, roots
   load, guard and env probes) times the six-pass drift-refusal structure. *Lands: fewer

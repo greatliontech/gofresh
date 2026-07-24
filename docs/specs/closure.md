@@ -126,7 +126,16 @@ dispatches concretely, initializer roots included so a concrete type registered 
 when the subject never names the registering package, the test main rooted for a test
 subject so setup it runs before the subject (state a production subject never sees)
 is in the closure; a narrower root or edge set is taken only when proven to preserve
-the same startup and global-flow coverage. Maximal closure and refinement package
+the same startup and global-flow coverage. A parameterized subject is open to
+caller-chosen instantiations: it is forced open-world (a signature walk alone
+misses zero-parameter generics) — refinement
+widens and observability refuses exactly as for any open subject world — its
+origin body is never a traversal surface (open over type parameters, it is
+not a runtime dispatch surface), and its origin declaration remains the
+subject's own content, so a generic-body edit always moves the refined
+closure. An analysis shape the reachability walk cannot classify degrades
+that analysis to unavailable evidence, never a process failure. Maximal
+closure and refinement package
 loading, dependency enumeration, and every other source-selection step use the
 caller's executable build flags, so both closures describe the binary whose
 build-configuration guard is recorded rather than a different default build.

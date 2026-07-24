@@ -206,7 +206,18 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 
 // analyzeAttributed performs RTA for up to 64 subjects at once. roots maps each
 // root function to the subjects for which it is an independent-analysis root.
-func analyzeAttributed(ctx context.Context, roots map[*ssa.Function]uint64) (*attributedRTAResult, error) {
+// The walk mirrors upstream RTA, whose internal assertions panic on shapes it
+// cannot classify; the boundary converts any such panic into an error so an
+// unsupported shape degrades to per-subject unavailable evidence in the
+// embedding process — fail-closed, never a crash. The breadth is deliberate:
+// a genuine regression panicking here degrades instead of crashing, and its
+// detection signal is corpus-level "unsupported analysis shape" counts.
+func analyzeAttributed(ctx context.Context, roots map[*ssa.Function]uint64) (result *attributedRTAResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result, err = nil, fmt.Errorf("closure: attributed reachability: unsupported analysis shape: %v", recovered)
+		}
+	}()
 	if ctx == nil {
 		return nil, fmt.Errorf("closure: nil analysis context")
 	}
