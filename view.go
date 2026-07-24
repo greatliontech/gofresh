@@ -16,6 +16,7 @@ import (
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -254,11 +255,21 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if e.progress != nil {
 		e.progress(Progress{Phase: "observe"})
 	}
-	hasher, err := closure.NewAtContextEnv(ctx, e.dir, e.env, e.buildFlags...)
+	// One `go env -json` read serves this whole pass: the hasher's
+	// GOMODCACHE and GOFLAGS validation, the guard's build-config digest,
+	// and the typed load's validation all derive from it. The snapshot is
+	// pass-scoped - a later pass takes its own, so environment drift still
+	// meets an observation (REQ-guard-buildconfig; the toolchain guard's
+	// `go version` stays a live probe: it carries the host platform).
+	snapshot, err := gotool.TakeEnvSnapshot(ctx, e.dir, e.env)
 	if err != nil {
 		return viewObservation{}, err
 	}
-	guards, err := guard.CaptureForContextEnv(ctx, moduleDir, e.env, kind, e.guardInputs()...)
+	hasher, err := closure.NewAtContextEnvSnapshot(ctx, e.dir, e.env, snapshot, e.buildFlags...)
+	if err != nil {
+		return viewObservation{}, err
+	}
+	guards, err := guard.CaptureForContextEnvSnapshot(ctx, moduleDir, e.env, kind, snapshot, e.guardInputs()...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -270,7 +281,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
-	directivePure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, packages...)
+	directivePure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}

@@ -15,14 +15,26 @@ import (
 // Explicit flags and effective GOFLAGS are checked together so analysis never
 // silently falls back to disk source for an overlay-backed build.
 func ValidateEnv(ctx context.Context, dir string, env, explicit []string) error {
+	return ValidateEnvSnapshot(ctx, dir, env, explicit, nil)
+}
+
+// ValidateEnvSnapshot is ValidateEnv reading GOFLAGS from the pass's one
+// env snapshot when non-nil, probing itself otherwise.
+func ValidateEnvSnapshot(ctx context.Context, dir string, env, explicit []string, snapshot *gotool.EnvSnapshot) error {
 	for _, flag := range explicit {
 		if isOverlayFlag(flag) {
 			return unsupportedOverlay(flag)
 		}
 	}
-	goFlags, err := EffectiveGOFLAGSEnv(ctx, dir, env)
-	if err != nil {
-		return err
+	var goFlags string
+	if snapshot != nil {
+		goFlags = snapshot.Value("GOFLAGS")
+	} else {
+		var err error
+		goFlags, err = EffectiveGOFLAGSEnv(ctx, dir, env)
+		if err != nil {
+			return err
+		}
 	}
 	for _, flag := range strings.Fields(goFlags) {
 		flag = strings.Trim(flag, `"'`)

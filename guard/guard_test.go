@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"os"
 	"os/exec"
 	"reflect"
@@ -313,5 +314,26 @@ func TestCaptureUsesSuppliedEnvironmentForGuards(t *testing.T) {
 	}
 	if first.BuildConfig == second.BuildConfig {
 		t.Fatal("supplied PKG_CONFIG_PATH did not move build-config guard")
+	}
+}
+
+// A snapshot-derived capture is byte-identical to a live-probing one: the
+// snapshot's raw env JSON feeds the same digest, so batching probes can
+// never move a recorded guard (REQ-guard-buildconfig).
+func TestSnapshotCaptureMatchesLiveCapture(t *testing.T) {
+	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), "", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := CaptureForContextEnv(context.Background(), "", os.Environ(), CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapped, err := CaptureForContextEnvSnapshot(context.Background(), "", os.Environ(), CodeResult, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != snapped {
+		t.Fatalf("snapshot capture diverged from live capture:\n live    %+v\n snapped %+v", live, snapped)
 	}
 }

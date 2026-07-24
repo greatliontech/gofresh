@@ -3,6 +3,7 @@ package gotool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -55,4 +56,40 @@ func runInContext(ctx context.Context, dir string, env []string, args ...string)
 		return nil, fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
+}
+
+// EnvSnapshot is one observation pass's single `go env -json` read: every
+// same-pass consumer of a go-env value - the build-config digest, GOFLAGS
+// validation, GOMODCACHE resolution - derives from it instead of probing
+// again, so one pass pays one env exec. The snapshot is pass-scoped by
+// construction: sharing it across passes would let a mid-run environment
+// change escape a later pass's observation.
+type EnvSnapshot struct {
+	// JSON is the raw `go env -json` output, byte-identical to a direct
+	// probe so digests derived from it cannot drift.
+	JSON []byte
+	// values are the parsed settings for single-key reads.
+	values map[string]string
+}
+
+// Value returns one parsed go-env setting ("" when absent).
+func (s *EnvSnapshot) Value(key string) string {
+	if s == nil {
+		return ""
+	}
+	return s.values[key]
+}
+
+// TakeEnvSnapshot performs the pass's one `go env -json` read under the
+// caller's complete environment.
+func TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapshot, error) {
+	out, err := RunInContextEnv(ctx, dir, env, "env", "-json")
+	if err != nil {
+		return nil, err
+	}
+	var values map[string]string
+	if err := json.Unmarshal(out, &values); err != nil {
+		return nil, fmt.Errorf("gotool: parse go env -json: %w", err)
+	}
+	return &EnvSnapshot{JSON: out, values: values}, nil
 }

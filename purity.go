@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -56,7 +57,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	pure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, pkgPaths...)
+	pure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, pkgPaths...)
 	return pure, known, openWorld, external, err
 }
 
@@ -67,7 +68,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, *closure.ViewLoad, error) {
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -94,7 +95,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		seenPattern[node.PkgPath] = true
 		patterns = append(patterns, node.PkgPath)
 	}
-	load, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, patterns...)
+	load, err := closure.LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, snapshot, patterns...)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

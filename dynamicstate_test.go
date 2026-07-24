@@ -57,7 +57,7 @@ func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pure, known, openWorld, external, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, pkgPaths...)
+	pure, known, openWorld, external, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}

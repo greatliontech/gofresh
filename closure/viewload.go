@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 	"golang.org/x/tools/go/packages"
 )
@@ -34,12 +35,18 @@ func (v *ViewLoad) Packages() []*packages.Package {
 // flags — the same selection discipline as every other load of the view
 // (REQ-closure-analysis).
 func LoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
+	return LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, nil, pkgPaths...)
+}
+
+// LoadViewPackagesEnvSnapshot is LoadViewPackagesEnv validating GOFLAGS from
+// the pass's one env snapshot when non-nil.
+func LoadViewPackagesEnvSnapshot(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*ViewLoad, error) {
 	// Roots-only syntax: dependency types come from export data. Every
 	// consumer needing dependency-graph syntax names its packages as
 	// patterns (the view path adds mutable-local graph packages;
 	// version-pinned facts ride the dynamic-state memo instead of a load,
 	// REQ-closure-dynamic-state-memo).
-	return loadView(ctx, dir, env, buildFlags, false, pkgPaths...)
+	return loadView(ctx, dir, env, buildFlags, snapshot, false, pkgPaths...)
 }
 
 // LoadViewGraphEnv is LoadViewPackagesEnv with whole-graph syntax: every
@@ -48,10 +55,10 @@ func LoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []stri
 // ("r [a.test]") exists only inside a test binary's graph, so its syntax is
 // reachable solely through a dependency-expanded load of the tested package.
 func LoadViewGraphEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
-	return loadView(ctx, dir, env, buildFlags, true, pkgPaths...)
+	return loadView(ctx, dir, env, buildFlags, nil, true, pkgPaths...)
 }
 
-func loadView(ctx context.Context, dir string, env, buildFlags []string, deps bool, pkgPaths ...string) (*ViewLoad, error) {
+func loadView(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, deps bool, pkgPaths ...string) (*ViewLoad, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
@@ -66,7 +73,7 @@ func loadView(ctx context.Context, dir string, env, buildFlags []string, deps bo
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.ValidateEnv(ctx, dir, normalized, buildFlags); err != nil {
+	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, snapshot); err != nil {
 		return nil, err
 	}
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |

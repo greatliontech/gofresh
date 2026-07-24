@@ -82,11 +82,21 @@ func CaptureForContext(ctx context.Context, moduleDir string, kind Kind, buildIn
 // CaptureForContextEnv is CaptureForContext with env as the complete process
 // environment used by Go subprocesses and environment-backed guards.
 func CaptureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs ...string) (Guards, error) {
+	return CaptureForContextEnvSnapshot(ctx, moduleDir, env, kind, nil, buildInputs...)
+}
+
+// CaptureForContextEnvSnapshot is CaptureForContextEnv deriving the
+// build-config digest from the pass's one env snapshot when non-nil - the
+// snapshot's raw JSON is byte-identical to a direct probe, so the digest
+// cannot drift. The toolchain guard always probes `go version` live: its
+// string carries the HOST platform, which `go env`'s target GOOS/GOARCH
+// does not describe.
+func CaptureForContextEnvSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
 	normalized, err := processenv.Normalize(env)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: %w", err)
 	}
-	return captureForContextEnv(ctx, moduleDir, normalized, kind, buildInputs, gatherFacts, runtimeConfigEnv)
+	return captureForContextEnvSnapshot(ctx, moduleDir, normalized, kind, snapshot, buildInputs, gatherFacts, runtimeConfigEnv)
 }
 
 func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
@@ -94,6 +104,10 @@ func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildIn
 }
 
 func captureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
+	return captureForContextEnvSnapshot(ctx, moduleDir, env, kind, nil, buildInputs, machine, runtimeGuard)
+}
+
+func captureForContextEnvSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
@@ -101,7 +115,12 @@ func captureForContextEnv(ctx context.Context, moduleDir string, env []string, k
 	if err != nil {
 		return Guards{}, err
 	}
-	bc, err := buildConfigContextEnv(ctx, moduleDir, env, buildInputs)
+	var bc string
+	if snapshot != nil {
+		bc, err = buildConfigDigestEnv(snapshot.JSON, env, buildInputs)
+	} else {
+		bc, err = buildConfigContextEnv(ctx, moduleDir, env, buildInputs)
+	}
 	if err != nil {
 		return Guards{}, err
 	}

@@ -119,6 +119,12 @@ func NewAtContext(ctx context.Context, dir string, buildFlags ...string) (*Hashe
 // NewAtContextEnv builds a Hasher using env as the complete immutable process
 // environment for package loading, Go commands, and source selection.
 func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags ...string) (*Hasher, error) {
+	return NewAtContextEnvSnapshot(ctx, dir, env, nil, buildFlags...)
+}
+
+// NewAtContextEnvSnapshot is NewAtContextEnv resolving GOMODCACHE and
+// validating GOFLAGS from the pass's one env snapshot when non-nil.
+func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
@@ -133,17 +139,20 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.ValidateEnv(ctx, dir, normalized, buildFlags); err != nil {
+	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, snapshot); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE")
-	if err != nil {
-		return nil, err
+	mc := snapshot.Value("GOMODCACHE")
+	if mc == "" {
+		out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE")
+		if err != nil {
+			return nil, err
+		}
+		mc = strings.TrimSpace(string(out))
 	}
-	mc := strings.TrimSpace(string(out))
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
