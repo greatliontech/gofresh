@@ -1009,18 +1009,50 @@ func (v *View) Validate(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// validateRefined re-observes the view and every refined closure captured
-// from it under ctx.
-// newValidationView re-observes the view's subjects for a validation
-// arm, carrying the producer view's declared budget: validation-time
-// refinement is a refinement operation like any other, and building the
-// view here makes budget inheritance unrepresentable to forget.
-func (v *View) newValidationView(ctx context.Context) (*View, error) {
-	current, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
+// newSeededValidationView builds the validation arm's view from one fresh
+// observation: the current tree is read once and compared against the
+// producer view's captured facts — refusal on any drift — and on agreement
+// the captured facts seed the validation view directly. The seeded facts
+// rest on a genuine agreement pair whose reads span capture time and
+// validation time, so they are record-grade without a second construction
+// pair (REQ-fresh-coherent-view's record/compare asymmetry). The view
+// carries the producer's declared budget: validation-time refinement is a
+// refinement operation like any other, and building the view here makes
+// budget inheritance unrepresentable to forget.
+func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
+	observation, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return nil, err
 	}
-	current.cfg = v.cfg
+	if err := v.compareObservationContext(ctx, observation); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	current := &View{
+		engine:               v.engine,
+		cfg:                  v.cfg,
+		subjects:             v.subjects,
+		requests:             v.requests,
+		packages:             v.packages,
+		moduleDir:            v.moduleDir,
+		kind:                 v.kind,
+		maximal:              v.maximal,
+		refined:              make(map[Subject]closure.Closure, len(v.subjects)),
+		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
+		guards:               v.guards,
+		purity:               v.purity,
+		openWorld:            v.openWorld,
+		sourceFiles:          v.sourceFiles,
+		sourceFilesBySubject: v.sourceFilesBySubject,
+		fileDigests:          v.fileDigests,
+		capturedRefined:      make(map[Subject]bool, len(v.subjects)),
+		capturedObserved:     make(map[Subject]bool, len(v.subjects)),
+		attachedObservations: make(map[Subject]runtimeinput.State, len(v.subjects)),
+	}
 	return current, nil
 }
 
@@ -1034,11 +1066,8 @@ func (v *View) validateRefined(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	current, err := v.newValidationView(ctx)
+	current, err := v.newSeededValidationView(ctx)
 	if err != nil {
-		return err
-	}
-	if err := v.compareBaseContext(ctx, current); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -1057,14 +1086,10 @@ func (v *View) validateRefined(ctx context.Context) error {
 	if len(subjects) == 0 {
 		return ctx.Err()
 	}
+	// ensureRefined's own bracket closes with a fresh observation compared
+	// against the seeded facts, so a separate closing view would re-verify
+	// what the bracket already refused on (REQ-fresh-coherent-view).
 	if err := current.ensureRefined(ctx, subjects); err != nil {
-		return err
-	}
-	final, err := v.engine.newView(ctx, v.subjects, v.moduleDir, v.kind)
-	if err != nil {
-		return err
-	}
-	if err := current.compareBaseContext(ctx, final); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -1087,11 +1112,8 @@ func (v *View) validateObserved(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	current, err := v.newValidationView(ctx)
+	current, err := v.newSeededValidationView(ctx)
 	if err != nil {
-		return err
-	}
-	if err := v.compareBaseContext(ctx, current); err != nil {
 		return err
 	}
 	v.mu.RLock()
@@ -1477,13 +1499,12 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 	if v.beforePreciseAnalysis != nil {
 		v.beforePreciseAnalysis()
 	}
-	before, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
-	if err != nil {
-		return err
-	}
-	if err := v.compareObservationContext(ctx, before); err != nil {
-		return err
-	}
+	// The bracket opens on the view's own agreed facts: any change since
+	// construction that persists to the closing observation refuses there,
+	// so a separate opening observation bought only earlier refusal on a
+	// dirty tree at the price of one pass on every clean one
+	// (REQ-fresh-coherent-view: the pair is load-bearing where facts
+	// become the record; the bracket only compares).
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}

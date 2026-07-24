@@ -2284,16 +2284,16 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	// The purity assertion flips during Validate's final re-observation
-	// and nowhere earlier. Observation count to that point: view construction 2,
-	// refined capture bracket pair 2, validation's current view 2, its analysis
-	// bracket pair 2 — so the flip lands on observation 9, the final
-	// double-observed validation view.
+	// and nowhere earlier. Observation count to that point: view
+	// construction pair 2, refined capture bracket close 1, validation's
+	// seeded read 1 - so the flip lands on observation 5, the validation
+	// analysis bracket's closing observation.
 	calls := 0
 	engine, err := New(
 		WithDir(dir),
 		WithAssumePure(func(Subject) bool {
 			calls++
-			return calls > 8
+			return calls > 4
 		}),
 	)
 	if err != nil {
@@ -2564,8 +2564,9 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		if i == 0 {
 			// The first round genuinely exercises every disposition class: the
 			// unchanged subject answers, the drift-recovered subject is served
-			// by its observation lift, the sibling stales on refined drift —
-			// and the whole batch shares one bracket pair and one analysis.
+			// by its observation lift, the sibling stales on refined drift -
+			// and the whole batch shares one analysis, bracketed by the
+			// view's agreed facts and one closing observation.
 			if singles[aF].Status != Valid {
 				t.Fatalf("unchanged subject = %+v, want valid", singles[aF])
 			}
@@ -2575,8 +2576,8 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 			if singles[bH].Status != Stale || singles[bH].Reason != "refinement" {
 				t.Fatalf("drift-staled subject = %+v, want stale refinement", singles[bH])
 			}
-			if observations != 4 {
-				t.Fatalf("batched observed check performed %d observations, want 4", observations)
+			if observations != 3 {
+				t.Fatalf("batched observed check performed %d observations, want 3", observations)
 			}
 		}
 		if i == 1 && singles[bRead].Status != Unverifiable {
@@ -3196,5 +3197,77 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 	}
 	if err := view2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("single-read validation missed the drift: %v", err)
+	}
+}
+
+// An observed producer lifecycle pays five observation passes: the
+// construction pair (facts become the record), the capture bracket's one
+// closing observation, the validation view's one seeded read, and the
+// validation analysis bracket's one close - comparison-only reads are
+// single (REQ-fresh-coherent-view's record/compare asymmetry). Drift
+// between capture and validation still refuses through the seeded read.
+func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
+	dir := writeObservedViewModule(t)
+	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations := 0
+	engine.observeHook = func() { observations++ }
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.Validate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	engine.observeHook = nil
+	if observations != 5 {
+		t.Fatalf("observed producer lifecycle performed %d observation passes, want 5 (2 construction + 1 capture bracket + 1 seeded read + 1 validation bracket)", observations)
+	}
+
+	// Same lifecycle with an edit after capture: the seeded read refuses.
+	producer2, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint2, err := producer2.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation2, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test 2"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := producer2.AttachObservation(subject, fingerprint2, observation2); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "observed_test.go"), []byte("package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	observations = 0
+	engine.observeHook = func() { observations++ }
+	if err := producer2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("seeded validation missed capture-to-validate drift: %v", err)
+	}
+	engine.observeHook = nil
+	// The seeded read itself refuses - one observation, no analysis
+	// bracket: the seed comparison is what makes the seeded facts
+	// record-grade before any validation-time analysis spends work on
+	// them (the bracket close would still refuse, one analysis later).
+	if observations != 1 {
+		t.Fatalf("capture-to-validate drift refused after %d observations, want 1 (the seeded read)", observations)
 	}
 }
