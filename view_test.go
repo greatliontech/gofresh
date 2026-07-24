@@ -2866,11 +2866,12 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 			t.Fatalf("unknown progress phase %q", event.Phase)
 		}
 	}
-	// A manifest-less drift-forced observed check observes twice (one bracket
-	// pair), opens no runtime window, loads the package program once, and runs
-	// each precise tier once.
-	if phases["observe"] != 2 || phases["runtime"] != 0 || phases["load"] != 1 || phases["refine"] != 1 || phases["prove"] != 1 {
-		t.Fatalf("progress phases = %v, want observe:2 load:1 refine:1 prove:1", phases)
+	// A manifest-less drift-forced observed check observes once - the
+	// analysis bracket opens on the view's agreed facts and reads only at
+	// close - opens no runtime window, loads the package program once, and
+	// runs each precise tier once.
+	if phases["observe"] != 1 || phases["runtime"] != 0 || phases["load"] != 1 || phases["refine"] != 1 || phases["prove"] != 1 {
+		t.Fatalf("progress phases = %v, want observe:1 load:1 refine:1 prove:1", phases)
 	}
 
 	// A manifest-carrying record's window performs two observation passes.
@@ -2940,14 +2941,15 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	if observations != 2 {
 		t.Fatalf("runtime-input check performed %d observations, want 2", observations)
 	}
-	// Refinement and observability requested together share one bracket pair
-	// and one analysis program.
+	// Refinement and observability requested together share one analysis
+	// program and one close-only bracket: the bracket opens on the view's
+	// agreed facts and reads exactly once, at close.
 	observations = 0
 	if err := current.ensurePrecise(context.Background(), []Subject{subject}, true, true); err != nil {
 		t.Fatal(err)
 	}
-	if observations != 2 {
-		t.Fatalf("combined precise analysis performed %d observations, want 2", observations)
+	if observations != 1 {
+		t.Fatalf("combined precise analysis performed %d observations, want 1", observations)
 	}
 	// Already-computed tiers re-observe nothing.
 	observations = 0
