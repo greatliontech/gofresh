@@ -11,11 +11,6 @@ when its work lands (git holds history).
   read open-world from their constraint, so refinement widens to maximal; constraint-aware
   narrowing plus instantiation-rooted traversal would recover precision. *Lands: when a
   corpus demonstrably loses serving precision to open-world generic subjects.*
-- **[observation-pass-subprocess-floor](observation-pass-subprocess-floor.md)** — with
-  analysis memoized, the serving floor is per-pass toolchain subprocesses (listing, roots
-  load, guard and env probes) times the six-pass drift-refusal structure. *Lands: fewer
-  passes (observed capture sharing the construction bracket), batched probes, or the
-  floor is accepted.*
 - **[dependency-heavy-refinement-precision](dependency-heavy-refinement-precision.md)** — the
   declaration-RTA refinement recovers 0/1 irrelevant edits on the Observer sample: graph-wide
   callable-carrying package variables (2,486 across 233 of 460 module-scoped packages) make every
