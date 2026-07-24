@@ -3151,3 +3151,50 @@ func TestObservedCheckDeclinesRefinementWithoutBudget(t *testing.T) {
 		t.Fatalf("unbudgeted observed drifted check = %+v, want stale closure", verdict)
 	}
 }
+
+// A maximal-only producer validation compares one fresh observation against
+// the captured facts instead of paying a construction pair: the compared
+// read is never recorded, so a torn read can only refuse
+// (REQ-fresh-coherent-view's record/compare asymmetry). Drift detection is
+// intact: an edit between capture and validation still refuses.
+func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc Sum(a, b int) int { return a + b }\n")
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewViewFor(context.Background(), []Subject{{Package: "example.com/view", Symbol: "Sum"}}, dir, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := view.Capture(context.Background(), Subject{Package: "example.com/view", Symbol: "Sum"}); err != nil {
+		t.Fatal(err)
+	}
+	observations := 0
+	engine.observeHook = func() { observations++ }
+	if err := view.Validate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	engine.observeHook = nil
+	if observations != 1 {
+		t.Fatalf("maximal validation performed %d observation passes, want exactly 1", observations)
+	}
+
+	edited, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view2, err := edited.NewViewFor(context.Background(), []Subject{{Package: "example.com/view", Symbol: "Sum"}}, dir, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := view2.Capture(context.Background(), Subject{Package: "example.com/view", Symbol: "Sum"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc Sum(a, b int) int { return a + b + 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := view2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("single-read validation missed the drift: %v", err)
+	}
+}

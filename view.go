@@ -993,11 +993,17 @@ func (v *View) Validate(ctx context.Context) error {
 	if hasRefined {
 		return v.validateRefined(ctx)
 	}
-	current, err := v.engine.NewViewFor(ctx, v.subjects, v.moduleDir, v.kind)
+	// A comparison-only observation reads once: these facts are never
+	// recorded, so a torn read can only compare unequal and refuse - the
+	// safe direction - while an equal torn read is the contract-excluded
+	// restore interval (REQ-fresh-coherent-view's record/compare
+	// asymmetry). The agreement pair is load-bearing exactly where an
+	// observation becomes the record: view construction.
+	observation, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	if err := v.compareBaseContext(ctx, current); err != nil {
+	if err := v.compareObservationContext(ctx, observation); err != nil {
 		return err
 	}
 	return ctx.Err()

@@ -213,7 +213,13 @@ guards represent. Checking re-observes the view's inputs around its
 runtime-input and precise-analysis windows to detect ordinary drift — any change
 persisting to an observation makes the check fail with the view-changed error —
 but, like producer validation, it cannot prove the absence of a
-mutation-and-restore interval between agreeing observations.
+mutation-and-restore interval between agreeing observations. Observations split
+by purpose: an observation that becomes the record — view construction —
+requires the agreement pair, because a torn recorded fact describes no build
+that existed; a comparison-only observation — validation against already
+captured facts — requires no agreement pair: a single observation suffices,
+because a torn read can only compare unequal and refuse, and an equal torn
+read is exactly the excluded restore interval.
 
 **REQ-fresh-producer-view** (behavior): A caller producing results for several
 subjects MUST persist fingerprints captured before execution, with runtime-input
