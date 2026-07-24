@@ -2576,8 +2576,8 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 			if singles[bH].Status != Stale || singles[bH].Reason != "refinement" {
 				t.Fatalf("drift-staled subject = %+v, want stale refinement", singles[bH])
 			}
-			if observations != 3 {
-				t.Fatalf("batched observed check performed %d observations, want 3", observations)
+			if observations != 2 {
+				t.Fatalf("batched observed check performed %d observations, want 2", observations)
 			}
 		}
 		if i == 1 && singles[bRead].Status != Unverifiable {
@@ -2874,7 +2874,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		t.Fatalf("progress phases = %v, want observe:1 load:1 refine:1 prove:1", phases)
 	}
 
-	// A manifest-carrying record's window performs two observation passes.
+	// A manifest-carrying record's window reads once, at close.
 	state, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
@@ -2930,16 +2930,16 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A runtime-input check brackets its observation window with exactly one
-	// fresh observation per side; a full double-observed view per side doubles
-	// the dominant cost without adding drift-detection power.
+	// A runtime-input check's window opens on the view's agreed facts and
+	// reads only at close: one fresh observation, with drift across the
+	// window still refusing there.
 	observations := 0
 	engine.observeHook = func() { observations++ }
 	if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
 		t.Fatal(err)
 	}
-	if observations != 2 {
-		t.Fatalf("runtime-input check performed %d observations, want 2", observations)
+	if observations != 1 {
+		t.Fatalf("runtime-input check performed %d observations, want 1", observations)
 	}
 	// Refinement and observability requested together share one analysis
 	// program and one close-only bracket: the bracket opens on the view's

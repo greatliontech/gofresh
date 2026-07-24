@@ -700,11 +700,12 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	for _, fingerprint := range pending {
 		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
 	}
-	if hasRuntimeInputs {
-		if err := v.reobserveBase(ctx); err != nil {
-			return nil, err
-		}
-	}
+	// The runtime-input window opens on the view's agreed facts and reads
+	// only at close: any change since construction persisting to the
+	// closing observation refuses there, so the re-read runtime values
+	// bind to a source interval the close verifies stable - the opening
+	// observation verified a prefix of the same interval
+	// (REQ-fresh-coherent-view's record/compare asymmetry).
 	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
 	if err != nil {
 		return nil, err
@@ -821,11 +822,12 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 	for _, fingerprint := range pending {
 		hasRuntimeInputs = hasRuntimeInputs || fingerprint.RuntimeInputs != ""
 	}
-	if hasRuntimeInputs {
-		if err := v.reobserveBase(ctx); err != nil {
-			return nil, err
-		}
-	}
+	// The runtime-input window opens on the view's agreed facts and reads
+	// only at close: any change since construction persisting to the
+	// closing observation refuses there, so the re-read runtime values
+	// bind to a source interval the close verifies stable - the opening
+	// observation verified a prefix of the same interval
+	// (REQ-fresh-coherent-view's record/compare asymmetry).
 	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
 	if err != nil {
 		return nil, err

@@ -218,8 +218,8 @@ by purpose: an observation that becomes the record — view construction —
 requires the agreement pair, because a torn recorded fact describes no build
 that existed; a comparison-only observation — validation against already
 captured facts — requires no agreement pair: a single observation suffices —
-or, for an analysis bracket, the bracket opens on already-agreed facts and
-reads only at close — because a torn read can only compare unequal and
+or, for an analysis bracket or a runtime-input window, it opens on
+already-agreed facts and reads only at close — because a torn read can only compare unequal and
 refuse, and an equal torn read is exactly the excluded restore interval.
 
 **REQ-fresh-producer-view** (behavior): A caller producing results for several
