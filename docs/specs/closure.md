@@ -134,7 +134,13 @@ origin body is never a traversal surface (open over type parameters, it is
 not a runtime dispatch surface), and its origin declaration remains the
 subject's own content, so a generic-body edit always moves the refined
 closure. An analysis shape the reachability walk cannot classify degrades
-that analysis to unavailable evidence, never a process failure. Maximal
+that analysis to unavailable evidence, never a process failure. A subject
+name declared by two distinct functions of one test binary — the package
+and its external test package may legally share a top-level name — is
+subject-local ambiguity: that subject degrades to unavailable evidence
+with a diagnostic naming the collision, and sibling subjects analyze
+normally; a name the package never declares at all remains a caller
+error. Maximal
 closure and refinement package
 loading, dependency enumeration, and every other source-selection step use the
 caller's executable build flags, so both closures describe the binary whose

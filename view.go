@@ -281,10 +281,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
-	directivePure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, packages...)
+	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}
+	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
 	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
 		return viewObservation{}, err
@@ -330,6 +331,18 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			maximal.Reason = "subject accepts caller-supplied dynamic behavior"
 			observation.openWorld[subject] = true
 		}
+		if detail := scan.ambiguous[subject]; detail != "" {
+			// Distinct declarations collapsed onto this identity: capture
+			// is refused for this subject alone — the maximal package
+			// closure stays the sound floor (it spans every declaring
+			// variant), but no evidence can say WHICH declaration it
+			// vouches for (REQ-purity-directive). The openWorld mark keeps
+			// the refined tier from claiming precision on the collapsed
+			// identity.
+			maximal.Unverifiable = true
+			maximal.Reason = "ambiguous subject identity: " + detail + "; rename one declaration to address either"
+			observation.openWorld[subject] = true
+		}
 		if external[subject] {
 			// The author declared external state: unverifiable by
 			// declaration, and no purity attribution is recorded — a purity
@@ -344,6 +357,13 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		observation.sourceFilesBySubject[subject] = slices.Clone(sources[request])
 		sort.Strings(observation.sourceFilesBySubject[subject])
 		if external[subject] {
+			continue
+		}
+		if scan.ambiguous[subject] != "" {
+			// A purity attribution names one declarer taking
+			// responsibility; a collapsed identity has two, so neither a
+			// caller assertion nor a directive can be attributed
+			// (REQ-purity-directive, REQ-purity-responsibility).
 			continue
 		}
 		switch caller, directive := e.assumePure(subject), directivePure(subject); {

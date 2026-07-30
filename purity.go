@@ -44,21 +44,24 @@ func ScanPureDirectivesWithBuildFlags(buildFlags []string, pkgPaths ...string) (
 // ScanPureDirectivesInWithBuildFlags scans under an explicit tree root and the
 // producing build's executable flags.
 func ScanPureDirectivesInWithBuildFlags(dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
-	pure, _, _, _, err := scanSubjectsInWithBuildFlags(context.Background(), dir, buildFlags, pkgPaths...)
-	return pure, err
+	scan, err := scanSubjectsInWithBuildFlags(context.Background(), dir, buildFlags, pkgPaths...)
+	if err != nil {
+		return nil, err
+	}
+	return scan.directivePure, nil
 }
 
-func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
+func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
 	return scanSubjectsInWithBuildFlagsEnv(ctx, dir, os.Environ(), buildFlags, pkgPaths...)
 }
 
-func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
+func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
 	hasher, err := closure.NewAtContextEnv(ctx, dir, env, buildFlags...)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
-	pure, known, openWorld, external, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, pkgPaths...)
-	return pure, known, openWorld, external, err
+	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, pkgPaths...)
+	return scan, err
 }
 
 // scanViewSubjects performs one observation pass's whole subject scan: the
@@ -68,10 +71,10 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	requested := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
@@ -97,27 +100,49 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 	}
 	load, err := closure.LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, snapshot, patterns...)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	hasher.UseViewLoad(load)
 	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, err
 	}
-	pure, known, openWorld, external, err := scanSubjectsFromLoaded(load.Packages(), state, pkgPaths...)
-	return pure, known, openWorld, external, load, err
+	scan, err := scanSubjectsFromLoaded(load.Packages(), state, pkgPaths...)
+	return scan, load, err
 }
+
+// subjectScan is one observation pass's subject-walk result: enumeration,
+// directive purity, per-subject dynamic-signature marks, and the subjects
+// whose identity collapsed distinct declarations.
+type subjectScan struct {
+	pure      map[Subject]bool
+	known     map[Subject]bool
+	openWorld map[Subject]bool
+	external  map[Subject]bool
+	// ambiguous holds, per subject whose identity is declared more than
+	// once across the package and its test variants, the message naming
+	// both declarations. Capture is refused for exactly these subjects —
+	// no directive or assertion can be attributed to one declaration —
+	// while sibling subjects scan normally (REQ-purity-directive).
+	ambiguous map[Subject]string
+}
+
+func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subject] }
 
 // scanSubjectsFromLoaded derives the subject walk — subject enumeration,
 // directives, per-subject dynamic-signature marks — from an observation
 // pass's already-loaded packages, applying the pass's dynamic-state
 // derivation for the shared-dynamic-state downgrade and promoted-method
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
-func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (func(Subject) bool, map[Subject]bool, map[Subject]bool, map[Subject]bool, error) {
-	pure := map[Subject]bool{}
-	external := map[Subject]bool{}
-	known := map[Subject]bool{}
-	openWorld := map[Subject]bool{}
+func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
+	scan := &subjectScan{
+		pure:      map[Subject]bool{},
+		known:     map[Subject]bool{},
+		openWorld: map[Subject]bool{},
+		external:  map[Subject]bool{},
+		ambiguous: map[Subject]string{},
+	}
+	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
 		requestedPackages[pkgPath] = true
@@ -128,8 +153,14 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		if scanErr != nil {
 			return
 		}
+		// Distinct declarations collapsing onto one subject identity —
+		// legal Go: `package x` and `package x_test` in one directory may
+		// share a top-level name — refuse capture for THAT subject and
+		// scan on: the collision is subject-local, and failing the whole
+		// scan would make the package unmeasurable over a name no caller
+		// may ever request (REQ-purity-directive).
 		if previous := declarations[subject]; previous != "" && previous != declaration {
-			scanErr = fmt.Errorf("gofresh: ambiguous subject %s.%s resolves to %s and %s", subject.Package, subject.Symbol, previous, declaration)
+			scan.ambiguous[subject] = fmt.Sprintf("declared at both %s and %s", previous, declaration)
 			return
 		}
 		declarations[subject] = declaration
@@ -227,7 +258,17 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		}
 	}
 	if scanErr != nil {
-		return nil, nil, nil, nil, scanErr
+		return nil, scanErr
+	}
+	// Refused capture for ambiguous identities: no purity or externality
+	// may be attributed to one of the collapsed declarations
+	// (REQ-purity-directive); openness marks stay — their union only
+	// widens, the safe direction, and the view force-marks ambiguous
+	// subjects regardless. The subject stays known — it IS declared —
+	// and the view marks it unverifiable with the naming diagnosis.
+	for subject := range scan.ambiguous {
+		delete(pure, subject)
+		delete(external, subject)
 	}
 	// The shared-dynamic-state downgrade: every subject of a package whose
 	// graph carries mutated shared dynamic state is unverifiable
@@ -238,7 +279,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 			openWorld[subject] = true
 		}
 	}
-	return func(s Subject) bool { return pure[s] }, known, openWorld, external, nil
+	return scan, nil
 }
 
 func signatureMayReceiveUnknownDynamic(sig *types.Signature) bool {

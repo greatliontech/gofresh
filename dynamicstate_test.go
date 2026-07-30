@@ -57,13 +57,13 @@ func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pure, known, openWorld, external, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := scanResult{known: known, openWorld: openWorld, external: external, pure: map[Subject]bool{}}
-	for subject := range known {
-		if pure(subject) {
+	result := scanResult{known: scan.known, openWorld: scan.openWorld, external: scan.external, pure: map[Subject]bool{}}
+	for subject := range scan.known {
+		if scan.directivePure(subject) {
 			result.pure[subject] = true
 		}
 	}

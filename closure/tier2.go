@@ -36,7 +36,12 @@ type program struct {
 	prog     *ssa.Program
 	pkgs     []*packages.Package
 	roots    map[string]*ssa.Function // benchmark function name → its SSA function
-	testMain *ssa.Function
+	// ambiguous names two distinct top-level functions (the in-package
+	// and external test packages may legally share a name): the root is
+	// tombstoned and a subject requesting the name degrades to
+	// unavailable evidence for that subject alone.
+	ambiguous map[string]bool
+	testMain  *ssa.Function
 }
 
 // parameterizedBody reports whether fn's body is generic (uninstantiated):
@@ -178,7 +183,6 @@ func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package
 // (REQ-fresh-sound).
 func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package) (*program, error) {
 	var errs []string
-	var rootErrs []string
 	var all []*packages.Package
 	seen := map[*packages.Package]bool{}
 	packages.Visit(roots, nil, func(p *packages.Package) {
@@ -225,6 +229,7 @@ func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package
 	// package never declares — a shared top-level name reads as an ambiguous root,
 	// and an unshared one silently resolves a subject to the dependency's closure.
 	funcRoots := map[string]*ssa.Function{}
+	ambiguousRoots := map[string]bool{}
 	var testMain *ssa.Function
 	var rootPkgs []*packages.Package
 	for _, p := range all {
@@ -240,8 +245,20 @@ func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package
 		}
 	}
 	addRoot := func(key string, f *ssa.Function) {
+		if ambiguousRoots[key] {
+			return
+		}
 		if prev := funcRoots[key]; prev != nil && prev != f {
-			rootErrs = append(rootErrs, key)
+			// Two distinct functions under one root name — legal Go: the
+			// in-package and external test packages may share a top-level
+			// name. The collision is subject-local: tombstone the name so
+			// a subject requesting it degrades to unavailable evidence
+			// with the naming diagnosis, while every other subject of the
+			// package analyzes normally (REQ-closure-batch-equivalence's
+			// per-subject norm; a package-wide refusal would make the
+			// package unmeasurable over a name no caller may request).
+			delete(funcRoots, key)
+			ambiguousRoots[key] = true
 			return
 		}
 		funcRoots[key] = f
@@ -259,9 +276,13 @@ func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package
 					continue
 				}
 				if name == "TestMain" && isTestMainHarness(p, obj) {
+					// Two distinct TestMain harnesses cannot coexist in a
+					// compiling test binary, so this arm is unreachable
+					// past a successful load; the whole-program refusal is
+					// the belt — a nil test main would silently under-root
+					// every test subject (REQ-fresh-sound).
 					if testMain != nil && testMain != f {
-						rootErrs = append(rootErrs, name)
-						continue
+						return nil, fmt.Errorf("closure: conflicting TestMain harnesses in %s", pkgPath)
 					}
 					testMain = f
 				}
@@ -298,10 +319,7 @@ func buildProgram(ctx context.Context, pkgPath string, roots []*packages.Package
 			}
 		}
 	}
-	if len(rootErrs) > 0 {
-		return nil, fmt.Errorf("closure: ambiguous subject roots in %s: %s", pkgPath, strings.Join(rootErrs, ", "))
-	}
-	return &program{pkgPath: pkgPath, prog: prog, pkgs: all, roots: funcRoots, testMain: testMain}, nil
+	return &program{pkgPath: pkgPath, prog: prog, pkgs: all, roots: funcRoots, ambiguous: ambiguousRoots, testMain: testMain}, nil
 }
 
 func isTestMainHarness(pkg *packages.Package, function *types.Func) bool {
@@ -482,8 +500,12 @@ func (h *Hasher) computeGroup(group *packageBatch, results map[Subject]Closure) 
 			// declares: a name it never declares — a typo, a non-function,
 			// or a recompiled dependency's symbol — is a caller error, not
 			// subject-local unavailability, and widened evidence for it
-			// would attribute a phantom subject.
-			if !declaresSymbol(prog, group.path, subject.Symbol) {
+			// would attribute a phantom subject. An ambiguous name IS
+			// declared — twice — so it degrades with the naming diagnosis.
+			reason := fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)
+			if prog.ambiguous[subject.Symbol] {
+				reason = fmt.Sprintf("refined analysis unavailable: subject name %s is ambiguous in %s (declared by both the package and its external test package)", subject.Symbol, group.path)
+			} else if !declaresSymbol(prog, group.path, subject.Symbol) {
 				return fmt.Errorf("%w: subject %s not found in %s", errCallerSubject, subject.Symbol, group.path)
 			}
 			if floorHash == "" {
@@ -497,7 +519,7 @@ func (h *Hasher) computeGroup(group *packageBatch, results map[Subject]Closure) 
 				Hash:         floorHash,
 				Widened:      true,
 				Unverifiable: true,
-				Reason:       fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path),
+				Reason:       reason,
 			}
 			continue
 		}
@@ -645,7 +667,11 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
 			if prog.roots[subject.Symbol] == nil {
-				proof := Observability{Reason: fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)}
+				reason := fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)
+				if prog.ambiguous[subject.Symbol] {
+					reason = fmt.Sprintf("observation analysis unavailable: subject name %s is ambiguous in %s (declared by both the package and its external test package)", subject.Symbol, group.path)
+				}
+				proof := Observability{Reason: reason}
 				results[subject] = proof
 				unrooted[subject.Symbol] = proof
 				continue
@@ -888,6 +914,9 @@ func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
 	}
 	root := prog.roots[bench]
 	if root == nil {
+		if prog.ambiguous[bench] {
+			return tier2Result{}, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", bench, pkgPath)
+		}
 		return tier2Result{}, fmt.Errorf("closure: subject %s not found in %s", bench, pkgPath)
 	}
 	metas, err := h.list(pkgPath)

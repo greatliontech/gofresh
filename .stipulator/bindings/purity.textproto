@@ -12,7 +12,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanPureDirectives"
   role: BINDING_ROLE_TESTS
@@ -30,7 +30,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-purity-directive"
-  content_hash: "a1df3eb9e4fdac95191173247f91b5705ba112c4e79e8080026a74d863555f04"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage"
   role: BINDING_ROLE_TESTS
@@ -98,4 +98,31 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveImmuneToObservationEvidence"
   role: BINDING_ROLE_TESTS
   shape_hash: "ed2d12aab779ed23d734e5b481eedd316543ce6694c757d615d7430732b5dcd5"
+}
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "36f45f900f5d8549137e835d982ecc77e03a021f12b6aaaa543b79747402b3eb"
+}
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAmbiguousSubjectDirectiveConfersNothing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "64b0c9036e7a54304c7ed6a687c7a2c9b8887f799fbd357a24e2add9c6d60e92"
+}
+
+bindings {
+  requirement_id: "REQ-purity-directive"
+  content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAmbiguousSubjectCallerAssertionConfersNothing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5148c5af08855c48e9686e7cb9611db5ccf240438a075aff1550e2d2d7579ba8"
 }

@@ -37,7 +37,12 @@ view as that declaration's closure, so an old directive cannot override a newly
 selected or edited declaration through process-lifetime scanner state. When
 production, in-package-test, or external-test variants collapse distinct
 declarations onto the same subject identity, capture is refused rather than allowing
-one declaration's directive to confer purity on another.
+one declaration's directive to confer purity on another. The refusal is scoped to
+the collapsed subject alone: that subject's evidence is unverifiable with a
+diagnostic naming both declarations, no purity — directive or caller assertion —
+is attributed to it, and every other subject of the package scans and analyzes
+untouched, because the collapse is legal Go (a package and its external test
+package may share a top-level name) that says nothing about sibling subjects.
 
 **REQ-purity-responsibility** (behavior): A purity assertion MUST be recorded as an
 explicit, attributable act, gofresh never silently assuming purity — so overriding an

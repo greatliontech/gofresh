@@ -819,7 +819,12 @@ func TestImportedPromotedMethodInheritsPurityDirective(t *testing.T) {
 	}
 }
 
-func TestViewRejectsExternalTestSubjectCollision(t *testing.T) {
+// An external-test twin's directive must never confer purity on the
+// production declaration it collides with: the collapsed identity refuses
+// capture — unverifiable evidence naming both declarations, no purity
+// attribution — while the view itself builds (the refusal is scoped to
+// the subject, REQ-purity-directive).
+func TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n")
 	if err := os.WriteFile(filepath.Join(dir, "external_test.go"), []byte("package view_test\n\n//gofresh:pure\nfunc F() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -828,9 +833,24 @@ func TestViewRejectsExternalTestSubjectCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir)
-	if err == nil || !strings.Contains(err.Error(), "ambiguous subject") {
-		t.Fatalf("external-test collision accepted: %v", err)
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatalf("subject-local collision failed the whole view: %v", err)
+	}
+	fingerprint, err := view.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.PurityAssertion != "" {
+		t.Fatalf("external twin's directive conferred purity on the collapsed identity: %q", fingerprint.PurityAssertion)
+	}
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "ambiguous") {
+		t.Fatalf("collapsed identity verdict = %+v, want unverifiable naming the collision", verdict)
 	}
 }
 
