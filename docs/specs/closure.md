@@ -127,9 +127,23 @@ when the subject never names the registering package, the test main rooted for a
 subject so setup it runs before the subject (state a production subject never sees)
 is in the closure; a narrower root or edge set is taken only when proven to preserve
 the same startup and global-flow coverage. A parameterized subject is open to
-caller-chosen instantiations: it is forced open-world (a signature walk alone
-misses zero-parameter generics) — refinement
-widens and observability refuses exactly as for any open subject world — its
+caller-chosen instantiations, and its openness is decided on the
+type-parameter list itself (a signature walk alone misses zero-parameter
+generics), identically at every tier: a constraint that provably bounds
+its type set away from dynamic carriers — methodless, with at least one
+bounding element whose every term is free of dynamic reach under the same
+carrier rule ordinary parameters answer to (interface, function, and
+unsafe reach open; a channel opens exactly when its element does);
+`any` and `comparable` bound nothing — closes
+the caller's choice, anything else keeps the subject open-world,
+where refinement widens and observability refuses exactly as for any
+open subject world. A
+constraint-bounded parameterized subject analyzes closed: its
+materialized in-binary instantiations root the reachability walk — each
+dispatches concretely, so instantiation-reached content enters the
+refined closure and the observability effect set, and a subject with no
+in-binary instantiation keeps the origin fold's own static closure, since
+no concretized behavior of it exists in the analyzed binary. In every case the
 origin body is never a traversal surface (open over type parameters, it is
 not a runtime dispatch surface), and its origin declaration remains the
 subject's own content, so a generic-body edit always moves the refined

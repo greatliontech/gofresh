@@ -289,13 +289,25 @@ func signatureMayReceiveUnknownDynamic(sig *types.Signature) bool {
 	if isHarnessSignature(sig) {
 		return false
 	}
-	seen := make(map[types.Type]bool)
-	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(recv.Type(), seen) {
+	// The type-parameter lists are consulted directly: a zero-parameter
+	// generic reads closed through Params alone, and both tiers must
+	// give one openness answer (REQ-closure-analysis's
+	// parameterized-subject arm).
+	for _, list := range []*types.TypeParamList{sig.TypeParams(), sig.RecvTypeParams()} {
+		for i := 0; list != nil && i < list.Len(); i++ {
+			if !closure.TypeParamBoundsAwayFromDynamic(list.At(i)) {
+				return true
+			}
+		}
+	}
+	// One fresh map per parameter, mirroring the closure tier: no
+	// cross-parameter mark leakage, cycle-safe within each evaluation.
+	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(recv.Type(), make(map[types.Type]bool)) {
 		return true
 	}
 	params := sig.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryUnknownDynamic(params.At(i).Type(), seen) {
+		if typeMayCarryUnknownDynamic(params.At(i).Type(), make(map[types.Type]bool)) {
 			return true
 		}
 	}
@@ -333,7 +345,7 @@ func typeMayCarryUnknownDynamic(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Interface, *types.Signature:
 		return true
 	case *types.TypeParam:
-		return typeMayCarryUnknownDynamic(t.Constraint(), seen)
+		return !closure.TypeParamBoundsAwayFromDynamic(t)
 	case *types.Named:
 		return typeMayCarryUnknownDynamic(t.Underlying(), seen)
 	case *types.Pointer:

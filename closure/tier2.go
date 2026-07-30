@@ -32,10 +32,10 @@ type asmMacro struct {
 // program is the loaded whole-program SSA for one package's test binary, cached
 // so per-benchmark Compute calls amortize the dominant load cost (REQ-closure-analysis).
 type program struct {
-	pkgPath  string
-	prog     *ssa.Program
-	pkgs     []*packages.Package
-	roots    map[string]*ssa.Function // benchmark function name → its SSA function
+	pkgPath string
+	prog    *ssa.Program
+	pkgs    []*packages.Package
+	roots   map[string]*ssa.Function // benchmark function name → its SSA function
 	// ambiguous names two distinct top-level functions (the in-package
 	// and external test packages may legally share a name): the root is
 	// tombstoned and a subject requesting the name degrades to
@@ -936,7 +936,11 @@ type attributedReachability struct {
 	startupFunctions map[*ssa.Function]bool
 	resolved         map[ssa.CallInstruction]bool
 	dynamicTargets   map[ssa.CallInstruction]map[*ssa.Function]bool
-	openWorld        bool
+	// instantiatedOrigins marks parameterized origins whose materialized
+	// instantiations were rooted for this subject: the origin's body
+	// scan yields to theirs.
+	instantiatedOrigins map[*ssa.Function]bool
+	openWorld           bool
 }
 
 // attributedReachableSets runs package-local RTA once and projects its masks
@@ -948,17 +952,41 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		allMasks = 1<<len(subjects) - 1
 	}
 	var testMasks uint64
+	var allFunctions map[*ssa.Function]bool
+	instantiated := map[uint64]map[*ssa.Function]bool{}
 	for i, subject := range subjects {
 		mask := uint64(1) << i
 		root := prog.roots[subject.Symbol]
 		// A parameterized body is open over type parameters and cannot
 		// enter the runtime-type walk (REQ-closure-analysis): it is never
-		// a traversal root. Its signature already reads open-world, so
-		// refinement widens and observability refuses exactly as for any
-		// open subject world; the origin fold below keeps its declaration
-		// in the subject's content.
-		if !parameterizedBody(root) {
+		// a traversal root itself. A constraint-bounded generic instead
+		// roots every materialized instantiation - each dispatches
+		// concretely, so instantiation-reached content enters the
+		// subject's reachable set (and through it the refined closure and
+		// the observability effect walk). An unbounded generic roots
+		// nothing: its signature reads open-world, refinement widens and
+		// observability refuses; either way the origin fold below keeps
+		// the declaration in the subject's content.
+		switch {
+		case !parameterizedBody(root):
 			roots[root] |= mask
+		case !rootMayReceiveUnknownDynamic(prog, root):
+			if allFunctions == nil {
+				allFunctions = ssautil.AllFunctions(prog.prog)
+			}
+			for fn := range allFunctions {
+				if fn != nil && fn != root && fn.Origin() == root {
+					roots[fn] |= mask
+					// The origin's own body scan yields to the rooted
+					// instantiations': each dispatches concretely, so
+					// scanning the open-over-T origin beside them would
+					// re-widen exactly the sites the rooting resolves.
+					if instantiated[mask] == nil {
+						instantiated[mask] = map[*ssa.Function]bool{}
+					}
+					instantiated[mask][root] = true
+				}
+			}
 		}
 		if subjectRunsThroughHarness(prog, root) {
 			testMasks |= mask
@@ -991,10 +1019,11 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	reachable := make([]attributedReachability, len(subjects))
 	for i := range reachable {
 		reachable[i] = attributedReachability{
-			functions:      make(map[*ssa.Function]bool),
-			resolved:       make(map[ssa.CallInstruction]bool),
-			dynamicTargets: make(map[ssa.CallInstruction]map[*ssa.Function]bool),
-			openWorld:      rootMayReceiveUnknownDynamic(prog, prog.roots[subjects[i].Symbol]),
+			functions:           make(map[*ssa.Function]bool),
+			resolved:            make(map[ssa.CallInstruction]bool),
+			dynamicTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
+			instantiatedOrigins: instantiated[uint64(1)<<i],
+			openWorld:           rootMayReceiveUnknownDynamic(prog, prog.roots[subjects[i].Symbol]),
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.roots[subjects[i].Symbol]
@@ -1010,7 +1039,23 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 				startupRoots = append(startupRoots, init)
 			}
 		}
-		reachable[i].subjectFunctions, err = provenanceReachable(ctx, []*ssa.Function{subjectRoot}, mask, res)
+		// The subject's provenance roots are exactly the roots its mask
+		// was given: for a bounded generic those are its materialized
+		// instantiations, so the effect walk sees every dispatch-reached
+		// site the refined closure carries — granting observability from
+		// the origin alone would answer without ever seeing them
+		// (REQ-closure-analysis's parameterized-subject arm,
+		// REQ-closure-observability-analysis).
+		subjectProvenance := []*ssa.Function{subjectRoot}
+		if len(instantiated[mask]) > 0 {
+			subjectProvenance = subjectProvenance[:0]
+			for fn := range allFunctions {
+				if fn != nil && fn != subjectRoot && fn.Origin() == subjectRoot {
+					subjectProvenance = append(subjectProvenance, fn)
+				}
+			}
+		}
+		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res)
 		if err != nil {
 			return nil, err
 		}
@@ -1123,25 +1168,33 @@ func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
 	if root == nil || root.Signature == nil {
 		return true
 	}
-	// A parameterized subject is open-world by force, not by signature
-	// walk: a zero-parameter generic (func Value[T any]() int) reads
-	// closed through Params alone, yet its instantiations are
-	// caller-chosen behavior the fold never traverses - a closed reading
-	// would grant observability and serve a refined hash that misses
-	// every callee (REQ-closure-analysis's parameterized-subject arm).
-	if parameterizedBody(root) {
+	// A parameterized subject's openness is decided by its constraints,
+	// consulted on the type-parameter list itself - a zero-parameter
+	// generic (func Value[T any]() int) reads closed through Params
+	// alone, so the params walk below can never be the whole answer. A
+	// constraint that provably bounds its type set away from dynamic
+	// carriers closes the caller's instantiation choice: every in-binary
+	// instantiation then dispatches concretely and roots the walk.
+	// Anything unbounded (any, comparable, a method-bearing constraint)
+	// keeps the forced open world
+	// (REQ-closure-analysis's parameterized-subject arm).
+	if parameterizedBody(root) && !typeParamListsBoundAwayFromDynamic(root) {
 		return true
 	}
 	if subjectRunsThroughHarness(prog, root) && isHarnessSubjectSignature(root.Signature) {
 		return false
 	}
-	seen := make(map[types.Type]bool)
-	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(recv.Type(), seen) {
+	// One fresh map per parameter: sharing across parameters would let
+	// one walk's marks short-circuit another's (a constraint interface
+	// marked by a bounding evaluation reading clean as a later value
+	// type); within one parameter's evaluation the map is shared - the
+	// cycle guard for recursive constraints.
+	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(recv.Type(), make(map[types.Type]bool)) {
 		return true
 	}
 	params := root.Signature.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryDynamic(params.At(i).Type(), seen) {
+		if typeMayCarryDynamic(params.At(i).Type(), make(map[types.Type]bool)) {
 			return true
 		}
 	}
@@ -1179,7 +1232,16 @@ func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Interface, *types.Signature:
 		return true
 	case *types.TypeParam:
-		return typeMayCarryDynamic(t.Constraint(), seen)
+		// The evaluation's own map is shared into the bounding walk: the
+		// marks placed at each walk's entry are the cycle guards for
+		// self- and mutually-referential constraints (~[]A on A is legal
+		// Go). The interface-mark cut decides the recursive cases -
+		// pessimistically, not-bounded, so a recursive constraint reads
+		// open; the type-parameter mark's clean cut only governs term
+		// structure inside one evaluation, where a carrier-free cycle
+		// path adds no carrier. Cross-parameter decoupling lives at the
+		// walk entries, which hand each parameter a fresh map.
+		return !constraintBoundsAwayFromDynamic(t.Constraint(), seen)
 	case *types.Named:
 		return typeMayCarryDynamic(t.Underlying(), seen)
 	case *types.Pointer:
@@ -1208,6 +1270,94 @@ func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 	return false
 }
 
+// TypeParamBoundsAwayFromDynamic reports whether one type parameter's
+// constraint provably bounds its type set away from dynamic carriers -
+// the openness question a parameterized subject asks per parameter,
+// shared with the view tier so both tiers give one answer
+// (REQ-closure-analysis's parameterized-subject arm).
+func TypeParamBoundsAwayFromDynamic(tp *types.TypeParam) bool {
+	if tp == nil {
+		return false
+	}
+	return constraintBoundsAwayFromDynamic(tp.Constraint(), make(map[types.Type]bool))
+}
+
+// typeParamListsBoundAwayFromDynamic reports whether every type parameter
+// of fn (function and receiver lists both) carries a constraint that
+// provably bounds its type set away from dynamic carriers.
+func typeParamListsBoundAwayFromDynamic(fn *ssa.Function) bool {
+	for _, list := range []*types.TypeParamList{fn.TypeParams(), fn.Signature.RecvTypeParams()} {
+		for i := 0; list != nil && i < list.Len(); i++ {
+			if !constraintBoundsAwayFromDynamic(list.At(i).Constraint(), make(map[types.Type]bool)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// constraintBoundsAwayFromDynamic reports whether a type parameter's
+// constraint provably bounds its type set away from dynamic carriers: the
+// complete interface is methodless (a constraint method is a dispatch
+// surface this analysis does not narrow), and at least one embedded
+// element bounds the set - a union or specific type whose every term is
+// free of interface, function, channel, and unsafe reach, or an embedded
+// interface that itself bounds. Intersection semantics make one clean
+// bounded element sufficient: the type set is the intersection of every
+// element's set, so a dirty sibling only shrinks a clean bound, never
+// widens it. `any` and `comparable` embed nothing and bound nothing.
+func constraintBoundsAwayFromDynamic(constraint types.Type, seen map[types.Type]bool) bool {
+	iface, ok := types.Unalias(constraint).Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	return interfaceBoundsAwayFromDynamic(iface, seen)
+}
+
+func interfaceBoundsAwayFromDynamic(iface *types.Interface, seen map[types.Type]bool) bool {
+	if iface == nil || iface.NumMethods() > 0 {
+		return false
+	}
+	if seen[iface] {
+		return false
+	}
+	seen[iface] = true
+	bounded := false
+	for i := 0; i < iface.NumEmbeddeds(); i++ {
+		switch e := types.Unalias(iface.EmbeddedType(i)).(type) {
+		case *types.Union:
+			clean := true
+			for j := 0; j < e.Len(); j++ {
+				// A tilde term (~T) admits every type whose underlying
+				// is T's underlying: structurally identical carriers, so
+				// the structural walk of the term type answers for the
+				// whole approximation set. Extra methods on a defined
+				// type in that set are unreachable through a methodless
+				// constraint.
+				if typeMayCarryDynamic(e.Term(j).Type(), seen) {
+					clean = false
+					break
+				}
+			}
+			if clean {
+				bounded = true
+			}
+		default:
+			if under, ok := types.Unalias(e).Underlying().(*types.Interface); ok {
+				if interfaceBoundsAwayFromDynamic(under, seen) {
+					bounded = true
+				}
+				continue
+			}
+			// A single specific-type element (interface{ int }).
+			if !typeMayCarryDynamic(e, seen) {
+				bounded = true
+			}
+		}
+	}
+	return bounded
+}
+
 func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 	return prog != nil && pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Pkg.Path() == prog.pkgPath+".test"
 }
@@ -1225,6 +1375,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 func (h *Hasher) tier2ReachableWithFresh(base *tier2Base, reachable attributedReachability, withFresh bool) (tier2Result, error) {
 	a := base.analyzer()
 	a.rtaResolved = reachable.resolved
+	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
 	if withFresh {
 		a.fresh = newFreshParamAnalysis(reachable)
@@ -1335,11 +1486,17 @@ type tier2Base struct {
 }
 
 type tier2Analyzer struct {
-	h                *Hasher
-	buildFlags       []string
-	prog             *program
-	metas            []listPkg
-	metaByPath       map[string]*listPkg
+	h          *Hasher
+	buildFlags []string
+	prog       *program
+	metas      []listPkg
+	metaByPath map[string]*listPkg
+	// skipOriginScan marks parameterized origins whose rooted
+	// instantiations carry the concrete forms of every site: the
+	// open-over-T origin body is never scanned, whatever path reaches it
+	// (the reach loop, the object drain, a static-callee walk) - its
+	// declaration still contributes.
+	skipOriginScan   map[*ssa.Function]bool
 	idxByTypes       map[*types.Package]*pkgIndex
 	idxByPath        map[string]*pkgIndex
 	objByName        map[string]types.Object
@@ -1667,7 +1824,7 @@ func (a *tier2Analyzer) addStartupPackage(idx *pkgIndex) {
 }
 
 func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
-	if fn == nil {
+	if fn == nil || a.skipOriginScan[fn] {
 		return
 	}
 	idx := a.idxForFunction(fn)
@@ -2963,6 +3120,10 @@ func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 	case *ssa.MakeInterface:
 		return true
 	case *ssa.ChangeInterface:
+		return locallyClosedDynamicValue(value.X, seen)
+	case *ssa.TypeAssert:
+		// Asserting narrows the dynamic-type set of X, never widens it:
+		// the asserted value is closed exactly when its operand is.
 		return locallyClosedDynamicValue(value.X, seen)
 	case *ssa.ChangeType:
 		return locallyClosedDynamicValue(value.X, seen)

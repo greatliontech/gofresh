@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestComputeRootsAnySubject"
   role: BINDING_ROLE_TESTS
@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestPrimeUsesBuildFlags"
   role: BINDING_ROLE_TESTS
@@ -75,7 +75,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestBuildFlagsDriveASMClosure"
   role: BINDING_ROLE_TESTS
@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
@@ -201,7 +201,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestComputeKeepsRecompiledDependencyOutOfSubjectRoots"
   role: BINDING_ROLE_TESTS
@@ -210,9 +210,54 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "03a36b4ab644c8e80fe82ceabd23c31fdf36e6e23482c36dfec75d0d8df82b57"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAmbiguousRootDegradesSubjectLocally"
   role: BINDING_ROLE_TESTS
   shape_hash: "7802e40578b060a783aa8ae73a95bab77c9bc81ac0443c3a1e8149b60a9e2733"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestConstraintBoundedGenericSubjectAnalyzesClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b532f91fac66435c81fd833d459f2f3cdef6d008c84df52921353f2cadc00d4a"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestUnboundedConstraintsStayOpenWorld"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6191f4a63194683bcc400d74fd0845d3decc7c66284cd85e79a4d9f92cff5a0c"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestBoundedGenericRootsInstantiationFlow"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bcf19303416880badae0e8276e73e37cfa3701973bc8aa09d319b6f0b0b62882"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestBoundedGenericObservabilitySeesInstantiationEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a7f22742e737b0ff9c5bd89b0c8aa60b3f5a59d2d1ad6de381e1fb9493f19fe9"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "15816fc34d141136c8471fc079efc4456c370000b9327cfe4f1a480f7f10d7d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestBoundedGenericBatchEquivalence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "06d2ae039c31fa7e8b08fb88b3bee63796dffb9662bd8ba5ca4562146d8cad6c"
 }
