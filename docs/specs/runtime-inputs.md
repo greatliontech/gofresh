@@ -177,8 +177,12 @@ observation-completeness assertion by itself. The toolchain guard pins producer
 behavior and the observability strategy identity pins the engine's interpretation
 of it. Against that model, the base read-only proof admits only subject-time `os.Getenv`,
 `os.LookupEnv`, `os.Open`, `os.ReadFile`, and
-`os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, free
-of carriage return and newline, and reproducibly resolvable. On a read-only file
+`os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, and
+free of carriage return and newline — testlog representability; resolvability is the
+runtime observation's obligation, ingest either discharging a traversal's
+congruence and recording the resolved identity or sealing the observation
+fail-closed (REQ-inputs-path-congruence), so no admitted identity can serve
+unresolved. On a read-only file
 handle obtained from that admitted acquisition, only `Close`, `Name`, `Read`,
 `ReadAt`, and `Seek` are admitted. An admitted standard-library wrapper is classified
 atomically at its audited public operation: implementation-internal syscall or native

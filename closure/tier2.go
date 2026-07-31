@@ -2149,10 +2149,14 @@ func observableIdentityArgument(effect externalEffect, call *ssa.CallCommon) boo
 		return false
 	}
 	identity := constant.StringVal(value.Value)
-	if identity == "" || !utf8.ValidString(identity) || strings.ContainsAny(identity, "\x00\r\n") {
-		return false
-	}
-	return effect.kind != externalEffectFileIO || !hasParentTraversalPath(identity)
+	// The admission proves testlog representability alone: non-empty,
+	// valid UTF-8, newline-free. Resolvability — a ".."-carrying identity
+	// included — is the runtime observation's obligation: ingest either
+	// discharges the traversal's congruence and records the resolved
+	// identity, or seals the observation fail-closed
+	// (REQ-inputs-path-congruence), so no admitted effect's identity can
+	// serve unresolved.
+	return identity != "" && utf8.ValidString(identity) && !strings.ContainsAny(identity, "\x00\r\n")
 }
 
 func observableFreshPathResult(site ssa.CallInstruction, fp *freshParamAnalysis) bool {
@@ -3098,15 +3102,6 @@ func observableFileMethod(fn *ssa.Function) bool {
 	default:
 		return false
 	}
-}
-
-func hasParentTraversalPath(name string) bool {
-	for _, component := range strings.FieldsFunc(name, func(r rune) bool { return r == '/' || filepath.Separator == '\\' && r == '\\' }) {
-		if component == ".." {
-			return true
-		}
-	}
-	return false
 }
 
 func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {

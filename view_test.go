@@ -254,6 +254,47 @@ func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
 	}
 }
 
+// TestObservedProofAdmitsParentTraversalIdentity pins the effects
+// admission's testlog-representability bar: a constant read identity
+// carrying ".." is admitted — resolvability is the runtime observation's
+// obligation under REQ-inputs-path-congruence, discharged or sealed at
+// ingest — so the repo-root read idiom no longer blocks the proof, and
+// with it the plain tier's file-I/O rescue.
+func TestObservedProofAdmitsParentTraversalIdentity(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":       "module example.com/traversal\n\ngo 1.26\n",
+		"data/fixture": "one",
+		"pkg/pkg.go":   "package pkg\n\nfunc Sibling() int { return 1 }\n",
+		"pkg/pkg_test.go": "package pkg\n\nimport (\"os\"; \"testing\")\n\n" +
+			"func TestReadsAbove(*testing.T) { _, _ = os.ReadFile(\"../data/fixture\") }\n",
+	} {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subject := Subject{Package: "example.com/traversal/pkg", Symbol: "TestReadsAbove"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fingerprint.ObservationProof.Observable {
+		t.Fatalf("traversal read identity blocked the proof: %+v", fingerprint.ObservationProof)
+	}
+}
+
 func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}

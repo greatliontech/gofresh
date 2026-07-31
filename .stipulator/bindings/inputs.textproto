@@ -174,7 +174,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkParentTraversalIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -210,7 +210,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestChdirResolvesRelativePaths"
   role: BINDING_ROLE_TESTS
@@ -219,7 +219,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
   role: BINDING_ROLE_IMPLEMENTS
@@ -228,7 +228,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observable-read-set"
-  content_hash: "f6be5ab971169e3890bf16f7cd48c60e70ba170cb75e74b388a3f157931578e4"
+  content_hash: "a9556a20d6033ef79e7da29c1cc8cf0ef1f131d02c6eab1448424ea5ce0f2604"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
@@ -237,7 +237,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observable-read-set"
-  content_hash: "f6be5ab971169e3890bf16f7cd48c60e70ba170cb75e74b388a3f157931578e4"
+  content_hash: "a9556a20d6033ef79e7da29c1cc8cf0ef1f131d02c6eab1448424ea5ce0f2604"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
@@ -903,7 +903,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCongruentParentTraversalResolvesLexically"
   role: BINDING_ROLE_TESTS
@@ -912,7 +912,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkedWorkingDirectoryTraversalIsUnverifiable"
   role: BINDING_ROLE_TESTS
