@@ -73,8 +73,14 @@ const DeclarationRTA = "gofresh/declaration-rta@1"
 // this version like any other strategy change.
 const DynamicStateStrategy = "gofresh/dynamic-state@1"
 
-// ObservationRTA identifies the caller-selected declaration-RTA observability proof.
-const ObservationRTA = "gofresh/observation-rta@4"
+// ObservationRTA identifies the caller-selected declaration-RTA observability
+// proof. The version pins the engine's interpretation: any admission or
+// classification change bumps it, so persistently memoized analyses and
+// recorded proofs from the prior interpretation refuse instead of serving
+// under semantics they were not computed by — @5 widened the identity
+// admission to ".."-carrying constants (resolvability delegated to
+// observation ingest, REQ-inputs-path-congruence).
+const ObservationRTA = "gofresh/observation-rta@5"
 
 // Refinement is optional narrower closure evidence. Its zero value means the
 // recording is maximal-only. A complete value binds its closure hash and
