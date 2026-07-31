@@ -174,7 +174,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkParentTraversalIsUnverifiable"
   role: BINDING_ROLE_TESTS
@@ -210,7 +210,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestChdirResolvesRelativePaths"
   role: BINDING_ROLE_TESTS
@@ -219,7 +219,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-congruence"
-  content_hash: "28d81335cf566b8b4d2875d72acddddb2f46448d3973ce60095eb040e1fae5de"
+  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
   role: BINDING_ROLE_IMPLEMENTS
@@ -899,4 +899,22 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestVolatileOSPathsClassifyLexically"
   role: BINDING_ROLE_TESTS
   shape_hash: "1ba7313666f6c54074a2b945ca6a78e374bce7ea41e822e75ad4d090c82ae5ab"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCongruentParentTraversalResolvesLexically"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "beef727dc87b1b6272d2972d1178e7168e85ef336b7f75b1ac4e95fd448a1374"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "17312274166b2d044a5b171e2da6c5fcd2beec4f795a67e77a9d2bf159777cb2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestSymlinkedWorkingDirectoryTraversalIsUnverifiable"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cadb042c2323b9b403940799675856c9083272f28f7a322dffcf1d480c6a250d"
 }

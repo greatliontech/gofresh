@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -334,14 +333,14 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if err := ctx.Err(); err != nil {
 			return viewObservation{}, err
 		}
-		digest, err := digestFile(path)
-		if err != nil {
-			// A file the closure just read but the digest pass cannot:
-			// attribution degrades, detection does not - the closure
-			// comparison still refuses drift.
-			continue
+		// The digest comes from the Hasher's own closure reads — the exact
+		// bytes the compared closure hash was built over — never a second
+		// read that could straddle an edit. A source the closure's reads
+		// did not digest keeps degraded attribution; detection is the
+		// closure comparison's, not this naming pass's.
+		if digest, ok := hasher.FileDigest(path); ok {
+			observation.fileDigests[path] = digest
 		}
-		observation.fileDigests[path] = digest
 	}
 	for _, subject := range subjects {
 		if !known[subject] {
@@ -1263,18 +1262,6 @@ func analysisUnavailable(reason string) bool {
 // differingGuard names the first environment guard whose two construction
 // observations disagreed — the actionable component behind a bare "guards
 // moved".
-// digestFile is the construction-time content identity behind
-// validation's moved-file naming: 32 hex of SHA-256, matching the
-// closure package's per-file style.
-func digestFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])[:32], nil
-}
-
 // movedIdentitySuffix names the source identities behind a drift
 // refusal, best-effort: membership changes name added and removed
 // paths exactly; content drift names paths whose construction-time

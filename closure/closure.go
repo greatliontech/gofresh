@@ -77,6 +77,7 @@ type Hasher struct {
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
 	testVariants   map[string]testVariantIdentity  // test-variant compartments by requested package
+	fileDigests    map[string]string               // per-file content digests from the closure's own reads, by absolute path
 	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
@@ -172,7 +173,17 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testVariantIdentity{},
+		fileDigests: map[string]string{},
 	}, nil
+}
+
+// FileDigest returns the truncated content digest of one absolute source
+// path exactly as this Hasher's own closure reads computed it — the same
+// bytes every compared closure hash was built over — so a consumer naming
+// moved identities never re-reads a file the closure already digested.
+func (h *Hasher) FileDigest(path string) (string, bool) {
+	digest, ok := h.fileDigests[path]
+	return digest, ok
 }
 
 // BoundAnalysis narrows the context governing this Hasher's subsequent
@@ -345,7 +356,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 			}
 		}
 	}
-	identity, err := computeTestVariantIdentity(compartmentDir, testOnly, compiledGo, embeddedData)
+	identity, err := computeTestVariantIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -455,7 +466,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	files = uniqueStrings(files)
-	fh, err := hashFiles(p.Dir, files)
+	fh, err := hashFiles(p.Dir, files, h.fileDigests)
 	if err != nil {
 		return "", nil, err
 	}
@@ -941,7 +952,7 @@ func (h *Hasher) underCache(dir string) bool {
 	return dir == h.modCache || strings.HasPrefix(dir, h.modCache+string(filepath.Separator))
 }
 
-func hashFiles(dir string, files []string) (string, error) {
+func hashFiles(dir string, files []string, digests map[string]string) (string, error) {
 	sort.Strings(files)
 	hasher := sha256.New()
 	for _, f := range files {
@@ -951,6 +962,12 @@ func hashFiles(dir string, files []string) (string, error) {
 			return "", fmt.Errorf("closure: read %s: %w", path, err)
 		}
 		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
+		if digests != nil {
+			// The per-file digest rides to the Hasher's memo so naming
+			// consumers reuse the exact bytes this hash was built over
+			// instead of re-reading (FileDigest).
+			digests[path] = contentDigest(content)
+		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil))[:32], nil
 }

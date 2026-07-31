@@ -698,24 +698,99 @@ func TestChdirResolvesRelativePaths(t *testing.T) {
 	}
 }
 
-func TestRawParentTraversalIsUnverifiable(t *testing.T) {
+// TestCongruentParentTraversalResolvesLexically pins
+// REQ-inputs-path-congruence's discharge: a ".." read whose crossed
+// directories are all real (non-symlink) directories resolves to its
+// lexical cleaning and is observed like any other path input — the
+// ubiquitous repo-root-from-package-directory test idiom — while the same
+// read crossing a symlinked component stays sealed.
+func TestCongruentParentTraversalResolvesLexically(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen ..\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := FromTestLog([]byte("# test log\nopen ../fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
-	if !st.Unverifiable || !strings.Contains(st.Reason, "ambiguous parent traversal") {
-		t.Fatalf("parent traversal observation = %+v, want ambiguous disposition", st)
+	if st.Unverifiable {
+		t.Fatalf("congruent parent traversal sealed the observation: %+v", st)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	cur, err := Current(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
-	if cur.Digest != st.Digest {
-		t.Fatalf("module root digest changed without input change: %q vs %q", cur.Digest, st.Digest)
+	if cur.Digest == st.Digest {
+		t.Fatal("congruent traversal did not track the resolved file")
+	}
+}
+
+// TestTraversalVerificationFailuresStaySealed pins the discharge's
+// fail-closed legs beyond the symlink one: crossing a non-directory and
+// crossing a vanished component both keep the seal.
+func TestTraversalVerificationFailuresStaySealed(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(packageDir, "fixture.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, log := range map[string]string{
+		"non-directory crossing": "open fixture.txt/../fixture.txt\n",
+		"vanished component":     "open gone/../fixture.txt\n",
+	} {
+		st, err := FromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !st.Unverifiable || !strings.Contains(st.Reason, "ambiguous parent traversal") {
+			t.Fatalf("%s = %+v, want the fail-closed seal", name, st)
+		}
+	}
+}
+
+// TestVolatileTraversalRefusesWithoutProbing pins the volatile no-probe
+// contract over the discharge (REQ-inputs-volatile-os-roots): a traversal
+// crossing a volatile OS root seals without the verifier reading it.
+func TestVolatileTraversalRefusesWithoutProbing(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	orig := congruenceProbe
+	congruenceProbe = func(p string) (os.FileInfo, error) {
+		if volatileOSPath(p) {
+			t.Errorf("congruence verifier probed a volatile OS path: %s", p)
+		}
+		return orig(p)
+	}
+	t.Cleanup(func() { congruenceProbe = orig })
+	st, err := FromTestLog([]byte("open /proc/self/../environ\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatalf("volatile traversal = %+v, want sealed", st)
+	}
+}
+
+// TestSymlinkedWorkingDirectoryTraversalIsUnverifiable pins the crossing
+// check over the resolution base itself: a ".." stepping back across a
+// symlinked package-directory component cannot be proven congruent and
+// keeps the fail-closed seal.
+func TestSymlinkedWorkingDirectoryTraversalIsUnverifiable(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(moduleDir, "linkedpkg")
+	if err := os.Symlink(packageDir, linked); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	st, err := FromTestLog([]byte("open ../fixture.txt\n"), moduleDir, linked, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable || !strings.Contains(st.Reason, "ambiguous parent traversal") {
+		t.Fatalf("symlinked base traversal = %+v, want blocking disposition", st)
 	}
 }
 

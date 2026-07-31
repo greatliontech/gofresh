@@ -48,6 +48,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -434,7 +435,12 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 // soundness input: the PWD bounded admission (REQ-inputs-unbounded)
 // compares the env's PWD against the spawn directory, so an env that is
 // not byte-for-byte what the process actually inherited can admit a
-// value the process never read.
+// value the process never read. packageDir fidelity is the same class:
+// the parent-traversal congruence discharge
+// (REQ-inputs-path-congruence) resolves relative reads against it, so a
+// packageDir that is not the faithful spawn path — a lexically collapsed
+// traversal through a symlink, a path the process never ran in — can
+// admit a read against the wrong base.
 func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
 	var cfg testLogConfig
 	for _, opt := range opts {
@@ -479,6 +485,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	}
 	guardMemo := map[string]bool{}
 	scratchMemo := map[string]bool{}
+	traversalMemo := map[string]bool{}
 	existenceBound := map[pathID]bool{}
 	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
 	cwd := packageDir
@@ -532,7 +539,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				m.Env = append(m.Env, envInput{Name: name})
 			}
 		case "open":
-			ambiguousParent := hasParentTraversal(name)
+			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
 			// Guard coverage demands an unambiguous resolution: a traversal
@@ -561,7 +568,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				addUnverifiable(&m, unverifiableSeen, "relative runtime input after working-directory change: "+id.displayPath())
 			}
 		case "stat":
-			ambiguousParent := hasParentTraversal(name)
+			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
 			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
@@ -632,7 +639,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		// independently seals the observation unverifiable, so admitting
 		// the identity could never clear anything.
 		case "chdir":
-			ambiguousParent := hasParentTraversal(name)
+			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			p := resolvePath(cwd, name)
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
@@ -1354,15 +1361,96 @@ func resolvePath(cwd, name string) string {
 
 func hasParentTraversal(name string) bool {
 	volume := filepath.VolumeName(name)
-	name = strings.TrimPrefix(name, volume)
-	for _, component := range strings.FieldsFunc(name, func(r rune) bool {
-		return r == '/' || filepath.Separator == '\\' && r == '\\'
-	}) {
+	for _, component := range pathComponents(strings.TrimPrefix(name, volume)) {
 		if component == ".." {
 			return true
 		}
 	}
 	return false
+}
+
+// ambiguousTraversal reports whether name carries a ".." component whose
+// kernel path-walk resolution cannot be proven to match lexical cleaning.
+// Congruence is discharged exactly when every directory a ".." steps back
+// across lstats as a real (non-symlink) directory at observation ingest —
+// more than lexical normalization, as REQ-inputs-path-congruence demands.
+// A mid-run change of a crossed component is the same
+// one-process-run-wide residual the scratch admission accepts; a symlink
+// the traversal does not itself step back across is an ordinary path
+// identity, walked identically by the producer and by every later
+// materialization of the recorded path. The ubiquitous test idiom this admits is a repo-root
+// read from the package directory ("../../docs/..."), which previously
+// sealed the whole observation.
+func ambiguousTraversal(cwd, name string, memo map[string]bool) bool {
+	if !hasParentTraversal(name) {
+		return false
+	}
+	key := strconv.Itoa(len(cwd)) + ":" + cwd + name
+	if ambiguous, ok := memo[key]; ok {
+		return ambiguous
+	}
+	ambiguous := !congruentTraversal(cwd, name)
+	memo[key] = ambiguous
+	return ambiguous
+}
+
+// congruentTraversal walks name's components lexically from its resolution
+// base, verifying at each ".." that the directory being stepped out of is
+// an existing non-symlink directory. Any verification failure — a symlink,
+// a non-directory, a vanished component, or an unusable base — refuses
+// fail-closed, and a crossing under a volatile OS root refuses before any
+// probe: those paths classify from the path alone
+// (REQ-inputs-volatile-os-roots), so the verifier must not read them
+// either.
+func congruentTraversal(cwd, name string) bool {
+	volume := filepath.VolumeName(name)
+	rest := strings.TrimPrefix(name, volume)
+	var cur string
+	if filepath.IsAbs(name) {
+		cur = volume + string(filepath.Separator)
+	} else {
+		if !filepath.IsAbs(cwd) {
+			return false
+		}
+		cur = filepath.Clean(cwd)
+	}
+	for _, component := range pathComponents(rest) {
+		switch component {
+		case ".":
+		case "..":
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				// The root's parent is the root under kernel path-walk
+				// semantics too; nothing is crossed.
+				continue
+			}
+			if volatileOSPath(cur) {
+				return false
+			}
+			info, err := congruenceProbe(cur)
+			if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return false
+			}
+			cur = parent
+		default:
+			cur = filepath.Join(cur, component)
+		}
+	}
+	return true
+}
+
+// congruenceProbe is the traversal verifier's filesystem probe, a seam so
+// tests can assert which paths it touches; production uses Lstat — the
+// final component must be judged as itself, never through a link.
+var congruenceProbe = os.Lstat
+
+// pathComponents splits a volume-stripped path into its components with the
+// exact separator predicate the traversal gate uses — one splitter for the
+// gate and the verifier, so the fast path can never disagree with the walk.
+func pathComponents(name string) []string {
+	return strings.FieldsFunc(name, func(r rune) bool {
+		return r == '/' || filepath.Separator == '\\' && r == '\\'
+	})
 }
 
 func classifyPath(moduleDir, p string) (pathID, string) {

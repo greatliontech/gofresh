@@ -705,6 +705,71 @@ func TestNewViewRejectsSourceChangeDuringConstruction(t *testing.T) {
 	}
 }
 
+// TestConstructionDriftNamesTheChangedFile pins content-change attribution:
+// a mid-construction edit that keeps the source membership identical is
+// named through the per-file digests the closure's own reads produced —
+// "changed <path>", never a bare refusal.
+func TestConstructionDriftNamesTheChangedFile(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	var change sync.Once
+	engine, err := New(
+		WithDir(dir),
+		WithAssumePure(func(Subject) bool {
+			change.Do(func() {
+				if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
+					t.Error(err)
+				}
+			})
+			return false
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.NewView(context.Background(), []Subject{subject}, dir)
+	if !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("NewView during source change = %v, want ErrViewChanged", err)
+	}
+	if !strings.Contains(err.Error(), "changed ") || !strings.Contains(err.Error(), "view.go") {
+		t.Fatalf("construction drift does not name the changed file: %v", err)
+	}
+}
+
+// TestConstructionDriftNamesTheChangedCompartmentFile pins content-change
+// attribution over the test-variant compartment: a mid-construction edit of
+// a test-only file is named through the digests the compartment computation
+// itself produced, exactly like a core member.
+func TestConstructionDriftNamesTheChangedCompartmentFile(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
+	if err := os.WriteFile(filepath.Join(dir, "extra_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) { _ = F() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	var change sync.Once
+	engine, err := New(
+		WithDir(dir),
+		WithAssumePure(func(Subject) bool {
+			change.Do(func() {
+				if err := os.WriteFile(filepath.Join(dir, "extra_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) { _ = F() + 1 }\n"), 0o644); err != nil {
+					t.Error(err)
+				}
+			})
+			return false
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.NewView(context.Background(), []Subject{subject}, dir)
+	if !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("NewView during compartment change = %v, want ErrViewChanged", err)
+	}
+	if !strings.Contains(err.Error(), "changed ") || !strings.Contains(err.Error(), "extra_test.go") {
+		t.Fatalf("compartment drift does not name the changed file: %v", err)
+	}
+}
+
 func TestViewDetectsAddedInitializer(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nvar Value int\nfunc F() int { return Value }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}

@@ -199,9 +199,14 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		}
 	})
 	t.Run("ambiguous traversal under root is observed", func(t *testing.T) {
-		// Lexical cleaning of a parent traversal may not match the
-		// filesystem, so the read is never provably inside the root.
-		traversal := root + "/dep/../dep/d.go"
+		// A parent traversal crossing a symlinked component cannot be
+		// proven congruent with its lexical cleaning
+		// (REQ-inputs-path-congruence), so the read is never provably
+		// inside the root.
+		if err := os.Symlink(filepath.Join(root, "dep"), filepath.Join(root, "deplink")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		traversal := root + "/deplink/../dep/d.go"
 		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", WithToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
@@ -209,6 +214,21 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		}
 		if !st.Unverifiable {
 			t.Fatal("ambiguous traversal under the guard root skipped observation")
+		}
+	})
+	t.Run("congruent traversal under root is guard-covered", func(t *testing.T) {
+		// Every crossed component is a real directory, so the traversal
+		// resolves lexically (REQ-inputs-path-congruence's discharge) and
+		// the read is provably inside the root: covered by the guard,
+		// never a recorded observation.
+		traversal := root + "/dep/../dep/d.go"
+		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", WithToolchainRoot(root))
+		st, err := CompletedState(obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Unverifiable {
+			t.Fatalf("congruent traversal under the guard root sealed the observation: %+v", st)
 		}
 	})
 	t.Run("missing path under root is observed", func(t *testing.T) {

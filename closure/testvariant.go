@@ -339,7 +339,7 @@ func (h *Hasher) TestVariantLedger(pkgPath string) (TestVariantLedger, error) {
 // whole-content header, because its bytes also feed unchanged code as data
 // and any movement in them must defeat inertness. An empty file set yields
 // EmptyTestVariantClosure and an empty ledger.
-func computeTestVariantIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool) (testVariantIdentity, error) {
+func computeTestVariantIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool, digests map[string]string) (testVariantIdentity, error) {
 	files = uniqueStrings(append([]string(nil), files...))
 	sort.Strings(files)
 	hasher := sha256.New()
@@ -351,6 +351,12 @@ func computeTestVariantIdentity(dir string, files []string, compiledGo, embedded
 			return testVariantIdentity{}, fmt.Errorf("closure: read %s: %w", path, err)
 		}
 		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
+		if digests != nil {
+			// Compartment members are observed source identities like any
+			// core member: their per-file digests ride to the Hasher's memo
+			// (FileDigest) so drift naming covers them without a re-read.
+			digests[path] = contentDigest(content)
+		}
 		if compiledGo[f] {
 			declarations, header, err := parseTestVariantFile(f, content)
 			if err != nil {

@@ -292,7 +292,16 @@ operation addressed under kernel path-walk semantics. The observation is
 unverifiable when this cannot be established, including any raw path with a `..`
 component that may cross a symlink before lexical cleaning and any relative path
 after a working-directory change. Lexical normalization alone never discharges this
-obligation.
+obligation. A `..`-carrying raw path discharges it when every directory the
+traversal steps back across — the resolution base's own components included —
+lstats at observation ingest as an existing non-symlink directory: no crossing can
+then rebind, so the kernel walk and the lexical cleaning name the same object, and
+a symlink the traversal does not itself step back across is an ordinary path
+identity walked identically by the producer and by every later
+materialization of the recorded path. A mid-run change of a crossed component is the same one-process-run-wide
+residual the scratch admission accepts. Any verification failure — a symlink, a
+non-directory, a vanished component, an unusable base — keeps the fail-closed
+seal, as does every relative read after a working-directory change.
 
 **REQ-inputs-fresh-mutation** (invariant): The fresh-mutation observability extension MAY admit
 a filesystem mutation only when subject-local value and alias analysis proves its
