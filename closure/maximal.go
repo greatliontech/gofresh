@@ -21,6 +21,9 @@ import (
 // subjects in one package share the selected test binary's complete non-standard
 // dependency closure; this deliberately trades declaration precision for bounded
 // analysis cost while preserving the no-false-valid floor (REQ-closure-floor).
+// The package's own test-variant source is partitioned out of the core hash
+// into the Closure's TestVariants compartment
+// (REQ-closure-test-variant-compartment).
 func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, error) {
 	results, _, err := h.ComputeMaximalBatchWithSources(subjects)
 	return results, err
@@ -67,6 +70,7 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 		for _, subject := range byPackage[pkgPath] {
 			results[subject] = Closure{
 				Hash:         maximalSubjectHash(hash, subject),
+				TestVariants: h.testVariants[pkgPath].hash,
 				Unverifiable: unverifiable,
 				Reason:       reason,
 				Unrefinable:  unrefinable,

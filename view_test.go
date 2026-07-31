@@ -58,8 +58,13 @@ func writeObservedViewModule(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"go.mod":           "module example.com/observed\n\ngo 1.26\n",
-		"observed_test.go": "package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\nfunc Sibling() int { return 1 }\n",
+		"go.mod": "module example.com/observed\n\ngo 1.26\n",
+		// Sibling lives in production source so editing it moves the CORE
+		// closure: a test-file sibling edit would move only the test-variant
+		// compartment and stale as "test variants" instead
+		// (REQ-closure-test-variant-compartment).
+		"observed.go":      "package observed\n\nfunc Sibling() int { return 1 }\n",
+		"observed_test.go": "package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n",
 		"fixture":          "one",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -195,7 +200,7 @@ func TestObservedRefinementRecomputesProofAfterMaximalDrift(t *testing.T) {
 	if err := producer.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sourcePath := filepath.Join(dir, "observed_test.go")
+	sourcePath := filepath.Join(dir, "observed.go")
 	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +236,7 @@ func TestCheckObservedPropagatesCancellationDuringDriftAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourcePath := filepath.Join(dir, "observed_test.go")
+	sourcePath := filepath.Join(dir, "observed.go")
 	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		t.Fatal(err)
@@ -3155,11 +3160,11 @@ func TestObservedCheckDeclinesRefinementWithoutBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := os.ReadFile(filepath.Join(dir, "observed_test.go"))
+	source, err := os.ReadFile(filepath.Join(dir, "observed.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "observed_test.go"), append([]byte(nil), append(source, []byte("\nfunc sibling() {}\n")...)...), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "observed.go"), append([]byte(nil), append(source, []byte("\nfunc sibling() {}\n")...)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	plain, err := engine.NewView(context.Background(), []Subject{subject}, dir)
@@ -3276,7 +3281,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if _, err := producer2.AttachObservation(subject, fingerprint2, observation2); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "observed_test.go"), []byte("package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "observed.go"), []byte("package observed\n\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	observations = 0

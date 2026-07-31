@@ -12,8 +12,19 @@ see — dispatch chosen from runtime data, a computed call, a linked side effect
 that trusting the call graph alone would under-cover the closure.
 
 **maximal closure** (term): every reachable non-standard-library package hashed
-whole; the sound floor that every blind spot widens to and the closure never falls
-below.
+whole, excluding the subject package's own test-variant source, which the
+test-variant compartment covers; the sound floor that every blind spot widens to
+and the closure never falls below.
+
+**test-variant compartment** (term): the hash over the subject package's own
+test-only files — the in-package (`pkg [pkg.test]`) and external
+(`pkg_test [pkg.test]`) test-variant file sets minus the base package's file
+set — recorded beside the maximal closure so a sibling-test edit is
+distinguishable from every other drift.
+
+**declaration ledger** (term): the deterministic, syntax-derived list of the
+compartment's top-level declarations and per-file header identities, exposed as
+data for a consumer to persist at capture and diff at check.
 
 **declaration-RTA refinement** (term): the optional narrower closure identified in
 recordings as `gofresh/declaration-rta@1`, using attributed rapid type analysis and
@@ -57,10 +68,110 @@ provably safe shrink rather than an optimistic guess.
 **REQ-closure-view-maximal** (behavior): A multi-subject analysis view MUST use the
 maximal selected test-binary closure of each subject's package as its default source
 guard, hashing every non-standard dependency whole and salting that package closure
-with the subject identity. Subjects in one package therefore observe the same source
-set without making fingerprints transferable between identities; an unrelated
-sibling edit may stale them together, the deliberately safe price for analysis whose
-time and live memory are bounded independently of subject count.
+with the subject identity. The subject package's own test-variant nodes' source
+members are excluded from that core hash: their production members already ride the
+base package's contribution, and their test-only members fold into the test-variant
+compartment instead (REQ-closure-test-variant-compartment). Test-only dependency
+nodes — packages reachable only through test imports — remain core contributions
+whole, dependency nodes recompiled against the test binary included, because a new
+package's initialization enters the test binary's behavior. Subjects in one package
+therefore observe the same source set without making fingerprints transferable
+between identities; an unrelated sibling edit may still stale them together — the
+deliberately safe price for analysis whose time and live memory are bounded
+independently of subject count — but a sibling-test edit now stales them through the
+compartment, where a consumer can recognize it, rather than through the core.
+
+**REQ-closure-test-variant-compartment** (behavior): A fingerprint MUST record,
+beside the maximal closure, the subject package's test-variant compartment: the
+hash over the package's own test-only files — each own test-variant node's file
+set minus the base package's file set, in-package and external variants folded
+together — under the same per-file name-and-content-hash discipline as the core's
+file folding, unsalted, so every subject of one package shares the compartment
+that describes the package. A package with no test files records the defined
+constant empty-set identity, stable for as long as the package has none; the
+empty string is never a computed compartment, so an empty recorded compartment
+identifies a recording that predates the compartment and fails closed to stale
+with reason "test variants". Verdicts order the comparison after the core: an unchanged
+core with a drifted compartment is stale with the stable reason
+"test variants" — the one verdict reason a consumer may discriminate on — and
+neither refinement nor observation evidence rescues it, because gofresh renders
+no judgment about which test-variant deltas are benign. A drifted core keeps
+its existing semantics for maximal-only recordings (stale on the closure), and
+refined rescue of a drifted core additionally requires the recorded
+compartment to equal the current one — the compartment is evidence on every
+path, so strictly more drift never flips a stale verdict to valid: a
+sibling-test edit reads "test variants" whether or not production drift rides
+along. Both unchanged keep the prior semantics exactly, including grafting a
+compatible refined recording's disposition on core equality alone —
+declaration-RTA roots neither sibling tests nor the compartment, while the
+check verdict above still stales on compartment drift regardless. A subject declared in a test file has its own body in the
+compartment, so an edited recorded test moves the compartment — that is the
+partition working, not a leak. A package whose core contribution widens to its
+whole directory (opaque assembly, cgo callback blind spots) may keep test files
+in the core as well: sound, merely undiscriminated. The compartment's
+declaration ledger is a read surface over the same bytes the compartment hash
+folded, derived by syntax-only parsing at the view's observation — never a
+re-read that could straddle a later edit — and served at capture and at check:
+per declaration the file (relative to the package directory), the kind (func,
+method, init, var, const, or type; TestMain is an ordinary func with its name
+visible), the name, the receiver type text for methods, and a content hash over
+the declaration's source range with its doc comment, grouped specs hashed
+individually and positions Go gives semantics folded into the hash — a const
+spec's ordinal within its group (iota and implicit expression repetition), a
+var spec's and an init function's ordinal within its file (package-level
+initialization order) — so an insertion that shifts a sibling's value or a
+reorder of initialization surfaces as changed declarations, never as a silent
+add or an empty delta; per directive-shaped comment (`//go:…` other than
+`//go:build`, wherever it sits in the file) a "directive" entry named by its
+verb and hashed over its text, because directives are behavior-bearing from
+any position — `//go:debug` ahead of the package clause, a floating
+`//go:linkname` inside a group span — and build constraints are the one
+exclusion, compiling to nothing under the current configuration while any
+membership change they cause already surfaces as declaration and file-header
+movement; per file a header identity — for a compiled Go member, over the
+non-declaration remainder: package clause, imports, build constraints, and
+comments outside declarations; for every other member, over the whole
+content, marked embedded and carrying no declarations. Membership comes from
+go list's file-kind facts, never the file name: a test-only embedded
+fixture whose name ends in .go is data — never parsed, never contributing
+declarations, its movement defeating inertness like any embedded member's.
+The kinds are not a partition: a member both compiled and embedded (a
+sibling test file names it in a go:embed directive) keeps its parsed
+declarations while carrying the embedded whole-content header, so any
+movement in its bytes — which unchanged code reads as data — defeats
+inertness fail-closed.
+The ledger is deterministically sorted. The inertness judgment is rendered
+modulo position metadata: any header edit shifts unchanged declarations'
+source positions, and a line directive remaps them — positions are
+diagnostics, not behavior, for this judgment. Two ledgers
+diff into a classified delta — added, changed, and removed declarations plus
+per-file header changes, deterministic for any pair — carrying gofresh's one
+Go-semantics judgment: the delta is inert exactly when no declaration changed
+or was removed and every added declaration is one no unchanged declaration can
+observe — a plain function (no receiver, not init, not TestMain), a const, or
+a type, whose accompanying methods would surface as their own added entries.
+The positional folding above is what keeps that whitelist honest: a const
+inserted mid-group or a reordered var or init reads as changed sibling
+declarations, so only additions that leave every existing declaration's
+meaning intact classify as added. Directive entries are outside the
+whitelist, so any directive movement — added, changed, or removed — defeats
+inertness; header benignity below covers only the directive-free remainder.
+Each rejected kind names the mechanism that reaches unchanged code: a package
+var's initializer runs during test-binary initialization; an init function
+likewise; TestMain replaces the harness entry wrapping every unchanged test; a
+method can flip interface satisfaction observed by unchanged type assertions
+and dispatch. Go-file header-only changes — imports, build-constraint text,
+comments outside declarations — never defeat inertness: this is where the
+judgment leans on the partition rule, because test-only dependency nodes stay
+in the core, so the core equality under which a consumer reads this delta
+already proves no new dependency package entered the test binary, and an
+import edit among already-present packages is init-benign. An embedded
+member's header movement defeats inertness fail-closed — whatever the file's
+name: test-only embedded bytes feed unchanged declarations that read them.
+Inertness is
+Go-semantics data — it claims the delta cannot change the behavior of any
+unchanged declaration and nothing more; what inertness licenses is the
+consumer's policy, never gofresh's.
 
 **REQ-closure-refinement-policy** (behavior): The declaration-RTA refinement MUST be
 optional and selected by the caller for capture, check, and producer validation;
@@ -204,7 +315,9 @@ for another. Batching is bounded so attributed state can be discarded incrementa
 rather than growing with every subject in the view.
 The same equivalence applies to maximal source identities: a batched subject's
 source-file set is exactly the set an independent maximal view would expose,
-while the view-wide set is their union.
+while the view-wide set is their union. It applies equally to both recorded
+hashes: a batched subject's core maximal hash and test-variant compartment are
+exactly the pair an independent computation of that subject would produce.
 
 **REQ-closure-observability-batch-equivalence** (invariant): Sharing observability
 analysis across subjects MUST yield exactly the proof disposition, complete effect set,

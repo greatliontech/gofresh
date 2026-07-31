@@ -86,7 +86,13 @@ type View struct {
 	// fileDigests: construction-time content digest per source identity,
 	// for naming moved files in validation refusals
 	// (REQ-fresh-producer-view's naming arm).
-	fileDigests          map[string]string
+	fileDigests map[string]string
+	// testVariantLedgers: per-package declaration ledgers over the
+	// test-variant compartment, derived at construction from the same file
+	// reads as the compartment hashes the agreement pair compares, so the
+	// served ledger describes exactly the observed bytes
+	// (REQ-closure-test-variant-compartment, REQ-fresh-coherent-view).
+	testVariantLedgers   map[string]closure.TestVariantLedger
 	capturedRefined      map[Subject]bool
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
@@ -225,6 +231,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		sourceFiles:          first.sourceFiles,
 		sourceFilesBySubject: first.sourceFilesBySubject,
 		fileDigests:          first.fileDigests,
+		testVariantLedgers:   first.testVariantLedgers,
 		capturedRefined:      make(map[Subject]bool, len(unique)),
 		capturedObserved:     make(map[Subject]bool, len(unique)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
@@ -246,6 +253,10 @@ type viewObservation struct {
 	// that moves inside that window names imprecisely while the closure
 	// comparison still refuses.
 	fileDigests map[string]string
+	// testVariantLedgers: per-package compartment ledgers, pure functions
+	// of the same bytes the compartment hashes fold, so the agreement
+	// pair's hash comparison vouches for them.
+	testVariantLedgers map[string]closure.TestVariantLedger
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
@@ -296,6 +307,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		purity:               make(map[Subject]string, len(subjects)),
 		openWorld:            make(map[Subject]bool, len(subjects)),
 		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
+		testVariantLedgers:   make(map[string]closure.TestVariantLedger, len(packages)),
+	}
+	for _, pkg := range packages {
+		// Served from the hasher's compartment memo: the ledger was derived
+		// from the same reads as the compartment hash above, never a
+		// re-read that could straddle an edit.
+		ledger, err := hasher.TestVariantLedger(pkg)
+		if err != nil {
+			return viewObservation{}, err
+		}
+		observation.testVariantLedgers[pkg] = ledger
 	}
 	seenSource := map[string]bool{}
 	for _, request := range requests {
@@ -400,7 +422,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -421,6 +443,27 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 		return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	return slices.Clone(files), nil
+}
+
+// TestVariantLedger returns the declaration ledger over subject's package
+// test-variant compartment, as observed by this view: it is derived at view
+// construction from the same file reads as the compartment hash the
+// fingerprint records, so a caller persists it at capture and diffs it at
+// check against exactly the bytes the verdict compared — never a re-read that
+// could straddle a later edit (REQ-closure-test-variant-compartment,
+// REQ-fresh-coherent-view). The returned value is caller-owned. A package with
+// no test files yields an empty ledger.
+func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if _, ok := v.maximal[subject]; !ok {
+		return TestVariantLedger{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	}
+	ledger := v.testVariantLedgers[subject.Package]
+	return TestVariantLedger{
+		Declarations: slices.Clone(ledger.Declarations),
+		FileHeaders:  slices.Clone(ledger.FileHeaders),
+	}, nil
 }
 
 func (v *View) captureRefined(ctx context.Context, subject Subject, beforePublish func()) (Fingerprint, error) {
@@ -461,7 +504,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 		result := make(map[Subject]Fingerprint, len(v.subjects))
 		for _, subject := range v.subjects {
 			cl := v.maximal[subject]
-			result[subject] = Fingerprint{MaximalClosure: cl.Hash, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
+			result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
 		}
 		return result, nil
 	}
@@ -499,11 +542,12 @@ func (v *View) refinedFingerprintLocked(subject Subject) Fingerprint {
 	}
 	refinement.Evidence = refinementEvidence(v.maximal[subject].Hash, refinement)
 	return Fingerprint{
-		MaximalClosure:  v.maximal[subject].Hash,
-		Refinement:      refinement,
-		Guards:          v.guards,
-		PurityAssertion: v.purity[subject],
-		ResultKind:      v.kind,
+		MaximalClosure:     v.maximal[subject].Hash,
+		TestVariantClosure: v.maximal[subject].TestVariants,
+		Refinement:         refinement,
+		Guards:             v.guards,
+		PurityAssertion:    v.purity[subject],
+		ResultKind:         v.kind,
 	}
 }
 
@@ -592,6 +636,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 	proof.Evidence = observationProofEvidence(v.maximal[subject].Hash, assertion, proof)
 	return Fingerprint{
 		MaximalClosure:       v.maximal[subject].Hash,
+		TestVariantClosure:   v.maximal[subject].TestVariants,
 		ObservationAssertion: assertion,
 		ObservationProof:     proof,
 		Guards:               v.guards,
@@ -701,12 +746,11 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
-		if rec.MaximalClosure == "" {
-			verdicts[subject] = Verdict{Stale, "closure"}
-			continue
-		}
-		if rec.MaximalClosure != cl.Hash && !v.refinementDeclared() {
-			verdicts[subject] = Verdict{Stale, "closure"}
+		// The shared evidence ladder (core, compartment, fail-closed
+		// pre-partition tiers) decides evidence-only staleness once for
+		// every check surface (recordedEvidenceVerdict).
+		if verdict, failed := recordedEvidenceVerdict(rec, cl, v.refinementDeclared()); failed {
+			verdicts[subject] = verdict
 			continue
 		}
 		if rec.MaximalClosure != cl.Hash && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
@@ -816,16 +860,11 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
-		if rec.MaximalClosure == "" {
-			verdicts[subject] = Verdict{Stale, "closure"}
-			continue
-		}
-		// A drifted recording under no declared budget is stale on its
-		// maximal closure regardless of the refined evidence it carries
-		// (REQ-fresh-refinement-failclosed) - the closure staleness is
-		// stated before any evidence-tier reasoning.
-		if rec.MaximalClosure != maximal.Hash && !v.refinementDeclared() {
-			verdicts[subject] = Verdict{Stale, "closure"}
+		// The shared evidence ladder (core, compartment, fail-closed
+		// pre-partition tiers) decides evidence-only staleness once for
+		// every check surface (recordedEvidenceVerdict).
+		if verdict, failed := recordedEvidenceVerdict(rec, maximal, v.refinementDeclared()); failed {
+			verdicts[subject] = verdict
 			continue
 		}
 		if rec.Refinement != (Refinement{}) && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
@@ -915,14 +954,6 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
 	}
 	return finish()
-}
-
-// checkAfterClosure decides a manifest-less recording: its only caller reaches
-// it with RuntimeInputs empty, so the runtime state is the zero value, no
-// observation runs, and there is no manifest to attribute movers from.
-func (v *View) checkAfterClosure(recorded Fingerprint, subject Subject, cl closure.Closure) Verdict {
-	var rt runtimeinput.State
-	return decideAfterClosure(recorded, cl, v.guards, rt, v.kind, v.purityMatches(recorded, subject))
 }
 
 func (v *View) purityMatches(recorded Fingerprint, subject Subject) bool {
@@ -1082,6 +1113,7 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 		sourceFiles:          v.sourceFiles,
 		sourceFilesBySubject: v.sourceFilesBySubject,
 		fileDigests:          v.fileDigests,
+		testVariantLedgers:   v.testVariantLedgers,
 		capturedRefined:      make(map[Subject]bool, len(v.subjects)),
 		capturedObserved:     make(map[Subject]bool, len(v.subjects)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(v.subjects)),

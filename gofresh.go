@@ -36,6 +36,25 @@ const (
 	Measurement = guard.Measurement
 )
 
+// TestVariantLedger and its element types are the declaration-level read
+// surface over a package's test-variant compartment, served by
+// View.TestVariantLedger (REQ-closure-test-variant-compartment).
+type (
+	TestVariantLedger            = closure.TestVariantLedger
+	TestVariantDeclaration       = closure.TestVariantDeclaration
+	TestVariantFileHeader        = closure.TestVariantFileHeader
+	TestVariantDelta             = closure.TestVariantDelta
+	TestVariantDeclarationChange = closure.TestVariantDeclarationChange
+	TestVariantHeaderChange      = closure.TestVariantHeaderChange
+)
+
+// DiffTestVariantLedgers classifies the delta between a recorded and a current
+// compartment ledger; TestVariantDelta.Inert carries the one Go-semantics
+// judgment gofresh renders over it (REQ-closure-test-variant-compartment).
+func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
+	return closure.DiffTestVariantLedgers(before, after)
+}
+
 // Subject names the symbol whose freshness is tracked — a package import path and a
 // symbol within it, either a function name or a "Type.Method" method reference.
 type Subject struct {
@@ -81,12 +100,23 @@ type ObservationProof struct {
 
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
 // wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
-// hash, optional refinement and observability evidence, guard values, attributable
+// hash, its package's test-variant compartment hash, optional refinement and
+// observability evidence, guard values, attributable
 // observation and purity assertions, result kind, and the caller's runtime-input manifest and digest evidence.
 // The caller serializes and stores it alongside its result, and pins any further
 // domain facts of its own (REQ-fresh-caller-pins).
 type Fingerprint struct {
-	MaximalClosure       string
+	MaximalClosure string
+	// TestVariantClosure is the subject package's test-variant compartment:
+	// 32 hex over the package's own test-only files, which the maximal
+	// closure excludes. A sibling test edit moves only this compartment, so
+	// a consumer validating test-binary evidence can tell "a sibling test
+	// moved" (stale with reason "test variants") from any other drift. A
+	// package with no test files records the stable empty-set identity
+	// (closure.EmptyTestVariantClosure); an empty value identifies a
+	// recording that predates the partition and fails closed to stale
+	// (REQ-closure-test-variant-compartment).
+	TestVariantClosure   string
 	Refinement           Refinement
 	ObservationAssertion string
 	ObservationProof     ObservationProof
@@ -376,11 +406,57 @@ func (e *Engine) guardInputs() []string {
 // (REQ-inputs-absent-asserted). commit/dirty are never consulted
 // (REQ-fresh-commit-independent).
 func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
-	// Closure guard: the recorded hash must equal the recomputed current hash.
-	if rec.MaximalClosure == "" || rec.MaximalClosure != cl.Hash {
-		return Verdict{Stale, "closure"}
+	// The evidence tiers are the shared ladder with no refinement declared:
+	// any core drift is stale on the closure.
+	if verdict, failed := recordedEvidenceVerdict(rec, cl, false); failed {
+		return verdict
 	}
 	return decideAfterClosure(rec, cl, cur, rt, kind, pure)
+}
+
+// recordedEvidenceVerdict is the evidence-only verdict ladder shared by every
+// check surface (decide, checkBatch, CheckObservedBatch), so the tier
+// ordering is written once: an unevaluable recorded core is stale on the
+// closure (REQ-fresh-sound); an unchanged core compares the test-variant
+// compartment next, stale with the stable discriminating reason
+// "test variants", never rescued by refinement or observation evidence, an
+// empty recorded compartment failing closed
+// (REQ-closure-test-variant-compartment); a drifted core is stale on the
+// closure when no refinement is declared (REQ-fresh-refinement-failclosed).
+// A drifted core under a declared refinement compares the compartment before
+// any refined evidence is consulted: refined rescue additionally requires the
+// recorded compartment to equal the current one, so strictly more drift can
+// never flip a stale verdict to valid — a sibling-test edit reads
+// "test variants" whether or not production drift rides along, and a
+// pre-partition recording (empty compartment) can never be rescued
+// (REQ-fresh-hierarchical-check). Maximal-only recordings keep the truthful
+// "closure" reason on core drift. Records surviving the ladder proceed to
+// the surface's own refinement and guard tiers.
+func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure, refinementDeclared bool) (Verdict, bool) {
+	if rec.MaximalClosure == "" {
+		return Verdict{Stale, "closure"}, true
+	}
+	if rec.MaximalClosure == current.Hash && compartmentStale(rec.TestVariantClosure, current.TestVariants) {
+		return Verdict{Stale, "test variants"}, true
+	}
+	if rec.MaximalClosure != current.Hash {
+		if !refinementDeclared {
+			return Verdict{Stale, "closure"}, true
+		}
+		if rec.Refinement != (Refinement{}) && compartmentStale(rec.TestVariantClosure, current.TestVariants) {
+			return Verdict{Stale, "test variants"}, true
+		}
+	}
+	return Verdict{}, false
+}
+
+// compartmentStale reports whether a recorded test-variant compartment fails
+// against the current one. An empty recorded value identifies a recording
+// that predates the partition and fails closed; an empty current value is
+// never a computed compartment, so it can only refuse
+// (REQ-closure-test-variant-compartment).
+func compartmentStale(recorded, current string) bool {
+	return recorded == "" || recorded != current
 }
 
 func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {

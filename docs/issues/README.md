@@ -3,6 +3,11 @@
 Parked deferrals. Each entry carries a `Lands:` trigger; the doc is deleted
 when its work lands (git holds history).
 
+- **[testing-log-output-defeats-observability](testing-log-output-defeats-observability.md)** — the
+  observability proof classifies `t.Fatal`'s formatted output as unobservable, so file-reading
+  oracles that can fail through it are permanently uncacheable under the observed policy.
+  *Lands: when a consumer needs observed-policy caching for `t.Fatal`-failing oracles that read
+  runtime inputs, or the next observability-analysis precision pass.*
 - **[closure-digests-reused-for-naming](closure-digests-reused-for-naming.md)** — validation's
   moved-file naming re-reads and re-hashes files the closure tier already digested; plumbing
   the closure's own per-file digests into the view removes the cost and the attribution

@@ -39,7 +39,8 @@ result that is a measurement.
 current tree — one of valid, stale, or unverifiable.
 
 **fingerprint** (term): the recorded evidence a verdict is computed from — the
-subject's maximal source-closure hash, optional refinement evidence, optional
+subject's maximal source-closure hash, its package's test-variant compartment
+hash, optional refinement evidence, optional
 attributable observation-completeness assertion and observability proof evidence, any
 attributable purity assertion used to override unverifiability, the result kind
 selecting its applicable guards, and the value of every applicable guard.
@@ -84,7 +85,12 @@ fails, so the result is recomputed; unverifiable when every guard would hold but
 the source closure reaches an unverifiable dependence, so validity can be neither
 proven nor refuted and the result is recomputed with the reason recorded. A
 verdict's reason is human-oriented diagnostic data: its wording is not a stable
-vocabulary and carries no contract beyond accompanying its status.
+vocabulary and carries no contract beyond accompanying its status — with one
+exception: the reason "test variants" is stable vocabulary a consumer may
+discriminate on, reporting test-variant compartment drift under an unchanged
+core, a compartment drift that blocks refined rescue of a drifted core, or a
+recording that predates the compartment and fails closed
+(REQ-closure-test-variant-compartment).
 
 **REQ-fresh-sound** (invariant): A subject MUST be reported valid only when every
 applicable guard provably holds over a source closure that is a superset of the
@@ -141,7 +147,8 @@ receiving the same verdict, so an unrelated commit never invalidates a result
 whose inputs are unchanged.
 
 **REQ-fresh-fingerprint-data** (structural): A fingerprint MUST be exposed as its
-constituent guard values, maximal closure hash, optional refinement evidence, and
+constituent guard values, maximal closure hash, test-variant compartment hash,
+optional refinement evidence, and
 optional attributable observation-completeness assertion and observability proof
 evidence, attributable purity assertion, and result kind as data, carrying no
 persistence or wire format of its own — the caller owns how a
@@ -150,11 +157,32 @@ explicit rather than inferred: a refined recording carries a non-empty recognize
 strategy/version identity and complete, internally consistent refined evidence; a
 maximal-only recording carries none.
 
+> Compatibility posture of the test-variant partition: every recording captured
+> before the compartment existed is stale exactly once against a partitioned
+> check — a package with test files no longer folds them into its recomputed
+> core, so the recorded core cannot match, and a package without test files
+> carries an empty recorded compartment, which fails closed
+> (REQ-closure-test-variant-compartment). A refined pre-partition recording is
+> no exception: refined evidence never rescues its drifted core, because
+> rescue requires a recorded compartment to compare, and an absent one fails
+> closed the same way (REQ-fresh-hierarchical-check). This one-time global
+> staleness is accepted: recomputing every pre-partition result is the safe
+> direction, and the alternative — honoring old evidence whose covered set
+> differs from the current computation — would be a false valid waiting to
+> happen.
+
 **REQ-fresh-hierarchical-check** (behavior): A check MUST compare the maximal closure
 before considering refinement. When the maximal hash is unchanged, it does not run
-refinement analysis. When the maximal hash changed, a maximal-only recording is
-stale; a refined recording under the current recognized strategy computes the
-current refined closure and remains reusable only when the refined hashes agree.
+refinement analysis, and the test-variant compartment is compared next: a drifted
+or absent recorded compartment is stale with reason "test variants" before any
+refinement evidence is consulted (REQ-closure-test-variant-compartment). When the
+maximal hash changed, a maximal-only recording is
+stale; a refined recording under the current recognized strategy compares the
+compartment first — a drifted or absent recorded compartment fails closed to
+stale with reason "test variants" before refinement is consulted, on the
+drifted path exactly as on the unchanged one, so strictly more drift never
+flips stale to valid — then computes the current refined closure and remains
+reusable only when the refined hashes agree.
 A refined hash mismatch is stale. Guards other than the source closure still apply
 normally after source equivalence is established.
 
@@ -257,7 +285,8 @@ expressed through a caller-supplied analysis budget, never through cancellation.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's
-maximal closure and their view-wide union, excluding standard-library and
+maximal closure or its package's test-variant compartment and their view-wide
+union, excluding standard-library and
 immutable module-cache source represented by other guards. Subject-local queries
 must not include identities contributed only by another subject in the same
 view, so a producer can prove whether the selected bytes behind each result are

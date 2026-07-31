@@ -34,7 +34,18 @@ import (
 // `valid`/`stale`. Unverifiable is a check-time verdict; the hash is always
 // computed (and recorded at run time, REQ-guard-recompute) regardless.
 type Closure struct {
-	Hash         string
+	Hash string
+	// TestVariants is the subject package's test-variant compartment: 32 hex
+	// over the package's own test-only files — the in-package and external
+	// test-variant file sets minus the base package's file set — under the
+	// same name\x00sha256 discipline as the core hash's file folding. The
+	// core Hash excludes those files, so a sibling test edit moves only this
+	// compartment; a package with no test files carries the stable
+	// EmptyTestVariantClosure identity. Unsalted: subjects of one package
+	// share the compartment, which describes the package, not the subject
+	// (REQ-closure-test-variant-compartment). Empty on refined closures,
+	// whose evidence is bound to the core alone.
+	TestVariants string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
 	Widened      bool   // declaration refinement fell back to the maximal package closure
@@ -65,6 +76,7 @@ type Hasher struct {
 	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
+	testVariants   map[string]testVariantIdentity  // test-variant compartments by requested package
 	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
@@ -159,7 +171,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
-		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testVariantIdentity{},
 	}, nil
 }
 
@@ -173,7 +185,7 @@ func (h *Hasher) BoundAnalysis(bound context.Context) error {
 	if bound == nil {
 		return errors.New("closure: nil analysis bound")
 	}
-	if len(h.progs) != 0 || len(h.progErrs) != 0 || len(h.lists) != 0 || len(h.maximalEffects) != 0 {
+	if len(h.progs) != 0 || len(h.progErrs) != 0 || len(h.lists) != 0 || len(h.maximalEffects) != 0 || len(h.testVariants) != 0 {
 		return errors.New("closure: analysis already begun; bound the Hasher before its first compute")
 	}
 	h.ctx = bound
@@ -260,13 +272,63 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	if err != nil {
 		return nil, nil, err
 	}
+	// The subject package's own test-variant nodes leave the core: their
+	// production members ride the base node's contribution, and their
+	// test-only members fold into the test-variant compartment instead
+	// (REQ-closure-test-variant-compartment). Dependency nodes stay in core
+	// whole, test-recompiled variants of dependencies included, so a test
+	// import pulling a NEW package still moves the core.
+	baseFiles := map[string]bool{}
+	compartmentDir := ""
+	for _, p := range pkgs {
+		if p.ImportPath == pkgPath && p.ForTest == "" {
+			for _, f := range p.sourceFiles() {
+				baseFiles[f] = true
+			}
+			compartmentDir = p.Dir
+		}
+	}
 	seen := map[string]bool{}
 	seenFile := map[string]bool{}
+	seenTestOnly := map[string]bool{}
 	var contribs []string
 	var sourceFiles []string
+	var testOnly []string
+	// compiledGo and embeddedData carry go list's file-kind facts into the
+	// compartment: only a variant node's GoFiles are Go source the test
+	// binary compiles; an embedded member is data whatever its name — a
+	// testdata fixture ending in .go included — and must never be parsed
+	// as source. The kinds are not a partition: a compiled test file can
+	// also be embedded by a sibling (//go:embed helper_test.go), and its
+	// bytes then feed unchanged code as data too
+	// (REQ-closure-test-variant-compartment).
+	compiledGo := map[string]bool{}
+	embeddedData := map[string]bool{}
 	for _, p := range pkgs {
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
+		}
+		if ownTestVariantOf(p, pkgPath, compartmentDir) {
+			if compartmentDir == "" {
+				compartmentDir = p.Dir
+			}
+			for _, f := range p.GoFiles {
+				if !baseFiles[f] {
+					compiledGo[f] = true
+				}
+			}
+			for _, f := range p.EmbedFiles {
+				if !baseFiles[f] {
+					embeddedData[f] = true
+				}
+			}
+			for _, f := range p.sourceFiles() {
+				if !baseFiles[f] && !seenTestOnly[f] {
+					seenTestOnly[f] = true
+					testOnly = append(testOnly, f)
+				}
+			}
+			continue
 		}
 		c, files, err := h.contributionAndFilesFor(pkgPath, p)
 		if err != nil {
@@ -281,6 +343,21 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 				seenFile[file] = true
 				sourceFiles = append(sourceFiles, file)
 			}
+		}
+	}
+	identity, err := computeTestVariantIdentity(compartmentDir, testOnly, compiledGo, embeddedData)
+	if err != nil {
+		return nil, nil, err
+	}
+	h.testVariants[pkgPath] = identity
+	// The compartment's bytes are part of the view's observed source
+	// identities: a producer's provenance and drift naming cover them like
+	// any core member (REQ-fresh-view-source-identities).
+	for _, f := range identity.files {
+		path := filepath.Join(compartmentDir, f)
+		if !seenFile[path] {
+			seenFile[path] = true
+			sourceFiles = append(sourceFiles, path)
 		}
 	}
 	sort.Strings(contribs)

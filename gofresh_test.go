@@ -21,12 +21,13 @@ import (
 func TestDecide(t *testing.T) {
 	base := func() (Fingerprint, closure.Closure, guard.Guards, runtimeinput.State) {
 		return Fingerprint{
-				MaximalClosure: "C",
-				Guards:         guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
-				RuntimeInputs:  "MANIFEST",
-				RuntimeDigest:  "D",
+				MaximalClosure:     "C",
+				TestVariantClosure: "T",
+				Guards:             guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
+				RuntimeInputs:      "MANIFEST",
+				RuntimeDigest:      "D",
 			},
-			closure.Closure{Hash: "C"},
+			closure.Closure{Hash: "C", TestVariants: "T"},
 			guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
 			runtimeinput.State{Digest: "D", OK: true}
 	}
@@ -47,6 +48,22 @@ func TestDecide(t *testing.T) {
 		{"closure both empty", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			f.MaximalClosure = ""
 			c.Hash = "" // an unevaluable closure is not proof, so never valid (REQ-fresh-sound)
+		}, Measurement, false, Stale, "closure"},
+		{"test variant mismatch", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.TestVariants = "T2"
+		}, Measurement, false, Stale, "test variants"},
+		// A recorded compartment that predates the partition is absence of
+		// proof, never valid — even when the current compartment is also
+		// unevaluable (REQ-closure-test-variant-compartment fail-closed arm).
+		{"test variant missing on pre-partition record", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			f.TestVariantClosure = ""
+			c.TestVariants = ""
+		}, Measurement, false, Stale, "test variants"},
+		// Core drift wins over compartment drift: the compartment discriminates
+		// only inside an unchanged core (REQ-closure-test-variant-compartment).
+		{"core and compartment both drifted", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.Hash = "C2"
+			c.TestVariants = "T2"
 		}, Measurement, false, Stale, "closure"},
 		{"runtime digest mismatch", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) { r.Digest = "D2" }, Measurement, false, Stale, "runtimeinputs"},
 		{"runtime not OK", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) { r.OK = false }, Measurement, false, Stale, "runtimeinputs"},
@@ -102,18 +119,25 @@ func TestDecide(t *testing.T) {
 // and non-empty so the property exercises the unverifiability branch, not a guard
 // mismatch.
 func FuzzDecideSound(f *testing.F) {
-	f.Add("C", "C", true, false, "", false)
-	f.Add("C", "C", false, false, "M", true)
-	f.Fuzz(func(t *testing.T, recCl, curCl string, clUnver, pure bool, manifest string, rtUnver bool) {
+	f.Add("C", "C", "T", "T", true, false, "", false)
+	f.Add("C", "C", "T", "T2", false, false, "M", true)
+	f.Add("C", "C", "", "T", false, false, "M", false)
+	f.Fuzz(func(t *testing.T, recCl, curCl, recTv, curTv string, clUnver, pure bool, manifest string, rtUnver bool) {
 		g := guard.Guards{Toolchain: "t", BuildConfig: "b"}
-		rec := Fingerprint{MaximalClosure: recCl, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
-		cl := closure.Closure{Hash: curCl, Unverifiable: clUnver}
+		rec := Fingerprint{MaximalClosure: recCl, TestVariantClosure: recTv, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
+		cl := closure.Closure{Hash: curCl, TestVariants: curTv, Unverifiable: clUnver}
 		rt := runtimeinput.State{Digest: "D", Unverifiable: rtUnver, OK: true}
 		v := decide(rec, cl, g, rt, CodeResult, pure)
 		if v.Status == Valid && !pure {
 			if cl.Unverifiable || (rec.RuntimeInputs != "" && rt.Unverifiable) {
 				t.Fatalf("sound violated: valid with an unverifiable dependence and no purity override (rec=%+v cl=%+v rt=%+v)", rec, cl, rt)
 			}
+		}
+		// The compartment is evidence like the core: valid requires a
+		// non-empty recorded compartment equal to the current one
+		// (REQ-closure-test-variant-compartment).
+		if v.Status == Valid && (rec.TestVariantClosure == "" || rec.TestVariantClosure != cl.TestVariants) {
+			t.Fatalf("sound violated: valid across test-variant compartment drift (rec=%+v cl=%+v)", rec, cl)
 		}
 	})
 }
@@ -134,7 +158,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "Refinement", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "TestVariantClosure", "Refinement", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
