@@ -22,6 +22,7 @@ import (
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -146,6 +147,10 @@ type Engine struct {
 	// observeHook observes every source/guard/purity observation pass. Tests use
 	// it to pin how many observations an operation performs.
 	observeHook func()
+	// snapshotHook observes the env snapshot each precise-analysis bracket
+	// derives its configuration from — a test seam pinning that the bracket
+	// reuses the view's construction snapshot instead of re-reading go env.
+	snapshotHook func(*gotool.EnvSnapshot)
 }
 
 // Option configures an Engine.

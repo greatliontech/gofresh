@@ -36,13 +36,21 @@ var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailab
 // behind a caller-supplied subject set. It can serve a current check batch or a
 // producer transaction; analysis state is never shared with another View.
 type View struct {
-	mu                   sync.RWMutex
-	engine               *Engine
-	subjects             []Subject
-	requests             []closure.Subject
-	packages             []string
-	moduleDir            string
-	kind                 Kind
+	mu        sync.RWMutex
+	engine    *Engine
+	subjects  []Subject
+	requests  []closure.Subject
+	packages  []string
+	moduleDir string
+	kind      Kind
+	// snapshot is the construction pass's env snapshot. The process
+	// environment is immutable configuration (REQ-fresh-coherent-view);
+	// go env FILE values can still change on disk, so a bracket reusing
+	// this snapshot resolves only GOMODCACHE from it, revalidates GOFLAGS
+	// live before any load (the memo write precedes the closing compare),
+	// and relies on the closing pass's fresh snapshot to refuse any drift
+	// the guards cover.
+	snapshot             *gotool.EnvSnapshot
 	maximal              map[Subject]closure.Closure
 	observable           map[Subject]closure.Observability
 	guards               guard.Guards
@@ -182,6 +190,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
+		snapshot:             first.snapshot,
 		maximal:              first.maximal,
 		observable:           make(map[Subject]closure.Observability, len(unique)),
 		guards:               first.guards,
@@ -197,6 +206,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 }
 
 type viewObservation struct {
+	snapshot             *gotool.EnvSnapshot
 	maximal              map[Subject]closure.Closure
 	guards               guard.Guards
 	purity               map[Subject]string
@@ -258,6 +268,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return viewObservation{}, err
 	}
 	observation := viewObservation{
+		snapshot:             snapshot,
 		maximal:              make(map[Subject]closure.Closure, len(subjects)),
 		guards:               guards,
 		purity:               make(map[Subject]string, len(subjects)),
@@ -836,6 +847,7 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 		packages:             v.packages,
 		moduleDir:            v.moduleDir,
 		kind:                 v.kind,
+		snapshot:             v.snapshot,
 		maximal:              v.maximal,
 		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
 		guards:               v.guards,
@@ -1170,7 +1182,10 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
-	hasher, err := closure.NewAtContextEnv(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags...)
+	if v.engine.snapshotHook != nil {
+		v.engine.snapshotHook(v.snapshot)
+	}
+	hasher, err := closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.snapshot, v.engine.buildFlags...)
 	if err != nil {
 		return err
 	}

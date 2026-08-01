@@ -176,7 +176,12 @@ constructing a current-tree view re-observes the tree and environment rather tha
 inheriting first-use state from an older view. The complete process environment used
 for Go commands and package loading is immutable analysis configuration: by default
 the environment captured when the engine is constructed, or an explicit complete
-environment supplied by the caller. Every source load, Go invocation, purity scan,
+environment supplied by the caller. Values the go command additionally reads from
+its environment file are not immutable: a later analysis bracket may reuse the
+view's construction-time reading only for module-cache resolution, must
+revalidate build-flag values live before any load whose derivations persist,
+and relies on its closing observation's fresh reading to refuse any
+guard-covered drift. Every source load, Go invocation, purity scan,
 and guard observation in the view uses that same environment, so workspace mode,
 persistent Go configuration, toolchain selection, and source selection cannot differ
 between the closure and the binary the guards describe. The host process selects the

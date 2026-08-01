@@ -18,9 +18,12 @@ chunks 1–2 are spec amendments).
 - [x] 4. Reason channel consolidates onto typed effects; the one contractual
       projection ("test variants") stays; duplicate `*Reason`/`*Effects`
       walker pairs collapse.
-- [ ] 5. Observed-proof path stops re-loading: capture batches share the
-      pass snapshot and Hasher state, `computeGroup` caches its program,
-      duplicate `go list`/`go env` execs collapse.
+- [x] 5. Observed-proof path: the capture bracket reuses the view's
+      construction env snapshot (env is immutable configuration), and the
+      observability batch releases each group's whole-program SSA with the
+      group — bounded peak, resolving the retention issue; the view load
+      stays out of the bracket (its facts are construction-generation and
+      the memo writes before the closing compare).
 - [ ] 6. In-pass cross-package contribution memo: shared dependency files
       hash once per pass, not once per subject package.
 - [ ] 7. tier2 allocation diet: visited-set reuse, type-identity keys

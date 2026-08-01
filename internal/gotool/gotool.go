@@ -61,9 +61,13 @@ func runInContext(ctx context.Context, dir string, env []string, args ...string)
 // EnvSnapshot is one observation pass's single `go env -json` read: every
 // same-pass consumer of a go-env value - the build-config digest, GOFLAGS
 // validation, GOMODCACHE resolution - derives from it instead of probing
-// again, so one pass pays one env exec. The snapshot is pass-scoped by
-// construction: sharing it across passes would let a mid-run environment
-// change escape a later pass's observation.
+// again, so one pass pays one env exec. The snapshot is pass-scoped for
+// record-producing passes: sharing it across such passes would let a
+// mid-run environment change escape a later pass's observation. A
+// precise-analysis bracket may reuse its view's construction snapshot for
+// GOMODCACHE resolution only, revalidating GOFLAGS live, because the
+// bracket's closing pass takes a fresh snapshot whose guard comparison
+// refuses any covered drift.
 type EnvSnapshot struct {
 	// JSON is the raw `go env -json` output, byte-identical to a direct
 	// probe so digests derived from it cannot drift.

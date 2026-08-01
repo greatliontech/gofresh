@@ -363,6 +363,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			if h.memoScope != "" && closureHash != "" {
 				storeMemo(h.memoScope, closureHash, unrooted)
 			}
+			delete(h.progs, group.path)
 			continue
 		}
 		metas, err := h.list(group.path)
@@ -396,6 +397,14 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		if h.memoScope != "" && closureHash != "" {
 			storeMemo(h.memoScope, closureHash, computed)
 		}
+		// Programs are per-package test binaries: no later group can reuse
+		// this one, so retaining it would grow peak memory with the batch's
+		// package count instead of its largest single binary (measured
+		// 10.4 GB against 614 MB on a 33-package set). Load failures stay
+		// memoized so the isolation retry never repeats a failing load; a
+		// completed group's subjects retry through the full-group memo hit,
+		// so only a failed memo write makes a retry reload.
+		delete(h.progs, group.path)
 	}
 	if err := h.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)

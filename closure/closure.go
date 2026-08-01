@@ -134,6 +134,27 @@ func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags .
 	return NewAtContextEnvSnapshot(ctx, dir, env, nil, buildFlags...)
 }
 
+// NewAtContextEnvBracket is NewAtContextEnvSnapshot for a precise-analysis
+// bracket that persists memo entries: GOMODCACHE resolves from the
+// construction snapshot, but GOFLAGS is validated LIVE — a bracket's loads
+// read the go env file at spawn, so an overlay written after view
+// construction must refuse here, before any load can derive memo values
+// under a key whose GOFLAGS digest predates it
+// (REQ-closure-observability-memo's byte-equivalence).
+func NewAtContextEnvBracket(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
+	if ctx == nil {
+		return nil, errors.New("closure: nil context")
+	}
+	normalized, err := processenv.Normalize(env)
+	if err != nil {
+		return nil, fmt.Errorf("closure: %w", err)
+	}
+	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, nil); err != nil {
+		return nil, err
+	}
+	return NewAtContextEnvSnapshot(ctx, dir, env, snapshot, buildFlags...)
+}
+
 // NewAtContextEnvSnapshot is NewAtContextEnv resolving GOMODCACHE and
 // validating GOFLAGS from the pass's one env snapshot when non-nil.
 func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
