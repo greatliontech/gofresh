@@ -24,7 +24,8 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen *gotool.EnvSnapshot
-	engine.snapshotHook = func(s *gotool.EnvSnapshot) { seen = s }
+	viewTestHooks.snapshot = func(s *gotool.EnvSnapshot) { seen = s }
+	t.Cleanup(func() { viewTestHooks.snapshot = nil })
 	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)

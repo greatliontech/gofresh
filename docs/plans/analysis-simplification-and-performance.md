@@ -55,7 +55,11 @@ chunks 1–2 are spec amendments).
       memo miss derives it in groupMemo and again in the testing scan,
       and computeTestVariantIdentity re-reads the compartment on every
       maximalContributionsAndFiles call rather than consulting
-      h.testVariants).
+      h.testVariants); the per-view beforePreciseAnalysis seam either
+      joins the viewTestHooks surface or stays deliberately per-view
+      (user's call at close-out); tier2's two addType +
+      typeUsesUnsafePointer + widen sites collapse onto one helper as
+      tier2 splits.
 - [ ] 12. Re-measure: instrumented campaign + stipulator corpus check;
       results recorded against the 2026-08-01 baseline; feeds the gomutant
       pipelining decision. Close-out also dispositions the overlap between

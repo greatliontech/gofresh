@@ -1595,6 +1595,11 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// this row pins that mask (the soundness argument for
 		// callers-from-subject-reach-only).
 		{fixture: "observablefreshinit", subject: "TestFreshHelperShadowedByStartupCaller", reason: "startup effect"},
+		// The unsafe payload is visible only through the named type's
+		// underlying structure — no reachable value has an unsafe type
+		// directly — so this row discriminates the type walk's
+		// underlying edge.
+		{fixture: "unsafewrapped", subject: "TestWrappedUnsafeHandle", reason: "unsafe pointer"},
 		{fixture: "toolchainread", subject: "TestAccessorAlone", observable: true},
 		{fixture: "toolchainread", subject: "TestReadVersion", observable: true},
 		{fixture: "toolchainread", subject: "TestOpenUnderToolchain", observable: true},

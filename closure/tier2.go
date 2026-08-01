@@ -512,7 +512,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
-	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) && !classBPureStandard(pkgPath, name) {
+	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}
@@ -1705,7 +1705,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isRefinementSourceOnlyStandardPackage(pkgPath) && !classBPureStandard(pkgPath, name) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}
@@ -2808,55 +2808,26 @@ func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
 
 func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 	found := false
-	seen := map[types.Type]bool{}
-	var walk func(types.Type)
-	walk = func(t types.Type) {
-		if t == nil || found {
-			return
+	walkTypeGraph(t, false, map[types.Type]bool{}, func(t types.Type) bool {
+		named, ok := t.(*types.Named)
+		if !ok {
+			return true
 		}
-		t = types.Unalias(t)
-		if seen[t] {
-			return
+		obj := named.Obj()
+		if obj == nil || obj.Pkg() == nil {
+			return true
 		}
-		seen[t] = true
-		switch tt := t.(type) {
-		case *types.Named:
-			if obj := tt.Obj(); obj != nil && obj.Pkg() != nil {
-				if idx := a.idxByTypes[obj.Pkg()]; idx != nil {
-					if !idx.std {
-						found = true
-						return
-					}
-				} else if !isStdImportPath(obj.Pkg().Path()) {
-					found = true
-					return
-				}
+		if idx := a.idxByTypes[obj.Pkg()]; idx != nil {
+			if !idx.std {
+				found = true
+				return false
 			}
-			walk(tt.Underlying())
-		case *types.Pointer:
-			walk(tt.Elem())
-		case *types.Slice:
-			walk(tt.Elem())
-		case *types.Array:
-			walk(tt.Elem())
-		case *types.Map:
-			walk(tt.Key())
-			walk(tt.Elem())
-		case *types.Chan:
-			walk(tt.Elem())
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					walk(tuple.At(i).Type())
-				}
-			}
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				walk(tt.Field(i).Type())
-			}
+		} else if !isStdImportPath(obj.Pkg().Path()) {
+			found = true
+			return false
 		}
-	}
-	walk(t)
+		return true
+	})
 	return found
 }
 
@@ -3016,49 +2987,79 @@ func (a *tier2Analyzer) addLinknameTarget(target string) {
 	a.enqueueObject(obj)
 }
 
-func (a *tier2Analyzer) addType(t types.Type) {
-	if t == nil {
-		return
-	}
-	if a.seenTypes[t] {
-		return
-	}
-	a.seenTypes[t] = true
-	switch tt := t.(type) {
-	case *types.Named:
-		a.enqueueObject(tt.Obj())
-		for i := 0; i < tt.TypeArgs().Len(); i++ {
-			a.addType(tt.TypeArgs().At(i))
+// walkTypeGraph visits the types reachable from t through the structural
+// edges listed here — element, key, field, parameter, result, underlying,
+// and (when typeArgs is set) type-argument — Unalias-normalized, each
+// type at most once per seen map. Interfaces are deliberately terminal:
+// their embedded and method types stay unwalked, and the carrier rule
+// judges interface-typed state separately — adding interface edges would
+// move verdicts. visit returning false stops the whole walk. Callers own
+// seen: the analyzer's addType shares one map across calls so a type
+// reached once is never re-walked; the per-call predicates pass fresh
+// maps. The typeArgs edge stays addType-only: the predicates never
+// walked it, and widening their reach could move a verdict.
+func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit func(types.Type) bool) {
+	stop := false
+	var walk func(types.Type)
+	walk = func(t types.Type) {
+		if t == nil || stop {
+			return
 		}
-		a.addType(tt.Underlying())
-	case *types.Pointer:
-		a.addType(tt.Elem())
-	case *types.Slice:
-		a.addType(tt.Elem())
-	case *types.Array:
-		a.addType(tt.Elem())
-	case *types.Map:
-		a.addType(tt.Key())
-		a.addType(tt.Elem())
-	case *types.Chan:
-		a.addType(tt.Elem())
-	case *types.Signature:
-		a.addTuple(tt.Params())
-		a.addTuple(tt.Results())
-	case *types.Struct:
-		for i := 0; i < tt.NumFields(); i++ {
-			a.addType(tt.Field(i).Type())
+		t = types.Unalias(t)
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		if !visit(t) {
+			stop = true
+			return
+		}
+		switch tt := t.(type) {
+		case *types.Named:
+			if typeArgs {
+				for i := 0; i < tt.TypeArgs().Len(); i++ {
+					walk(tt.TypeArgs().At(i))
+				}
+			}
+			walk(tt.Underlying())
+		case *types.Pointer:
+			walk(tt.Elem())
+		case *types.Slice:
+			walk(tt.Elem())
+		case *types.Array:
+			walk(tt.Elem())
+		case *types.Map:
+			walk(tt.Key())
+			walk(tt.Elem())
+		case *types.Chan:
+			walk(tt.Elem())
+		case *types.Signature:
+			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
+				for i := 0; tuple != nil && i < tuple.Len(); i++ {
+					walk(tuple.At(i).Type())
+				}
+			}
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				walk(tt.Field(i).Type())
+			}
 		}
 	}
+	walk(t)
 }
 
-func (a *tier2Analyzer) addTuple(t *types.Tuple) {
-	if t == nil {
-		return
-	}
-	for i := 0; i < t.Len(); i++ {
-		a.addType(t.At(i).Type())
-	}
+// addType enqueues every named type the walked structure carries. The
+// walk Unalias-normalizes, so alias targets are enqueued even when the
+// alias never appears in scanned syntax — a reach-widening whose only
+// possible divergence direction is conservative: enqueues add scans,
+// scans add effects and widens, never the reverse.
+func (a *tier2Analyzer) addType(t types.Type) {
+	walkTypeGraph(t, true, a.seenTypes, func(t types.Type) bool {
+		if named, ok := t.(*types.Named); ok {
+			a.enqueueObject(named.Obj())
+		}
+		return true
+	})
 }
 
 func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node) {
@@ -3309,7 +3310,7 @@ func unverifiableReasonRank(reason string) int {
 	}
 }
 
-func isRefinementSourceOnlyStandardPackage(pkgPath string) bool {
+func isStandardFallbackExempt(pkgPath string) bool {
 	// The testing harness itself is selected infrastructure. Its externally
 	// observable helpers are classified before this fallback.
 	return pkgPath == "testing" || isSourceOnlyStandardPackage(pkgPath)
@@ -3512,54 +3513,19 @@ func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {
 
 func typeUsesUnsafePointer(t types.Type) bool {
 	found := false
-	seen := map[types.Type]bool{}
-	var walk func(types.Type)
-	walk = func(t types.Type) {
-		if t == nil || found {
-			return
-		}
-		t = types.Unalias(t)
-		if seen[t] {
-			return
-		}
-		seen[t] = true
+	walkTypeGraph(t, false, map[types.Type]bool{}, func(t types.Type) bool {
 		if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UnsafePointer {
 			found = true
-			return
+			return false
 		}
 		if n, ok := t.(*types.Named); ok {
 			if obj := n.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "unsafe" && obj.Name() == "Pointer" {
 				found = true
-				return
+				return false
 			}
 		}
-		switch tt := t.(type) {
-		case *types.Named:
-			walk(tt.Underlying())
-		case *types.Pointer:
-			walk(tt.Elem())
-		case *types.Slice:
-			walk(tt.Elem())
-		case *types.Array:
-			walk(tt.Elem())
-		case *types.Map:
-			walk(tt.Key())
-			walk(tt.Elem())
-		case *types.Chan:
-			walk(tt.Elem())
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					walk(tuple.At(i).Type())
-				}
-			}
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				walk(tt.Field(i).Type())
-			}
-		}
-	}
-	walk(t)
+		return true
+	})
 	return found
 }
 

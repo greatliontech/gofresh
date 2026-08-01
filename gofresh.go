@@ -144,13 +144,22 @@ type Engine struct {
 	envSet         bool
 	analysisBudget time.Duration
 	progress       func(Progress)
-	// observeHook observes every source/guard/purity observation pass. Tests use
-	// it to pin how many observations an operation performs.
-	observeHook func()
-	// snapshotHook observes the env snapshot each precise-analysis bracket
-	// derives its configuration from — a test seam pinning that the bracket
-	// reuses the view's construction snapshot instead of re-reading go env.
-	snapshotHook func(*gotool.EnvSnapshot)
+}
+
+// viewTestHooks is the package's one test-observation surface: each field
+// observes an internal step tests prove taken, skipped, or counted; nil
+// disables. Root tests run sequentially, so package scope suffices.
+var viewTestHooks struct {
+	// observe observes every source/guard/purity observation pass — tests
+	// pin how many observations an operation performs.
+	observe func()
+	// snapshot observes the env snapshot each precise-analysis bracket
+	// derives its configuration from — tests pin that the bracket reuses
+	// the view's construction snapshot instead of re-reading go env.
+	snapshot func(*gotool.EnvSnapshot)
+	// dynamicStateMissLoad observes the batched typed load of
+	// version-pinned packages whose dynamic-state facts missed the memo.
+	dynamicStateMissLoad func(patterns []string)
 }
 
 // Option configures an Engine.

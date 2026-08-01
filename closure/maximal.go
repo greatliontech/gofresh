@@ -200,10 +200,6 @@ func preferMaximalReason(candidate, current string) bool {
 	return candidate < current
 }
 
-// testingTypeOwnLoadHook observes the fallback private load for tests pinning
-// that a shared view load is actually consumed instead.
-var testingTypeOwnLoadHook func(pkgPath string)
-
 func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
 	if scan, ok := h.maximalTesting[pkgPath]; ok {
 		return scan, nil
@@ -226,8 +222,8 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 	}
 	loaded := h.viewLoadVariants(pkgPath)
 	if loaded == nil {
-		if testingTypeOwnLoadHook != nil {
-			testingTypeOwnLoadHook(pkgPath)
+		if analysisTestHooks.testingTypeOwnLoad != nil {
+			analysisTestHooks.testingTypeOwnLoad(pkgPath)
 		}
 		var err error
 		loaded, err = packages.Load(&packages.Config{

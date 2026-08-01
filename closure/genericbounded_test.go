@@ -55,10 +55,10 @@ func Unrelated() string { return "quiet" }
 `
 
 // A constraint-bounded generic subject analyzes closed: observability
-// answers instead of refusing on the open subject world, refinement does
-// not widen, an edit to a helper reached only through the instantiation
-// moves the refined hash (the purity-override audit: instantiation-
-// reachable content is in the hash), a generic-body edit moves it (the
+// answers instead of refusing on the open subject world, the analysis
+// does not widen, an edit to a helper reached only through the
+// instantiation moves the hash (the purity-override audit:
+// instantiation-reachable content is in the hash), a generic-body edit moves it (the
 // origin fold), and an unrelated edit leaves it alone — the serving
 // precision the open-world wall cost (REQ-closure-analysis's
 // parameterized-subject arm).

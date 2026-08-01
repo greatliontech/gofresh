@@ -2428,7 +2428,8 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	rounds = append(rounds, map[Subject]Fingerprint{aF: guardDrift, bRead: tampered, bH: maximalOnly})
 
 	observations := 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	for i, recorded := range rounds {
 		singles := map[Subject]Verdict{}
 		for subject, fingerprint := range recorded {
@@ -2478,14 +2479,15 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 
 	// An all-unchanged manifest-less batch answers without observations or
 	// precise analysis, and a cancelled caller context aborts the batch.
-	engine.observeHook = nil
+	viewTestHooks.observe = nil
 	quietView, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observations = 0
 	analyses := 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	quietView.beforePreciseAnalysis = func() { analyses++ }
 	quiet, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{aF: captured[aF]})
 	if err != nil {
@@ -2789,7 +2791,8 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	// reads only at close: one fresh observation, with drift across the
 	// window still refusing there.
 	observations := 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
 		t.Fatal(err)
 	}
@@ -2901,11 +2904,12 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations := 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	if err := view.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	engine.observeHook = nil
+	viewTestHooks.observe = nil
 	if observations != 1 {
 		t.Fatalf("maximal validation performed %d observation passes, want exactly 1", observations)
 	}
@@ -2943,7 +2947,8 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations := 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -2962,7 +2967,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err := producer.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	engine.observeHook = nil
+	viewTestHooks.observe = nil
 	if observations != 5 {
 		t.Fatalf("observed producer lifecycle performed %d observation passes, want 5 (2 construction + 1 capture bracket + 1 seeded read + 1 validation bracket)", observations)
 	}
@@ -2987,11 +2992,12 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations = 0
-	engine.observeHook = func() { observations++ }
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
 	if err := producer2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("seeded validation missed capture-to-validate drift: %v", err)
 	}
-	engine.observeHook = nil
+	viewTestHooks.observe = nil
 	// The seeded read itself refuses - one observation, no analysis
 	// bracket: the seed comparison is what makes the seeded facts
 	// record-grade before any validation-time analysis spends work on

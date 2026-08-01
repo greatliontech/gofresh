@@ -80,10 +80,10 @@ func TestDynamicStateFactsServePinnedPackagesWithoutLoading(t *testing.T) {
 	const pkg = "example.com/pinned"
 
 	var missLoads [][]string
-	dynamicStateMissLoadHook = func(patterns []string) {
+	viewTestHooks.dynamicStateMissLoad = func(patterns []string) {
 		missLoads = append(missLoads, append([]string(nil), patterns...))
 	}
-	defer func() { dynamicStateMissLoadHook = nil }()
+	defer func() { viewTestHooks.dynamicStateMissLoad = nil }()
 	processFactCache = sync.Map{}
 
 	const scope = DynamicStateStrategy + "|test-toolchain|test-buildconfig"

@@ -31,9 +31,9 @@ func TestPure(t *testing.T) {
 func countTestingScanLoads(t *testing.T) *int {
 	t.Helper()
 	loads := 0
-	prev := testingTypeOwnLoadHook
-	testingTypeOwnLoadHook = func(string) { loads++ }
-	t.Cleanup(func() { testingTypeOwnLoadHook = prev })
+	prev := analysisTestHooks.testingTypeOwnLoad
+	analysisTestHooks.testingTypeOwnLoad = func(string) { loads++ }
+	t.Cleanup(func() { analysisTestHooks.testingTypeOwnLoad = prev })
 	return &loads
 }
 

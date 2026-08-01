@@ -84,11 +84,6 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	return fact
 }
 
-// dynamicStateMissLoadHook observes the batched typed load of version-pinned
-// packages whose facts neither cache layer served — the event tests pin to
-// prove the memo actually substitutes for loading.
-var dynamicStateMissLoadHook func(patterns []string)
-
 // processFactCache serves version-pinned package facts within one process.
 // Keyed by (scope, bucket, package path) — the same complete identity the
 // persistent memo trusts, so a hit is sound wherever the persistent entry
@@ -276,8 +271,8 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			patterns = append(patterns, node.PkgPath)
 		}
 		sort.Strings(patterns)
-		if dynamicStateMissLoadHook != nil {
-			dynamicStateMissLoadHook(patterns)
+		if viewTestHooks.dynamicStateMissLoad != nil {
+			viewTestHooks.dynamicStateMissLoad(patterns)
 		}
 		missLoad, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, patterns...)
 		if err != nil {

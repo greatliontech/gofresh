@@ -406,6 +406,15 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	return contribs, sourceFiles, nil
 }
 
+// analysisTestHooks is the package's one test-observation surface: each
+// field observes a load the tests prove skipped or taken; nil disables.
+var analysisTestHooks struct {
+	// testingTypeOwnLoad observes the typed testing-effect scan's private
+	// fallback load, so tests pin that a shared view load or a memo hit is
+	// actually consumed instead.
+	testingTypeOwnLoad func(pkgPath string)
+}
+
 // resetCallScope arms the per-batch-call memos: one call observes one
 // tree generation (the Hasher's pinned contract), so each public batch
 // entry starts them empty — an edit between calls can never serve a

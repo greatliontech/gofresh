@@ -226,8 +226,8 @@ type viewObservation struct {
 }
 
 func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
-	if e.observeHook != nil {
-		e.observeHook()
+	if viewTestHooks.observe != nil {
+		viewTestHooks.observe()
 	}
 	if e.progress != nil {
 		e.progress(Progress{Phase: "observe"})
@@ -1182,8 +1182,8 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
-	if v.engine.snapshotHook != nil {
-		v.engine.snapshotHook(v.snapshot)
+	if viewTestHooks.snapshot != nil {
+		viewTestHooks.snapshot(v.snapshot)
 	}
 	hasher, err := closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.snapshot, v.engine.buildFlags...)
 	if err != nil {
