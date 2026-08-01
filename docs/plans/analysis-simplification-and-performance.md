@@ -13,7 +13,7 @@ chunks 1–2 are spec amendments).
       without fine analysis; the Plan9 scanner deletes whole (its
       toolchain arm was reachability-dead: filePkgs only ever holds
       mutable/cache packages).
-- [ ] 3. Per-file effect scan reads and parses once (equivalence-pinned
+- [x] 3. Per-file effect scan reads and parses once (equivalence-pinned
       against the two-pass reference; benchmark added).
 - [ ] 4. Reason channel consolidates onto typed effects; the one contractual
       projection ("test variants") stays; duplicate `*Reason`/`*Effects`

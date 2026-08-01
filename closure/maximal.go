@@ -317,55 +317,121 @@ func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
 	return scan
 }
 
-func maximalFileReason(filename string) (string, error) {
+// importAlias is one import declaration's resolved alias and path, shared
+// by the preferred-reason derivation and the effect collection so the scan
+// unquotes each import once.
+type importAlias struct {
+	alias   string
+	pkgPath string
+}
+
+// maximalFileEffects is the per-file external-effect scan: a pure function
+// of the file's bytes. One read and one parse serve both the effect
+// collection and the preferred-reason derivation
+// (equivalence-pinned by TestFileEffectScanMatchesTwoPassReference).
+func maximalFileEffects(filename string) (maximalEffectScan, error) {
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		return "", err
+		return maximalEffectScan{}, err
 	}
-	if strings.Contains(string(content), "//go:wasmimport") {
-		return "reaches go:wasmimport", nil
-	}
-	if strings.Contains(string(content), "//go:linkname") {
-		return "reaches go:linkname (opaque linkage)", nil
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.ImportsOnly)
+	text := string(content)
+	hasWasmImport := strings.Contains(text, "//go:wasmimport")
+	hasLinkname := strings.Contains(text, "//go:linkname")
+	// The walks read identifiers by name and imports from file.Imports;
+	// object resolution is unused, so skipping it saves its allocations.
+	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
 	if err != nil {
-		return "", fmt.Errorf("closure: parse %s: %w", filename, err)
+		return maximalEffectScan{}, fmt.Errorf("closure: parse %s: %w", filename, err)
 	}
+	imports := make([]importAlias, 0, len(file.Imports))
 	aliases := make(map[string]string, len(file.Imports))
-	potentialExternal := ""
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
-			return "", fmt.Errorf("closure: parse import in %s: %w", filename, err)
+			return maximalEffectScan{}, fmt.Errorf("closure: parse import in %s: %w", filename, err)
 		}
 		alias := path.Base(pkgPath)
 		if spec.Name != nil {
 			alias = spec.Name.Name
 		}
 		aliases[alias] = pkgPath
-		if pkgPath == "testing" {
-			if alias == "." {
-				potentialExternal = pkgPath
+		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
+	}
+	scan := maximalEffectScan{preferred: maximalReasonFromParsed(hasWasmImport, hasLinkname, file, imports, aliases)}
+	if hasWasmImport {
+		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
+		effect.unrefinable = true
+		scan.add(effect)
+	}
+	if hasLinkname {
+		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
+	}
+	for _, imp := range imports {
+		if imp.pkgPath == "testing" {
+			if imp.alias == "." {
+				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
 			}
 			continue
 		}
-		if isAlwaysExternalPackage(pkgPath) {
-			return trueReason(pkgPath), nil
-		}
-		if alias == "." && packageHasClassifiedExternalAPI(pkgPath) && potentialExternal == "" {
-			potentialExternal = pkgPath
-		}
-		if potentialExternal == "" && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
-			potentialExternal = pkgPath
+		if imp.alias == "." || imp.alias == "_" {
+			if isAlwaysExternalPackage(imp.pkgPath) {
+				scan.add(trueExternalEffect(imp.pkgPath))
+			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
+				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
+			}
 		}
 	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		sel, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		pkgPath := aliases[ident.Name]
+		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
+			scan.add(effect)
+		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+		}
+		return true
+	})
+	for _, effect := range testingMethodEffects(file, aliases) {
+		scan.add(effect)
+	}
+	return scan, nil
+}
 
-	// Reparse with bodies only when imports include packages whose individual
-	// calls distinguish external operations from ordinary deterministic APIs.
-	file, err = parser.ParseFile(token.NewFileSet(), filename, content, 0)
-	if err != nil {
-		return "", fmt.Errorf("closure: parse %s: %w", filename, err)
+// maximalReasonFromParsed derives the preferred human diagnostic over the
+// shared parse, reproducing the reference precedence exactly: directives,
+// then the first always-external import, then the body walk, then the
+// testing-method scan, then the potential-external fallback.
+func maximalReasonFromParsed(hasWasmImport, hasLinkname bool, file *ast.File, imports []importAlias, aliases map[string]string) string {
+	if hasWasmImport {
+		return "reaches go:wasmimport"
+	}
+	if hasLinkname {
+		return "reaches go:linkname (opaque linkage)"
+	}
+	potentialExternal := ""
+	for _, imp := range imports {
+		if imp.pkgPath == "testing" {
+			if imp.alias == "." {
+				potentialExternal = imp.pkgPath
+			}
+			continue
+		}
+		if isAlwaysExternalPackage(imp.pkgPath) {
+			return trueReason(imp.pkgPath)
+		}
+		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
+			potentialExternal = imp.pkgPath
+		}
+		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
+			potentialExternal = imp.pkgPath
+		}
 	}
 	var reason string
 	ast.Inspect(file, func(node ast.Node) bool {
@@ -403,82 +469,22 @@ func maximalFileReason(filename string) (string, error) {
 		reason = testingMethodReason(file, aliases)
 	}
 	if reason != "" {
-		return reason, nil
+		return reason
 	}
 	if potentialExternal != "" {
-		return "reaches " + potentialExternal + " (potential external dependence)", nil
+		return "reaches " + potentialExternal + " (potential external dependence)"
 	}
-	return "", nil
+	return ""
 }
 
-func maximalFileEffects(filename string) (maximalEffectScan, error) {
-	preferred, err := maximalFileReason(filename)
+// maximalFileReason is the reason-only projection of the scan, kept for
+// direct classification tests; production reads scan.preferred.
+func maximalFileReason(filename string) (string, error) {
+	scan, err := maximalFileEffects(filename)
 	if err != nil {
-		return maximalEffectScan{}, err
+		return "", err
 	}
-	scan := maximalEffectScan{preferred: preferred}
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return maximalEffectScan{}, err
-	}
-	if strings.Contains(string(content), "//go:wasmimport") {
-		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
-		effect.unrefinable = true
-		scan.add(effect)
-	}
-	if strings.Contains(string(content), "//go:linkname") {
-		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)
-	if err != nil {
-		return maximalEffectScan{}, fmt.Errorf("closure: parse %s: %w", filename, err)
-	}
-	aliases := make(map[string]string, len(file.Imports))
-	for _, spec := range file.Imports {
-		pkgPath, err := strconv.Unquote(spec.Path.Value)
-		if err != nil {
-			return maximalEffectScan{}, fmt.Errorf("closure: parse import in %s: %w", filename, err)
-		}
-		alias := path.Base(pkgPath)
-		if spec.Name != nil {
-			alias = spec.Name.Name
-		}
-		aliases[alias] = pkgPath
-		if pkgPath == "testing" {
-			if alias == "." {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
-			}
-			continue
-		}
-		if alias == "." || alias == "_" {
-			if isAlwaysExternalPackage(pkgPath) {
-				scan.add(trueExternalEffect(pkgPath))
-			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
-			}
-		}
-	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		sel, ok := node.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		pkgPath := aliases[ident.Name]
-		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
-			scan.add(effect)
-		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
-			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
-		}
-		return true
-	})
-	for _, effect := range testingMethodEffects(file, aliases) {
-		scan.add(effect)
-	}
-	return scan, nil
+	return scan.preferred, nil
 }
 
 func testingMethodReason(file *ast.File, aliases map[string]string) string {
