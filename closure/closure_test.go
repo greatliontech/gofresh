@@ -1610,6 +1610,10 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "testing.Run"},
 		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
 		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
+		// User test-main flow is startup, not subject time: its effects
+		// block the proof (REQ-closure-observability-analysis) — the pin
+		// that keeps the test main in the startup provenance roots.
+		{fixture: "harnessroot", subject: "BenchmarkProd", reason: "startup effect"},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
@@ -2206,7 +2210,7 @@ func TestTier2CacheDeclarationTraversesMutableReference(t *testing.T) {
 	a := &tier2Analyzer{
 		idxByTypes:  map[*types.Package]*pkgIndex{cacheTypes: cacheIdx, localTypes: localIdx},
 		seenObjects: map[types.Object]bool{},
-		seenTypes:   map[string]bool{},
+		seenTypes:   map[types.Type]bool{},
 	}
 
 	a.addObject(cacheObj)
@@ -2252,7 +2256,7 @@ func TestTier2CacheFunctionTraversesMutableReference(t *testing.T) {
 	a := &tier2Analyzer{
 		idxByTypes:  map[*types.Package]*pkgIndex{cacheTypes: cacheIdx, localTypes: localIdx},
 		seenObjects: map[types.Object]bool{},
-		seenTypes:   map[string]bool{},
+		seenTypes:   map[types.Type]bool{},
 		filePkgs:    map[*pkgIndex]bool{},
 		scanned:     map[*ssa.Function]bool{},
 	}
@@ -2288,7 +2292,7 @@ func TestTier2CacheInitTraversesMutableReference(t *testing.T) {
 	a := &tier2Analyzer{
 		idxByTypes:  map[*types.Package]*pkgIndex{cacheTypes: cacheIdx, localTypes: localIdx},
 		seenObjects: map[types.Object]bool{},
-		seenTypes:   map[string]bool{},
+		seenTypes:   map[types.Type]bool{},
 		filePkgs:    map[*pkgIndex]bool{},
 		scanned:     map[*ssa.Function]bool{},
 	}
@@ -2474,7 +2478,7 @@ func TestTier2ReverseLinknameTargetEnqueued(t *testing.T) {
 		idxByTypes:       map[*types.Package]*pkgIndex{upperTypes: upperIdx, lowerTypes: lowerIdx},
 		objsByLinkTarget: map[string][]types.Object{},
 		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[string]bool{},
+		seenTypes:        map[types.Type]bool{},
 		seenDecls:        map[string]bool{},
 		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},
@@ -2518,7 +2522,7 @@ func f() {}
 		objByName:        map[string]types.Object{},
 		objsByLinkTarget: map[string][]types.Object{},
 		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[string]bool{},
+		seenTypes:        map[types.Type]bool{},
 		seenDecls:        map[string]bool{},
 		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},

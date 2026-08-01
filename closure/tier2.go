@@ -641,13 +641,20 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	if prog.testMain != nil {
 		roots[prog.testMain] |= testMasks
 	}
+	// The init-root set is subject-independent; only the test-main prepend
+	// varies by harness. One derivation serves the RTA roots and every
+	// subject's startup provenance.
+	initRoots := make([]*ssa.Function, 0, len(prog.prog.AllPackages()))
 	for _, p := range prog.prog.AllPackages() {
 		if isGeneratedTestMainPackage(prog, p) {
 			continue
 		}
 		if init := p.Func("init"); init != nil {
-			roots[init] |= allMasks
+			initRoots = append(initRoots, init)
 		}
+	}
+	for _, init := range initRoots {
+		roots[init] |= allMasks
 	}
 	res, err := analyzeAttributed(ctx, roots)
 	if err != nil {
@@ -665,25 +672,19 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	reachable := make([]attributedReachability, len(subjects))
 	for i := range reachable {
 		reachable[i] = attributedReachability{
-			functions:           make(map[*ssa.Function]bool),
-			resolved:            make(map[ssa.CallInstruction]bool),
+			functions:           make(map[*ssa.Function]bool, len(res.Reachable)),
+			resolved:            make(map[ssa.CallInstruction]bool, len(res.Resolved)),
 			dynamicTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins: instantiated[uint64(1)<<i],
 			openWorld:           rootMayReceiveUnknownDynamic(prog, prog.roots[subjects[i].Symbol]),
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.roots[subjects[i].Symbol]
-		startupRoots := make([]*ssa.Function, 0, len(prog.prog.AllPackages())+1)
+		startupRoots := initRoots
 		if prog.testMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
+			startupRoots = make([]*ssa.Function, 0, len(initRoots)+1)
 			startupRoots = append(startupRoots, prog.testMain)
-		}
-		for _, p := range prog.prog.AllPackages() {
-			if isGeneratedTestMainPackage(prog, p) {
-				continue
-			}
-			if init := p.Func("init"); init != nil {
-				startupRoots = append(startupRoots, init)
-			}
+			startupRoots = append(startupRoots, initRoots...)
 		}
 		// The subject's provenance roots are exactly the roots its mask
 		// was given: for a bounded generic those are its materialized
@@ -798,16 +799,23 @@ func isTestingMRun(fn *ssa.Function) bool {
 	if fn == nil {
 		return false
 	}
-	if strings.Contains(fn.String(), "testing.M).Run") {
+	// The disjunction is order-free; the structural arm is checked first
+	// because it needs no rendering, and only a non-testing-package name
+	// pays the RelString render for the wrapper/thunk forms the string
+	// arm exists to catch.
+	if fn.Signature != nil && fn.Signature.Recv() != nil && funcPkgPath(fn) == "testing" && fn.Name() == "Run" &&
+		strings.Contains(types.TypeString(fn.Signature.Recv().Type(), nil), "testing.M") {
 		return true
 	}
-	if fn.Signature == nil || fn.Signature.Recv() == nil {
+	// "testing.M).Run" in the rendered string always begins inside the
+	// name portion (the receiver ends at ")."), so a name without "Run"
+	// can never match — synthetic wrappers ("Run$bound", "Run$thunk")
+	// keep it, and they may lack package identity, so the name is the
+	// only allocation-free gate that loses nothing.
+	if !strings.Contains(fn.Name(), "Run") {
 		return false
 	}
-	if funcPkgPath(fn) != "testing" || fn.Name() != "Run" {
-		return false
-	}
-	return strings.Contains(types.TypeString(fn.Signature.Recv().Type(), nil), "testing.M")
+	return strings.Contains(fn.String(), "testing.M).Run")
 }
 
 func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
@@ -1142,7 +1150,12 @@ type tier2Analyzer struct {
 
 	seenObjects map[types.Object]bool
 	objectQueue []types.Object
-	seenTypes   map[string]bool
+	// seenTypes dedups the type walk by type identity: recursive types
+	// self-reference through one instance, so pointer keys break cycles;
+	// structurally identical distinct instances re-walk harmlessly
+	// (enqueueObject dedups), and the TypeString render this key replaced
+	// dominated the walk's allocations.
+	seenTypes   map[types.Type]bool
 	seenDecls   map[string]bool
 	seenPkgs    map[*pkgIndex]bool
 	filePkgs    map[*pkgIndex]bool
@@ -1227,7 +1240,7 @@ func (b *tier2Base) analyzer() *tier2Analyzer {
 		objByName:        b.objByName,
 		objsByLinkTarget: b.objsByLinkTarget,
 		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[string]bool{},
+		seenTypes:        map[types.Type]bool{},
 		seenDecls:        map[string]bool{},
 		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},
@@ -2788,18 +2801,17 @@ func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
 
 func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 	found := false
-	seen := map[string]bool{}
+	seen := map[types.Type]bool{}
 	var walk func(types.Type)
 	walk = func(t types.Type) {
 		if t == nil || found {
 			return
 		}
 		t = types.Unalias(t)
-		key := types.TypeString(t, nil)
-		if seen[key] {
+		if seen[t] {
 			return
 		}
-		seen[key] = true
+		seen[t] = true
 		switch tt := t.(type) {
 		case *types.Named:
 			if obj := tt.Obj(); obj != nil && obj.Pkg() != nil {
@@ -3001,11 +3013,10 @@ func (a *tier2Analyzer) addType(t types.Type) {
 	if t == nil {
 		return
 	}
-	key := types.TypeString(t, nil)
-	if a.seenTypes[key] {
+	if a.seenTypes[t] {
 		return
 	}
-	a.seenTypes[key] = true
+	a.seenTypes[t] = true
 	switch tt := t.(type) {
 	case *types.Named:
 		a.enqueueObject(tt.Obj())
@@ -3494,18 +3505,17 @@ func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {
 
 func typeUsesUnsafePointer(t types.Type) bool {
 	found := false
-	seen := map[string]bool{}
+	seen := map[types.Type]bool{}
 	var walk func(types.Type)
 	walk = func(t types.Type) {
 		if t == nil || found {
 			return
 		}
 		t = types.Unalias(t)
-		key := types.TypeString(t, nil)
-		if seen[key] {
+		if seen[t] {
 			return
 		}
-		seen[key] = true
+		seen[t] = true
 		if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UnsafePointer {
 			found = true
 			return

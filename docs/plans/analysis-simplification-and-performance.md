@@ -26,7 +26,7 @@ chunks 1–2 are spec amendments).
       the memo writes before the closing compare).
 - [x] 6. In-pass cross-package contribution memo: shared dependency files
       hash once per pass, not once per subject package.
-- [ ] 7. tier2 allocation diet: visited-set reuse, type-identity keys
+- [x] 7. tier2 allocation diet: visited-set reuse, type-identity keys
       replacing `types.TypeString`, per-subject reachability
       materialization trimmed.
 - [ ] 8. maximal/testvariant allocation diet: single content buffer, shared
