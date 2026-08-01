@@ -208,6 +208,22 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 	if scan, ok := h.maximalTesting[pkgPath]; ok {
 		return scan, nil
 	}
+	// The persistent memo serves before any type-environment load: the
+	// scan is a pure function of (scope, package test-binary closure), so
+	// a hit under the complete key is byte-equivalent to recomputation
+	// (REQ-closure-testing-scan-memo). A hash-derivation failure disables
+	// the memo for the package — fail-open to recomputation.
+	scope := h.testingScanScope()
+	key := ""
+	if scope != "" {
+		if k, err := h.testBinaryClosureKey(pkgPath); err == nil {
+			key = k
+			if scan, ok := loadEffectScan(testingScanDirName, scope, key); ok {
+				h.maximalTesting[pkgPath] = scan
+				return scan, nil
+			}
+		}
+	}
 	loaded := h.viewLoadVariants(pkgPath)
 	if loaded == nil {
 		if testingTypeOwnLoadHook != nil {
@@ -259,6 +275,9 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 				return true
 			})
 		}
+	}
+	if key != "" {
+		storeEffectScan(testingScanDirName, scope, key, scan)
 	}
 	h.maximalTesting[pkgPath] = scan
 	return scan, nil
@@ -830,7 +849,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 			composite.preferred = scan.preferred
 		}
 	}
-	if stored, ok := loadEffectScan(effectScanScope(), key); ok {
+	if stored, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
 		fold(stored)
 		return composite, true, nil
 	}
@@ -851,7 +870,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 			fileFold.preferred = scan.preferred
 		}
 	}
-	storeEffectScan(effectScanScope(), key, fileFold)
+	storeEffectScan(effectScanDirName, effectScanScope(), key, fileFold)
 	fold(fileFold)
 	return composite, true, nil
 }

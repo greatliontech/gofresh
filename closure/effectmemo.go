@@ -25,6 +25,26 @@ func effectScanScope() string {
 	return effectScanStrategy + " " + runtime.Version()
 }
 
+// testingScanStrategy versions the typed testing-effect scan's semantics:
+// the testing classification table and the selection walk. Any change that
+// can move the scan's effect set or preferred diagnostic bumps it, so
+// persisted scans from the prior interpretation refuse instead of serving
+// (REQ-closure-testing-scan-memo).
+const testingScanStrategy = "gofresh/testing-scan@1"
+
+// testingScanScope completes the typed scan's analysis identity outside
+// the source closure: its own strategy version plus the caller-supplied
+// memo scope, which carries the code guards — toolchain and build
+// configuration — the type environment depends on
+// (REQ-closure-testing-scan-memo). Empty when the caller set no scope:
+// the memo stays disabled.
+func (h *Hasher) testingScanScope() string {
+	if h.memoScope == "" {
+		return ""
+	}
+	return testingScanStrategy + "|" + h.memoScope
+}
+
 // effectScanEntry is one pinned package's persisted file-effect scan.
 type effectScanEntry struct {
 	Scope    string             `json:"scope"`
@@ -74,27 +94,28 @@ func effectScanKey(pin, importPath string, goFiles, cgoFiles []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func effectScanDir() (string, error) {
+// effectScanDirName and testingScanDirName are the two sibling user-cache
+// directories one scan-memo mechanism serves: the syntactic per-file fold
+// (REQ-closure-effect-scan-memo) and the typed testing-effect scan
+// (REQ-closure-testing-scan-memo).
+const (
+	effectScanDirName  = "effectscan"
+	testingScanDirName = "testingscan"
+)
+
+func effectScanPath(dirName, scope, key string) (string, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cache, "gofresh", "effectscan"), nil
-}
-
-func effectScanPath(scope, key string) (string, error) {
-	dir, err := effectScanDir()
-	if err != nil {
-		return "", err
-	}
 	sum := sha256.Sum256([]byte(scope + "\x00" + key))
-	return filepath.Join(dir, hex.EncodeToString(sum[:12])+".json"), nil
+	return filepath.Join(cache, "gofresh", dirName, hex.EncodeToString(sum[:12])+".json"), nil
 }
 
-// loadEffectScan returns the persisted scan for (scope, key); ok is false
-// on any failure — the memo is a cache, never a record.
-func loadEffectScan(scope, key string) (maximalEffectScan, bool) {
-	path, err := effectScanPath(scope, key)
+// loadEffectScan returns the persisted scan for (scope, key) in dirName;
+// ok is false on any failure — the memo is a cache, never a record.
+func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
+	path, err := effectScanPath(dirName, scope, key)
 	if err != nil {
 		return maximalEffectScan{}, false
 	}
@@ -109,11 +130,11 @@ func loadEffectScan(scope, key string) (maximalEffectScan, bool) {
 	return maximalEffectScan{effects: decodeEffects(entry.Effects), preferred: entry.Selected}, true
 }
 
-// storeEffectScan persists one pinned package's scan with an atomic
+// storeEffectScan persists one package's scan in dirName with an atomic
 // replace; failures are silent — a lost store costs one recomputation,
 // never a wrong scan.
-func storeEffectScan(scope, key string, scan maximalEffectScan) {
-	path, err := effectScanPath(scope, key)
+func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
+	path, err := effectScanPath(dirName, scope, key)
 	if err != nil {
 		return
 	}

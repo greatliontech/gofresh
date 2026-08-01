@@ -345,6 +345,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// fact — a production symbol can be unreachable as a root of its
 		// external-test binary — so it degrades to an unavailable proof for
 		// that subject alone and never denies a sibling's analysis.
+		memoArmed := h.memoScope != "" && closureHash != ""
 		unrooted := map[string]Observability{}
 		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
@@ -362,7 +363,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		}
 		group.subjects = rooted
 		if len(group.subjects) == 0 {
-			if h.memoScope != "" && closureHash != "" {
+			if memoArmed {
 				storeMemo(h.memoScope, closureHash, unrooted)
 			}
 			delete(h.progs, group.path)
@@ -373,7 +374,13 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			return nil, err
 		}
 		base := newTier2Base(h, prog, metas)
-		computed := unrooted
+		// Proofs persist as each attribution slice completes: an analysis
+		// deadline expiring mid-group forfeits only the interrupted
+		// slice, and the next pass serves every completed slice's proofs
+		// from the memo (REQ-closure-observability-memo).
+		if memoArmed && len(unrooted) > 0 {
+			storeMemo(h.memoScope, closureHash, unrooted)
+		}
 		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
 			if err := h.ctx.Err(); err != nil {
 				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -384,6 +391,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			if err != nil {
 				return nil, err
 			}
+			sliceProofs := make(map[string]Observability, len(batch))
 			for i, subject := range batch {
 				if err := h.ctx.Err(); err != nil {
 					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -393,11 +401,11 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 					return nil, err
 				}
 				results[subject] = result
-				computed[subject.Symbol] = result
+				sliceProofs[subject.Symbol] = result
 			}
-		}
-		if h.memoScope != "" && closureHash != "" {
-			storeMemo(h.memoScope, closureHash, computed)
+			if memoArmed {
+				storeMemo(h.memoScope, closureHash, sliceProofs)
+			}
 		}
 		// Programs are per-package test binaries: no later group can reuse
 		// this one, so retaining it would grow peak memory with the batch's

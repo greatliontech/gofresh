@@ -106,16 +106,34 @@ func storeMemo(scope, closureHash string, proofs map[string]Observability) {
 	}
 }
 
-// groupMemo resolves one package group's memo: the closure hash keying
-// it and the already-proven subjects. A hash-derivation failure
+// testBinaryClosureKey is the memo-key identity of everything the
+// package's analyzed test binary is built from: the core closure hash
+// joined with the test-variant compartment identity. The compartment
+// rides as its own axis because the partition keeps test-only bytes out
+// of the core contributions (REQ-closure-test-variant-compartment) while
+// the analyzed program compiles them all the same — a key equating the
+// test binary with the core alone serves stale proofs after test-only
+// edits (REQ-closure-observability-memo).
+func (h *Hasher) testBinaryClosureKey(pkgPath string) (string, error) {
+	mh, err := h.maximalHash(pkgPath)
+	if err != nil {
+		return "", err
+	}
+	// maximalHash derives and records the compartment identity for the
+	// package as a side effect, so the axis is in hand.
+	return mh + "\x00" + h.testVariants[pkgPath].hash, nil
+}
+
+// groupMemo resolves one package group's memo: the closure key keying
+// it and the already-proven subjects. A key-derivation failure
 // disables the memo for the group - fail-open to recomputation.
 func (h *Hasher) groupMemo(pkgPath string) (closureHash string, proofs map[string]Observability) {
 	if h.memoScope == "" {
 		return "", nil
 	}
-	mh, err := h.maximalHash(pkgPath)
+	key, err := h.testBinaryClosureKey(pkgPath)
 	if err != nil {
 		return "", nil
 	}
-	return mh, loadMemo(h.memoScope, mh)
+	return key, loadMemo(h.memoScope, key)
 }

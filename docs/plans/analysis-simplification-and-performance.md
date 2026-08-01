@@ -33,7 +33,7 @@ chunks 1–2 are spec amendments).
       FileSets where sound, fixed-point walks de-duplicated.
 - [x] 9. Persistent memo for pinned-package effect scans (spec: extends the
       dynamic-state-memo pattern; mutable-local files never keyed).
-- [ ] 10. Persistent memo absorption for the typed testing-type scan (spec:
+- [x] 10. Persistent memo absorption for the typed testing-type scan (spec:
       observability-memo key pattern); observability memo writes become
       slice-granular so a deadline mid-group keeps the completed slices'
       proofs.
@@ -50,7 +50,12 @@ chunks 1–2 are spec amendments).
       module-pin derivation + pinned-classification predicate (4-5 sites
       each, inconsistent ToSlash) collapse onto Hasher helpers; the
       suite's user-cache isolation (XDG_CACHE_HOME, Linux-only for
-      os.UserCacheDir) becomes platform-complete as the tests move.
+      os.UserCacheDir) becomes platform-complete as the tests move; the
+      test-binary closure key derives once per batch and package (today a
+      memo miss derives it in groupMemo and again in the testing scan,
+      and computeTestVariantIdentity re-reads the compartment on every
+      maximalContributionsAndFiles call rather than consulting
+      h.testVariants).
 - [ ] 12. Re-measure: instrumented campaign + stipulator corpus check;
       results recorded against the 2026-08-01 baseline; feeds the gomutant
       pipelining decision. Close-out also dispositions the overlap between

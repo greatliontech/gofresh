@@ -1,9 +1,14 @@
 package closure
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func memoModule(t *testing.T) string {
@@ -132,5 +137,120 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	}
 	if loads == 0 {
 		t.Fatal("changed source served from the memo")
+	}
+
+	// Test-only source is part of the analyzed test binary: an edit that
+	// moves only the test-variant compartment must miss exactly as a core
+	// edit does — the analyzed program's bytes moved.
+	testSrc, err := os.ReadFile(filepath.Join(dir, "memo_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memo_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testMoved, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testMoved.SetMemoScope("scope-a")
+	loads = 0
+	testMoved.OnProgress(func(phase, _ string) {
+		if phase == "load" {
+			loads++
+		}
+	})
+	if _, err := testMoved.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if loads == 0 {
+		t.Fatal("a test-only source change served from the memo")
+	}
+}
+
+// cancelWhenDirNonEmpty cancels every context consult once dir holds an
+// entry — deterministic mid-group cancellation landing right after the
+// first attribution slice's memo write.
+type cancelWhenDirNonEmpty struct{ dir string }
+
+func (c cancelWhenDirNonEmpty) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c cancelWhenDirNonEmpty) Done() <-chan struct{}       { return nil }
+func (c cancelWhenDirNonEmpty) Value(any) any               { return nil }
+func (c cancelWhenDirNonEmpty) Err() error {
+	entries, err := os.ReadDir(c.dir)
+	if err == nil && len(entries) > 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestObservabilityMemoKeepsCompletedSlicesOnDeadline pins the write
+// granularity (REQ-closure-observability-memo): a deadline expiring
+// mid-group forfeits only the interrupted slice's proofs — every
+// completed slice persists and a later pass serves it from the memo.
+func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/slices\n\ngo 1.26\n")
+	count := maxAttributedSubjects + 2
+	var source strings.Builder
+	source.WriteString("package slices\n\n")
+	subjects := make([]Subject, count)
+	for i := range subjects {
+		symbol := fmt.Sprintf("F%d", i)
+		fmt.Fprintf(&source, "func %s() int { return %d }\n", symbol, i)
+		subjects[i] = Subject{Package: "example.com/slices", Symbol: symbol}
+	}
+	writeFile(t, dir, "slices.go", source.String())
+
+	first, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.SetMemoScope("scope-a")
+	memoFiles := filepath.Join(cacheRoot, "gofresh", "observability")
+	first.ctx = cancelWhenDirNonEmpty{dir: memoFiles}
+	if _, err := first.ComputeObservabilityBatch(subjects); err == nil {
+		t.Fatal("mid-group cancellation did not surface")
+	}
+
+	entries, err := os.ReadDir(memoFiles)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("memo entries = %v, err %v; want exactly one", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(memoFiles, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry memoEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if len(entry.Proofs) != maxAttributedSubjects {
+		t.Fatalf("persisted proofs = %d, want the completed slice's %d", len(entry.Proofs), maxAttributedSubjects)
+	}
+	for i := range maxAttributedSubjects {
+		if _, ok := entry.Proofs[fmt.Sprintf("F%d", i)]; !ok {
+			t.Fatalf("completed slice's proof F%d missing from the memo", i)
+		}
+	}
+	for i := maxAttributedSubjects; i < count; i++ {
+		if _, ok := entry.Proofs[fmt.Sprintf("F%d", i)]; ok {
+			t.Fatalf("interrupted slice's proof F%d persisted", i)
+		}
+	}
+
+	second, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.SetMemoScope("scope-a")
+	results, err := second.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != count {
+		t.Fatalf("resumed batch results = %d, want %d", len(results), count)
 	}
 }

@@ -241,32 +241,35 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	scan := maximalEffectScan{preferred: "reaches os.ReadFile (file I/O)", effects: []externalEffect{{kind: externalEffectFileIO, reason: "reaches os.ReadFile (file I/O)"}}}
 	key := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go"}, nil)
-	storeEffectScan(effectScanScope(), key, scan)
-	if got, ok := loadEffectScan(effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
+	storeEffectScan(effectScanDirName, effectScanScope(), key, scan)
+	if got, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
 		t.Fatalf("round trip = %+v ok=%v", got, ok)
 	}
-	if _, ok := loadEffectScan(effectScanScope()+"-bumped", key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, effectScanScope()+"-bumped", key); ok {
 		t.Fatal("a bumped scan strategy served a prior generation's scan")
 	}
-	if _, ok := loadEffectScan(effectScanStrategy, key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, effectScanStrategy, key); ok {
 		t.Fatal("the bare strategy without the toolchain identity served")
 	}
+	if _, ok := loadEffectScan(testingScanDirName, effectScanScope(), key); ok {
+		t.Fatal("the sibling testing-scan directory served the effect-scan entry")
+	}
 	otherFiles := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go", "extra.go"}, nil)
-	if _, ok := loadEffectScan(effectScanScope(), otherFiles); ok {
+	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), otherFiles); ok {
 		t.Fatal("a changed file set served the prior set's scan")
 	}
 	migrated := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", nil, []string{"eff.go"})
-	if _, ok := loadEffectScan(effectScanScope(), migrated); ok {
+	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), migrated); ok {
 		t.Fatal("a file migrating between the Go and cgo lists served the prior partition's scan")
 	}
-	path, err := effectScanPath(effectScanScope(), key)
+	path, err := effectScanPath(effectScanDirName, effectScanScope(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadEffectScan(effectScanScope(), key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
 		t.Fatal("a corrupt entry served")
 	}
 }
