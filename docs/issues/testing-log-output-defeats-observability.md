@@ -23,6 +23,5 @@ testing-runtime effect handling (closure's maximalTesting classification).
 Whether it can be classified observable (or testing-runtime-internal) needs
 its own diagnosis against REQ-closure-observability-analysis's contract.
 
-Lands: when a consumer needs observed-policy caching for `t.Fatal`-failing
-oracles that read runtime inputs, or the next observability-analysis
-precision pass, whichever comes first.
+Lands: the observability precision pass — the next gofresh plan,
+opening immediately after this plan's close-out (chunk 12).
