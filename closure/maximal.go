@@ -154,6 +154,12 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if pkg.Standard || pkg.Module == nil || pkg.isGeneratedTestMainFor(pkgPath) {
 			continue
 		}
+		if scan, ok, err := h.pinnedEffectScan(pkg); err != nil {
+			return nil, "", err
+		} else if ok {
+			record(scan)
+			continue
+		}
 		record(maximalPackageExternalEffects(&pkg))
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
 		for _, name := range files {
@@ -787,4 +793,65 @@ func trueExternalEffect(pkgPath string) externalEffect {
 	default:
 		return externalEffect{kind: externalEffectNative, packagePath: pkgPath, reason: "reaches " + pkgPath + " (external system call)"}
 	}
+}
+
+// pinnedEffectScan serves a version-pinned package's per-file effect-scan
+// fold from the persistent memo, deriving and storing it on a miss
+// (REQ-closure-effect-scan-memo). Only the per-file fold persists — it is
+// a pure syntactic function of the key's pinned inputs. The package-level
+// facts (assembly, system objects, cgo linkage metadata) are functions of
+// the live listing's build configuration, which the key does not carry, so
+// every pass recomputes them from the listing in hand — zero file reads —
+// and folds the served scans in. Both folds order and dedup exactly as the
+// inline loop's global fold: effect dedup is first-occurrence-wins, and
+// the preferred fold is a total order (opaqueness, then the
+// lexicographically smaller reason), so per-package folding then
+// cross-package folding equals the flat fold. A mutable-local package
+// returns ok=false and takes the read path: the classification is
+// directory-based — resolved source outside the module cache, the same
+// rule the closure contribution pin applies — and the version leg
+// additionally excludes modules reporting no version at all (the main
+// and workspace modules), whose pin would carry no signal. The caller
+// guarantees pkg.Module != nil.
+func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) {
+	if pkg.Module.Version == "" || !h.underCache(pkg.Dir) || pkg.Module.Dir == "" {
+		return maximalEffectScan{}, false, nil
+	}
+	// The pin is the cache-relative module content dir — replace-correct
+	// via Module.Dir, the same identity the closure contribution pins.
+	pin := filepath.ToSlash(strings.TrimPrefix(filepath.Clean(pkg.Module.Dir), h.modCache+string(filepath.Separator)))
+	key := effectScanKey(pin, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
+	composite := maximalPackageExternalEffects(&pkg)
+	fold := func(scan maximalEffectScan) {
+		for _, effect := range scan.effects {
+			composite.add(effect)
+		}
+		if scan.preferred != "" && (composite.preferred == "" || preferMaximalReason(scan.preferred, composite.preferred)) {
+			composite.preferred = scan.preferred
+		}
+	}
+	if stored, ok := loadEffectScan(effectScanScope(), key); ok {
+		fold(stored)
+		return composite, true, nil
+	}
+	var fileFold maximalEffectScan
+	files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
+	for _, name := range files {
+		if err := h.contextErr(); err != nil {
+			return maximalEffectScan{}, false, err
+		}
+		scan, err := h.maximalFileEffectsCached(filepath.Join(pkg.Dir, name))
+		if err != nil {
+			return maximalEffectScan{}, false, err
+		}
+		for _, effect := range scan.effects {
+			fileFold.add(effect)
+		}
+		if scan.preferred != "" && (fileFold.preferred == "" || preferMaximalReason(scan.preferred, fileFold.preferred)) {
+			fileFold.preferred = scan.preferred
+		}
+	}
+	storeEffectScan(effectScanScope(), key, fileFold)
+	fold(fileFold)
+	return composite, true, nil
 }

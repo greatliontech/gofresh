@@ -381,6 +381,34 @@ REQ-closure-dynamic-state-memo: enforced by
 `TestIntermediateRecompilationsScanFromTheirOwnCompilation`, and
 `TestDynamicStateLocalFactsDeriveFreshEachScan`.
 
+**REQ-closure-effect-scan-memo** (behavior): The fold of a version-pinned
+package's per-file effect scans MAY be served from a persistent memo,
+because that fold is a pure syntactic function of its key's complete input
+identity: the scan-strategy version and the toolchain identity, plus the
+module's version pin, the package's import path, and the identity — with
+its Go/cgo partition — of the file set the current listing selects for it.
+No type-environment signature participates, because the per-file scan reads
+no types (the typed testing-effect scan is separately governed).
+Package-level effect facts — assembly, system objects, cgo linkage
+metadata — are functions of the live listing's build configuration, which
+the key does not carry: every pass recomputes them from the listing in hand
+and they are never persisted. A mutable-local package's files are never
+served from this memo — the classification is the resolved source living
+outside the module cache, and any version the listing reports for a
+replacement does not attest that source — every pass re-reads them. A
+memo hit is byte-equivalent to recomputation — the
+effect set, its order, and the preferred diagnostic alike. The memo is a
+cache, never a record — the observability memo's discipline verbatim: a
+sibling user-cache directory, atomic writes, silent recomputation on any
+miss, corruption, or key mismatch, deletable wholesale at any time;
+changing scan semantics — classification tables included — bumps the
+scan-strategy version.
+
+REQ-closure-effect-scan-memo: enforced by
+`TestEffectScanMemoServesPinnedPackagesWithoutReads`,
+`TestEffectScanMemoMissesOnScopeAndFileSetChange`, and
+`TestEffectScanMemoFoldMatchesInlineFold`.
+
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the
 subject MUST be hashed by its source content, never pinned by module version — such
 source resolves to a working directory with no version or checksum signal, so pinning

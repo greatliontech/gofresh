@@ -522,3 +522,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "6002dec06423dfa453d56d53aa6ac0b2ec87308667825c74e8f79f4238ea4ce7"
 }
+
+bindings {
+  requirement_id: "REQ-closure-floor"
+  content_hash: "93c1bbc09607827deb37566fff306bce8e0feff8be56411052dc72bffd07a5a0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzMaximalClosureFloor"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2ff5f86b5a7fb362f293bfd5299a6ab40fc4948bffb347836ee38d69f5690a3f"
+}

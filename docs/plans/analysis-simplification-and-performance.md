@@ -31,7 +31,7 @@ chunks 1–2 are spec amendments).
       materialization trimmed.
 - [x] 8. maximal/testvariant allocation diet: single content buffer, shared
       FileSets where sound, fixed-point walks de-duplicated.
-- [ ] 9. Persistent memo for pinned-package effect scans (spec: extends the
+- [x] 9. Persistent memo for pinned-package effect scans (spec: extends the
       dynamic-state-memo pattern; mutable-local files never keyed).
 - [ ] 10. Persistent memo absorption for the typed testing-type scan (spec:
       observability-memo key pattern); observability memo writes become
@@ -44,7 +44,15 @@ chunks 1–2 are spec amendments).
       binaries; dead surface deleted (incl. the production-dead
       declaration-contribution collection with its driver pins re-homed
       onto reachable-set assertions, the single-valued withFresh
-      parameter, and stale refinement-named identifiers).
+      parameter, and stale refinement-named identifiers); the three
+      parallel persistent-memo store/load shapes (memo.go, dynamicstate,
+      effectmemo) collapse onto one cache-file helper, and the
+      module-pin derivation + pinned-classification predicate (4-5 sites
+      each, inconsistent ToSlash) collapse onto Hasher helpers; the
+      suite's user-cache isolation (XDG_CACHE_HOME, Linux-only for
+      os.UserCacheDir) becomes platform-complete as the tests move.
 - [ ] 12. Re-measure: instrumented campaign + stipulator corpus check;
       results recorded against the 2026-08-01 baseline; feeds the gomutant
-      pipelining decision.
+      pipelining decision. Close-out also dispositions the overlap between
+      FuzzMaximalClosureFloor's equality leg and the witness surface of
+      REQ-closure-batch-equivalence.
