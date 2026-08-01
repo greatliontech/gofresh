@@ -119,4 +119,3 @@ func (h *Hasher) groupMemo(pkgPath string) (closureHash string, proofs map[strin
 	}
 	return mh, loadMemo(h.memoScope, mh)
 }
-

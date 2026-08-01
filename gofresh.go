@@ -4,10 +4,10 @@
 // (closure, guard, runtimeinput), and reports a verdict by comparing a stored
 // fingerprint against the current one (spec overview.md). It never runs the symbol
 // and never owns the result store: it answers "is this still fresh?" and leaves
-// measuring and storing to the caller. Default operations use a shared maximal
-// package closure so multi-subject checks avoid per-subject whole-program analysis;
-// callers opt into declaration-level RTA only when its additional precision is
-// worth the analysis budget.
+// measuring and storing to the caller. Operations use a shared maximal
+// package closure so multi-subject checks avoid per-subject whole-program
+// analysis; whole-program reachability runs only for the caller-selected
+// observability proof.
 package gofresh
 
 import (
@@ -62,11 +62,6 @@ type Subject struct {
 	Symbol  string
 }
 
-// DeclarationRTA identifies the optional declaration-level RTA refinement. The
-// identity is persisted with refined evidence and changes whenever its semantics
-// become incompatible.
-const DeclarationRTA = "gofresh/declaration-rta@1"
-
 // DynamicStateStrategy identifies the shared-dynamic-state fact derivation
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
@@ -82,18 +77,6 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // observation ingest, REQ-inputs-path-congruence).
 const ObservationRTA = "gofresh/observation-rta@5"
 
-// Refinement is optional narrower closure evidence. Its zero value means the
-// recording is maximal-only. A complete value binds its closure hash and
-// unverifiability disposition to Strategy (REQ-fresh-fingerprint-data).
-type Refinement struct {
-	Strategy     string
-	Subject      Subject
-	Closure      string
-	Unverifiable bool
-	Reason       string
-	Evidence     string
-}
-
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
 type ObservationProof struct {
@@ -106,7 +89,7 @@ type ObservationProof struct {
 
 // Fingerprint is the recorded evidence a verdict is computed from (data only, no
 // wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
-// hash, its package's test-variant compartment hash, optional refinement and
+// hash, its package's test-variant compartment hash, optional
 // observability evidence, guard values, attributable
 // observation and purity assertions, result kind, and the caller's runtime-input manifest and digest evidence.
 // The caller serializes and stores it alongside its result, and pins any further
@@ -123,7 +106,6 @@ type Fingerprint struct {
 	// recording that predates the partition and fails closed to stale
 	// (REQ-closure-test-variant-compartment).
 	TestVariantClosure   string
-	Refinement           Refinement
 	ObservationAssertion string
 	ObservationProof     ObservationProof
 	Guards               guard.Guards
@@ -187,8 +169,8 @@ func WithBuildInputs(inputs ...string) Option {
 
 // Progress reports the start of one long-running analysis step: Phase is
 // "observe" for a view observation pass, "runtime" for each runtime-input
-// observation pass (a check's window performs two), "load" for a package program load, "refine" for a
-// package's declaration-RTA batch, or "prove" for a package's observability
+// observation pass (a check's window performs two), "load" for a package
+// program load, or "prove" for a package's observability
 // batch; Package names the package for the per-package phases. Events are
 // emitted before the step runs, carry no completion signal, and are
 // diagnostic keep-alive data, not contract.
@@ -206,14 +188,13 @@ func WithProgress(f func(Progress)) Option {
 	return func(e *Engine) { e.progress = f }
 }
 
-// WithAnalysisBudget bounds each precise-analysis phase — declaration-RTA
-// refinement and observability proving, whether selected at capture, forced by
-// drift at check, or re-established at validation — to d of wall clock. A
+// WithAnalysisBudget bounds each precise-analysis phase — observability
+// proving, whether selected at capture or re-established at
+// validation — to d of wall clock. A
 // batched operation's shared analysis draws on one budget; each operation
 // derives a fresh one. An exhausted budget yields unavailable evidence for the
-// affected subjects — checks report unverifiable and never valid
-// (REQ-fresh-refinement-failclosed), validation reports
-// ErrAnalysisUnavailable, refined-mode captures fail — and it never cancels
+// affected subjects — captures record the unavailable proof, validation
+// reports ErrAnalysisUnavailable — and it never cancels
 // the operation itself, which remains governed solely by the caller's context
 // (REQ-fresh-context). Zero means unbounded.
 func WithAnalysisBudget(d time.Duration) Option {
@@ -334,8 +315,8 @@ func canonicalDir(dir string) (string, error) {
 // WithEnv, into the returned Fingerprint's
 // RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
 // non-empty manifest those functions return.
-func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string, opts ...ViewOption) (Fingerprint, error) {
-	view, err := e.NewView(ctx, []Subject{subject}, moduleDir, opts...)
+func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
+	view, err := e.NewView(ctx, []Subject{subject}, moduleDir)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -344,8 +325,8 @@ func (e *Engine) Capture(ctx context.Context, subject Subject, moduleDir string,
 
 // CaptureFor records subject with the guards applicable to kind. Measurements must
 // use this method so machine and runtime-configuration evidence is captured.
-func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind, opts ...ViewOption) (Fingerprint, error) {
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind, opts...)
+func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, kind)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -356,11 +337,11 @@ func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir stri
 // tree under its recorded result kind. It recomputes the current closure and guards
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
-func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string, opts ...ViewOption) (Verdict, error) {
+func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
 	if err := validateRecordedKind(recorded); err != nil {
 		return Verdict{}, err
 	}
-	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind, opts...)
+	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -412,9 +393,7 @@ func (e *Engine) guardInputs() []string {
 // (REQ-inputs-absent-asserted). commit/dirty are never consulted
 // (REQ-fresh-commit-independent).
 func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
-	// The evidence tiers are the shared ladder with no refinement declared:
-	// any core drift is stale on the closure.
-	if verdict, failed := recordedEvidenceVerdict(rec, cl, false); failed {
+	if verdict, failed := recordedEvidenceVerdict(rec, cl); failed {
 		return verdict
 	}
 	return decideAfterClosure(rec, cl, cur, rt, kind, pure)
@@ -425,20 +404,12 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 // ordering is written once: an unevaluable recorded core is stale on the
 // closure (REQ-fresh-sound); an unchanged core compares the test-variant
 // compartment next, stale with the stable discriminating reason
-// "test variants", never rescued by refinement or observation evidence, an
+// "test variants", never rescued by observation evidence, an
 // empty recorded compartment failing closed
 // (REQ-closure-test-variant-compartment); a drifted core is stale on the
-// closure when no refinement is declared (REQ-fresh-refinement-failclosed).
-// A drifted core under a declared refinement compares the compartment before
-// any refined evidence is consulted: refined rescue additionally requires the
-// recorded compartment to equal the current one, so strictly more drift can
-// never flip a stale verdict to valid — a sibling-test edit reads
-// "test variants" whether or not production drift rides along, and a
-// pre-partition recording (empty compartment) can never be rescued
-// (REQ-fresh-hierarchical-check). Maximal-only recordings keep the truthful
-// "closure" reason on core drift. Records surviving the ladder proceed to
-// the surface's own refinement and guard tiers.
-func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure, refinementDeclared bool) (Verdict, bool) {
+// closure (REQ-fresh-hierarchical-check). Records surviving the ladder
+// proceed to the surface's own guard tiers.
+func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict, bool) {
 	if rec.MaximalClosure == "" {
 		return Verdict{Stale, "closure"}, true
 	}
@@ -446,12 +417,7 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure, refinemen
 		return Verdict{Stale, "test variants"}, true
 	}
 	if rec.MaximalClosure != current.Hash {
-		if !refinementDeclared {
-			return Verdict{Stale, "closure"}, true
-		}
-		if rec.Refinement != (Refinement{}) && compartmentStale(rec.TestVariantClosure, current.TestVariants) {
-			return Verdict{Stale, "test variants"}, true
-		}
+		return Verdict{Stale, "closure"}, true
 	}
 	return Verdict{}, false
 }

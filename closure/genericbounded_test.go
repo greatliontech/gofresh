@@ -3,6 +3,7 @@ package closure
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -63,14 +64,14 @@ func Unrelated() string { return "quiet" }
 // parameterized-subject arm).
 func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
-	compute := func(body string) (Closure, Observability) {
+	compute := func(body string) (tier2Result, Observability) {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
 		h, err := NewAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		refined, err := h.ComputeBatch([]Subject{subject})
+		refined, err := computeTier2Result(h, subject.Package, subject.Symbol)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,11 +79,11 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return refined[subject], proofs[subject]
+		return refined, proofs[subject]
 	}
 
 	base, proof := compute(boundedBody)
-	if base.Widened || base.Unverifiable {
+	if base.widen || base.unverifiable {
 		t.Fatalf("bounded generic widened: %+v", base)
 	}
 	if strings.Contains(proof.Reason, "open subject world") {
@@ -90,18 +91,18 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 	}
 
 	helperEdit, _ := compute(strings.Replace(boundedBody, "x + fixtureConstant", "x + fixtureConstant + 1", 1))
-	if helperEdit.Hash == base.Hash {
-		t.Fatal("helper edit reached only through the instantiation did not move the refined hash")
+	if slices.Equal(helperEdit.contribs, base.contribs) {
+		t.Fatal("helper edit reached only through the instantiation did not move the precise contributions")
 	}
 
 	bodyEdit, _ := compute(strings.Replace(boundedBody, "return a + b", "return b + a", 1))
-	if bodyEdit.Hash == base.Hash {
-		t.Fatal("generic-body edit did not move the refined hash")
+	if slices.Equal(bodyEdit.contribs, base.contribs) {
+		t.Fatal("generic-body edit did not move the precise contributions")
 	}
 
 	unrelatedEdit, _ := compute(strings.Replace(boundedBody, `return "quiet"`, `return "quieter"`, 1))
-	if unrelatedEdit.Hash != base.Hash {
-		t.Fatal("unrelated edit moved the bounded generic's refined hash: the precision the narrowing exists for is absent")
+	if !slices.Equal(unrelatedEdit.contribs, base.contribs) {
+		t.Fatal("unrelated edit moved the bounded generic's precise contributions: the precision the narrowing exists for is absent")
 	}
 }
 
@@ -144,32 +145,32 @@ func TestUnboundedConstraintsStayOpenWorld(t *testing.T) {
 func TestBoundedGenericWithoutInstantiationKeepsOriginFold(t *testing.T) {
 	orphan := strings.Replace(boundedBody, "func UseSum() int { return Sum(1, 2) }", "func UseSum() int { return 3 }", 1)
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
-	compute := func(body string) Closure {
+	compute := func(body string) tier2Result {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
 		h, err := NewAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		refined, err := h.ComputeBatch([]Subject{subject})
+		refined, err := computeTier2Result(h, subject.Package, subject.Symbol)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return refined[subject]
+		return refined
 	}
 	base := compute(orphan)
-	if base.Widened || base.Unverifiable {
+	if base.widen || base.unverifiable {
 		t.Fatalf("uninstantiated bounded generic widened: %+v", base)
 	}
 	bodyEdit := compute(strings.Replace(orphan, "return a + b", "return b + a", 1))
-	if bodyEdit.Hash == base.Hash {
+	if slices.Equal(bodyEdit.contribs, base.contribs) {
 		t.Fatal("generic-body edit did not move the origin fold")
 	}
 }
 
-// Batching a bounded generic beside an ordinary subject yields exactly
-// the solo analysis: instantiation roots attribute under the subject's
-// own mask, never a sibling's (REQ-closure-batch-equivalence).
+// Analyzing a bounded generic beside an ordinary subject in one shared
+// attributed traversal yields exactly the solo analysis: instantiation
+// roots attribute under the subject's own mask, never a sibling's.
 func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	dir := writeBoundedFixture(t, boundedBody)
 	sum := Subject{Package: "example.com/bounded", Symbol: "Sum"}
@@ -178,7 +179,24 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := h.ComputeBatch([]Subject{sum, unrelated})
+	prog, err := h.loadCached(sum.Package)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{sum, unrelated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metas, err := h.list(sum.Package)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := newTier2Base(h, prog, metas)
+	batchedSum, err := h.tier2ReachableWithFresh(base, reachable[0], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchedUnrelated, err := h.tier2ReachableWithFresh(base, reachable[1], false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,15 +204,15 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	soloSum, err := solo.ComputeBatch([]Subject{sum})
+	soloSum, err := computeTier2Result(solo, sum.Package, sum.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if batch[sum].Hash != soloSum[sum].Hash {
-		t.Fatalf("batch %q != solo %q for the bounded generic", batch[sum].Hash, soloSum[sum].Hash)
+	if !slices.Equal(batchedSum.contribs, soloSum.contribs) || batchedSum.widen != soloSum.widen || batchedSum.unverifiable != soloSum.unverifiable {
+		t.Fatalf("batch %+v != solo %+v for the bounded generic", batchedSum, soloSum)
 	}
-	if batch[unrelated].Unverifiable || strings.Contains(batch[unrelated].Reason, "open") {
-		t.Fatalf("sibling polluted by the generic's instantiation roots: %+v", batch[unrelated])
+	if batchedUnrelated.unverifiable || strings.Contains(batchedUnrelated.reason, "open") || strings.Contains(batchedUnrelated.widenReason, "open") {
+		t.Fatalf("sibling polluted by the generic's instantiation roots: %+v", batchedUnrelated)
 	}
 }
 
@@ -232,26 +250,26 @@ func (t Tagged) TagUniq() string { return "tag" }
 
 func TestBoundedGenericRootsInstantiationFlow(t *testing.T) {
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
-	compute := func(body string) Closure {
+	compute := func(body string) tier2Result {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
 		h, err := NewAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		refined, err := h.ComputeBatch([]Subject{subject})
+		refined, err := computeTier2Result(h, subject.Package, subject.Symbol)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return refined[subject]
+		return refined
 	}
 	base := compute(flowBody)
-	if base.Widened || base.Unverifiable {
+	if base.widen || base.unverifiable {
 		t.Fatalf("instantiation-rooted dispatch did not resolve: %+v", base)
 	}
 	tagEdit := compute(strings.Replace(flowBody, `return "tag"`, `return "gat"`, 1))
-	if tagEdit.Hash == base.Hash {
-		t.Fatal("instantiation-reached method body is missing from the refined hash: a purity-asserted serve would go stale-valid")
+	if slices.Equal(tagEdit.contribs, base.contribs) {
+		t.Fatal("instantiation-reached method body is missing from the precise contributions: a purity-asserted serve would go stale-valid")
 	}
 }
 

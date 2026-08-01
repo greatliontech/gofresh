@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -936,28 +937,6 @@ func TestPropMutableLocalContentSensitivity(t *testing.T) {
 	}
 }
 
-func FuzzClosureFloor(f *testing.F) {
-	h, err := New()
-	if err != nil {
-		f.Fatal(err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/reflectfixture"
-	maximal, err := h.maximalHash(pkg)
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add("arbitrary precise contribution")
-	f.Fuzz(func(t *testing.T, contribution string) {
-		got, err := h.closureFromTier2(pkg, tier2Result{widen: true, contribs: []string{contribution}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Hash != maximal {
-			t.Fatalf("widened hash = %s, maximal = %s", got.Hash, maximal)
-		}
-	})
-}
-
 // TestParseListError: a package reporting a load Error must fail the parse, never
 // be silently dropped from the closure (REQ-fresh-sound).
 func TestParseListError(t *testing.T) {
@@ -987,141 +966,6 @@ func TestMaximalHashReal(t *testing.T) {
 	}
 	if b, _ := h.maximalHash(pkg); b != a {
 		t.Errorf("hash not deterministic: %q vs %q", a, b)
-	}
-}
-
-// TestBatchLoadMatchesPerPackage is the equivalence guard for Prime: a batched
-// shared packages.Load must yield, for every benchmark, byte-identical Compute
-// output (hash, unverifiable, reason) to the per-package single load. This is what
-// makes Prime a sound optimization rather than a behavior change — an under-scoped
-// rootsForBinary would shrink a program's package set, drop a registering init
-// from RTA's roots, and under-cover the closure (false-valid, REQ-fresh-sound); that shows
-// up here as a hash mismatch. The fixtures span the soundness-sensitive paths:
-// cross-package init-side-effect registration, init file I/O, an external test
-// package, a TestMain root, and reflection.
-func TestBatchLoadMatchesPerPackage(t *testing.T) {
-	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
-	pkgs := []string{
-		base + "initregistry/bench",
-		base + "initfile",
-		base + "external",
-		base + "externalbench",       // benchmark lives in the external (package X_test) test package
-		base + "rootcollision/bench", // imports rootcollision/dep, also primed (cross-prime-import shape)
-		base + "rootcollision/dep",
-		base + "testmainroot",
-		base + "reflectexternal",
-		base + "initdynamic",
-	}
-
-	primed, err := New()
-	if err != nil {
-		t.Fatalf("New (primed): %v", err)
-	}
-	primed.Prime(pkgs)
-
-	compared := 0
-	for _, pkg := range pkgs {
-		// Assert the batch actually cached this package: otherwise Compute would
-		// fall back to a single load and the comparison would be single-vs-single —
-		// a vacuous pass that hides an under-scoped rootsForBinary.
-		if _, ok := primed.progs[pkg]; !ok {
-			t.Fatalf("Prime did not cache %s; batch path not exercised (test would be vacuous)", pkg)
-		}
-
-		// Discover the benchmark names via an independent single-load hasher; the
-		// discovery machinery is not what is under test — the hash equivalence is.
-		single, err := New()
-		if err != nil {
-			t.Fatalf("New (single) for %s: %v", pkg, err)
-		}
-		prog, err := single.loadCached(pkg)
-		if err != nil {
-			t.Fatalf("single load %s: %v", pkg, err)
-		}
-		var benches []string
-		for name := range prog.roots {
-			benches = append(benches, name)
-		}
-		sort.Strings(benches)
-		if len(benches) == 0 {
-			t.Fatalf("%s has no benchmarks; fixture cannot exercise the comparison", pkg)
-		}
-
-		for _, b := range benches {
-			want, errWant := single.Compute(pkg, b)
-			got, errGot := primed.Compute(pkg, b)
-			if (errWant == nil) != (errGot == nil) {
-				t.Errorf("%s.%s: single err=%v, primed err=%v", pkg, b, errWant, errGot)
-				continue
-			}
-			if errWant != nil {
-				continue
-			}
-			if got != want {
-				t.Errorf("%s.%s: primed Compute %+v != single %+v", pkg, b, got, want)
-			}
-			compared++
-		}
-	}
-	if compared == 0 {
-		t.Fatal("no benchmarks compared; test is vacuous")
-	}
-	t.Logf("compared %d benchmark(s) batch-vs-single across %d packages", compared, len(pkgs))
-}
-
-// TestRootsForBinaryMatchesSingleLoad pins rootsForBinary's contract structurally:
-// the roots it selects for a package out of a batched packages.Load must be
-// exactly the roots a single packages.Load(pkg) returns. This is the
-// by-construction basis for Prime's equivalence — a selection that is too narrow
-// would build a smaller program (a dropped test-main or test variant) and
-// under-cover the closure. Unlike the hash-level equivalence test, this observes
-// the full root set, so it catches a dropped clause even when that root is
-// behaviorally inert for the fixtures at hand.
-func TestRootsForBinaryMatchesSingleLoad(t *testing.T) {
-	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
-	pkgs := []string{
-		base + "initregistry/bench",
-		base + "external",
-		base + "externalbench",       // exercises the ForTest clause: a distinct package X_test root
-		base + "rootcollision/bench", // primed alongside its own dependency rootcollision/dep
-		base + "rootcollision/dep",
-		base + "testmainroot",
-		base + "initfile",
-	}
-	batch, err := packages.Load(loadConfig(context.Background(), ""), pkgs...)
-	if err != nil {
-		t.Fatalf("batch load: %v", err)
-	}
-	idSet := func(ps []*packages.Package) map[string]bool {
-		m := map[string]bool{}
-		for _, p := range ps {
-			m[p.ID] = true
-		}
-		return m
-	}
-	for _, pkg := range pkgs {
-		single, err := packages.Load(loadConfig(context.Background(), ""), pkg)
-		if err != nil {
-			t.Fatalf("single load %s: %v", pkg, err)
-		}
-		want := idSet(single)
-		got := idSet(rootsForBinary(batch, pkg))
-		if len(want) == 0 {
-			t.Fatalf("%s: single load returned no roots", pkg)
-		}
-		if len(got) != len(want) {
-			t.Errorf("%s: rootsForBinary selected %d roots, single load returned %d", pkg, len(got), len(want))
-		}
-		for id := range want {
-			if !got[id] {
-				t.Errorf("%s: rootsForBinary missing root %q that single load returned", pkg, id)
-			}
-		}
-		for id := range got {
-			if !want[id] {
-				t.Errorf("%s: rootsForBinary selected extra root %q not in single load", pkg, id)
-			}
-		}
 	}
 }
 
@@ -1182,38 +1026,6 @@ func TestListUsesBuildFlags(t *testing.T) {
 	t.Fatal("go list omitted the tagged package")
 }
 
-func TestPrimeUsesBuildFlags(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "go.mod", "module example.com/tagged\n\ngo 1.26\n")
-	writeFile(t, dir, "selected_default.go", "//go:build !special\n\npackage tagged\n\nfunc Selected() int { return 1 }\n")
-	writeFile(t, dir, "selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 2 }\n")
-
-	const pkg = "example.com/tagged"
-	primed, err := NewAt(dir, "-tags=special")
-	if err != nil {
-		t.Fatal(err)
-	}
-	primed.Prime([]string{pkg})
-	if _, ok := primed.progs[pkg]; !ok {
-		t.Fatal("Prime did not cache the tagged package")
-	}
-	got, err := primed.Compute(pkg, "Selected")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lazy, err := NewAt(dir, "-tags=special")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := lazy.Compute(pkg, "Selected")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("primed tagged closure = %+v, lazy tagged closure = %+v", got, want)
-	}
-}
-
 func TestBuildFlagsDriveASMClosure(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/asmflag\n\ngo 1.26\n")
@@ -1225,42 +1037,35 @@ func TestBuildFlagsDriveASMClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainClosure, err := plain.Compute(pkg, "Subject")
+	plainResult, err := computeTier2Result(plain, pkg, "Subject")
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainMax, err := plain.maximalHash(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plainClosure.Hash == plainMax {
-		t.Fatal("plain assembly closure widened; flagged comparison would be vacuous")
+	if plainResult.widen {
+		t.Fatalf("plain assembly closure widened (%s); flagged comparison would be vacuous", plainResult.widenReason)
 	}
 
 	flagged, err := NewAt(dir, "-asmflags=all=-D=hook=helper")
 	if err != nil {
 		t.Fatal(err)
 	}
-	flaggedClosure, err := flagged.Compute(pkg, "Subject")
+	flaggedResult, err := computeTier2Result(flagged, pkg, "Subject")
 	if err != nil {
 		t.Fatal(err)
 	}
-	flaggedMax, err := flagged.maximalHash(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if flaggedClosure.Hash != flaggedMax {
-		t.Fatalf("assembly define closure = %s, want maximal %s", flaggedClosure.Hash, flaggedMax)
+	if !flaggedResult.widen {
+		t.Fatalf("assembly define did not widen the closure: %+v", flaggedResult)
 	}
 }
 
-// TestComputeRootsAnySubject pins the generalized root seam: Compute resolves any
-// top-level function as a subject — a production function, not only a Benchmark* —
-// through both the test-variant package (a package that also has tests) and the
-// plain-package fallback (a package with no test files), and errors clearly on a
-// name that resolves to no function. Before generalization the root index held only
-// Benchmark*/TestMain, so a production symbol was reported "not found".
-func TestComputeRootsAnySubject(t *testing.T) {
+// TestAnalysisRootsAnySubject pins the generalized root seam: the analysis
+// resolves any top-level function as a subject — a production function, not only
+// a Benchmark* — through both the test-variant package (a package that also has
+// tests) and the plain-package fallback (a package with no test files), and
+// errors clearly on a name that resolves to no function. Before generalization
+// the root index held only Benchmark*/TestMain, so a production symbol was
+// reported "not found".
+func TestAnalysisRootsAnySubject(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1270,35 +1075,35 @@ func TestComputeRootsAnySubject(t *testing.T) {
 	// test-variant package, which compiles the package WITH its test files and so
 	// holds production and test symbols alike.
 	const withTests = "github.com/greatliontech/gofresh/internal/gotool"
-	a, err := h.Compute(withTests, "RunIn")
+	a, err := computeTier2Result(h, withTests, "RunIn")
 	if err != nil {
-		t.Fatalf("Compute production func RunIn: %v", err)
+		t.Fatalf("analysis of production func RunIn: %v", err)
 	}
-	if a.Hash == "" {
-		t.Fatal("empty closure hash for a resolvable production subject")
+	if len(a.contribs) == 0 {
+		t.Fatal("empty contributions for a resolvable production subject")
 	}
-	if again, err := h.Compute(withTests, "RunIn"); err != nil || again.Hash != a.Hash {
-		t.Errorf("nondeterministic: %q vs %q (err %v)", again.Hash, a.Hash, err)
+	if again, err := computeTier2Result(h, withTests, "RunIn"); err != nil || !slices.Equal(again.contribs, a.contribs) {
+		t.Errorf("nondeterministic: %v vs %v (err %v)", again.contribs, a.contribs, err)
 	}
 
 	// (b) A function in a package with NO test files: resolved via the plain-package
 	// fallback (no ForTest variant exists).
 	const noTests = "github.com/greatliontech/gofresh/closure/fixtures/rootcollision/dep"
-	b, err := h.Compute(noTests, "BenchmarkSame")
+	b, err := computeTier2Result(h, noTests, "BenchmarkSame")
 	if err != nil {
-		t.Fatalf("Compute func in a no-test package: %v", err)
+		t.Fatalf("analysis of func in a no-test package: %v", err)
 	}
-	if b.Hash == "" {
-		t.Fatal("empty closure hash via the plain-package fallback")
+	if len(b.contribs) == 0 {
+		t.Fatal("empty contributions via the plain-package fallback")
 	}
 
 	// A name that resolves to no function is a clear error, not a silent empty root.
-	if _, err := h.Compute(withTests, "NoSuchFunction"); err == nil {
+	if _, err := computeTier2Result(h, withTests, "NoSuchFunction"); err == nil {
 		t.Error("a name resolving to no function: want error, got nil")
 	}
 }
 
-// TestComputeKeepsRecompiledDependencyOutOfSubjectRoots pins subject rooting
+// TestRecompiledDependencyStaysOutOfSubjectRoots pins subject rooting
 // (REQ-closure-analysis): the reachability walk roots at the subject, so the
 // candidate-root index for a package must come only from that package's own
 // variants. `go list` marks every package recompiled into the test binary with
@@ -1308,7 +1113,7 @@ func TestComputeRootsAnySubject(t *testing.T) {
 // must not read as an ambiguous root, and a name the tested package never
 // declares must be refused, never silently resolved to the dependency's
 // closure.
-func TestComputeKeepsRecompiledDependencyOutOfSubjectRoots(t *testing.T) {
+func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 	writeTriangle := func(t *testing.T, aSource, rSource string) string {
 		t.Helper()
 		dir := t.TempDir()
@@ -1362,12 +1167,12 @@ func TestComputeKeepsRecompiledDependencyOutOfSubjectRoots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
-		cl, err := h.Compute("example.com/triangle/a", "G")
+		tr, err := computeTier2Result(h, "example.com/triangle/a", "G")
 		if err != nil {
-			t.Fatalf("Compute a.G with a same-named dependency symbol: %v", err)
+			t.Fatalf("analysis of a.G with a same-named dependency symbol: %v", err)
 		}
-		if cl.Hash == "" {
-			t.Fatal("empty closure hash for a's own G")
+		if len(tr.contribs) == 0 {
+			t.Fatal("empty contributions for a's own G")
 		}
 	})
 
@@ -1380,70 +1185,70 @@ func TestComputeKeepsRecompiledDependencyOutOfSubjectRoots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
-		if cl, err := h.Compute("example.com/triangle/a", "A"); err != nil || cl.Hash == "" {
-			t.Fatalf("Compute a.A: %+v, %v; want a's own subject to resolve", cl, err)
+		if tr, err := computeTier2Result(h, "example.com/triangle/a", "A"); err != nil || len(tr.contribs) == 0 {
+			t.Fatalf("analysis of a.A: %+v, %v; want a's own subject to resolve", tr, err)
 		}
-		if _, err := h.Compute("example.com/triangle/a", "Use"); err == nil {
-			t.Fatal("Compute a.Use: want an error (a never declares Use), got the recompiled dependency's closure")
+		if _, err := computeTier2Result(h, "example.com/triangle/a", "Use"); err == nil {
+			t.Fatal("analysis of a.Use: want an error (a never declares Use), got the recompiled dependency's closure")
 		}
 	})
 }
 
-// TestComputeRootsMethods pins method-subject resolution: a method is named
-// "Type.Method" (matching the consumer symbol grammar with the package prefix
-// stripped), resolves through both value- and pointer-receiver method sets, roots
-// at that specific method, and errors on a missing method name.
-func TestComputeRootsMethods(t *testing.T) {
+// TestMethodSubjectsRootAtSpecificMethod pins method-subject resolution: a
+// method is named "Type.Method" (matching the consumer symbol grammar with the
+// package prefix stripped), resolves through both value- and pointer-receiver
+// method sets, roots at that specific method, and errors on a missing method name.
+func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
 
-	val, err := h.Compute(pkg, "Adder.Value") // value receiver
+	val, err := computeTier2Result(h, pkg, "Adder.Value") // value receiver
 	if err != nil {
-		t.Fatalf("Compute value-receiver method Adder.Value: %v", err)
+		t.Fatalf("analysis of value-receiver method Adder.Value: %v", err)
 	}
-	if val.Hash == "" {
-		t.Fatal("empty closure hash for a method subject")
+	if len(val.contribs) == 0 {
+		t.Fatal("empty contributions for a method subject")
 	}
-	ptr, err := h.Compute(pkg, "Adder.Ptr") // pointer receiver
+	ptr, err := computeTier2Result(h, pkg, "Adder.Ptr") // pointer receiver
 	if err != nil {
-		t.Fatalf("Compute pointer-receiver method Adder.Ptr: %v", err)
+		t.Fatalf("analysis of pointer-receiver method Adder.Ptr: %v", err)
 	}
 	// The two methods reach distinct helpers, so rooting at the specific method (not
 	// the whole type or package) yields distinct closures.
-	if ptr.Hash == val.Hash {
-		t.Error("Adder.Value and Adder.Ptr hash identically; not rooting at the specific method")
+	if slices.Equal(ptr.contribs, val.contribs) {
+		t.Error("Adder.Value and Adder.Ptr contribute identically; not rooting at the specific method")
 	}
-	if _, err := h.Compute(pkg, "Adder.Missing"); err == nil {
+	if _, err := computeTier2Result(h, pkg, "Adder.Missing"); err == nil {
 		t.Error("a missing method name: want error, got nil")
 	}
 }
 
-// TestComputeRootsGenericMethods pins that method subjects on a generic receiver
-// type resolve — the pointer star and generics are dropped from the type name
-// (Box[T] → "Box"), and each method roots at its own closure. SSA materializes the
-// receiver, so no deferral is needed.
-func TestComputeRootsGenericMethods(t *testing.T) {
+// TestGenericMethodSubjectsRootPerMethod pins that method subjects on a generic
+// receiver type resolve — the pointer star and generics are dropped from the type
+// name (Box[T] → "Box"), and each method roots at its own closure. SSA
+// materializes the receiver, so no deferral is needed.
+func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericmethod"
-	get, err := h.Compute(pkg, "Box.Get") // value receiver on Box[T]
+	get, err := computeTier2Result(h, pkg, "Box.Get") // value receiver on Box[T]
 	if err != nil {
-		t.Fatalf("Compute Box.Get: %v", err)
+		t.Fatalf("analysis of Box.Get: %v", err)
 	}
-	set, err := h.Compute(pkg, "Box.Set") // pointer receiver on Box[T]
+	set, err := computeTier2Result(h, pkg, "Box.Set") // pointer receiver on Box[T]
 	if err != nil {
-		t.Fatalf("Compute Box.Set: %v", err)
+		t.Fatalf("analysis of Box.Set: %v", err)
 	}
-	if get.Hash == "" || set.Hash == "" {
-		t.Fatal("empty closure hash for a generic-receiver method")
+	if len(get.contribs) == 0 || len(set.contribs) == 0 {
+		t.Fatal("empty contributions for a generic-receiver method")
 	}
-	if get.Hash == set.Hash {
-		t.Error("Box.Get and Box.Set hash identically; not rooting at the specific method")
+	if slices.Equal(get.contribs, set.contribs) {
+		t.Error("Box.Get and Box.Set contribute identically; not rooting at the specific method")
 	}
 }
 
@@ -1461,29 +1266,29 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/harnessroot"
 
-	bench, err := h.Compute(pkg, "BenchmarkProd")
+	bench, err := computeTier2Result(h, pkg, "BenchmarkProd")
 	if err != nil {
-		t.Fatalf("Compute BenchmarkProd: %v", err)
+		t.Fatalf("analysis of BenchmarkProd: %v", err)
 	}
-	if !bench.Unverifiable {
+	if !bench.unverifiable {
 		t.Error("test subject: want unverifiable (its closure reaches TestMain's file I/O), got verifiable")
 	}
 
-	prod, err := h.Compute(pkg, "Prod")
+	prod, err := computeTier2Result(h, pkg, "Prod")
 	if err != nil {
-		t.Fatalf("Compute Prod: %v", err)
+		t.Fatalf("analysis of Prod: %v", err)
 	}
-	if prod.Unverifiable {
-		t.Errorf("production subject: want verifiable (TestMain not in its closure), got unverifiable: %s", prod.Reason)
+	if prod.unverifiable {
+		t.Errorf("production subject: want verifiable (TestMain not in its closure), got unverifiable: %s", prod.reason)
 	}
 }
 
-// TestComputeIncludesInitRegisteredSideEffectPackage pins REQ-fresh-sound for registry
-// patterns: a side-effect import's init can register an implementation that the
-// benchmark later observes through package-level state and interface dispatch.
-// Tier-2 roots linked startup code so the registering package source is hashed
-// even though the benchmark never names it directly.
-func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
+// TestClosureIncludesInitRegisteredSideEffectPackage pins REQ-fresh-sound for
+// registry patterns: a side-effect import's init can register an implementation
+// that the benchmark later observes through package-level state and interface
+// dispatch. The analysis roots linked startup code so the registering package
+// source is hashed even though the benchmark never names it directly.
+func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1491,18 +1296,11 @@ func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	const benchPkg = "github.com/greatliontech/gofresh/closure/fixtures/initregistry/bench"
 	const codecPkg = "github.com/greatliontech/gofresh/closure/fixtures/initregistry/codec"
 
-	cl, err := h.Compute(benchPkg, "BenchmarkDecode")
+	tr, err := computeTier2Result(h, benchPkg, "BenchmarkDecode")
 	if err != nil {
-		t.Fatalf("Compute: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if len(cl.Hash) != 32 {
-		t.Fatalf("hash len: got %d (%q)", len(cl.Hash), cl.Hash)
-	}
-
-	contribs, _, err := h.tier2Contributions(benchPkg, "BenchmarkDecode")
-	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
-	}
+	contribs := tr.contribs
 	// The init body must be hashed, but the load-bearing edit for this false-valid
 	// is the *registered method* body: the benchmark dispatches gz.Decode through
 	// registry state and an interface without naming codec, so gz.Decode is reached
@@ -1516,18 +1314,18 @@ func TestComputeIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	}
 }
 
-func TestComputeIncludesTestMainRoot(t *testing.T) {
+func TestContributionsIncludeTestMainRoot(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/testmainroot"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkTestMainRoot")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkTestMainRoot")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "TestMain") || !contribContains(contribs, "setup") {
-		t.Fatalf("TestMain/setup missing from closure contributions: %v", contribs)
+	if !contribContains(tr.contribs, "TestMain") || !contribContains(tr.contribs, "setup") {
+		t.Fatalf("TestMain/setup missing from closure contributions: %v", tr.contribs)
 	}
 }
 
@@ -1537,11 +1335,12 @@ func TestTier2DeclarationPrecision(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/direct"
-	contribs, widened, err := h.tier2Contributions(pkg, "BenchmarkDirect")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkDirect")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if widened {
+	contribs := tr.contribs
+	if tr.widen {
 		t.Fatalf("direct fixture widened to Tier-1; contributions: %v", contribs)
 	}
 	for _, want := range []string{"used", "UsedConst", "UsedType"} {
@@ -1553,17 +1352,6 @@ func TestTier2DeclarationPrecision(t *testing.T) {
 		if contribContains(contribs, notWant) {
 			t.Fatalf("Tier-2 contribution unexpectedly contains %q: %v", notWant, contribs)
 		}
-	}
-	cl, err := h.Compute(pkg, "BenchmarkDirect")
-	if err != nil {
-		t.Fatalf("Compute: %v", err)
-	}
-	maxHash, err := h.maximalHash(pkg)
-	if err != nil {
-		t.Fatalf("maximalHash: %v", err)
-	}
-	if cl.Hash == maxHash {
-		t.Fatalf("direct Tier-2 hash unexpectedly equals maximal Tier-1 hash %q", cl.Hash)
 	}
 }
 
@@ -1584,18 +1372,18 @@ func TestBuildIndexTrustsGoListStandardForDotlessModule(t *testing.T) {
 	}
 }
 
-func TestComputeFindsExternalTestBenchmark(t *testing.T) {
+func TestExternalTestBenchmarkRoots(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/externalbench"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkExternal")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkExternal")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "BenchmarkExternal") {
-		t.Fatalf("external test benchmark root missing from contributions: %v", contribs)
+	if !contribContains(tr.contribs, "BenchmarkExternal") {
+		t.Fatalf("external test benchmark root missing from contributions: %v", tr.contribs)
 	}
 }
 
@@ -1605,12 +1393,12 @@ func TestTier2PinsLinkedCacheModules(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkHashFiles")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkHashFiles")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "cache:golang.org/x/tools@v0.47.0") {
-		t.Fatalf("linked x/tools module version missing from Tier-2 contributions: %v", contribs)
+	if !contribContains(tr.contribs, "cache:golang.org/x/tools@v0.47.0") {
+		t.Fatalf("linked x/tools module version missing from Tier-2 contributions: %v", tr.contribs)
 	}
 }
 
@@ -1642,18 +1430,18 @@ func TestTier2ScansReachedCacheASM(t *testing.T) {
 	}
 }
 
-func TestComputeStdWrapperClassBUnverifiable(t *testing.T) {
+func TestStdWrapperClassBUnverifiable(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/stdwrapper"
-	cl, err := h.Compute(pkg, "BenchmarkTemplateParseFiles")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkTemplateParseFiles")
 	if err != nil {
-		t.Fatalf("Compute: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
-		t.Fatalf("std wrapper Class-B = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	if !tr.unverifiable || !strings.Contains(tr.reason, "file I/O") {
+		t.Fatalf("std wrapper Class-B = %v/%q, want file I/O", tr.unverifiable, tr.reason)
 	}
 }
 
@@ -1663,12 +1451,12 @@ func TestTier2StdCallbackContributesMethod(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/stdcallback"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkSortCallback")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkSortCallback")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "Less") {
-		t.Fatalf("std callback method Less missing from contributions: %v", contribs)
+	if !contribContains(tr.contribs, "Less") {
+		t.Fatalf("std callback method Less missing from contributions: %v", tr.contribs)
 	}
 }
 
@@ -1678,20 +1466,19 @@ func TestTier2EmbedFileContribution(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/embedfixture"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkEmbed")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkEmbed")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "embed:") || !contribContains(contribs, "data.txt") {
-		t.Fatalf("embed data file missing from contributions: %v", contribs)
+	if !contribContains(tr.contribs, "embed:") || !contribContains(tr.contribs, "data.txt") {
+		t.Fatalf("embed data file missing from contributions: %v", tr.contribs)
 	}
 }
 
-func TestComputeReachesUnverifiable(t *testing.T) {
+func TestAnalysisReachesUnverifiable(t *testing.T) {
 	// Every benchmark here reaches a Class-B external dependence in its closure
 	// (file I/O, filesystem/path mutation, or network), so the closure is
-	// unverifiable with the matching reason — and still carries a computed hash
-	// (unverifiable is a verdict; the hash is always recorded, REQ-guard-recompute). File I/O is
+	// unverifiable with the matching reason. File I/O is
 	// unverifiable regardless of when it runs relative to the testlog stream: the
 	// runtime-input manifest is evidence of observed identities, never a proof
 	// that every reachable file-I/O path was covered, so the closure never
@@ -1736,15 +1523,12 @@ func TestComputeReachesUnverifiable(t *testing.T) {
 		{"mixedexternal", "BenchmarkMixedExternal", "network I/O"},
 	} {
 		t.Run(tc.pkg+"/"+tc.bench, func(t *testing.T) {
-			cl, err := h.Compute(base+tc.pkg, tc.bench)
+			tr, err := computeTier2Result(h, base+tc.pkg, tc.bench)
 			if err != nil {
-				t.Fatalf("Compute: %v", err)
+				t.Fatalf("analysis: %v", err)
 			}
-			if !cl.Unverifiable || !strings.Contains(cl.Reason, tc.reason) {
-				t.Fatalf("unverifiable = %v, reason = %q, want reason containing %q", cl.Unverifiable, cl.Reason, tc.reason)
-			}
-			if cl.Hash == "" {
-				t.Fatal("unverifiable closure has empty hash")
+			if !tr.unverifiable || !strings.Contains(tr.reason, tc.reason) {
+				t.Fatalf("unverifiable = %v, reason = %q, want reason containing %q", tr.unverifiable, tr.reason, tc.reason)
 			}
 		})
 	}
@@ -1756,7 +1540,7 @@ func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/mixedexternal"
-	result, err := h.tier2(pkg, "BenchmarkMixedExternal")
+	result, err := computeTier2Result(h, pkg, "BenchmarkMixedExternal")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2001,23 +1785,14 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 		t.Fatalf("initfile subject = %+v, want a startup-effect rejection", startup)
 	}
 
-	// One shared Hasher running the production prime→refine→observe sequence
-	// over warm program, list, and effect caches must yield the same
-	// dispositions as the fresh batch above.
-	packages := map[string]bool{}
-	primed := []string{}
-	for _, subject := range subjects {
-		if !packages[subject.Package] {
-			packages[subject.Package] = true
-			primed = append(primed, subject.Package)
-		}
-	}
+	// One shared Hasher running the production maximal→observe sequence
+	// over warm list and effect caches must yield the same dispositions as
+	// the fresh batch above.
 	sharedHasher, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharedHasher.Prime(primed)
-	if _, err := sharedHasher.ComputeBatch(subjects); err != nil {
+	if _, err := sharedHasher.ComputeMaximalBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
 	shared, err := sharedHasher.ComputeObservabilityBatch(subjects)
@@ -2072,23 +1847,12 @@ func TestTier2ReflectWidens(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/reflectfixture"
-	_, widened, err := h.tier2Contributions(pkg, "BenchmarkReflect")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkReflect")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !widened {
+	if !tr.widen {
 		t.Fatal("reflect dispatch did not widen to Tier-1")
-	}
-	cl, err := h.Compute(pkg, "BenchmarkReflect")
-	if err != nil {
-		t.Fatalf("Compute: %v", err)
-	}
-	maxHash, err := h.maximalHash(pkg)
-	if err != nil {
-		t.Fatalf("maximalHash: %v", err)
-	}
-	if cl.Hash != maxHash {
-		t.Fatalf("reflect widened hash = %q, want maximal %q", cl.Hash, maxHash)
 	}
 }
 
@@ -2098,10 +1862,11 @@ func TestTier2GenericInterfaceEscapeHashesMethodBody(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericescape"
-	contribs, widened, err := h.tier2Contributions(pkg, "BenchmarkGenericEscape")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkGenericEscape")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
+	contribs, widened := tr.contribs, tr.widen
 	if widened {
 		t.Fatalf("generic interface escape widened to Tier-1 (imprecise): %v", contribs)
 	}
@@ -2118,10 +1883,11 @@ func TestTier2ConstGroupHashesImplicitContext(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/constgroup"
-	contribs, widened, err := h.tier2Contributions(pkg, "BenchmarkConstGroup")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkConstGroup")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
+	contribs, widened := tr.contribs, tr.widen
 	if widened {
 		t.Fatalf("const group fixture widened to Tier-1: %v", contribs)
 	}
@@ -2136,9 +1902,9 @@ func TestTier2ASMStaticCallAddsGoTarget(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := h.tier2(pkg, "BenchmarkASMCall")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMCall")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	contribs := tr.contribs
 	if tr.widen {
@@ -2150,12 +1916,8 @@ func TestTier2ASMStaticCallAddsGoTarget(t *testing.T) {
 	if !contribContains(contribs, "asm_amd64.s") {
 		t.Fatalf("asm source file missing from contributions: %v", contribs)
 	}
-	cl, err := h.Compute(pkg, "BenchmarkASMCall")
-	if err != nil {
-		t.Fatalf("Compute: %v", err)
-	}
-	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
-		t.Fatalf("asm call target Class-B = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	if !tr.unverifiable || !strings.Contains(tr.reason, "file I/O") {
+		t.Fatalf("asm call target Class-B = %v/%q, want file I/O", tr.unverifiable, tr.reason)
 	}
 }
 
@@ -2165,9 +1927,9 @@ func TestTier2ASMStaticJumpAddsGoTarget(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := h.tier2(pkg, "BenchmarkASMJump")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMJump")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	contribs := tr.contribs
 	if tr.widen {
@@ -2184,9 +1946,9 @@ func TestTier2ASMMacroAddsGoTarget(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := h.tier2(pkg, "BenchmarkASMMacro")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMMacro")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	if tr.widen {
 		t.Fatalf("asm macro fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
@@ -2202,9 +1964,9 @@ func TestTier2ASMSymbolComponentMacroAddsGoTarget(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := h.tier2(pkg, "BenchmarkASMComponentMacro")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMComponentMacro")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	if tr.widen {
 		t.Fatalf("asm component macro fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
@@ -2223,9 +1985,9 @@ func TestTier2ASMLocalJumpContinuesScanning(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := h.tier2(pkg, "BenchmarkASMLocalJump")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMLocalJump")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	if tr.widen {
 		t.Fatalf("asm local jump fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
@@ -3036,22 +2798,18 @@ func TestTier2ASMOpaquePreprocessorWidens(t *testing.T) {
 	}
 }
 
-func TestComputeOpaqueASMFallsBackToMaximal(t *testing.T) {
+func TestOpaqueASMSubjectWidens(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/opaqueasm"
-	cl, err := h.Compute(pkg, "BenchmarkOpaqueASM")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkOpaqueASM")
 	if err != nil {
-		t.Fatalf("Compute: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	maxHash, err := h.maximalHash(pkg)
-	if err != nil {
-		t.Fatalf("maximalHash: %v", err)
-	}
-	if cl.Hash != maxHash {
-		t.Fatalf("opaque asm hash = %q, want maximal %q", cl.Hash, maxHash)
+	if !tr.widen {
+		t.Fatalf("opaque asm did not widen to the maximal closure: %+v", tr)
 	}
 }
 
@@ -3498,15 +3256,15 @@ func TestTier2HashesReachedImports(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/importbinding"
-	contribs, widened, err := h.tier2Contributions(pkg, "BenchmarkImportBinding")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkImportBinding")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if widened {
-		t.Fatalf("import binding fixture widened unexpectedly: %v", contribs)
+	if tr.widen {
+		t.Fatalf("import binding fixture widened unexpectedly: %v", tr.contribs)
 	}
-	if !contribContains(contribs, "imports") {
-		t.Fatalf("import declaration missing from contributions: %v", contribs)
+	if !contribContains(tr.contribs, "imports") {
+		t.Fatalf("import declaration missing from contributions: %v", tr.contribs)
 	}
 }
 
@@ -3516,9 +3274,9 @@ func TestTier2ASMTargetInterfaceInvokeWidens(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asminvoke"
-	tr, err := h.tier2(pkg, "BenchmarkASMInvoke")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkASMInvoke")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	if !tr.widen {
 		t.Fatalf("widen = false, want post-RTA interface dispatch or computed-call widening")
@@ -3531,9 +3289,9 @@ func TestTier2GenericPostRTAInvokeWidens(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericpostrta"
-	tr, err := h.tier2(pkg, "BenchmarkGenericPostRTA")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkGenericPostRTA")
 	if err != nil {
-		t.Fatalf("tier2: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
 	if !tr.widen {
 		t.Fatalf("widen = false, want generic post-RTA dispatch widening")
@@ -3546,12 +3304,12 @@ func TestTier2ReflectReferenceScansClassB(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/reflectexternal"
-	cl, err := h.Compute(pkg, "BenchmarkReflectExternal")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkReflectExternal")
 	if err != nil {
-		t.Fatalf("Compute: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !cl.Unverifiable || !strings.Contains(cl.Reason, "file I/O") {
-		t.Fatalf("reflect target Class-B = %v/%q, want file I/O", cl.Unverifiable, cl.Reason)
+	if !tr.unverifiable || !strings.Contains(tr.reason, "file I/O") {
+		t.Fatalf("reflect target Class-B = %v/%q, want file I/O", tr.unverifiable, tr.reason)
 	}
 }
 
@@ -3644,12 +3402,12 @@ func TestTier2LinknameLocalTargetContributes(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/linknamelocal/bench"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkLinknameLocal")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkLinknameLocal")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "Hidden") || !contribContains(contribs, "LocalOnly") {
-		t.Fatalf("linkname local target declarations missing from contributions: %v", contribs)
+	if !contribContains(tr.contribs, "Hidden") || !contribContains(tr.contribs, "LocalOnly") {
+		t.Fatalf("linkname local target declarations missing from contributions: %v", tr.contribs)
 	}
 }
 
@@ -3766,21 +3524,21 @@ var linked int
 	}
 }
 
-func TestComputeScopesBenchmarkRootToTargetPackage(t *testing.T) {
+func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/rootcollision/bench"
-	contribs, _, err := h.tier2Contributions(pkg, "BenchmarkSame")
+	tr, err := computeTier2Result(h, pkg, "BenchmarkSame")
 	if err != nil {
-		t.Fatalf("tier2Contributions: %v", err)
+		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(contribs, "RealOnly") {
-		t.Fatalf("target benchmark root contribution missing RealOnly: %v", contribs)
+	if !contribContains(tr.contribs, "RealOnly") {
+		t.Fatalf("target benchmark root contribution missing RealOnly: %v", tr.contribs)
 	}
-	if contribContains(contribs, "DepOnly") {
-		t.Fatalf("dependency benchmark root leaked into target closure: %v", contribs)
+	if contribContains(tr.contribs, "DepOnly") {
+		t.Fatalf("dependency benchmark root leaked into target closure: %v", tr.contribs)
 	}
 }
 
@@ -3835,52 +3593,5 @@ func BenchmarkHashFiles(b *testing.B) {
 		if _, err := hashFiles(dir, files, nil); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-// A package-local load failure degrades to unavailable refined evidence
-// for exactly that package's subjects: sibling packages refine
-// normally, and a caller error - a symbol the package never declares -
-// still fails the whole request (REQ-closure-batch-equivalence).
-func TestComputeBatchIsolatesPackageLocalFailures(t *testing.T) {
-	dir := t.TempDir()
-	for name, content := range map[string]string{
-		"go.mod":           "module example.com/iso\n\ngo 1.26\n",
-		"ok/ok.go":         "package ok\n\nfunc F() int { return 1 }\n",
-		"broken/broken.go": "package broken\n\nfunc F() int { syntax error here }\n",
-	} {
-		full := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h, err := NewAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	okSubject := Subject{Package: "example.com/iso/ok", Symbol: "F"}
-	brokenSubject := Subject{Package: "example.com/iso/broken", Symbol: "F"}
-	results, err := h.ComputeBatch([]Subject{okSubject, brokenSubject})
-	if err != nil {
-		t.Fatalf("package-local failure escalated to a batch error: %v", err)
-	}
-	if got := results[okSubject]; got.Unverifiable || got.Hash == "" {
-		t.Fatalf("healthy sibling lost its refinement: %+v", got)
-	}
-	got := results[brokenSubject]
-	if !got.Unverifiable || !got.Widened || !strings.Contains(got.Reason, "refined analysis unavailable") {
-		t.Fatalf("broken package's subject = %+v, want unavailable refined evidence", got)
-	}
-	if got.Hash == "" {
-		t.Fatal("unavailable evidence carries no floor hash - a hashless record could check valid under a purity assertion")
-	}
-
-	// A symbol the healthy package never declares stays a whole-request
-	// caller error.
-	if _, err := h.ComputeBatch([]Subject{{Package: "example.com/iso/ok", Symbol: "NoSuchSymbol"}}); err == nil {
-		t.Fatal("unknown subject did not fail the request")
 	}
 }

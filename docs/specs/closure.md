@@ -26,11 +26,6 @@ distinguishable from every other drift.
 compartment's top-level declarations and per-file header identities, exposed as
 data for a consumer to persist at capture and diff at check.
 
-**declaration-RTA refinement** (term): the optional narrower closure identified in
-recordings as `gofresh/declaration-rta@1`, using attributed rapid type analysis and
-declaration-level source contributions while retaining every sound widening and
-unverifiable disposition required by this contract.
-
 **pinned dependency** (term): a reachable module dependency whose resolved source is
 immutable under the module cache, identified by its module path and version rather
 than hashed per declaration.
@@ -94,17 +89,10 @@ identifies a recording that predates the compartment and fails closed to stale
 with reason "test variants". Verdicts order the comparison after the core: an unchanged
 core with a drifted compartment is stale with the stable reason
 "test variants" — the one verdict reason a consumer may discriminate on — and
-neither refinement nor observation evidence rescues it, because gofresh renders
-no judgment about which test-variant deltas are benign. A drifted core keeps
-its existing semantics for maximal-only recordings (stale on the closure), and
-refined rescue of a drifted core additionally requires the recorded
-compartment to equal the current one — the compartment is evidence on every
-path, so strictly more drift never flips a stale verdict to valid: a
-sibling-test edit reads "test variants" whether or not production drift rides
-along. Both unchanged keep the prior semantics exactly, including grafting a
-compatible refined recording's disposition on core equality alone —
-declaration-RTA roots neither sibling tests nor the compartment, while the
-check verdict above still stales on compartment drift regardless. A subject declared in a test file has its own body in the
+no observation evidence rescues it, because gofresh renders
+no judgment about which test-variant deltas are benign. A drifted core is
+stale on the closure. Both unchanged keep the prior semantics
+exactly. A subject declared in a test file has its own body in the
 compartment, so an edited recorded test moves the compartment — that is the
 partition working, not a leak. A package whose core contribution widens to its
 whole directory (opaque assembly, cgo callback blind spots) may keep test files
@@ -173,13 +161,6 @@ Go-semantics data — it claims the delta cannot change the behavior of any
 unchanged declaration and nothing more; what inertness licenses is the
 consumer's policy, never gofresh's.
 
-**REQ-closure-refinement-policy** (behavior): The declaration-RTA refinement MUST be
-optional and selected by the caller for capture, check, and producer validation;
-maximal closure is the default. A refined recording contains both closures, and each
-hash is bound to the subject identity. Refinement never runs merely because gofresh
-estimates execution or recomputation cost: the caller alone chooses whether its
-possible precision is worth the analysis.
-
 ## Blind spots
 
 **REQ-closure-blindspot** (behavior): Every blind spot MUST take exactly one of three
@@ -223,7 +204,7 @@ variables are ubiquitous.
 
 ## Analysis requirements
 
-**REQ-closure-analysis** (behavior): Declaration-RTA refinement MUST build
+**REQ-closure-analysis** (behavior): The observability proof's precise analysis MUST build
 whole-program SSA with standard-library bodies present and generic instantiations
 materialized, and root the reachability walk at the subject, every linked source
 package initializer, and — for a subject that executes through the test harness (one
@@ -247,18 +228,18 @@ carrier rule ordinary parameters answer to (interface, function, and
 unsafe reach open; a channel opens exactly when its element does);
 `any` and `comparable` bound nothing — closes
 the caller's choice, anything else keeps the subject open-world,
-where refinement widens and observability refuses exactly as for any
+where observability refuses exactly as for any
 open subject world. A
 constraint-bounded parameterized subject analyzes closed: its
 materialized in-binary instantiations root the reachability walk — each
 dispatches concretely, so instantiation-reached content enters the
-refined closure and the observability effect set, and a subject with no
-in-binary instantiation keeps the origin fold's own static closure, since
+observability effect set, and a subject with no
+in-binary instantiation is analyzed on the origin fold's own static
+reachability, since
 no concretized behavior of it exists in the analyzed binary. In every case the
 origin body is never a traversal surface (open over type parameters, it is
 not a runtime dispatch surface), and its origin declaration remains the
-subject's own content, so a generic-body edit always moves the refined
-closure. An analysis shape the reachability walk cannot classify degrades
+subject's own content. An analysis shape the reachability walk cannot classify degrades
 that analysis to unavailable evidence, never a process failure. A subject
 name declared by two distinct functions of one test binary — the package
 and its external test package may legally share a top-level name — is
@@ -266,14 +247,14 @@ subject-local ambiguity: that subject degrades to unavailable evidence
 with a diagnostic naming the collision, and sibling subjects analyze
 normally; a name the package never declares at all remains a caller
 error. Maximal
-closure and refinement package
+closure and precise-analysis package
 loading, dependency enumeration, and every other source-selection step use the
-caller's executable build flags, so both closures describe the binary whose
+caller's executable build flags, so both tiers describe the binary whose
 build-configuration guard is recorded rather than a different default build.
 
 **REQ-closure-observability-analysis** (invariant): An observability proof MUST use the
-same whole-program SSA, standard-library bodies, generic instantiations, executable
-build selection, and subject attribution required of declaration-RTA, but preserves
+whole-program SSA, standard-library bodies, generic instantiations, executable
+build selection, and subject attribution of REQ-closure-analysis, and preserves
 root provenance: any external effect attributable to a package initializer or to
 user test-main flow rather than the subject is outside subject-time observation and
 blocks the proof, while subject flow is classified against the admitted observation
@@ -305,25 +286,23 @@ the accessor stays refused, and among handle-producing opens exactly the read-on
 positions — freshness licenses mutation, pinning never does — and a write through a
 pinned path blocks on its own effect.
 
-**REQ-closure-batch-equivalence** (invariant): Sharing reachability work across an
-analysis view's refined subjects MUST produce, for every subject, the same reachable
-functions, widening disposition, closure hash, and unverifiability as analyzing that
-subject independently with the same startup and test-harness roots. Dynamic-function
-and interface-dispatch facts are attributed to the subjects that reach both sides of
-their cross-product; a fact reachable only from one subject does not create an edge
-for another. Batching is bounded so attributed state can be discarded incrementally
-rather than growing with every subject in the view.
-The same equivalence applies to maximal source identities: a batched subject's
+**REQ-closure-batch-equivalence** (invariant): Sharing closure computation across an
+analysis view's subjects MUST produce, for every subject, the same evidence as
+computing that subject independently: a batched subject's
 source-file set is exactly the set an independent maximal view would expose,
-while the view-wide set is their union. It applies equally to both recorded
-hashes: a batched subject's core maximal hash and test-variant compartment are
+while the view-wide set is their union, and a batched subject's core maximal
+hash and test-variant compartment are
 exactly the pair an independent computation of that subject would produce.
 
 **REQ-closure-observability-batch-equivalence** (invariant): Sharing observability
 analysis across subjects MUST yield exactly the proof disposition, complete effect set,
 root provenance, and diagnostic that independent analysis of each subject under the
-same view would yield. No effect or proof fact reached only by one subject can confer
-or deny another subject's proof.
+same view would yield, with the same startup and test-harness roots. Dynamic-function
+and interface-dispatch facts are attributed to the subjects that reach both sides of
+their cross-product; a fact reachable only from one subject does not create an edge
+for another — no effect or proof fact reached only by one subject can confer
+or deny another subject's proof. Batching is bounded so attributed state can be
+discarded incrementally rather than growing with every subject in the view.
 
 ## Cross-module dependencies
 

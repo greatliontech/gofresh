@@ -54,7 +54,6 @@ func TestFingerprintIsExportedData(t *testing.T) {
 	structural.ExportedData[Fingerprint](t,
 		structural.FieldOf[string]("MaximalClosure"),
 		structural.FieldOf[string]("TestVariantClosure"),
-		structural.FieldOf[Refinement]("Refinement"),
 		structural.FieldOf[string]("ObservationAssertion"),
 		structural.FieldOf[ObservationProof]("ObservationProof"),
 		structural.FieldOf[guard.Guards]("Guards"),

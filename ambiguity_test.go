@@ -78,7 +78,7 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 		{Package: pkg, Symbol: "TestInternal"},
 		{Package: pkg, Symbol: "TestExternal"},
 	}
-	view, err := engine.NewView(context.Background(), subjects, dir, WithUnboundedRefinement())
+	view, err := engine.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatalf("shared helper name made the package unmeasurable: %v", err)
 	}
@@ -87,8 +87,8 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("capture %s: %v", subject.Symbol, err)
 		}
-		if strings.Contains(fingerprint.Refinement.Reason, "ambiguous") {
-			t.Fatalf("unambiguous subject %s degraded by a sibling collision: %+v", subject.Symbol, fingerprint.Refinement)
+		if strings.Contains(fingerprint.ObservationProof.Reason, "ambiguous") {
+			t.Fatalf("unambiguous subject %s degraded by a sibling collision: %+v", subject.Symbol, fingerprint.ObservationProof)
 		}
 	}
 }
@@ -105,7 +105,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
-	view, err := engine.NewView(context.Background(), []Subject{ambiguous, {Package: pkg, Symbol: "Compute"}}, dir, WithUnboundedRefinement())
+	view, err := engine.NewView(context.Background(), []Subject{ambiguous, {Package: pkg, Symbol: "Compute"}}, dir)
 	if err != nil {
 		t.Fatalf("ambiguous subject request failed view construction: %v", err)
 	}
@@ -113,12 +113,11 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
-	if !fingerprint.Refinement.Unverifiable {
-		t.Fatalf("collapsed identity captured verifiable evidence: %+v", fingerprint.Refinement)
+	if fingerprint.ObservationProof.Observable {
+		t.Fatalf("collapsed identity captured usable evidence: %+v", fingerprint.ObservationProof)
 	}
-	// The diagnostic names BOTH declarations: the repair (rename one) is
-	// actionable only when the caller sees where each lives.
-	reason := fingerprint.Refinement.Reason
+	// The degraded proof names the collision so the repair is actionable.
+	reason := fingerprint.ObservationProof.Reason
 	if !strings.Contains(reason, "ambiguous") {
 		t.Fatalf("refused capture does not name the collision: %q", reason)
 	}
@@ -137,8 +136,8 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(sibling.Refinement.Reason, "ambiguous") {
-		t.Fatalf("sibling subject degraded by the collision: %+v", sibling.Refinement)
+	if strings.Contains(sibling.ObservationProof.Reason, "ambiguous") {
+		t.Fatalf("sibling subject degraded by the collision: %+v", sibling.ObservationProof)
 	}
 }
 

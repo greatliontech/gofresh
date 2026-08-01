@@ -1,12 +1,15 @@
 // Package closure computes the closure hash (REQ-closure-coverage): a sound fingerprint
-// of the source a benchmark exercises, used to decide whether a stored result is
+// of the source a subject exercises, used to decide whether a stored result is
 // still valid for HEAD.
 //
-// Compute is the Tier-2 entry point: reachable mutable-local declarations are
-// hashed by source, linked cache modules are pinned by module version, stdlib is
-// cut by the toolchain guard, and unresolved source blind spots widen to the
-// Tier-1 maximal closure. Soundness (REQ-fresh-sound): the hashed set is always a superset
-// of the source able to affect the benchmark — never false-valid.
+// ComputeMaximalBatch is the hashing entry point: the package test binary's
+// mutable-local sources are hashed by content, linked cache modules are pinned
+// by module version, and stdlib is cut by the toolchain guard.
+// ComputeObservabilityBatch is the precise-analysis entry point: whole-program
+// SSA reachability proves every subject-reachable external effect representable
+// by the observation stream, or refuses (REQ-closure-observability-analysis).
+// Soundness (REQ-fresh-sound): the hashed set is always a superset of the
+// source able to affect the subject — never false-valid.
 package closure
 
 import (
@@ -43,13 +46,10 @@ type Closure struct {
 	// compartment; a package with no test files carries the stable
 	// EmptyTestVariantClosure identity. Unsalted: subjects of one package
 	// share the compartment, which describes the package, not the subject
-	// (REQ-closure-test-variant-compartment). Empty on refined closures,
-	// whose evidence is bound to the core alone.
+	// (REQ-closure-test-variant-compartment).
 	TestVariants string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
-	Widened      bool   // declaration refinement fell back to the maximal package closure
-	Unrefinable  bool   // refinement cannot prove this opaque maximal dependence absent
 	// External marks a subject the author declared external-state via
 	// //gofresh:external: unverifiability by declaration, never suppressible
 	// by a purity assertion or observation evidence (REQ-external-precedence).
@@ -100,10 +100,9 @@ func (h *Hasher) UseViewLoad(load *ViewLoad) {
 }
 
 // OnProgress supplies a callback invoked synchronously at the start of each
-// long-running analysis step: "load" before a package program load, "refine"
-// before a package's declaration-RTA batch, "prove" before a package's
-// observability batch. The callback must be fast; events are diagnostic
-// keep-alive data, not contract.
+// long-running analysis step: "load" before a package program load, "prove"
+// before a package's observability batch. The callback must be fast; events
+// are diagnostic keep-alive data, not contract.
 func (h *Hasher) OnProgress(f func(phase, pkgPath string)) {
 	h.progress = f
 }

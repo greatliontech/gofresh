@@ -130,6 +130,19 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	if verdict.Status != Stale || verdict.Reason != "test variants" {
 		t.Fatalf("pre-partition recording = %+v, want fail-closed {stale \"test variants\"}", verdict)
 	}
+	// Both check surfaces share one evidence ladder: the observed surface
+	// fails a pre-partition recording closed identically.
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := view.CheckObserved(context.Background(), prePartition, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != Stale || observed.Reason != "test variants" {
+		t.Fatalf("observed pre-partition recording = %+v, want fail-closed {stale \"test variants\"}", observed)
+	}
 	current, err := engine.Check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -139,13 +152,12 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	}
 }
 
-// Refined evidence never rescues compartment drift: with the core equal, a
-// drifted compartment is stale "test variants" and no precise analysis runs;
-// with both equal, the recorded refined disposition still grafts without
-// analysis exactly as before — the graft stays keyed to core equality because
-// declaration-RTA roots neither sibling tests nor the compartment
-// (REQ-closure-test-variant-compartment, REQ-fresh-refinement-disposition).
-func TestRefinedEvidenceDoesNotRescueCompartmentDrift(t *testing.T) {
+// Compartment drift is decided from recorded evidence alone: with the core
+// equal, a drifted compartment is stale "test variants" on both check
+// surfaces and no precise analysis runs; with both equal, the verdict is
+// valid, equally without analysis (REQ-closure-test-variant-compartment,
+// REQ-fresh-hierarchical-check).
+func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -156,7 +168,7 @@ func TestRefinedEvidenceDoesNotRescueCompartmentDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,12 +176,9 @@ func TestRefinedEvidenceDoesNotRescueCompartmentDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recorded.Refinement == (Refinement{}) {
-		t.Fatalf("refined capture carries no refinement: %+v", recorded)
-	}
 
-	// Both equal: the graft path serves the verdict with no precise analysis.
-	unchanged, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	// Both equal: the verdict is served with no precise analysis.
+	unchanged, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +189,14 @@ func TestRefinedEvidenceDoesNotRescueCompartmentDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	if verdict.Status != Valid || analyses != 0 {
-		t.Fatalf("no-drift refined check = %+v with %d analyses, want valid without analysis", verdict, analyses)
+		t.Fatalf("no-drift check = %+v with %d analyses, want valid without analysis", verdict, analyses)
 	}
 
-	// Compartment drift: stale "test variants", refinement not consulted.
+	// Compartment drift: stale "test variants", no analysis consulted.
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,25 +207,22 @@ func TestRefinedEvidenceDoesNotRescueCompartmentDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "test variants" || analyses != 0 {
-		t.Fatalf("compartment-drift refined check = %+v with %d analyses, want {stale \"test variants\"} without analysis", verdict, analyses)
+		t.Fatalf("compartment-drift check = %+v with %d analyses, want {stale \"test variants\"} without analysis", verdict, analyses)
 	}
 	observed, err := drifted.CheckObserved(context.Background(), recorded, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.Status != Stale || observed.Reason != "test variants" {
-		t.Fatalf("compartment-drift observed check = %+v, want {stale \"test variants\"}", observed)
+	if observed.Status != Stale || observed.Reason != "test variants" || analyses != 0 {
+		t.Fatalf("compartment-drift observed check = %+v with %d analyses, want {stale \"test variants\"} without analysis", observed, analyses)
 	}
 }
 
-// A refined recording that predates the partition is never rescued: with the
-// core drifted, refined evidence would otherwise graft a Valid verdict while
-// the record carries no compartment to compare, leaving sibling-test edits
-// permanently invisible — so it fails closed to {stale "test variants"} on
-// both check surfaces, while the same drift under a recorded compartment
-// still rescues (REQ-closure-test-variant-compartment,
-// REQ-fresh-hierarchical-check).
-func TestRefinedPrePartitionRecordingFailsClosedInsteadOfRescuing(t *testing.T) {
+// Core drift takes the ladder's first tier even when the compartment also
+// drifted: strictly more drift never improves a verdict, and the reason names
+// the core ("closure"), the compartment being compared only under an equal
+// core (REQ-closure-test-variant-compartment, REQ-fresh-hierarchical-check).
+func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -228,69 +234,7 @@ func TestRefinedPrePartitionRecordingFailsClosedInsteadOfRescuing(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorded, err := producer.Capture(context.Background(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recorded.Refinement == (Refinement{}) {
-		t.Fatalf("refined capture carries no refinement: %+v", recorded)
-	}
-
-	// Core drift F's refined closure does not cover: a production sibling.
-	if err := os.WriteFile(filepath.Join(dir, "sibling.go"), []byte("package partition\n\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
-	if err != nil {
-		t.Fatal(err)
-	}
-	rescued, err := drifted.Check(context.Background(), recorded, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rescued.Status != Valid {
-		t.Fatalf("post-partition refined recording = %+v, want the rescue this test guards", rescued)
-	}
-
-	prePartition := recorded
-	prePartition.TestVariantClosure = ""
-	verdict, err := drifted.Check(context.Background(), prePartition, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Stale || verdict.Reason != "test variants" {
-		t.Fatalf("pre-partition refined recording = %+v, want fail-closed {stale \"test variants\"}", verdict)
-	}
-	observed, err := drifted.CheckObserved(context.Background(), prePartition, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.Status != Stale || observed.Reason != "test variants" {
-		t.Fatalf("pre-partition observed-policy check = %+v, want fail-closed {stale \"test variants\"}", observed)
-	}
-}
-
-// Compartment drift blocks refined rescue even when the core also drifted:
-// strictly more drift never flips a stale verdict to valid, so a sibling-test
-// edit reads {stale "test variants"} whether or not production drift rides
-// along (REQ-closure-test-variant-compartment, REQ-fresh-hierarchical-check).
-func TestCompartmentDriftBlocksRefinedRescueAcrossCoreDrift(t *testing.T) {
-	dir := writePartitionModule(t, map[string]string{
-		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
-		"partition.go":      partitionProduction,
-		"sibling.go":        "package partition\n\nfunc Sibling() int { return 1 }\n",
-		"partition_test.go": partitionTest,
-	})
-	subject := Subject{Package: "example.com/partition", Symbol: "F"}
-	engine, err := New(WithDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,16 +243,14 @@ func TestCompartmentDriftBlocksRefinedRescueAcrossCoreDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Production drift outside F's refined slice AND a sibling-test edit:
-	// without the compartment tier the refined hashes agree and rescue would
-	// return valid across the sibling-test movement.
+	// A production sibling edit AND a sibling-test edit drift both tiers.
 	if err := os.WriteFile(filepath.Join(dir, "sibling.go"), []byte("package partition\n\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir, WithUnboundedRefinement())
+	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,15 +258,15 @@ func TestCompartmentDriftBlocksRefinedRescueAcrossCoreDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Stale || verdict.Reason != "test variants" {
-		t.Fatalf("mixed-drift refined check = %+v, want {stale \"test variants\"}", verdict)
+	if verdict.Status != Stale || verdict.Reason != "closure" {
+		t.Fatalf("mixed-drift check = %+v, want {stale \"closure\"}", verdict)
 	}
 	observed, err := drifted.CheckObserved(context.Background(), recorded, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.Status != Stale || observed.Reason != "test variants" {
-		t.Fatalf("mixed-drift observed check = %+v, want {stale \"test variants\"}", observed)
+	if observed.Status != Stale || observed.Reason != "closure" {
+		t.Fatalf("mixed-drift observed check = %+v, want {stale \"closure\"}", observed)
 	}
 }
 

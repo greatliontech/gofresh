@@ -158,7 +158,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "TestVariantClosure", "Refinement", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
@@ -645,49 +645,6 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 		if !wantExternal && v.Reason == "external directive" {
 			t.Errorf("%s marked external without the directive", symbol)
 		}
-	}
-}
-
-// TestExternalDirectiveSurvivesRefinementDrift pins REQ-external-directive
-// across the refined tier: a declared-external subject whose maximal closure
-// drifts while its declaration-RTA refinement still matches must stay
-// unverifiable "external directive" — never valid on the refined hash alone.
-// The sibling edit moves only the maximal hash, which is exactly the drift
-// that routes CheckRefined onto the refined closure.
-func TestExternalDirectiveSurvivesRefinementDrift(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go toolchain not available")
-	}
-	tmp := t.TempDir()
-	write := func(name, content string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("go.mod", "module example.com/extdrift\n\ngo 1.26\n")
-	write("ext.go", "package extdrift\n\n//gofresh:external\nfunc Reads() int { return 1 }\n\nfunc Sibling() int { return 10 }\n")
-
-	subj := Subject{Package: "example.com/extdrift", Symbol: "Reads"}
-	e, err := New(WithDir(tmp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fp, err := e.Capture(context.Background(), subj, tmp, WithUnboundedRefinement())
-	if err != nil {
-		t.Fatalf("refined capture: %v", err)
-	}
-	write("ext.go", "package extdrift\n\n//gofresh:external\nfunc Reads() int { return 1 }\n\nfunc Sibling() int { return 20 }\n")
-	drifted, err := New(WithDir(tmp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	v, err := drifted.Check(context.Background(), fp, subj, tmp, WithUnboundedRefinement())
-	if err != nil {
-		t.Fatalf("refined check: %v", err)
-	}
-	if v.Status != Unverifiable || v.Reason != "external directive" {
-		t.Fatalf("drifted refined verdict = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
 	}
 }
 

@@ -63,8 +63,8 @@ external-state assertion: whenever the subject's guards hold, its verdict is
 unverifiable with the reason `external directive`, so a subject the author knows
 depends on external state is never reused on hashable guards alone — while a failing
 guard still reports stale, externality withholding reuse without ever masking guard
-information. Externality survives every evidence tier: a matching declaration-RTA
-refinement after maximal drift, and completed observation evidence, still verdict
+information. Externality survives every evidence tier: completed observation
+evidence still verdicts
 unverifiable — no finer analysis of the subject's body outweighs the author's
 declaration about its environment. Discovery follows the same rules as the purity
 directive: the producing build's executable flags select it, it belongs to the same

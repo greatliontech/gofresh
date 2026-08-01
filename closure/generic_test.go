@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,8 +50,8 @@ func UseInt() string { return Key[int](1) }
 `
 
 // A parameterized subject analyzes through its materialized instantiations:
-// no panic, a real observability disposition, and a refined closure that
-// moves when the generic body moves (REQ-closure-analysis: instantiations
+// no panic, a real observability disposition, and precise contributions that
+// move when the generic body moves (REQ-closure-analysis: instantiations
 // dispatch concretely; a parameterized body is not a runtime dispatch
 // surface, but its source is still the subject's content).
 func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
@@ -62,9 +63,9 @@ func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refined, err := h.ComputeBatch([]Subject{subject})
+	refined, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
-		t.Fatalf("refinement over a generic subject: %v", err)
+		t.Fatalf("precise analysis over a generic subject: %v", err)
 	}
 	proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
 	if err != nil {
@@ -96,12 +97,12 @@ func UseInt() string { return Key[int](1) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	refinedEdited, err := h2.ComputeBatch([]Subject{subject})
+	refinedEdited, err := computeTier2Result(h2, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refined[subject].Hash == refinedEdited[subject].Hash {
-		t.Fatal("editing the generic body did not move the refined closure - the origin's content left the subject")
+	if slices.Equal(refined.contribs, refinedEdited.contribs) {
+		t.Fatal("editing the generic body did not move the precise contributions - the origin's content left the subject")
 	}
 }
 
@@ -168,18 +169,18 @@ func Orphan[K comparable](k K) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refined, err := h.ComputeBatch([]Subject{subject})
+	refined, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
-		t.Fatalf("refinement over an uninstantiated generic subject: %v", err)
+		t.Fatalf("precise analysis over an uninstantiated generic subject: %v", err)
 	}
-	if refined[subject].Hash == "" {
+	if len(refined.contribs) == 0 {
 		t.Fatal("uninstantiated generic subject lost its closure")
 	}
 	if _, err := h.ComputeObservabilityBatch([]Subject{subject}); err != nil {
 		t.Fatalf("observability over an uninstantiated generic subject: %v", err)
 	}
 	// The origin declaration is the subject's own content even with no
-	// instantiation to traverse: a body edit moves the refined closure.
+	// instantiation to traverse: a body edit moves the precise contributions.
 	edited := writeGenericFixture(t, genericFixtureBody+`
 // Orphan has no instantiation anywhere in the binary.
 func Orphan[K comparable](k K) string {
@@ -192,12 +193,12 @@ func Orphan[K comparable](k K) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refinedEdited, err := h2.ComputeBatch([]Subject{subject})
+	refinedEdited, err := computeTier2Result(h2, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refined[subject].Hash == refinedEdited[subject].Hash {
-		t.Fatal("editing the uninstantiated generic body did not move its refined closure - the origin fold lost the subject's own content")
+	if slices.Equal(refined.contribs, refinedEdited.contribs) {
+		t.Fatal("editing the uninstantiated generic body did not move its precise contributions - the origin fold lost the subject's own content")
 	}
 }
 
@@ -265,7 +266,7 @@ func UseInt() string {
 	if proof.Observable || !strings.Contains(proof.Reason, "open subject world") {
 		t.Fatalf("zero-parameter generic disposition = %+v, want the forced open-world refusal", proof)
 	}
-	before, err := h.ComputeBatch([]Subject{subject})
+	before, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,12 +275,12 @@ func UseInt() string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := h2.ComputeBatch([]Subject{subject})
+	after, err := computeTier2Result(h2, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before[subject].Hash == after[subject].Hash {
-		t.Fatal("a callee edit did not move the zero-parameter generic's refined closure - closed-world reading served a stale hash")
+	if slices.Equal(before.contribs, after.contribs) {
+		t.Fatal("a callee edit did not move the zero-parameter generic's precise contributions - closed-world reading would serve a stale closure")
 	}
 }
 
@@ -323,7 +324,7 @@ func UseInt() string {
 	if proof.Observable || !strings.Contains(proof.Reason, "open subject world") {
 		t.Fatalf("generic method disposition = %+v, want the forced open-world refusal", proof)
 	}
-	before, err := h.ComputeBatch([]Subject{subject})
+	before, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,11 +333,11 @@ func UseInt() string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := h2.ComputeBatch([]Subject{subject})
+	after, err := computeTier2Result(h2, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before[subject].Hash == after[subject].Hash {
-		t.Fatal("a callee edit did not move the generic method's refined closure")
+	if slices.Equal(before.contribs, after.contribs) {
+		t.Fatal("a callee edit did not move the generic method's precise contributions")
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
@@ -22,35 +21,6 @@ import (
 // ErrViewChanged reports that a producer View no longer describes the current
 // source, build, guard, or purity state and its results must not be persisted.
 var ErrViewChanged = errors.New("gofresh: analysis view changed")
-
-// ViewOption configures an analysis view at construction.
-type ViewOption func(*viewConfig)
-
-type viewConfig struct {
-	refinementBudget    time.Duration
-	refinementUnbounded bool
-}
-
-// WithRefinementBudget declares the view's refinement budget: with it,
-// capture computes refined evidence and a check whose maximal closure
-// drifted runs current refinement to consume a recording's refined
-// evidence, each refinement operation bounded by d. Absent any budget,
-// refinement never runs - gofresh never infers whether a subject is
-// expensive enough to refine; cost consent is the caller's, declared
-// once per view (REQ-fresh-refinement-failclosed).
-func WithRefinementBudget(d time.Duration) ViewOption {
-	return func(c *viewConfig) {
-		c.refinementBudget = d
-	}
-}
-
-// WithUnboundedRefinement declares an explicitly unbounded refinement
-// budget: refinement runs under the caller's own context alone.
-func WithUnboundedRefinement() ViewOption {
-	return func(c *viewConfig) {
-		c.refinementUnbounded = true
-	}
-}
 
 // ErrViewSealed reports a capture attempted after producer validation started.
 var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
@@ -73,13 +43,10 @@ type View struct {
 	packages             []string
 	moduleDir            string
 	kind                 Kind
-	cfg                  viewConfig
 	maximal              map[Subject]closure.Closure
-	refined              map[Subject]closure.Closure
 	observable           map[Subject]closure.Observability
 	guards               guard.Guards
 	purity               map[Subject]string
-	openWorld            map[Subject]bool
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	// fileDigests: construction-time content digest per source identity,
@@ -92,13 +59,12 @@ type View struct {
 	// served ledger describes exactly the observed bytes
 	// (REQ-closure-test-variant-compartment, REQ-fresh-coherent-view).
 	testVariantLedgers   map[string]closure.TestVariantLedger
-	capturedRefined      map[Subject]bool
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
 	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
 	// beforePreciseAnalysis observes the start of drift-forced precise analysis
-	// (refinement or observability). Tests use it to pin which check paths run
+	// (the observability proof). Tests use it to pin which check paths run
 	// analysis and to inject cancellation at the analysis boundary.
 	beforePreciseAnalysis func()
 }
@@ -107,21 +73,17 @@ type View struct {
 // under the caller's context. Reachability and package loading are shared
 // across the requested set, but each subject retains its independent closure
 // semantics (REQ-closure-batch-equivalence).
-func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string, opts ...ViewOption) (*View, error) {
-	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult, opts...)
+func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
+	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult)
 }
 
 // NewViewFor observes one analysis view with the guards applicable to kind
 // under the caller's context.
-func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind, opts ...ViewOption) (*View, error) {
-	return e.newView(ctx, subjects, moduleDir, kind, opts...)
+func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+	return e.newView(ctx, subjects, moduleDir, kind)
 }
 
-func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind, opts ...ViewOption) (*View, error) {
-	var cfg viewConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
@@ -215,23 +177,19 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 
 	v := &View{
 		engine:               e,
-		cfg:                  cfg,
 		subjects:             unique,
 		requests:             requests,
 		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
 		maximal:              first.maximal,
-		refined:              make(map[Subject]closure.Closure, len(unique)),
 		observable:           make(map[Subject]closure.Observability, len(unique)),
 		guards:               first.guards,
 		purity:               first.purity,
-		openWorld:            first.openWorld,
 		sourceFiles:          first.sourceFiles,
 		sourceFilesBySubject: first.sourceFilesBySubject,
 		fileDigests:          first.fileDigests,
 		testVariantLedgers:   first.testVariantLedgers,
-		capturedRefined:      make(map[Subject]bool, len(unique)),
 		capturedObserved:     make(map[Subject]bool, len(unique)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 	}
@@ -242,7 +200,6 @@ type viewObservation struct {
 	maximal              map[Subject]closure.Closure
 	guards               guard.Guards
 	purity               map[Subject]string
-	openWorld            map[Subject]bool
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
@@ -304,7 +261,6 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		maximal:              make(map[Subject]closure.Closure, len(subjects)),
 		guards:               guards,
 		purity:               make(map[Subject]string, len(subjects)),
-		openWorld:            make(map[Subject]bool, len(subjects)),
 		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
 		testVariantLedgers:   make(map[string]closure.TestVariantLedger, len(packages)),
 	}
@@ -350,19 +306,15 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if openWorld[subject] {
 			maximal.Unverifiable = true
 			maximal.Reason = "subject accepts caller-supplied dynamic behavior"
-			observation.openWorld[subject] = true
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
 			// is refused for this subject alone — the maximal package
 			// closure stays the sound floor (it spans every declaring
 			// variant), but no evidence can say WHICH declaration it
-			// vouches for (REQ-purity-directive). The openWorld mark keeps
-			// the refined tier from claiming precision on the collapsed
-			// identity.
+			// vouches for (REQ-purity-directive).
 			maximal.Unverifiable = true
 			maximal.Reason = "ambiguous subject identity: " + detail + "; rename one declaration to address either"
-			observation.openWorld[subject] = true
 		}
 		if external[subject] {
 			// The author declared external state: unverifiable by
@@ -404,13 +356,6 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
 	if ctx == nil {
 		return Fingerprint{}, errors.New("gofresh: nil analysis context")
-	}
-	// Under a declared refinement budget the fingerprint carries refined
-	// evidence; without one, maximal evidence alone - the engine owns
-	// the strategy, the caller declares only the budget
-	// (REQ-fresh-refinement-failclosed).
-	if v.refinementDeclared() {
-		return v.captureRefined(ctx, subject, nil)
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -465,89 +410,23 @@ func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
 	}, nil
 }
 
-func (v *View) captureRefined(ctx context.Context, subject Subject, beforePublish func()) (Fingerprint, error) {
-	if _, ok := v.maximal[subject]; !ok {
-		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-	}
-	if err := v.ensureRefined(ctx, []Subject{subject}); err != nil {
-		return Fingerprint{}, err
-	}
-	if beforePublish != nil {
-		beforePublish()
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return Fingerprint{}, fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
-	if v.sealed {
-		return Fingerprint{}, ErrViewSealed
-	}
-	v.capturedRefined[subject] = true
-	return v.refinedFingerprintLocked(subject), nil
-}
-
 // CaptureBatch captures a fingerprint for every subject in the view,
-// sharing attributed analysis across the set; refined evidence rides
-// each fingerprint exactly when the view declares a refinement budget.
+// sharing the view's batched analysis across the set.
 func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
-	if !v.refinementDeclared() {
-		v.mu.RLock()
-		defer v.mu.RUnlock()
-		if v.sealed {
-			return nil, ErrViewSealed
-		}
-		result := make(map[Subject]Fingerprint, len(v.subjects))
-		for _, subject := range v.subjects {
-			cl := v.maximal[subject]
-			result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
-		}
-		return result, nil
-	}
-	if err := v.ensureRefined(ctx, v.subjects); err != nil {
-		return nil, err
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("gofresh: refinement cancelled: %w", err)
-	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	if v.sealed {
 		return nil, ErrViewSealed
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
-		v.capturedRefined[subject] = true
-		result[subject] = v.refinedFingerprintLocked(subject)
+		cl := v.maximal[subject]
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
 	}
 	return result, nil
-}
-
-func (v *View) refinedFingerprintLocked(subject Subject) Fingerprint {
-	cl := v.refined[subject]
-	reason := ""
-	if cl.Unverifiable {
-		reason = reasonOr(cl.Reason, "external dependence")
-	}
-	refinement := Refinement{
-		Strategy:     DeclarationRTA,
-		Subject:      subject,
-		Closure:      refinedSubjectHash(subject, cl.Hash),
-		Unverifiable: cl.Unverifiable,
-		Reason:       reason,
-	}
-	refinement.Evidence = refinementEvidence(v.maximal[subject].Hash, refinement)
-	return Fingerprint{
-		MaximalClosure:     v.maximal[subject].Hash,
-		TestVariantClosure: v.maximal[subject].TestVariants,
-		Refinement:         refinement,
-		Guards:             v.guards,
-		PurityAssertion:    v.purity[subject],
-		ResultKind:         v.kind,
-	}
 }
 
 // CaptureObserved returns maximal closure evidence plus a caller-selected,
@@ -556,10 +435,7 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprin
 	if _, ok := v.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	wantRefined := v.refinementDeclared()
-	rctx, cancel := v.refinementCtx(ctx)
-	defer cancel()
-	if err := v.ensurePrecise(rctx, []Subject{subject}, wantRefined, true); err != nil {
+	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
 		return Fingerprint{}, err
 	}
 	v.mu.Lock()
@@ -571,39 +447,12 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprin
 		return Fingerprint{}, ErrViewSealed
 	}
 	v.capturedObserved[subject] = true
-	if wantRefined {
-		v.capturedRefined[subject] = true
-		return v.observedRefinedFingerprintLocked(subject), nil
-	}
 	return v.observedFingerprintLocked(subject), nil
 }
 
 // CaptureObservedBatch captures observation proof evidence for every
-// subject; refined evidence rides each fingerprint exactly when the
-// view declares a refinement budget.
+// subject, sharing one proof analysis across the set.
 func (v *View) CaptureObservedBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
-	if v.refinementDeclared() {
-		rctx, cancel := v.refinementCtx(ctx)
-		defer cancel()
-		if err := v.ensurePrecise(rctx, v.subjects, true, true); err != nil {
-			return nil, err
-		}
-		v.mu.Lock()
-		defer v.mu.Unlock()
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if v.sealed {
-			return nil, ErrViewSealed
-		}
-		result := make(map[Subject]Fingerprint, len(v.subjects))
-		for _, subject := range v.subjects {
-			v.capturedRefined[subject] = true
-			v.capturedObserved[subject] = true
-			result[subject] = v.observedRefinedFingerprintLocked(subject)
-		}
-		return result, nil
-	}
 	if err := v.ensureObservable(ctx, v.subjects); err != nil {
 		return nil, err
 	}
@@ -644,12 +493,6 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 	}
 }
 
-func (v *View) observedRefinedFingerprintLocked(subject Subject) Fingerprint {
-	fingerprint := v.observedFingerprintLocked(subject)
-	fingerprint.Refinement = v.refinedFingerprintLocked(subject).Refinement
-	return fingerprint
-}
-
 // AttachObservation binds sealed, process-backed runtime evidence to a captured
 // observation proof. The returned fingerprint is ready for producer validation.
 func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
@@ -663,8 +506,7 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 		return Fingerprint{}, ErrViewSealed
 	}
 	observed := v.observedFingerprintLocked(subject)
-	combined := v.observedRefinedFingerprintLocked(subject)
-	if !v.capturedObserved[subject] || fingerprint != observed && fingerprint != combined {
+	if !v.capturedObserved[subject] || fingerprint != observed {
 		return Fingerprint{}, errors.New("gofresh: observation does not match captured subject proof")
 	}
 	if _, attached := v.attachedObservations[subject]; attached {
@@ -689,11 +531,8 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 	return verdicts[subject], nil
 }
 
-// CheckBatch checks a caller-supplied recording set, batching
-// drift-forced refinement - under the view's declared budget, for
-// recordings carrying compatible refined evidence - for subjects whose
-// maximal evidence drifted (REQ-fresh-hierarchical-check,
-// REQ-fresh-refinement-failclosed).
+// CheckBatch checks a caller-supplied recording set under the shared
+// evidence ladder (REQ-fresh-hierarchical-check).
 func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	return v.checkBatch(ctx, recorded)
 }
@@ -748,12 +587,8 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		// The shared evidence ladder (core, compartment, fail-closed
 		// pre-partition tiers) decides evidence-only staleness once for
 		// every check surface (recordedEvidenceVerdict).
-		if verdict, failed := recordedEvidenceVerdict(rec, cl, v.refinementDeclared()); failed {
+		if verdict, failed := recordedEvidenceVerdict(rec, cl); failed {
 			verdicts[subject] = verdict
-			continue
-		}
-		if rec.MaximalClosure != cl.Hash && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
-			verdicts[subject] = Verdict{Stale, "refinement"}
 			continue
 		}
 		pending[subject] = rec
@@ -788,51 +623,9 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		}
 		return finished, nil
 	}
-	var drifted []Subject
 	for subject, rec := range pending {
 		cl := v.maximal[subject]
-		if rec.MaximalClosure != cl.Hash {
-			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
-				verdict = v.withMovedInputs(ctx, verdict, rec)
-				verdicts[subject] = verdict
-				continue
-			}
-			drifted = append(drifted, subject)
-			continue
-		}
 		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != ""), rec)
-	}
-	if len(drifted) == 0 {
-		return finish()
-	}
-	// Every drifted record here passed the no-budget gate above, so the
-	// declared budget bounds the shared precise-analysis pass
-	// (REQ-fresh-refinement-failclosed).
-	rctx, rcancel := v.refinementCtx(ctx)
-	defer rcancel()
-	if err := v.ensurePrecise(rctx, drifted, true, true); err != nil {
-		for _, subject := range drifted {
-			verdicts[subject] = Verdict{Unverifiable, "precise analysis unavailable: " + err.Error()}
-		}
-		return finish()
-	}
-	v.mu.RLock()
-	currentRefined := make(map[Subject]closure.Closure, len(drifted))
-	currentObservable := make(map[Subject]closure.Observability, len(drifted))
-	for _, subject := range drifted {
-		currentRefined[subject] = v.refined[subject]
-		currentObservable[subject] = v.observable[subject]
-	}
-	v.mu.RUnlock()
-	for _, subject := range drifted {
-		rec := recorded[subject]
-		effective := currentRefined[subject]
-		if rec.Refinement.Closure != refinedSubjectHash(subject, effective.Hash) {
-			verdicts[subject] = Verdict{Stale, "refinement"}
-			continue
-		}
-		positive := positives[subject] && currentObservable[subject].Observable
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positive && rec.RuntimeInputs != ""), rec)
 	}
 	return finish()
 }
@@ -862,16 +655,8 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		// The shared evidence ladder (core, compartment, fail-closed
 		// pre-partition tiers) decides evidence-only staleness once for
 		// every check surface (recordedEvidenceVerdict).
-		if verdict, failed := recordedEvidenceVerdict(rec, maximal, v.refinementDeclared()); failed {
+		if verdict, failed := recordedEvidenceVerdict(rec, maximal); failed {
 			verdicts[subject] = verdict
-			continue
-		}
-		if rec.Refinement != (Refinement{}) && !compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
-			verdicts[subject] = Verdict{Stale, "refinement"}
-			continue
-		}
-		if rec.MaximalClosure != maximal.Hash && rec.Refinement == (Refinement{}) {
-			verdicts[subject] = Verdict{Stale, "closure"}
 			continue
 		}
 		pending[subject] = rec
@@ -905,52 +690,9 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		}
 		return finished, nil
 	}
-	var drifted []Subject
 	for subject, rec := range pending {
 		maximal := v.maximal[subject]
-		if rec.MaximalClosure != maximal.Hash {
-			if verdict, failed := decideKnownGuards(rec, v.guards, runtimeBefore[subject], v.kind); failed {
-				verdict = v.withMovedInputs(ctx, verdict, rec)
-				verdicts[subject] = verdict
-				continue
-			}
-			drifted = append(drifted, subject)
-			continue
-		}
-
-		// Maximal equality proves the source behind compatible recorded precise
-		// evidence is unchanged, so no precise analysis is run.
-		effective := maximal
-		if compatibleRefinement(rec.Refinement, subject, rec.MaximalClosure) {
-			effective.Unverifiable = rec.Refinement.Unverifiable
-			effective.Reason = rec.Refinement.Reason
-		}
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, effective, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
-	}
-
-	if len(drifted) == 0 {
-		return finish()
-	}
-	if err := v.ensureRefined(ctx, drifted); err != nil {
-		for _, subject := range drifted {
-			verdicts[subject] = Verdict{Unverifiable, "refinement unavailable: " + err.Error()}
-		}
-		return finish()
-	}
-	v.mu.RLock()
-	currentRefined := make(map[Subject]closure.Closure, len(drifted))
-	for _, subject := range drifted {
-		currentRefined[subject] = v.refined[subject]
-	}
-	v.mu.RUnlock()
-	for _, subject := range drifted {
-		rec := recorded[subject]
-		current := currentRefined[subject]
-		if rec.Refinement.Closure != refinedSubjectHash(subject, current.Hash) {
-			verdicts[subject] = Verdict{Stale, "refinement"}
-			continue
-		}
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, current, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, maximal, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
 	}
 	return finish()
 }
@@ -1036,7 +778,6 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) 
 func (v *View) Validate(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
-	hasRefined := len(v.capturedRefined) != 0
 	hasObserved := len(v.capturedObserved) != 0
 	v.mu.Unlock()
 	if ctx == nil {
@@ -1046,15 +787,11 @@ func (v *View) Validate(ctx context.Context) error {
 		return err
 	}
 	// The view validates whatever it captured: observation proofs pull
-	// in the observed arm (which also revalidates refined captures),
-	// refined captures alone the refined arm, and a maximal-only
-	// producer the base comparison - the engine owns the dispatch
-	// exactly as it owns the capture strategy.
+	// in the observed arm, and a maximal-only producer the base
+	// comparison - the engine owns the dispatch exactly as it owns the
+	// capture strategy.
 	if hasObserved {
 		return v.validateObserved(ctx)
-	}
-	if hasRefined {
-		return v.validateRefined(ctx)
 	}
 	// A comparison-only observation reads once: these facts are never
 	// recorded, so a torn read can only compare unequal and refuse - the
@@ -1078,10 +815,7 @@ func (v *View) Validate(ctx context.Context) error {
 // the captured facts seed the validation view directly. The seeded facts
 // rest on a genuine agreement pair whose reads span capture time and
 // validation time, so they are record-grade without a second construction
-// pair (REQ-fresh-coherent-view's record/compare asymmetry). The view
-// carries the producer's declared budget: validation-time refinement is a
-// refinement operation like any other, and building the view here makes
-// budget inheritance unrepresentable to forget.
+// pair (REQ-fresh-coherent-view's record/compare asymmetry).
 func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 	observation, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
@@ -1097,75 +831,27 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 	defer v.mu.RUnlock()
 	current := &View{
 		engine:               v.engine,
-		cfg:                  v.cfg,
 		subjects:             v.subjects,
 		requests:             v.requests,
 		packages:             v.packages,
 		moduleDir:            v.moduleDir,
 		kind:                 v.kind,
 		maximal:              v.maximal,
-		refined:              make(map[Subject]closure.Closure, len(v.subjects)),
 		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
 		guards:               v.guards,
 		purity:               v.purity,
-		openWorld:            v.openWorld,
 		sourceFiles:          v.sourceFiles,
 		sourceFilesBySubject: v.sourceFilesBySubject,
 		fileDigests:          v.fileDigests,
 		testVariantLedgers:   v.testVariantLedgers,
-		capturedRefined:      make(map[Subject]bool, len(v.subjects)),
 		capturedObserved:     make(map[Subject]bool, len(v.subjects)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(v.subjects)),
 	}
 	return current, nil
 }
 
-func (v *View) validateRefined(ctx context.Context) error {
-	v.mu.Lock()
-	v.sealed = true
-	v.mu.Unlock()
-	if ctx == nil {
-		return errors.New("gofresh: nil refinement context")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	current, err := v.newSeededValidationView(ctx)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	v.mu.RLock()
-	subjects := make([]Subject, 0, len(v.capturedRefined))
-	expected := make(map[Subject]closure.Closure, len(v.capturedRefined))
-	for _, subject := range v.subjects {
-		if v.capturedRefined[subject] {
-			subjects = append(subjects, subject)
-			expected[subject] = v.refined[subject]
-		}
-	}
-	v.mu.RUnlock()
-	if len(subjects) == 0 {
-		return ctx.Err()
-	}
-	// ensureRefined's own bracket closes with a fresh observation compared
-	// against the seeded facts, so a separate closing view would re-verify
-	// what the bracket already refused on (REQ-fresh-coherent-view).
-	if err := current.ensureRefined(ctx, subjects); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	current.mu.RLock()
-	defer current.mu.RUnlock()
-	return compareRefinedContext(ctx, current.refined, expected, subjects)
-}
-
 // validateObserved re-establishes every captured observation proof and
-// attached runtime state, refined captures included.
+// attached runtime state.
 func (v *View) validateObserved(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
@@ -1183,16 +869,12 @@ func (v *View) validateObserved(ctx context.Context) error {
 	v.mu.RLock()
 	subjects := make([]Subject, 0, len(v.capturedObserved))
 	expected := make(map[Subject]closure.Observability, len(v.capturedObserved))
-	expectedRefined := make(map[Subject]closure.Closure, len(v.capturedRefined))
 	attached := make(map[Subject]runtimeinput.State, len(v.capturedObserved))
 	for _, subject := range v.subjects {
 		if v.capturedObserved[subject] {
 			subjects = append(subjects, subject)
 			expected[subject] = v.observable[subject]
 			attached[subject] = v.attachedObservations[subject]
-		}
-		if v.capturedRefined[subject] {
-			expectedRefined[subject] = v.refined[subject]
 		}
 	}
 	v.mu.RUnlock()
@@ -1204,23 +886,6 @@ func (v *View) validateObserved(ctx context.Context) error {
 	}
 	if err := current.ensureObservable(ctx, subjects); err != nil {
 		return err
-	}
-	if len(expectedRefined) != 0 {
-		refinedSubjects := make([]Subject, 0, len(expectedRefined))
-		for _, subject := range v.subjects {
-			if _, ok := expectedRefined[subject]; ok {
-				refinedSubjects = append(refinedSubjects, subject)
-			}
-		}
-		if err := current.ensureRefined(ctx, refinedSubjects); err != nil {
-			return err
-		}
-		current.mu.RLock()
-		if err := compareRefinedContext(ctx, current.refined, expectedRefined, refinedSubjects); err != nil {
-			current.mu.RUnlock()
-			return err
-		}
-		current.mu.RUnlock()
 	}
 	current.mu.RLock()
 	for _, subject := range subjects {
@@ -1399,24 +1064,6 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 	return ctx.Err()
 }
 
-func compareRefinedContext(ctx context.Context, current, expected map[Subject]closure.Closure, subjects []Subject) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	for _, subject := range subjects {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if current[subject] != expected[subject] {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("%w: refinement for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
-		}
-	}
-	return ctx.Err()
-}
-
 // reobserveBase detects source, guard, or purity drift since view construction
 // with one fresh observation compared against the constructing view. This
 // provides the same ordinary-drift guarantee as a full double-observed view per
@@ -1487,39 +1134,12 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 	return ctx.Err()
 }
 
-// refinementDeclared reports whether the view carries any refinement
-// budget; without one, refinement never runs
-// (REQ-fresh-refinement-failclosed).
-func (v *View) refinementDeclared() bool {
-	return v.cfg.refinementUnbounded || v.cfg.refinementBudget > 0
-}
-
-// refinementCtx bounds one refinement operation by the declared budget;
-// an unbounded declaration runs under the caller's context alone.
-func (v *View) refinementCtx(ctx context.Context) (context.Context, context.CancelFunc) {
-	if v.cfg.refinementUnbounded || v.cfg.refinementBudget <= 0 {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, v.cfg.refinementBudget)
-}
-
-func (v *View) ensureRefined(ctx context.Context, subjects []Subject) error {
-	rctx, cancel := v.refinementCtx(ctx)
-	defer cancel()
-	return v.ensurePrecise(rctx, subjects, true, false)
-}
-
-func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
-	return v.ensurePrecise(ctx, subjects, false, true)
-}
-
-// ensurePrecise runs the requested drift-forced precise tiers — declaration-RTA
-// refinement and observability proof — for subjects not yet computed, inside one
-// single-observation drift bracket pair and over one shared closure Hasher, so a
-// check needing both tiers loads and analyzes the program once
+// ensureObservable runs the drift-forced observability proof for subjects
+// not yet computed, inside one single-observation drift bracket pair and
+// over one shared closure Hasher
 // (REQ-fresh-coherent-view attribution; equivalence per
-// REQ-closure-batch-equivalence and REQ-closure-observability-batch-equivalence).
-func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefined, wantObservable bool) error {
+// REQ-closure-observability-batch-equivalence).
+func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil precise-analysis context")
 	}
@@ -1527,25 +1147,15 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
 	v.mu.RLock()
-	refinedRequests := make([]closure.Subject, 0, len(subjects))
 	observableRequests := make([]closure.Subject, 0, len(subjects))
-	expected := make(map[closure.Subject]closure.Closure, len(subjects))
 	for _, subject := range subjects {
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-		if wantRefined {
-			if _, ok := v.refined[subject]; !ok {
-				refinedRequests = append(refinedRequests, request)
-				expected[request] = v.maximal[subject]
-			}
-		}
-		if wantObservable {
-			if _, ok := v.observable[subject]; !ok {
-				observableRequests = append(observableRequests, request)
-			}
+		if _, ok := v.observable[subject]; !ok {
+			observableRequests = append(observableRequests, request)
 		}
 	}
 	v.mu.RUnlock()
-	if len(refinedRequests) == 0 && len(observableRequests) == 0 {
+	if len(observableRequests) == 0 {
 		return nil
 	}
 	if v.beforePreciseAnalysis != nil {
@@ -1586,57 +1196,28 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 			return err
 		}
 	}
-	if len(refinedRequests) > 0 && len(observableRequests) > 0 {
-		// Priming retains a package's program for the Hasher's lifetime, so
-		// prime exactly the packages both tiers analyze: sharing one load and
-		// SSA build helps only there, and retaining single-tier packages would
-		// defeat the batch computation's bounded-peak release discipline.
-		refinedPackages := map[string]bool{}
-		for _, request := range refinedRequests {
-			refinedPackages[request.Package] = true
+	observableComputed, err := hasher.ComputeObservabilityBatch(observableRequests)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 		}
-		primed := make([]string, 0, len(observableRequests))
-		seen := map[string]bool{}
+		// Isolation retries per subject so a fact reached only by one
+		// subject can never deny a sibling's proof. While the analysis
+		// context lives, the Hasher memoizes load failures, so a failing
+		// package's load runs once per analysis however many subjects
+		// retry; once the analysis budget expires, retries fail at the
+		// subprocess boundary without real work.
+		observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
 		for _, request := range observableRequests {
-			if refinedPackages[request.Package] && !seen[request.Package] {
-				seen[request.Package] = true
-				primed = append(primed, request.Package)
-			}
-		}
-		hasher.Prime(primed)
-	}
-	var refinedComputed map[closure.Subject]closure.Closure
-	if len(refinedRequests) > 0 {
-		refinedComputed, err = hasher.ComputeBatch(refinedRequests)
-		if err != nil {
-			return err
-		}
-	}
-	var observableComputed map[closure.Subject]closure.Observability
-	if len(observableRequests) > 0 {
-		observableComputed, err = hasher.ComputeObservabilityBatch(observableRequests)
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
-			}
-			// Isolation retries per subject so a fact reached only by one
-			// subject can never deny a sibling's proof. While the analysis
-			// context lives, the Hasher memoizes load failures, so a failing
-			// package's load runs once per analysis however many subjects
-			// retry; once the analysis budget expires, retries fail at the
-			// subprocess boundary without real work.
-			observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
-			for _, request := range observableRequests {
-				isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
-				if isolatedErr != nil {
-					if ctx.Err() != nil {
-						return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
-					}
-					observableComputed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
-					continue
+			isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
+			if isolatedErr != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 				}
-				maps.Copy(observableComputed, isolated)
+				observableComputed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
+				continue
 			}
+			maps.Copy(observableComputed, isolated)
 		}
 	}
 	after, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
@@ -1648,50 +1229,17 @@ func (v *View) ensurePrecise(ctx context.Context, subjects []Subject, wantRefine
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if len(observableRequests) > 0 && v.sealed {
+	if v.sealed {
 		return ErrViewSealed
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
-	}
-	for _, request := range refinedRequests {
-		subject := Subject{Package: request.Package, Symbol: request.Symbol}
-		if _, ok := v.refined[subject]; !ok {
-			v.refined[subject] = retainMaximalDisposition(expected[request], refinedComputed[request], v.openWorld[subject])
-		}
 	}
 	for _, request := range observableRequests {
 		subject := Subject{Package: request.Package, Symbol: request.Symbol}
 		v.observable[subject] = observableComputed[request]
 	}
 	return ctx.Err()
-}
-
-func retainMaximalDisposition(maximal, refined closure.Closure, openWorld bool) closure.Closure {
-	// Declared externality survives refinement unconditionally: the author's
-	// external-state assertion is a property of the subject, not of what the
-	// analysis could or could not prove about its body
-	// (REQ-external-directive, REQ-external-precedence).
-	if maximal.External {
-		refined.External = true
-		refined.Unverifiable = true
-		refined.Reason = maximal.Reason
-		return refined
-	}
-	if maximal.Unverifiable && (openWorld || refined.Widened || maximal.Unrefinable) {
-		refined.Unverifiable = true
-		refined.Reason = maximal.Reason
-	}
-	return refined
-}
-
-func compatibleRefinement(ref Refinement, subject Subject, maximalClosure string) bool {
-	return ref.Strategy == DeclarationRTA && ref.Subject == subject && ref.Closure != "" && ref.Unverifiable == (ref.Reason != "") && ref.Evidence == refinementEvidence(maximalClosure, ref)
-}
-
-func refinementEvidence(maximalClosure string, ref Refinement) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(ref.Strategy), ref.Strategy, len(ref.Subject.Package), ref.Subject.Package, len(ref.Subject.Symbol), ref.Subject.Symbol, len(ref.Closure), ref.Closure, ref.Unverifiable, len(ref.Reason), ref.Reason))
-	return hex.EncodeToString(sum[:])[:32]
 }
 
 func compatibleObservationProof(proof ObservationProof, assertion string, subject Subject, maximalClosure string) bool {
@@ -1706,10 +1254,5 @@ func compatibleObservationProof(proof ObservationProof, assertion string, subjec
 
 func observationProofEvidence(maximalClosure, assertion string, proof ObservationProof) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason))
-	return hex.EncodeToString(sum[:])[:32]
-}
-
-func refinedSubjectHash(subject Subject, closureHash string) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s", len(DeclarationRTA), DeclarationRTA, len(closureHash), closureHash, len(subject.Package), subject.Package, len(subject.Symbol), subject.Symbol))
 	return hex.EncodeToString(sum[:])[:32]
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,9 +98,9 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 		{index: 1, name: "DynamicCaller", part: "dynamicTarget"},
 		{index: 3, name: "Invoker", part: "concreteMethodHelper"},
 	} {
-		tr, err := h.tier2Reachable(base, reachable[check.index])
+		tr, err := h.tier2ReachableWithFresh(base, reachable[check.index], false)
 		if err != nil {
-			t.Fatalf("tier2Reachable(%s): %v", check.name, err)
+			t.Fatalf("tier2ReachableWithFresh(%s): %v", check.name, err)
 		}
 		if contribHasAll(tr.contribs, batchIsolationPackage, "batchisolation.go", check.part) {
 			t.Fatalf("%s closure contains other subject's %s declaration: %v", check.name, check.part, tr.contribs)
@@ -121,7 +122,7 @@ func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
 		{symbol: "Invoker", widen: true},
 	} {
 		t.Run(tc.symbol, func(t *testing.T) {
-			result, err := h.tier2(batchIsolationPackage, tc.symbol)
+			result, err := computeTier2Result(h, batchIsolationPackage, tc.symbol)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,19 +138,12 @@ func TestTier2WidensInitializedMutableGlobalDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := h.tier2("github.com/greatliontech/gofresh/closure/fixtures/globalcallback", "F")
+	result, err := computeTier2Result(h, "github.com/greatliontech/gofresh/closure/fixtures/globalcallback", "F")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.widen {
 		t.Fatalf("initialized mutable global did not widen: %+v", result)
-	}
-	computed, err := h.Compute("github.com/greatliontech/gofresh/closure/fixtures/globalcallback", "F")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !computed.Widened {
-		t.Fatalf("public closure lost widening disposition: %+v", computed)
 	}
 }
 
@@ -223,7 +217,7 @@ func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
 	}
 	base := newTier2Base(h, prog, metas)
 	h.ctx = &cancelAfterContext{Context: context.Background(), remaining: 3}
-	if _, err := h.tier2Reachable(base, reachable[0]); err == nil {
+	if _, err := h.tier2ReachableWithFresh(base, reachable[0], false); err == nil {
 		t.Fatal("tier-2 projection ignored cancellation during traversal")
 	}
 }
@@ -241,48 +235,7 @@ func (c *cancelAfterContext) Err() error {
 	return nil
 }
 
-func TestComputeBatchEqualsIndependentCompute(t *testing.T) {
-	subjects := []Subject{
-		{Package: batchIsolationPackage, Symbol: "AddressTaker"},
-		{Package: batchIsolationPackage, Symbol: "DynamicCaller"},
-		{Package: batchIsolationPackage, Symbol: "Materializer"},
-		{Package: batchIsolationPackage, Symbol: "Invoker"},
-		{Package: batchIsolationPackage, Symbol: "Production"},
-		{Package: batchIsolationPackage, Symbol: "BenchmarkHarness"},
-		{Package: "github.com/greatliontech/gofresh/closure/fixtures/direct", Symbol: "BenchmarkDirect"},
-	}
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := h.ComputeBatch(append(subjects, subjects[1], subjects[0]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(subjects) {
-		t.Fatalf("ComputeBatch returned %d results for %d distinct subjects", len(got), len(subjects))
-	}
-	for _, subject := range subjects {
-		independent, err := New()
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := independent.Compute(subject.Package, subject.Symbol)
-		if err != nil {
-			t.Fatalf("independent Compute(%+v): %v", subject, err)
-		}
-		if got[subject] != want {
-			t.Errorf("ComputeBatch(%+v) = %+v, independent Compute = %+v", subject, got[subject], want)
-		}
-	}
-
-	empty, err := h.ComputeBatch(nil)
-	if err != nil || len(empty) != 0 {
-		t.Fatalf("ComputeBatch(nil) = %v, %v; want empty map, nil", empty, err)
-	}
-}
-
-func TestComputeBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
+func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/batchbound\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -302,17 +255,21 @@ func TestComputeBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := h.ComputeBatch(subjects)
+	got, err := h.ComputeObservabilityBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
 	last := subjects[len(subjects)-1]
-	want, err := h.Compute(last.Package, last.Symbol)
+	solo, err := NewAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[last] != want {
-		t.Fatalf("boundary subject closure = %+v, independent = %+v", got[last], want)
+	want, err := solo.ComputeObservabilityBatch([]Subject{last})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[last] != want[last] {
+		t.Fatalf("boundary subject proof = %+v, independent = %+v", got[last], want[last])
 	}
 }
 
@@ -321,70 +278,47 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 		{Package: batchIsolationPackage, Symbol: "TestStandardDynamic"},
 		{Package: batchIsolationPackage, Symbol: "Production"},
 	}
-	batchedHasher, err := New()
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	batched, err := batchedHasher.ComputeBatch(subjects)
+	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, subject := range subjects {
+	reachable, err := attributedReachableSets(context.Background(), prog, subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metas, err := h.list(batchIsolationPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := newTier2Base(h, prog, metas)
+	batched := make([]tier2Result, len(subjects))
+	for i, subject := range subjects {
+		batched[i], err = h.tier2ReachableWithFresh(base, reachable[i], false)
+		if err != nil {
+			t.Fatalf("batched analysis (%s): %v", subject.Symbol, err)
+		}
 		independentHasher, err := New()
 		if err != nil {
 			t.Fatal(err)
 		}
-		independent, err := independentHasher.Compute(subject.Package, subject.Symbol)
+		independent, err := computeTier2Result(independentHasher, subject.Package, subject.Symbol)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if batched[subject] != independent {
-			t.Fatalf("batched %s = %+v, independent = %+v", subject.Symbol, batched[subject], independent)
+		if !slices.Equal(batched[i].contribs, independent.contribs) ||
+			batched[i].widen != independent.widen ||
+			batched[i].widenReason != independent.widenReason ||
+			batched[i].unverifiable != independent.unverifiable ||
+			batched[i].reason != independent.reason {
+			t.Fatalf("batched %s = %+v, independent = %+v", subject.Symbol, batched[i], independent)
 		}
 	}
-	if !batched[subjects[0]].Unverifiable {
-		t.Fatalf("standard dynamic target was verifiable: %+v", batched[subjects[0]])
-	}
-}
-
-func BenchmarkComputeBatch(b *testing.B) {
-	subjects := []Subject{
-		{Package: batchIsolationPackage, Symbol: "AddressTaker"},
-		{Package: batchIsolationPackage, Symbol: "DynamicCaller"},
-		{Package: batchIsolationPackage, Symbol: "Materializer"},
-		{Package: batchIsolationPackage, Symbol: "Invoker"},
-		{Package: batchIsolationPackage, Symbol: "Production"},
-		{Package: batchIsolationPackage, Symbol: "BenchmarkHarness"},
-	}
-	for _, tc := range []struct {
-		name  string
-		batch bool
-	}{
-		{name: "batch", batch: true},
-		{name: "one-subject-calls"},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			h, err := New()
-			if err != nil {
-				b.Fatal(err)
-			}
-			h.Prime([]string{batchIsolationPackage})
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				if tc.batch {
-					if _, err := h.ComputeBatch(subjects); err != nil {
-						b.Fatal(err)
-					}
-					continue
-				}
-				for _, subject := range subjects {
-					if _, err := h.Compute(subject.Package, subject.Symbol); err != nil {
-						b.Fatal(err)
-					}
-				}
-			}
-		})
+	if !batched[0].unverifiable {
+		t.Fatalf("standard dynamic target was verifiable: %+v", batched[0])
 	}
 }
 

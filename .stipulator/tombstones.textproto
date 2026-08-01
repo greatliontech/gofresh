@@ -1,0 +1,6 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Tombstones
+
+retired: "REQ-closure-refinement-policy"
+retired: "REQ-fresh-refinement-disposition"
+retired: "REQ-fresh-refinement-failclosed"

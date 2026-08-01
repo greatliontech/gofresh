@@ -99,18 +99,18 @@ the core count the machine guard already covers.
 
 ## Recording and recomputation
 
-**REQ-guard-recompute** (behavior): A subject's maximal closure hash and any selected
-refinement evidence for its recorded commit MUST be recorded at run time from the
+**REQ-guard-recompute** (behavior): A subject's maximal closure hash for its
+recorded commit MUST be recorded at run time from the
 working tree. A newly constructed current analysis view recomputes the maximal hash
-and, only after maximal drift under a caller-selected refined check, the current
-refinement — never reconstructing a historical build — so a verdict needs no fragile
+— never reconstructing a historical build — so a verdict needs no fragile
 checkout and rests only on the current view and recorded evidence. Several subjects
 can share one explicitly bounded current view; a prior producer or current view never
 silently becomes the next check's current state.
 
 **REQ-guard-cache** (invariant): Persisted closure evidence MUST be treated as
 memoization keyed only by immutable inputs — the commit, the toolchain, the build
-configuration, the subject identity, and for refinement its strategy/version — never
+configuration, the subject identity, and for versioned analysis evidence its
+strategy/version — never
 as the source of truth, so recomputing or discarding it never changes source
 equivalence, and evidence that disagrees with recomputation from source can never
 make an unsound result look valid.

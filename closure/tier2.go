@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/constant"
@@ -78,13 +77,6 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 	return p, nil
 }
 
-// loadConfig is the shared packages.Config for both the single-package load and
-// the batched Prime: all-dependency syntax (stdlib bodies included, REQ-closure-analysis) with the
-// ForTest linkage needed to distinguish a package's test-binary variants.
-func loadConfig(ctx context.Context, dir string, buildFlags ...string) *packages.Config {
-	return loadConfigEnv(ctx, dir, os.Environ(), buildFlags...)
-}
-
 func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...string) *packages.Config {
 	return &packages.Config{
 		Context:    ctx,
@@ -96,84 +88,12 @@ func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...
 	}
 }
 
-// load builds whole-program SSA for pkgPath's test binary from a single-package
-// packages.Load. It is the fallback path (and the exact behavior Prime reproduces
-// per package); Prime shares one Load across many packages but each still gets its
-// own program from only its own roots. A load error is fatal — analyzing a partial
-// program could miss reachable code and report a stale result valid (REQ-fresh-sound).
-func load(ctx context.Context, dir string, buildFlags []string, pkgPath string) (*program, error) {
-	return loadEnv(ctx, dir, os.Environ(), buildFlags, pkgPath)
-}
-
 func loadEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPath string) (*program, error) {
 	roots, err := packages.Load(loadConfigEnv(ctx, dir, env, buildFlags...), pkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
 	return buildProgram(ctx, pkgPath, roots)
-}
-
-// Prime warms the per-package SSA cache for pkgPaths with one shared
-// packages.Load, so the stdlib and shared dependencies are parsed and
-// type-checked once for the whole set rather than once per package (REQ-closure-analysis — the
-// dominant residual cost of a a multi-package run). Each package still gets
-// its own ssa.Program built from only its own test-binary roots (rootsForBinary),
-// so the analysis — including the per-binary init-root set RTA depends on (see the
-// roots loop in tier2) — is byte-identical to the single-package load; Prime
-// shares only the parse/type-check front-end, never the SSA program.
-//
-// It is best-effort: a batch-load failure, or a package whose closure fails to
-// build, leaves that package uncached, and its first Compute falls back to a
-// single load — preserving both per-package error isolation and the exact
-// single-load result. Already-cached packages are skipped. Equivalence to the
-// per-package load is pinned by TestBatchLoadMatchesPerPackage.
-func (h *Hasher) Prime(pkgPaths []string) {
-	var need []string
-	seen := map[string]bool{}
-	for _, p := range pkgPaths {
-		if p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		if _, ok := h.progs[p]; !ok {
-			need = append(need, p)
-		}
-	}
-	if len(need) == 0 {
-		return
-	}
-	for _, p := range need {
-		h.emitProgress("load", p)
-	}
-	roots, err := packages.Load(loadConfigEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags...), need...)
-	if err != nil {
-		return // fall back to lazy single loads; the error resurfaces there
-	}
-	for _, p := range need {
-		prog, err := buildProgram(h.ctx, p, rootsForBinary(roots, p))
-		if err != nil {
-			continue // leave uncached; loadCached single-loads and surfaces the error
-		}
-		h.progs[p] = prog
-	}
-}
-
-// rootsForBinary selects, from a batched packages.Load result, exactly the root
-// packages a single packages.Load(pkgPath) with Tests returns: the package and its
-// in-package/external test variants (ForTest==pkgPath) plus the generated
-// test-main (PkgPath==pkgPath+".test"). Feeding exactly these to
-// ssautil.AllPackages reproduces the per-package program's package set, so RTA's
-// per-binary init roots (tier2) are unchanged. Selecting too few would shrink that
-// set and under-cover the closure (REQ-fresh-sound) — this must match the single-load root
-// set exactly, which TestBatchLoadMatchesPerPackage pins over real fixtures.
-func rootsForBinary(all []*packages.Package, pkgPath string) []*packages.Package {
-	var rs []*packages.Package
-	for _, p := range all {
-		if p.PkgPath == pkgPath || p.ForTest == pkgPath || p.PkgPath == pkgPath+".test" {
-			rs = append(rs, p)
-		}
-	}
-	return rs
 }
 
 // buildProgram builds whole-program SSA for one package's test binary from its
@@ -369,238 +289,6 @@ type Observability struct {
 
 const maxAttributedSubjects = 64
 
-// Compute returns the source closure for one subject of pkgPath. It is the
-// one-subject form of ComputeBatch.
-func (h *Hasher) Compute(pkgPath, symbol string) (Closure, error) {
-	subject := Subject{Package: pkgPath, Symbol: symbol}
-	closures, err := h.ComputeBatch([]Subject{subject})
-	if err != nil {
-		return Closure{}, err
-	}
-	return closures[subject], nil
-}
-
-// ComputeBatch returns each distinct subject's source closure. Reachability is
-// shared in package-local batches while retaining independent subject results.
-// A subject that cannot be rooted in its package's loaded program degrades to
-// unavailable refined evidence — the maximal package closure, widened and
-// unverifiable — for that subject alone; it never fails the batch or a
-// sibling's analysis. Empty input returns an empty map.
-func (h *Hasher) ComputeBatch(subjects []Subject) (map[Subject]Closure, error) {
-	results := make(map[Subject]Closure)
-	if len(subjects) == 0 {
-		return results, nil
-	}
-	if err := h.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-	}
-
-	var groups []*packageBatch
-	byPackage := make(map[string]*packageBatch)
-	seen := make(map[Subject]bool)
-	for _, subject := range subjects {
-		if seen[subject] {
-			continue
-		}
-		seen[subject] = true
-		group := byPackage[subject.Package]
-		if group == nil {
-			group = &packageBatch{path: subject.Package}
-			byPackage[subject.Package] = group
-			groups = append(groups, group)
-		}
-		group.subjects = append(group.subjects, subject)
-	}
-
-	for _, group := range groups {
-		if err := h.ctx.Err(); err != nil {
-			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-		}
-		if err := h.computeGroup(group, results); err != nil {
-			// Cancellation and caller errors fail the whole request. A
-			// package-local load or analysis failure retries each
-			// remaining subject alone first — a mid-group failure caused
-			// by one subject must not degrade siblings a singleton run
-			// would refine (REQ-closure-batch-equivalence) — and only a
-			// subject that still fails alone degrades, to the maximal
-			// floor: the floor HASH keeps the record source-sensitive,
-			// since hashless unavailable evidence could check valid
-			// under a purity assertion. A package whose floor cannot be
-			// computed at all fails the request instead.
-			if h.ctx.Err() != nil || errors.Is(err, errCallerSubject) {
-				return nil, err
-			}
-			for _, subject := range group.subjects {
-				if _, done := results[subject]; done {
-					continue
-				}
-				single := &packageBatch{path: group.path, subjects: []Subject{subject}}
-				retryErr := h.computeGroup(single, results)
-				if retryErr == nil {
-					continue
-				}
-				if h.ctx.Err() != nil || errors.Is(retryErr, errCallerSubject) {
-					return nil, retryErr
-				}
-				floorHash, floorErr := h.maximalHash(group.path)
-				if floorErr != nil {
-					return nil, retryErr
-				}
-				results[subject] = Closure{
-					Hash:         floorHash,
-					Widened:      true,
-					Unverifiable: true,
-					Reason:       "refined analysis unavailable: " + retryErr.Error(),
-				}
-			}
-		}
-	}
-	if err := h.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-	}
-	return results, nil
-}
-
-// errCallerSubject marks request errors — a subject name its package never
-// declares — that no package-local degradation may absorb.
-var errCallerSubject = errors.New("closure: caller subject error")
-
-// computeGroup refines one package group into results. Any error return
-// with a live context and no caller-error mark is a package-local
-// failure the batch degrades group-locally.
-func (h *Hasher) computeGroup(group *packageBatch, results map[Subject]Closure) error {
-	h.emitProgress("refine", group.path)
-	// A batch view retains only final closures. Explicitly primed programs
-	// remain caller-owned; otherwise load one package program at a time and
-	// release it after this group so peak SSA memory is bounded by the largest
-	// package test binary rather than the total subject set.
-	prog := h.progs[group.path]
-	if prog == nil {
-		var err error
-		prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, group.path)
-		if err != nil {
-			return err
-		}
-	}
-	// Read before any listing below (maximalHash included): a list entry
-	// present now was caller-primed and stays retained; one loaded here is
-	// released with the group.
-	_, retainList := h.lists[group.path]
-	// A symbol absent from the loaded program's roots is a subject-local
-	// fact — a production symbol can be unreachable as a root of its
-	// external-test binary — so it degrades to unavailable refined
-	// evidence for that subject alone: the maximal package closure, the
-	// sound floor, recorded widened and unverifiable. Sibling subjects
-	// analyze normally (REQ-closure-batch-equivalence).
-	floorHash := ""
-	rooted := group.subjects[:0:0]
-	for _, subject := range group.subjects {
-		if prog.roots[subject.Symbol] == nil {
-			// Degradation is only for symbols the package under test
-			// declares: a name it never declares — a typo, a non-function,
-			// or a recompiled dependency's symbol — is a caller error, not
-			// subject-local unavailability, and widened evidence for it
-			// would attribute a phantom subject. An ambiguous name IS
-			// declared — twice — so it degrades with the naming diagnosis.
-			reason := fmt.Sprintf("refined analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)
-			if prog.ambiguous[subject.Symbol] {
-				reason = fmt.Sprintf("refined analysis unavailable: subject name %s is ambiguous in %s (declared by both the package and its external test package)", subject.Symbol, group.path)
-			} else if !declaresSymbol(prog, group.path, subject.Symbol) {
-				return fmt.Errorf("%w: subject %s not found in %s", errCallerSubject, subject.Symbol, group.path)
-			}
-			if floorHash == "" {
-				var floorErr error
-				floorHash, floorErr = h.maximalHash(group.path)
-				if floorErr != nil {
-					return floorErr
-				}
-			}
-			results[subject] = Closure{
-				Hash:         floorHash,
-				Widened:      true,
-				Unverifiable: true,
-				Reason:       reason,
-			}
-			continue
-		}
-		rooted = append(rooted, subject)
-	}
-	group.subjects = rooted
-	if len(group.subjects) == 0 {
-		if !retainList {
-			delete(h.lists, group.path)
-		}
-		return nil
-	}
-	metas, err := h.list(group.path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if !retainList {
-			delete(h.lists, group.path)
-		}
-	}()
-	base := newTier2Base(h, prog, metas)
-	for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
-		if err := h.ctx.Err(); err != nil {
-			return fmt.Errorf("closure: analysis cancelled: %w", err)
-		}
-		end := min(start+maxAttributedSubjects, len(group.subjects))
-		batch := group.subjects[start:end]
-		reachable, err := attributedReachableSets(h.ctx, prog, batch)
-		if err != nil {
-			return err
-		}
-		for i, subject := range batch {
-			if err := h.ctx.Err(); err != nil {
-				return fmt.Errorf("closure: analysis cancelled: %w", err)
-			}
-			tr, err := h.tier2Reachable(base, reachable[i])
-			if err != nil {
-				return err
-			}
-			closure, err := h.closureFromTier2(group.path, tr)
-			if err != nil {
-				return err
-			}
-			results[subject] = closure
-		}
-	}
-	return nil
-}
-
-// declaresSymbol reports whether the package under test or its external test
-// variant declares symbol as a function or method — distinguishing a subject
-// that exists but cannot root in this test binary (degradable) from a name the
-// package never declares (a caller error).
-func declaresSymbol(prog *program, pkgPath, symbol string) bool {
-	recv, method, isMethod := strings.Cut(symbol, ".")
-	for _, p := range prog.pkgs {
-		if p.Types == nil || (p.PkgPath != pkgPath && p.PkgPath != pkgPath+"_test") {
-			continue
-		}
-		scope := p.Types.Scope()
-		if !isMethod {
-			if _, ok := scope.Lookup(symbol).(*types.Func); ok {
-				return true
-			}
-			continue
-		}
-		tn, ok := scope.Lookup(recv).(*types.TypeName)
-		if !ok {
-			continue
-		}
-		ms := types.NewMethodSet(types.NewPointer(tn.Type()))
-		for i := 0; i < ms.Len(); i++ {
-			if ms.At(i).Obj().Name() == method {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // packageBatch groups one package's requested subjects for shared analysis.
 type packageBatch struct {
 	path     string
@@ -751,7 +439,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		}
 		return Observability{Reason: "subject reachability is not closed: " + reason}, nil
 	}
-	maximalEffects, _, _, err := h.maximalExternalEffects(pkgPath)
+	maximalEffects, _, err := h.maximalExternalEffects(pkgPath)
 	if err != nil {
 		return Observability{}, err
 	}
@@ -876,20 +564,6 @@ func isOpenFlagSymbol(symbol string) bool {
 	}
 }
 
-func (h *Hasher) closureFromTier2(pkgPath string, tr tier2Result) (Closure, error) {
-	var hash string
-	var err error
-	if tr.widen {
-		hash, err = h.maximalHash(pkgPath)
-	} else {
-		hash, err = hashContributions(pkgPath, tr.contribs)
-	}
-	if err != nil {
-		return Closure{}, err
-	}
-	return Closure{Hash: hash, Unverifiable: tr.unverifiable, Reason: tr.reason, Widened: tr.widen}, nil
-}
-
 type tier2Result struct {
 	contribs     []string
 	effects      []externalEffect
@@ -897,37 +571,6 @@ type tier2Result struct {
 	widenReason  string
 	unverifiable bool
 	reason       string
-}
-
-func (h *Hasher) tier2Contributions(pkgPath, bench string) ([]string, bool, error) {
-	tr, err := h.tier2(pkgPath, bench)
-	if err != nil {
-		return nil, false, err
-	}
-	return tr.contribs, tr.widen, nil
-}
-
-func (h *Hasher) tier2(pkgPath, bench string) (tier2Result, error) {
-	prog, err := h.loadCached(pkgPath)
-	if err != nil {
-		return tier2Result{}, err
-	}
-	root := prog.roots[bench]
-	if root == nil {
-		if prog.ambiguous[bench] {
-			return tier2Result{}, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", bench, pkgPath)
-		}
-		return tier2Result{}, fmt.Errorf("closure: subject %s not found in %s", bench, pkgPath)
-	}
-	metas, err := h.list(pkgPath)
-	if err != nil {
-		return tier2Result{}, err
-	}
-	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{{Package: pkgPath, Symbol: bench}})
-	if err != nil {
-		return tier2Result{}, err
-	}
-	return h.tier2Reachable(newTier2Base(h, prog, metas), reachable[0])
 }
 
 type attributedReachability struct {
@@ -962,9 +605,9 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		// a traversal root itself. A constraint-bounded generic instead
 		// roots every materialized instantiation - each dispatches
 		// concretely, so instantiation-reached content enters the
-		// subject's reachable set (and through it the refined closure and
-		// the observability effect walk). An unbounded generic roots
-		// nothing: its signature reads open-world, refinement widens and
+		// subject's reachable set (and through it the observability
+		// effect walk). An unbounded generic roots
+		// nothing: its signature reads open-world and
 		// observability refuses; either way the origin fold below keeps
 		// the declaration in the subject's content.
 		switch {
@@ -1008,8 +651,8 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		return nil, err
 	}
 	// Fold each parameterized origin into the result under its subject's
-	// mask: its declaration is the subject's own source — the refined
-	// closure must move when the generic body moves — while its body was
+	// mask: its declaration is the subject's own source — the subject's
+	// content must move when the generic body moves — while its body was
 	// never traversed.
 	for i, subject := range subjects {
 		if origin := prog.roots[subject.Symbol]; parameterizedBody(origin) {
@@ -1042,7 +685,7 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		// The subject's provenance roots are exactly the roots its mask
 		// was given: for a bounded generic those are its materialized
 		// instantiations, so the effect walk sees every dispatch-reached
-		// site the refined closure carries — granting observability from
+		// site the subject's reachable set carries — granting observability from
 		// the origin alone would answer without ever seeing them
 		// (REQ-closure-analysis's parameterized-subject arm,
 		// REQ-closure-observability-analysis).
@@ -1362,16 +1005,10 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 	return prog != nil && pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Pkg.Path() == prog.pkgPath+".test"
 }
 
-// tier2Reachable performs declaration, source, widening, and unverifiability
-// analysis over a supplied per-subject RTA set. Its behavior is otherwise the
-// same as the former one-subject tier2 path.
-func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachability) (tier2Result, error) {
-	return h.tier2ReachableWithFresh(base, reachable, false)
-}
-
 // tier2ReachableWithFresh optionally carries the cross-boundary
 // fresh-path analysis: only the observability walk consults
-// effect.observable, so the refined-closure path skips the sweep.
+// effect.observable, so withFresh=false skips the sweep (a
+// test-driver configuration; every production proof passes true).
 func (h *Hasher) tier2ReachableWithFresh(base *tier2Base, reachable attributedReachability, withFresh bool) (tier2Result, error) {
 	a := base.analyzer()
 	a.rtaResolved = reachable.resolved
@@ -3521,7 +3158,8 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			if generated {
 				// go_asm.h contains only constants and struct sizes/offsets derived
 				// from selected Go declarations. Hash the selected package whole so
-				// those generated values cannot move outside the refined closure.
+				// those generated values cannot move outside the subject's
+				// contribution set.
 				if err := a.addRelFiles(idx, "generated-asm-input", idx.meta.sourceFiles()); err != nil {
 					return err
 				}

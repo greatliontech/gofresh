@@ -63,7 +63,7 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 		if err != nil {
 			return nil, nil, err
 		}
-		unverifiable, reason, unrefinable, err := h.maximalUnverifiable(pkgPath)
+		unverifiable, reason, err := h.maximalUnverifiable(pkgPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -73,7 +73,6 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 				TestVariants: h.testVariants[pkgPath].hash,
 				Unverifiable: unverifiable,
 				Reason:       reason,
-				Unrefinable:  unrefinable,
 			}
 			sources[subject] = append([]string(nil), files...)
 		}
@@ -103,34 +102,32 @@ func maximalSubjectHash(packageHash string, subject Subject) string {
 // the maximal closure for the high-confidence external-dependence classes. A
 // package-wide hit applies to every subject sharing this maximal closure; the
 // safe failure direction is a spurious unverifiable verdict.
-func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, bool, error) {
-	effects, selected, unrefinable, err := h.maximalExternalEffects(pkgPath)
-	return len(effects) != 0, selected, unrefinable, err
+func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, error) {
+	effects, selected, err := h.maximalExternalEffects(pkgPath)
+	return len(effects) != 0, selected, err
 }
 
 // maximalEffectsResult memoizes one package's complete external-effect scan
 // within a Hasher: the scan depends only on the package's listed sources, so
 // every subject sharing the package shares one scan.
 type maximalEffectsResult struct {
-	effects     []externalEffect
-	selected    string
-	unrefinable bool
+	effects  []externalEffect
+	selected string
 }
 
 // maximalExternalEffects returns the package's complete external-effect scan.
 // The returned effects slice aliases the Hasher's memo — callers must treat it
 // as read-only.
-func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, string, bool, error) {
+func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, string, error) {
 	if cached, ok := h.maximalEffects[pkgPath]; ok {
-		return cached.effects, cached.selected, cached.unrefinable, nil
+		return cached.effects, cached.selected, nil
 	}
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", err
 	}
 	var effects []externalEffect
 	var selected string
-	unrefinable := false
 	record := func(scan maximalEffectScan) {
 		for _, effect := range scan.effects {
 			effects = appendExternalEffect(effects, effect)
@@ -139,19 +136,18 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if reason == "" {
 			return
 		}
-		unrefinable = unrefinable || maximalReasonUnrefinable(reason)
 		if selected == "" || preferMaximalReason(reason, selected) {
 			selected = reason
 		}
 	}
 	testingEffects, err := h.maximalTestingTypeEffects(pkgPath)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", err
 	}
 	record(testingEffects)
 	for _, pkg := range pkgs {
 		if err := h.contextErr(); err != nil {
-			return nil, "", false, err
+			return nil, "", err
 		}
 		if pkg.Standard || pkg.Module == nil || pkg.isGeneratedTestMainFor(pkgPath) {
 			continue
@@ -160,17 +156,17 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
 		for _, name := range files {
 			if err := h.contextErr(); err != nil {
-				return nil, "", false, err
+				return nil, "", err
 			}
 			scan, err := h.maximalFileEffectsCached(filepath.Join(pkg.Dir, name))
 			if err != nil {
-				return nil, "", false, err
+				return nil, "", err
 			}
 			record(scan)
 		}
 	}
-	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected, unrefinable: unrefinable}
-	return effects, selected, unrefinable, nil
+	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected}
+	return effects, selected, nil
 }
 
 // maximalFileEffectsCached memoizes one file's effect scan within a Hasher: a
@@ -834,7 +830,7 @@ func isAlwaysExternalPackage(pkgPath string) bool {
 func isSourceOnlyStandardPackage(pkgPath string) bool {
 	// The audited-pure set: packages that are bit-deterministic pure
 	// computation for every consumer of this audit - the observability
-	// tier, the refinement tier, and the maximal unverifiable-dependence
+	// tier and the maximal unverifiable-dependence
 	// marker share it, so membership demands the strongest reading:
 	// every ambient effect must enter via a flagged constructor or
 	// global of an effect-bearing package, no testlog-invisible input
@@ -846,7 +842,7 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 	// same registration-shaped covert channel: a subject's decode
 	// outcome can depend on a sibling's prior Register call);
 	// math and math/cmplx (CPU-dispatched implementations vary results
-	// across machines - the refinement tier pins the rejection); sync
+	// across machines); sync
 	// and sync/atomic (sync.Pool is runtime-backed and GC-coupled);
 	// time, math/rand, hash/maphash (ambient clock and entropy); and
 	// every I/O-acquiring package

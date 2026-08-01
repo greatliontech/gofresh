@@ -4,7 +4,7 @@ Derived from: docs/specs/overview.md, docs/specs/closure.md (every chunk is
 same-verdict under REQ-fresh-coherent-view unless it amends the spec first;
 chunks 1–2 are spec amendments).
 
-- [ ] 1. Amputate declaration-RTA refinement: spec requirements, budget API,
+- [x] 1. Amputate declaration-RTA refinement: spec requirements, budget API,
       `Refinement` evidence, `DeclarationRTA` identity, tier2 compute
       plumbing; close out `dependency-heavy-refinement-precision`.
 - [ ] 2. Non-toolchain assembly classifies conservative: spec states the
@@ -30,7 +30,10 @@ chunks 1–2 are spec amendments).
 - [ ] 10. Persistent memo absorption for the typed testing-type scan (spec:
       observability-memo key pattern).
 - [ ] 11. tier2 file split to responsibility-sized files; dead surface
-      deleted.
+      deleted (incl. the production-dead declaration-contribution
+      collection with its driver pins re-homed onto reachable-set
+      assertions, the single-valued withFresh parameter, and stale
+      refinement-named identifiers).
 - [ ] 12. Re-measure: instrumented campaign + stipulator corpus check;
       results recorded against the 2026-08-01 baseline; feeds the gomutant
       pipelining decision.

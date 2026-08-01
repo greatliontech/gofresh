@@ -37,9 +37,10 @@ func UseBoth() int {
 
 // The view tier gives the same openness answer as the closure tier
 // (REQ-closure-analysis's parameterized-subject arm): a constraint-
-// bounded generic is not marked open-world — its evidence is verifiable
-// — while an unbounded zero-parameter generic reads open on the
-// type-parameter list itself, which a params-only walk misses.
+// bounded generic analyzes closed — it produces a usable observed
+// disposition — while an unbounded zero-parameter generic reads open on
+// the type-parameter list itself, which a params-only walk misses, and
+// refuses open-world.
 func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	dir := writeBoundedViewFixture(t)
 	const pkg = "example.com/boundedview"
@@ -49,7 +50,7 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	}
 	bounded := Subject{Package: pkg, Symbol: "Sum"}
 	unbounded := Subject{Package: pkg, Symbol: "Value"}
-	view, err := engine.NewView(context.Background(), []Subject{bounded, unbounded}, dir, WithUnboundedRefinement())
+	view, err := engine.NewView(context.Background(), []Subject{bounded, unbounded}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +58,8 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(boundedPrint.Refinement.Reason, "caller-supplied dynamic") || boundedPrint.Refinement.Unverifiable {
-		t.Fatalf("bounded generic read open at the view tier: %+v", boundedPrint.Refinement)
+	if !boundedPrint.ObservationProof.Observable || strings.Contains(boundedPrint.ObservationProof.Reason, "caller-supplied dynamic") {
+		t.Fatalf("bounded generic read open at the view tier: %+v", boundedPrint.ObservationProof)
 	}
 	verdict, err := view.CheckObserved(context.Background(), boundedPrint, bounded)
 	if err != nil {

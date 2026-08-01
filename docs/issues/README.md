@@ -8,12 +8,7 @@ when its work lands (git holds history).
   oracles that can fail through it are permanently uncacheable under the observed policy.
   *Lands: when a consumer needs observed-policy caching for `t.Fatal`-failing oracles that read
   runtime inputs, or the next observability-analysis precision pass.*
-- **[dependency-heavy-refinement-precision](dependency-heavy-refinement-precision.md)** — the
-  declaration-RTA refinement recovers 0/1 irrelevant edits on the Observer sample: graph-wide
-  callable-carrying package variables (2,486 across 233 of 460 module-scoped packages) make every
-  subject open-world, so refined evidence stays unverifiable without whole-program immutability
-  proofs. *Lands: before a consumer relies on refined mode for a
-  dependency-heavy benchmark package, and only after re-measuring the open-world
-  population under the shared-dynamic-state mutation analysis shows the residual is
-  worth the alias-level extension - re-measured 2026-07-22: 39/39 still open-world under
-  the narrowing, the extension is the only mover.*
+- **[observability-batch-retains-every-program](observability-batch-retains-every-program.md)** — a
+  capture batch over a many-package view grows peak RSS with the package count (10.4 GB vs
+  614 MB measured on a 33-package set) because the observability batch never releases loaded
+  whole-program SSA. *Lands: 5 (of the active analysis-simplification plan).*
