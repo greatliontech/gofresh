@@ -37,7 +37,7 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 		return nil, nil, err
 	}
 	// One call observes one tree generation; a later call re-observes.
-	h.contribs = map[string]depContribution{}
+	h.resetCallScope()
 	results := make(map[Subject]Closure, len(subjects))
 	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)
@@ -830,15 +830,14 @@ func trueExternalEffect(pkgPath string) externalEffect {
 // directory-based — resolved source outside the module cache, the same
 // rule the closure contribution pin applies — and the version leg
 // additionally excludes modules reporting no version at all (the main
-// and workspace modules), whose pin would carry no signal. The caller
-// guarantees pkg.Module != nil.
+// and workspace modules, which pinnedPackage's Main leg also excludes),
+// whose pin would carry no signal. The caller guarantees
+// pkg.Module != nil.
 func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) {
-	if pkg.Module.Version == "" || !h.underCache(pkg.Dir) || pkg.Module.Dir == "" {
+	if pkg.Module.Version == "" || !h.pinnedPackage(&pkg) || pkg.Module.Dir == "" {
 		return maximalEffectScan{}, false, nil
 	}
-	// The pin is the cache-relative module content dir — replace-correct
-	// via Module.Dir, the same identity the closure contribution pins.
-	pin := filepath.ToSlash(strings.TrimPrefix(filepath.Clean(pkg.Module.Dir), h.modCache+string(filepath.Separator)))
+	pin := h.modulePin(pkg.Module)
 	key := effectScanKey(pin, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
 	composite := maximalPackageExternalEffects(&pkg)
 	fold := func(scan maximalEffectScan) {

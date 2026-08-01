@@ -294,7 +294,7 @@ type packageBatch struct {
 // (REQ-closure-observability-batch-equivalence).
 func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
 	// One call observes one tree generation; a later call re-observes.
-	h.contribs = map[string]depContribution{}
+	h.resetCallScope()
 	results := make(map[Subject]Observability, len(subjects))
 	byPackage := map[string]*packageBatch{}
 	var groups []*packageBatch
@@ -1427,11 +1427,10 @@ func (a *tier2Analyzer) metaForPackage(p *packages.Package) *listPkg {
 
 func (a *tier2Analyzer) addLinkedCacheModules() error {
 	for _, p := range a.metas {
-		if p.Standard || p.Module == nil || p.Module.Main || !a.h.underCache(p.Dir) {
+		if p.Standard || !a.h.pinnedPackage(&p) {
 			continue
 		}
-		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), a.h.modCache+string(filepath.Separator))
-		a.addContribution("cache:" + filepath.ToSlash(rel))
+		a.addContribution("cache:" + a.h.modulePin(p.Module))
 	}
 	return nil
 }

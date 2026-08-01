@@ -81,10 +81,14 @@ type Hasher struct {
 	// is re-observed per call (the Hasher's pinned contract) while subjects
 	// and groups of one call share each dependency node's reads. Every
 	// Hasher starts nil (memoization off) until a batch entry arms it.
-	contribs     map[string]depContribution
-	testVariants map[string]testVariantIdentity // test-variant compartments by requested package
-	fileDigests  map[string]string              // per-file content digests from the closure's own reads, by absolute path
-	progress     func(phase, pkgPath string)    // start-of-step keep-alive events; nil disables
+	contribs map[string]depContribution
+	// testBinaryKeys memoizes per-package test-binary closure keys under
+	// the same call scope and arming discipline as contribs: nil until a
+	// batch entry arms it, reset per call.
+	testBinaryKeys map[string]string
+	testVariants   map[string]testVariantIdentity // test-variant compartments by requested package
+	fileDigests    map[string]string              // per-file content digests from the closure's own reads, by absolute path
+	progress       func(phase, pkgPath string)    // start-of-step keep-alive events; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
@@ -402,6 +406,29 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	return contribs, sourceFiles, nil
 }
 
+// resetCallScope arms the per-batch-call memos: one call observes one
+// tree generation (the Hasher's pinned contract), so each public batch
+// entry starts them empty — an edit between calls can never serve a
+// prior generation's entry or key a persistent memo under one.
+func (h *Hasher) resetCallScope() {
+	h.contribs = map[string]depContribution{}
+	h.testBinaryKeys = map[string]string{}
+}
+
+// modulePin is the version-pin identity every persistent memo and
+// contribution shares: the cache-relative module content dir —
+// modpath@version, replace-correct via Module.Dir.
+func (h *Hasher) modulePin(mod *listMod) string {
+	return filepath.ToSlash(strings.TrimPrefix(filepath.Clean(mod.Dir), h.modCache+string(filepath.Separator)))
+}
+
+// pinnedPackage reports the pinned-dependency classification: resolved
+// source immutable under the module cache. REQ-closure-mutable-local
+// names the package Dir, so classification uses it.
+func (h *Hasher) pinnedPackage(p *listPkg) bool {
+	return p.Module != nil && !p.Module.Main && h.underCache(p.Dir)
+}
+
 func (h *Hasher) contextErr() error {
 	if h == nil || h.ctx == nil {
 		return nil
@@ -459,14 +486,11 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 	if c, ok := h.contribs[p.ImportPath]; ok {
 		return c.contribution, c.files, nil
 	}
-	if !p.Module.Main && h.underCache(p.Dir) {
-		// Immutable, version-locked cache dep (classified on the package Dir per
-		// REQ-closure-mutable-local): pin once by the module's content dir (modpath@version,
-		// replace-correct via Module.Dir), never read its source. p.Dir and
-		// Module.Dir agree on under-cache classification for every reachable config;
-		// REQ-closure-mutable-local names the package Dir, so we use it.
-		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator))
-		contribution := "cache:" + filepath.ToSlash(rel)
+	if h.pinnedPackage(&p) {
+		// Immutable, version-locked cache dep: pin once by the module's
+		// content dir, never read its source. p.Dir and Module.Dir agree
+		// on under-cache classification for every reachable config.
+		contribution := "cache:" + h.modulePin(p.Module)
 		if h.contribs != nil {
 			h.contribs[p.ImportPath] = depContribution{contribution: contribution}
 		}

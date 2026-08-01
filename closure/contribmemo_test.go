@@ -29,13 +29,20 @@ func TestContributionMemoServesWhatAMissDerives(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		pkg  listPkg
+		want string
 	}{
-		{"mutable", listPkg{ImportPath: "example.com/memo", Dir: dir, GoFiles: []string{"m.go"}, Module: &listMod{Main: true, Dir: dir}}},
-		{"cache", listPkg{ImportPath: "example.com/dep", Dir: cacheDir, Module: &listMod{Main: false, Dir: cacheDir}}},
+		{"mutable", listPkg{ImportPath: "example.com/memo", Dir: dir, GoFiles: []string{"m.go"}, Module: &listMod{Main: true, Dir: dir}}, ""},
+		{"cache", listPkg{ImportPath: "example.com/dep", Dir: cacheDir, Module: &listMod{Main: false, Dir: cacheDir}}, "cache:example.com/dep@v1.0.0"},
 	} {
 		miss, missFiles, err := h.contributionAndFilesFor("", tc.pkg)
 		if err != nil {
 			t.Fatalf("%s miss: %v", tc.name, err)
+		}
+		// The cache leg pins the exact pin bytes and that pinned source is
+		// never read: a mis-classification or a shifted pin would silently
+		// move every closure hash.
+		if tc.want != "" && (miss != tc.want || missFiles != nil) {
+			t.Fatalf("%s: contribution %q files %v, want %q with no files", tc.name, miss, missFiles, tc.want)
 		}
 		if _, ok := h.contribs[tc.pkg.ImportPath]; !ok {
 			t.Fatalf("%s: the armed memo recorded nothing", tc.name)
@@ -62,6 +69,29 @@ func TestContributionMemoServesWhatAMissDerives(t *testing.T) {
 			t.Fatalf("%s: memo lookup bypassed: got %q/%v", tc.name, served, servedFiles)
 		}
 		h.contribs = map[string]depContribution{}
+	}
+}
+
+// TestModulePinIsCacheRelativeAndSlashCanonical pins the pin identity's
+// exact bytes: the cache-relative module content dir, Clean-normalized.
+// The pin feeds every closure hash and persistent memo key, so a silent
+// shift here invalidates all of them wholesale.
+func TestModulePinIsCacheRelativeAndSlashCanonical(t *testing.T) {
+	h := &Hasher{modCache: filepath.Join(string(filepath.Separator), "cache", "mod")}
+	root := h.modCache
+	for _, tc := range []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{"under cache", filepath.Join(root, "example.com", "dep@v1.0.0"), "example.com/dep@v1.0.0"},
+		{"trailing separator cleans", filepath.Join(root, "example.com", "dep@v1.0.0") + string(filepath.Separator), "example.com/dep@v1.0.0"},
+		{"outside cache keeps its identity", filepath.Join(string(filepath.Separator), "elsewhere", "dep"), "/elsewhere/dep"},
+		{"the cache root itself is not relativized", root, filepath.ToSlash(root)},
+	} {
+		if got := h.modulePin(&listMod{Dir: tc.dir}); got != tc.want {
+			t.Fatalf("%s: modulePin(%q) = %q, want %q", tc.name, tc.dir, got, tc.want)
+		}
 	}
 }
 

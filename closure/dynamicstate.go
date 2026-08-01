@@ -1,11 +1,7 @@
 package closure
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -81,9 +77,9 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 			switch {
 			case p.Standard || p.Module == nil:
 				node.Class = StandardPackage
-			case !p.Module.Main && h.underCache(p.Dir):
+			case h.pinnedPackage(&p):
 				node.Class = PinnedPackage
-				node.Pin = filepath.ToSlash(strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator)))
+				node.Pin = h.modulePin(p.Module)
 			default:
 				node.Class = MutableLocalPackage
 			}
@@ -101,28 +97,9 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 // (cache-never-record, REQ-closure-dynamic-state-memo). Entries batch per
 // (scope, bucket): one file holds every package fact of one pinned module.
 
-type dynamicStateEntry struct {
-	Scope  string                     `json:"scope"`
-	Bucket string                     `json:"bucket"`
-	Facts  map[string]json.RawMessage `json:"facts"`
-}
-
-func dynamicStateDir() (string, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cache, "gofresh", "dynamicstate"), nil
-}
-
-func dynamicStatePath(scope, bucket string) (string, error) {
-	dir, err := dynamicStateDir()
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(scope + "\x00" + bucket))
-	return filepath.Join(dir, hex.EncodeToString(sum[:12])+".json"), nil
-}
+// dynamicStateDirName is the dynamic-state memo's sibling user-cache
+// directory under the shared cache-file mechanism.
+const dynamicStateDirName = "dynamicstate"
 
 // LoadDynamicStateFacts returns the persisted facts for (scope, bucket) by
 // package path — nil on any failure; the key IS the freshness, so no entry
@@ -131,61 +108,19 @@ func LoadDynamicStateFacts(scope, bucket string) map[string]json.RawMessage {
 	if scope == "" {
 		return nil
 	}
-	path, err := dynamicStatePath(scope, bucket)
-	if err != nil {
+	var facts map[string]json.RawMessage
+	if !loadCacheEntry(dynamicStateDirName, scope, bucket, &facts) {
 		return nil
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var entry dynamicStateEntry
-	if json.Unmarshal(data, &entry) != nil || entry.Scope != scope || entry.Bucket != bucket {
-		return nil
-	}
-	return entry.Facts
+	return facts
 }
 
 // StoreDynamicStateFacts merges facts into the (scope, bucket) entry with an
 // atomic replace; failures are silent — a lost store costs one
 // recomputation, never a wrong fact.
 func StoreDynamicStateFacts(scope, bucket string, facts map[string]json.RawMessage) {
-	if scope == "" || len(facts) == 0 {
+	if scope == "" {
 		return
 	}
-	path, err := dynamicStatePath(scope, bucket)
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	merged := LoadDynamicStateFacts(scope, bucket)
-	if merged == nil {
-		merged = make(map[string]json.RawMessage, len(facts))
-	}
-	for pkg, fact := range facts {
-		merged[pkg] = fact
-	}
-	data, err := json.Marshal(dynamicStateEntry{Scope: scope, Bucket: bucket, Facts: merged})
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".facts-*")
-	if err != nil {
-		return
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-	}
+	mergeCacheEntry(dynamicStateDirName, scope, bucket, facts)
 }

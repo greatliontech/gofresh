@@ -262,7 +262,7 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), migrated); ok {
 		t.Fatal("a file migrating between the Go and cgo lists served the prior partition's scan")
 	}
-	path, err := effectScanPath(effectScanDirName, effectScanScope(), key)
+	path, err := cacheEntryPath(effectScanDirName, effectScanScope(), key)
 	if err != nil {
 		t.Fatal(err)
 	}

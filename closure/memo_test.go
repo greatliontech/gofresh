@@ -168,6 +168,62 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	}
 }
 
+// TestBatchEntriesDiscardStaleTestBinaryKeys pins the key memo's call
+// scope: a batch entry must start from an empty test-binary-key memo, or
+// an edit between calls on one Hasher could key persistent memo entries
+// under a prior generation's identity.
+func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := memoModule(t)
+	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
+
+	first, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.SetMemoScope("scope-a")
+	if _, err := first.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+
+	// A pre-armed stale key is discarded at the batch entry, so the batch
+	// derives the real key and hits the entry the first pass stored.
+	second, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.SetMemoScope("scope-a")
+	second.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
+	loads := 0
+	second.OnProgress(func(phase, _ string) {
+		if phase == "load" || phase == "prove" {
+			loads++
+		}
+	})
+	if _, err := second.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if loads != 0 {
+		t.Fatal("a stale pre-call key defeated the memo hit")
+	}
+	if second.testBinaryKeys["example.com/memo"] == "stale-key" {
+		t.Fatal("the observability batch retained a pre-call key generation")
+	}
+
+	third, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third.SetMemoScope("scope-a")
+	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
+	if _, err := third.ComputeMaximalBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if third.testBinaryKeys["example.com/memo"] == "stale-key" {
+		t.Fatal("the hashing batch retained a pre-call key generation")
+	}
+}
+
 // cancelWhenDirNonEmpty cancels every context consult once dir holds an
 // entry — deterministic mid-group cancellation landing right after the
 // first attribution slice's memo write.
@@ -223,20 +279,24 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var entry memoEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
+	var envelope cacheEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if len(entry.Proofs) != maxAttributedSubjects {
-		t.Fatalf("persisted proofs = %d, want the completed slice's %d", len(entry.Proofs), maxAttributedSubjects)
+	var proofs map[string]Observability
+	if err := json.Unmarshal(envelope.Payload, &proofs); err != nil {
+		t.Fatal(err)
+	}
+	if len(proofs) != maxAttributedSubjects {
+		t.Fatalf("persisted proofs = %d, want the completed slice's %d", len(proofs), maxAttributedSubjects)
 	}
 	for i := range maxAttributedSubjects {
-		if _, ok := entry.Proofs[fmt.Sprintf("F%d", i)]; !ok {
+		if _, ok := proofs[fmt.Sprintf("F%d", i)]; !ok {
 			t.Fatalf("completed slice's proof F%d missing from the memo", i)
 		}
 	}
 	for i := maxAttributedSubjects; i < count; i++ {
-		if _, ok := entry.Proofs[fmt.Sprintf("F%d", i)]; ok {
+		if _, ok := proofs[fmt.Sprintf("F%d", i)]; ok {
 			t.Fatalf("interrupted slice's proof F%d persisted", i)
 		}
 	}

@@ -3,9 +3,6 @@ package closure
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -45,10 +42,9 @@ func (h *Hasher) testingScanScope() string {
 	return testingScanStrategy + "|" + h.memoScope
 }
 
-// effectScanEntry is one pinned package's persisted file-effect scan.
-type effectScanEntry struct {
-	Scope    string             `json:"scope"`
-	Key      string             `json:"key"`
+// effectScanPayload is one package's persisted effect scan — the shared
+// cache-file envelope carries the scope and key.
+type effectScanPayload struct {
 	Effects  []effectScanEffect `json:"effects"`
 	Selected string             `json:"selected"`
 }
@@ -103,63 +99,19 @@ const (
 	testingScanDirName = "testingscan"
 )
 
-func effectScanPath(dirName, scope, key string) (string, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(scope + "\x00" + key))
-	return filepath.Join(cache, "gofresh", dirName, hex.EncodeToString(sum[:12])+".json"), nil
-}
-
 // loadEffectScan returns the persisted scan for (scope, key) in dirName;
 // ok is false on any failure — the memo is a cache, never a record.
 func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
-	path, err := effectScanPath(dirName, scope, key)
-	if err != nil {
+	var payload effectScanPayload
+	if !loadCacheEntry(dirName, scope, key, &payload) {
 		return maximalEffectScan{}, false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return maximalEffectScan{}, false
-	}
-	var entry effectScanEntry
-	if json.Unmarshal(data, &entry) != nil || entry.Scope != scope || entry.Key != key {
-		return maximalEffectScan{}, false
-	}
-	return maximalEffectScan{effects: decodeEffects(entry.Effects), preferred: entry.Selected}, true
+	return maximalEffectScan{effects: decodeEffects(payload.Effects), preferred: payload.Selected}, true
 }
 
 // storeEffectScan persists one package's scan in dirName with an atomic
 // replace; failures are silent — a lost store costs one recomputation,
 // never a wrong scan.
 func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
-	path, err := effectScanPath(dirName, scope, key)
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	data, err := json.Marshal(effectScanEntry{Scope: scope, Key: key, Effects: encodeEffects(scan.effects), Selected: scan.preferred})
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".effectscan-*")
-	if err != nil {
-		return
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-	}
+	storeCacheEntry(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), Selected: scan.preferred})
 }
