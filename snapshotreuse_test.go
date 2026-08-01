@@ -55,9 +55,19 @@ func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
 	}
 	var phases []string
 	var mu sync.Mutex
+	// Replace, never append: the ambient environment may itself carry
+	// GOENV (a stipulator witness run does), and the engine rejects
+	// duplicate keys by design.
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GOENV=") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "GOENV="+goenv)
 	engine, err := New(
 		WithDir(dir),
-		WithEnv(append(os.Environ(), "GOENV="+goenv)...),
+		WithEnv(env...),
 		WithProgress(func(p Progress) {
 			mu.Lock()
 			phases = append(phases, p.Phase)
