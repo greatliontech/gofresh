@@ -15,7 +15,7 @@ chunks 1–2 are spec amendments).
       mutable/cache packages).
 - [x] 3. Per-file effect scan reads and parses once (equivalence-pinned
       against the two-pass reference; benchmark added).
-- [ ] 4. Reason channel consolidates onto typed effects; the one contractual
+- [x] 4. Reason channel consolidates onto typed effects; the one contractual
       projection ("test variants") stays; duplicate `*Reason`/`*Effects`
       walker pairs collapse.
 - [ ] 5. Observed-proof path stops re-loading: capture batches share the

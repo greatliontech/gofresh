@@ -192,11 +192,6 @@ func preferMaximalReason(candidate, current string) bool {
 	return candidate < current
 }
 
-func (h *Hasher) maximalTestingTypeReason(pkgPath string) (string, error) {
-	scan, err := h.maximalTestingTypeEffects(pkgPath)
-	return scan.preferred, err
-}
-
 // testingTypeOwnLoadHook observes the fallback private load for tests pinning
 // that a shared view load is actually consumed instead.
 var testingTypeOwnLoadHook func(pkgPath string)
@@ -280,10 +275,6 @@ func (h *Hasher) viewLoadVariants(pkgPath string) []*packages.Package {
 	return variants
 }
 
-func maximalPackageExternalReason(pkg *listPkg) string {
-	return maximalPackageExternalEffects(pkg).preferred
-}
-
 func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
 	var scan maximalEffectScan
 	if hasExternalCgoMeta(pkg) {
@@ -357,7 +348,13 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		aliases[alias] = pkgPath
 		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
 	}
-	scan := maximalEffectScan{preferred: maximalReasonFromParsed(hasWasmImport, hasLinkname, file, imports, aliases)}
+	var scan maximalEffectScan
+	// The preferred diagnostic's precedence over the same single walk:
+	// directives, then the first always-external import, then the first
+	// classified selector or call, then the testing-method scan, then the
+	// potential-external import fallback.
+	importReason := ""
+	potentialExternal := ""
 	if hasWasmImport {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
 		effect.unrefinable = true
@@ -370,8 +367,18 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		if imp.pkgPath == "testing" {
 			if imp.alias == "." {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
+				potentialExternal = imp.pkgPath
 			}
 			continue
+		}
+		if isAlwaysExternalPackage(imp.pkgPath) && importReason == "" {
+			importReason = trueReason(imp.pkgPath)
+		}
+		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
+			potentialExternal = imp.pkgPath
+		}
+		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
+			potentialExternal = imp.pkgPath
 		}
 		if imp.alias == "." || imp.alias == "_" {
 			if isAlwaysExternalPackage(imp.pkgPath) {
@@ -381,233 +388,58 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 			}
 		}
 	}
+	bodyReason := ""
 	ast.Inspect(file, func(node ast.Node) bool {
-		sel, ok := node.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		pkgPath := aliases[ident.Name]
-		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
-			scan.add(effect)
-		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
-			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+		if sel, ok := node.(*ast.SelectorExpr); ok {
+			if ident, ok := sel.X.(*ast.Ident); ok {
+				pkgPath := aliases[ident.Name]
+				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
+					scan.add(effect)
+					if bodyReason == "" && pkgPath != "" {
+						bodyReason = effect.reason
+					}
+				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+				}
+			}
 		}
 		return true
 	})
-	for _, effect := range testingMethodEffects(file, aliases) {
+	testingEffects, testingReason := testingMethodEffects(file, aliases)
+	for _, effect := range testingEffects {
 		scan.add(effect)
+	}
+	switch {
+	case hasWasmImport:
+		scan.preferred = "reaches go:wasmimport"
+	case hasLinkname:
+		scan.preferred = "reaches go:linkname (opaque linkage)"
+	case importReason != "":
+		scan.preferred = importReason
+	case bodyReason != "":
+		scan.preferred = bodyReason
+	case testingReason != "":
+		scan.preferred = testingReason
+	case potentialExternal != "":
+		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
 	return scan, nil
 }
 
-// maximalReasonFromParsed derives the preferred human diagnostic over the
-// shared parse, reproducing the reference precedence exactly: directives,
-// then the first always-external import, then the body walk, then the
-// testing-method scan, then the potential-external fallback.
-func maximalReasonFromParsed(hasWasmImport, hasLinkname bool, file *ast.File, imports []importAlias, aliases map[string]string) string {
-	if hasWasmImport {
-		return "reaches go:wasmimport"
-	}
-	if hasLinkname {
-		return "reaches go:linkname (opaque linkage)"
-	}
-	potentialExternal := ""
-	for _, imp := range imports {
-		if imp.pkgPath == "testing" {
-			if imp.alias == "." {
-				potentialExternal = imp.pkgPath
-			}
-			continue
-		}
-		if isAlwaysExternalPackage(imp.pkgPath) {
-			return trueReason(imp.pkgPath)
-		}
-		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
-			potentialExternal = imp.pkgPath
-		}
-		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
-			potentialExternal = imp.pkgPath
-		}
-	}
-	var reason string
-	ast.Inspect(file, func(node ast.Node) bool {
-		if reason != "" {
-			return false
-		}
-		if sel, ok := node.(*ast.SelectorExpr); ok {
-			if ident, ok := sel.X.(*ast.Ident); ok {
-				if pkgPath := aliases[ident.Name]; pkgPath != "" {
-					if classified := classBReason(pkgPath, sel.Sel.Name); classified != "" {
-						reason = classified
-						return false
-					}
-				}
-			}
-		}
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		if pkgPath := aliases[ident.Name]; pkgPath != "" {
-			reason = classBReason(pkgPath, sel.Sel.Name)
-		}
-		return true
-	})
-	if reason == "" {
-		reason = testingMethodReason(file, aliases)
-	}
-	if reason != "" {
-		return reason
-	}
-	if potentialExternal != "" {
-		return "reaches " + potentialExternal + " (potential external dependence)"
-	}
-	return ""
-}
-
-// maximalFileReason is the reason-only projection of the scan, kept for
-// direct classification tests; production reads scan.preferred.
-func maximalFileReason(filename string) (string, error) {
-	scan, err := maximalFileEffects(filename)
-	if err != nil {
-		return "", err
-	}
-	return scan.preferred, nil
-}
-
-func testingMethodReason(file *ast.File, aliases map[string]string) string {
-	return testingMethodReasonWithHandleTypes(file, aliases, testingHandleTypeNames(file, aliases))
-}
-
-func testingMethodReasonWithHandleTypes(file *ast.File, aliases map[string]string, handleTypes map[string]bool) string {
+// testingMethodEffects returns the file's testing-runtime effects and its
+// testing reason: the first function with a non-empty final reason in
+// declaration order,
+// where a function's reason is the last assignment its walker makes (an
+// escape, or a tracked receiver selector's classification — possibly
+// empty). Both walker closures run over per-function receiver and parent
+// state computed once; equivalence-pinned by
+// TestFileEffectScanMatchesTwoPassReference.
+func testingMethodEffects(file *ast.File, aliases map[string]string) ([]externalEffect, string) {
 	if file == nil {
-		return ""
-	}
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Type.Params == nil || function.Body == nil {
-			continue
-		}
-		receivers := map[string]bool{}
-		for _, field := range function.Type.Params.List {
-			if isTestingHandleType(field.Type, aliases, handleTypes) {
-				for _, name := range field.Names {
-					receivers[name.Name] = true
-				}
-			}
-		}
-		changed := true
-		for changed {
-			changed = false
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				if specification, ok := node.(*ast.ValueSpec); ok {
-					for i, value := range specification.Values {
-						name, ok := identifierName(value)
-						if ok && receivers[name] && i < len(specification.Names) && !receivers[specification.Names[i].Name] {
-							receivers[specification.Names[i].Name] = true
-							changed = true
-						}
-					}
-				}
-				assignment, ok := node.(*ast.AssignStmt)
-				if !ok {
-					return true
-				}
-				for i, rhs := range assignment.Rhs {
-					name, ok := identifierName(rhs)
-					if !ok || !receivers[name] || i >= len(assignment.Lhs) {
-						continue
-					}
-					if lhs, ok := assignment.Lhs[i].(*ast.Ident); ok && !receivers[lhs.Name] {
-						receivers[lhs.Name] = true
-						changed = true
-					}
-				}
-				return true
-			})
-		}
-		parents := make(map[ast.Node]ast.Node)
-		var stack []ast.Node
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			if node == nil {
-				stack = stack[:len(stack)-1]
-				return false
-			}
-			if len(stack) != 0 {
-				parents[node] = stack[len(stack)-1]
-			}
-			stack = append(stack, node)
-			return true
-		})
-		var reason string
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			switch node := node.(type) {
-			case *ast.AssignStmt:
-				for i, rhs := range node.Rhs {
-					name, ok := identifierName(rhs)
-					if !ok || !receivers[name] || i >= len(node.Lhs) {
-						continue
-					}
-					if _, ok := node.Lhs[i].(*ast.Ident); !ok {
-						reason = "testing runtime value escapes analyzable receiver"
-						return false
-					}
-				}
-			case *ast.CallExpr:
-				for _, argument := range node.Args {
-					if name, ok := identifierName(argument); ok && receivers[name] {
-						reason = "testing runtime value escapes analyzable receiver"
-						return false
-					}
-				}
-			case *ast.ReturnStmt:
-				for _, result := range node.Results {
-					if name, ok := identifierName(result); ok && receivers[name] {
-						reason = "testing runtime value escapes analyzable receiver"
-						return false
-					}
-				}
-			case *ast.Ident:
-				if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
-					reason = "testing runtime value escapes analyzable receiver"
-					return false
-				}
-			}
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			receiver, ok := selector.X.(*ast.Ident)
-			if !ok || !receivers[receiver.Name] {
-				return true
-			}
-			reason = classBReason("testing", selector.Sel.Name)
-			return reason == ""
-		})
-		if reason != "" {
-			return reason
-		}
-	}
-	return ""
-}
-
-func testingMethodEffects(file *ast.File, aliases map[string]string) []externalEffect {
-	if file == nil {
-		return nil
+		return nil, ""
 	}
 	handleTypes := testingHandleTypeNames(file, aliases)
+	reason := ""
 	var effects []externalEffect
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
@@ -707,8 +539,58 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) []externalE
 			}
 			return true
 		})
+		if reason == "" {
+			var fnReason string
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				switch node := node.(type) {
+				case *ast.AssignStmt:
+					for i, rhs := range node.Rhs {
+						name, ok := identifierName(rhs)
+						if !ok || !receivers[name] || i >= len(node.Lhs) {
+							continue
+						}
+						if _, ok := node.Lhs[i].(*ast.Ident); !ok {
+							fnReason = "testing runtime value escapes analyzable receiver"
+							return false
+						}
+					}
+				case *ast.CallExpr:
+					for _, argument := range node.Args {
+						if name, ok := identifierName(argument); ok && receivers[name] {
+							fnReason = "testing runtime value escapes analyzable receiver"
+							return false
+						}
+					}
+				case *ast.ReturnStmt:
+					for _, result := range node.Results {
+						if name, ok := identifierName(result); ok && receivers[name] {
+							fnReason = "testing runtime value escapes analyzable receiver"
+							return false
+						}
+					}
+				case *ast.Ident:
+					if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
+						fnReason = "testing runtime value escapes analyzable receiver"
+						return false
+					}
+				}
+				selector, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				receiver, ok := selector.X.(*ast.Ident)
+				if !ok || !receivers[receiver.Name] {
+					return true
+				}
+				fnReason = classBReason("testing", selector.Sel.Name)
+				return fnReason == ""
+			})
+			if fnReason != "" {
+				reason = fnReason
+			}
+		}
 	}
-	return effects
+	return effects, reason
 }
 
 func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]ast.Node) bool {

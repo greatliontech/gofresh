@@ -252,12 +252,12 @@ func TestMaximalTestingMethodClassificationUsesHarnessReceiver(t *testing.T) {
 	if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reason, err := maximalFileReason(filename)
+	scan, err := maximalFileEffects(filename)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reason != "" {
-		t.Fatalf("unrelated Setenv method classified as testing API: %q", reason)
+	if scan.preferred != "" {
+		t.Fatalf("unrelated Setenv method classified as testing API: %q", scan.preferred)
 	}
 }
 
@@ -389,7 +389,7 @@ func TestComputeMaximalBatchConservativelyMarksNonGoEdges(t *testing.T) {
 
 func TestMaximalPackageMarksImplicitCgoExternal(t *testing.T) {
 	pkg := &listPkg{CgoFiles: []string{"cgo.go"}}
-	if reason := maximalPackageExternalReason(pkg); !strings.Contains(reason, "cgo") {
+	if reason := maximalPackageExternalEffects(pkg).preferred; !strings.Contains(reason, "cgo") {
 		t.Fatalf("implicit cgo reason = %q, want cgo external disposition", reason)
 	}
 }
@@ -431,12 +431,8 @@ func F() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := maximalFileReason(filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scan.preferred != legacy {
-		t.Fatalf("preferred diagnostic = %q, want legacy %q", scan.preferred, legacy)
+	if scan.preferred != "reaches net (network I/O)" {
+		t.Fatalf("preferred diagnostic = %q, want the always-external import to outrank the body walk", scan.preferred)
 	}
 	for _, want := range [][2]string{{"os", "ReadFile"}, {"net", "Dial"}} {
 		found := false

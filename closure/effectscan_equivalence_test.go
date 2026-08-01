@@ -81,6 +81,21 @@ func effectScanCorpusFiles() map[string]string {
 	files["pair_dot_os_selector.go"] = "package corpus\n\nimport . \"os\"\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"x\") }\n"
 	files["dup_alias.go"] = "package corpus\n\nimport o \"os\"\nimport o \"strings\"\n\nfunc F() { _ = o.Join }\n"
 	files["dup_path.go"] = "package corpus\n\nimport \"os\"\nimport osx \"os\"\n\nfunc F() { _, _ = osx.ReadFile(\"x\") }\n"
+	// Backward receiver propagation: v is reachable from t only on the
+	// fixed-point's second iteration (v = u precedes u = t in source
+	// order), so v.TempDir classifies only if the propagation iterates.
+	files["fixedpoint_backward.go"] = "package corpus\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {\n\tvar u, v *testing.T\n\tfor i := 0; i < 2; i++ {\n\t\tv = u\n\t\tu = t\n\t}\n\tv.TempDir()\n}\n"
+	// A package-level shadow makes the pre-declaration read legal, and the
+	// walker is name-based and scope-blind: w is reachable from t only when
+	// the ValueSpec-triggered iteration re-runs the earlier assignment.
+	files["fixedpoint_valuespec_backward.go"] = "package corpus\n\nimport \"testing\"\n\nvar v *testing.T\n\nfunc TestX(t *testing.T) {\n\tw := v\n\tvar v = t\n\tv.Helper()\n\tw.TempDir()\n}\n"
+	// The dot-testing potential-external overwrite fires after another
+	// dot import already set the fallback, and in the reverse order.
+	files["dot_os_then_dot_testing.go"] = "package corpus\n\nimport . \"os\"\nimport . \"testing\"\n\nfunc F() {}\n"
+	files["dot_testing_then_dot_os.go"] = "package corpus\n\nimport . \"testing\"\nimport . \"os\"\n\nfunc F() {}\n"
+	// Two test functions with distinct non-empty testing reasons pin the
+	// first-function gating of the folded reason.
+	files["two_testing_reasons.go"] = "package corpus\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { t.Setenv(\"K\", \"V\") }\n\nfunc TestB(t *testing.T) { t.TempDir() }\n"
 	return files
 }
 
