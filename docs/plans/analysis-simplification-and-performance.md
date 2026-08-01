@@ -29,7 +29,7 @@ chunks 1–2 are spec amendments).
 - [x] 7. tier2 allocation diet: visited-set reuse, type-identity keys
       replacing `types.TypeString`, per-subject reachability
       materialization trimmed.
-- [ ] 8. maximal/testvariant allocation diet: single content buffer, shared
+- [x] 8. maximal/testvariant allocation diet: single content buffer, shared
       FileSets where sound, fixed-point walks de-duplicated.
 - [ ] 9. Persistent memo for pinned-package effect scans (spec: extends the
       dynamic-state-memo pattern; mutable-local files never keyed).

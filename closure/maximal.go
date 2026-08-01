@@ -456,35 +456,46 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) ([]external
 				}
 			}
 		}
+		// One body walk collects the name-propagation edges; the fixed
+		// point then iterates the small edge list instead of re-walking
+		// the whole body per round. The fixed point is order-independent,
+		// so the collection order only bounds round count
+		// (equivalence-pinned by
+		// TestFileEffectScanMatchesTwoPassReference's backward rows).
+		type propagation struct{ from, to string }
+		var edges []propagation
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if specification, ok := node.(*ast.ValueSpec); ok {
+				for i, value := range specification.Values {
+					if name, ok := identifierName(value); ok && i < len(specification.Names) {
+						edges = append(edges, propagation{from: name, to: specification.Names[i].Name})
+					}
+				}
+			}
+			assignment, ok := node.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for i, rhs := range assignment.Rhs {
+				name, ok := identifierName(rhs)
+				if !ok || i >= len(assignment.Lhs) {
+					continue
+				}
+				if lhs, ok := assignment.Lhs[i].(*ast.Ident); ok {
+					edges = append(edges, propagation{from: name, to: lhs.Name})
+				}
+			}
+			return true
+		})
 		changed := true
 		for changed {
 			changed = false
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				if specification, ok := node.(*ast.ValueSpec); ok {
-					for i, value := range specification.Values {
-						name, ok := identifierName(value)
-						if ok && receivers[name] && i < len(specification.Names) && !receivers[specification.Names[i].Name] {
-							receivers[specification.Names[i].Name] = true
-							changed = true
-						}
-					}
+			for _, edge := range edges {
+				if receivers[edge.from] && !receivers[edge.to] {
+					receivers[edge.to] = true
+					changed = true
 				}
-				assignment, ok := node.(*ast.AssignStmt)
-				if !ok {
-					return true
-				}
-				for i, rhs := range assignment.Rhs {
-					name, ok := identifierName(rhs)
-					if !ok || !receivers[name] || i >= len(assignment.Lhs) {
-						continue
-					}
-					if lhs, ok := assignment.Lhs[i].(*ast.Ident); ok && !receivers[lhs.Name] {
-						receivers[lhs.Name] = true
-						changed = true
-					}
-				}
-				return true
-			})
+			}
 		}
 		parents := make(map[ast.Node]ast.Node)
 		var stack []ast.Node

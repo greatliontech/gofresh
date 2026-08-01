@@ -188,3 +188,26 @@ func BenchmarkMaximalFileEffects(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkTestingHeavyFileEffects exercises the receiver-propagation
+// machinery the production-function benchmark above cannot: every
+// function is a test with a propagation chain, so the fixed point and
+// the testing walks dominate.
+func BenchmarkTestingHeavyFileEffects(b *testing.B) {
+	dir := b.TempDir()
+	var sb strings.Builder
+	sb.WriteString("package bench\n\nimport \"testing\"\n\n")
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&sb, "func TestX%d(t *testing.T) { u := t; u.TempDir(); v := u; _ = v }\n", i)
+	}
+	path := filepath.Join(dir, "big_test.go")
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := maximalFileEffects(path); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
