@@ -7,9 +7,10 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
-	"slices"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -997,26 +998,31 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 	// test-variant package, which compiles the package WITH its test files and so
 	// holds production and test symbols alike.
 	const withTests = "github.com/greatliontech/gofresh/internal/gotool"
-	a, err := computeTier2Result(h, withTests, "RunIn")
+	a, aReach, err := computeTier2ResultAndReach(h, withTests, "RunIn")
 	if err != nil {
 		t.Fatalf("analysis of production func RunIn: %v", err)
 	}
-	if len(a.contribs) == 0 {
-		t.Fatal("empty contributions for a resolvable production subject")
+	if len(aReach) == 0 {
+		t.Fatal("empty reachability for a resolvable production subject")
 	}
-	if again, err := computeTier2Result(h, withTests, "RunIn"); err != nil || !slices.Equal(again.contribs, a.contribs) {
-		t.Errorf("nondeterministic: %v vs %v (err %v)", again.contribs, a.contribs, err)
+	if again, err := computeTier2Result(h, withTests, "RunIn"); err != nil || !reflect.DeepEqual(again, a) {
+		t.Errorf("nondeterministic: %+v vs %+v (err %v)", again, a, err)
+	}
+	// The projection's total order is what makes the equality above — and
+	// the proof diagnostic — deterministic across recomputations.
+	if !sort.SliceIsSorted(a.effects, func(i, j int) bool { return effectLess(a.effects[i], a.effects[j]) }) {
+		t.Errorf("effect projection is not sorted: %+v", a.effects)
 	}
 
 	// (b) A function in a package with NO test files: resolved via the plain-package
 	// fallback (no ForTest variant exists).
 	const noTests = "github.com/greatliontech/gofresh/closure/fixtures/rootcollision/dep"
-	b, err := computeTier2Result(h, noTests, "BenchmarkSame")
+	_, bReach, err := computeTier2ResultAndReach(h, noTests, "BenchmarkSame")
 	if err != nil {
 		t.Fatalf("analysis of func in a no-test package: %v", err)
 	}
-	if len(b.contribs) == 0 {
-		t.Fatal("empty contributions via the plain-package fallback")
+	if len(bReach) == 0 {
+		t.Fatal("empty reachability via the plain-package fallback")
 	}
 
 	// A name that resolves to no function is a clear error, not a silent empty root.
@@ -1089,12 +1095,12 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
-		tr, err := computeTier2Result(h, "example.com/triangle/a", "G")
+		_, reach, err := computeTier2ResultAndReach(h, "example.com/triangle/a", "G")
 		if err != nil {
 			t.Fatalf("analysis of a.G with a same-named dependency symbol: %v", err)
 		}
-		if len(tr.contribs) == 0 {
-			t.Fatal("empty contributions for a's own G")
+		if len(reach) == 0 {
+			t.Fatal("empty reachability for a's own G")
 		}
 	})
 
@@ -1107,8 +1113,8 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
-		if tr, err := computeTier2Result(h, "example.com/triangle/a", "A"); err != nil || len(tr.contribs) == 0 {
-			t.Fatalf("analysis of a.A: %+v, %v; want a's own subject to resolve", tr, err)
+		if _, reach, err := computeTier2ResultAndReach(h, "example.com/triangle/a", "A"); err != nil || len(reach) == 0 {
+			t.Fatalf("analysis of a.A: reach %v, %v; want a's own subject to resolve", reach, err)
 		}
 		if _, err := computeTier2Result(h, "example.com/triangle/a", "Use"); err == nil {
 			t.Fatal("analysis of a.Use: want an error (a never declares Use), got the recompiled dependency's closure")
@@ -1127,21 +1133,21 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
 
-	val, err := computeTier2Result(h, pkg, "Adder.Value") // value receiver
+	_, valReach, err := computeTier2ResultAndReach(h, pkg, "Adder.Value") // value receiver
 	if err != nil {
 		t.Fatalf("analysis of value-receiver method Adder.Value: %v", err)
 	}
-	if len(val.contribs) == 0 {
-		t.Fatal("empty contributions for a method subject")
+	if len(valReach) == 0 {
+		t.Fatal("empty reachability for a method subject")
 	}
-	ptr, err := computeTier2Result(h, pkg, "Adder.Ptr") // pointer receiver
+	_, ptrReach, err := computeTier2ResultAndReach(h, pkg, "Adder.Ptr") // pointer receiver
 	if err != nil {
 		t.Fatalf("analysis of pointer-receiver method Adder.Ptr: %v", err)
 	}
 	// The two methods reach distinct helpers, so rooting at the specific method (not
-	// the whole type or package) yields distinct closures.
-	if slices.Equal(ptr.contribs, val.contribs) {
-		t.Error("Adder.Value and Adder.Ptr contribute identically; not rooting at the specific method")
+	// the whole type or package) yields distinct reachable sets.
+	if maps.Equal(ptrReach, valReach) {
+		t.Error("Adder.Value and Adder.Ptr reach identically; not rooting at the specific method")
 	}
 	if _, err := computeTier2Result(h, pkg, "Adder.Missing"); err == nil {
 		t.Error("a missing method name: want error, got nil")
@@ -1158,19 +1164,19 @@ func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericmethod"
-	get, err := computeTier2Result(h, pkg, "Box.Get") // value receiver on Box[T]
+	_, getReach, err := computeTier2ResultAndReach(h, pkg, "Box.Get") // value receiver on Box[T]
 	if err != nil {
 		t.Fatalf("analysis of Box.Get: %v", err)
 	}
-	set, err := computeTier2Result(h, pkg, "Box.Set") // pointer receiver on Box[T]
+	_, setReach, err := computeTier2ResultAndReach(h, pkg, "Box.Set") // pointer receiver on Box[T]
 	if err != nil {
 		t.Fatalf("analysis of Box.Set: %v", err)
 	}
-	if len(get.contribs) == 0 || len(set.contribs) == 0 {
-		t.Fatal("empty contributions for a generic-receiver method")
+	if len(getReach) == 0 || len(setReach) == 0 {
+		t.Fatal("empty reachability for a generic-receiver method")
 	}
-	if slices.Equal(get.contribs, set.contribs) {
-		t.Error("Box.Get and Box.Set contribute identically; not rooting at the specific method")
+	if maps.Equal(getReach, setReach) {
+		t.Error("Box.Get and Box.Set reach identically; not rooting at the specific method")
 	}
 }
 
@@ -1218,62 +1224,54 @@ func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	const benchPkg = "github.com/greatliontech/gofresh/closure/fixtures/initregistry/bench"
 	const codecPkg = "github.com/greatliontech/gofresh/closure/fixtures/initregistry/codec"
 
-	tr, err := computeTier2Result(h, benchPkg, "BenchmarkDecode")
+	_, reach, err := computeTier2ResultAndReach(h, benchPkg, "BenchmarkDecode")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	contribs := tr.contribs
-	// The init body must be hashed, but the load-bearing edit for this false-valid
-	// is the *registered method* body: the benchmark dispatches gz.Decode through
-	// registry state and an interface without naming codec, so gz.Decode is reached
-	// only because all package inits are RTA roots. Hashing only the init would
-	// leave a gz.Decode body change unhashed (REQ-closure-coverage reference/side-effect closure).
-	if !contribHasAll(contribs, codecPkg, "codec.go", ":init=") {
-		t.Fatalf("init-registered side-effect package %s init body missing from closure contributions: %v", codecPkg, contribs)
-	}
-	if !contribHasAll(contribs, codecPkg, "codec.go", "Decode") {
-		t.Fatalf("init-registered method gz.Decode missing from closure contributions: %v", contribs)
+	// The benchmark dispatches gz.Decode through registry state and an
+	// interface without naming codec, so gz.Decode is analyzed only
+	// because all package inits are RTA roots; losing that root would
+	// leave the registered method's effects invisible
+	// (REQ-closure-coverage reference/side-effect closure). The bodies'
+	// bytes ride the maximal hash.
+	if !reachContains(reach, codecPkg, "Decode") {
+		t.Fatalf("init-registered method gz.Decode missing from the subject's reach: %v", reach)
 	}
 }
 
-func TestContributionsIncludeTestMainRoot(t *testing.T) {
+func TestReachIncludesTestMainRoot(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/testmainroot"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkTestMainRoot")
+	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkTestMainRoot")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(tr.contribs, "TestMain") || !contribContains(tr.contribs, "setup") {
-		t.Fatalf("TestMain/setup missing from closure contributions: %v", tr.contribs)
+	if !reachContains(reach, "TestMain") || !reachContains(reach, "setup") {
+		t.Fatalf("TestMain/setup missing from the subject's reach: %v", reach)
 	}
 }
 
-func TestTier2DeclarationPrecision(t *testing.T) {
+func TestAnalysisReachStaysSubjectPrecise(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/direct"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkDirect")
+	tr, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkDirect")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	contribs := tr.contribs
 	if tr.widen {
-		t.Fatalf("direct fixture widened to Tier-1; contributions: %v", contribs)
+		t.Fatalf("direct fixture widened: %+v", tr)
 	}
-	for _, want := range []string{"used", "UsedConst", "UsedType"} {
-		if !contribContains(contribs, want) {
-			t.Fatalf("Tier-2 contribution missing %q: %v", want, contribs)
-		}
+	if !reachContains(reach, "used") {
+		t.Fatalf("subject-reached function missing from the reach: %v", reach)
 	}
-	for _, notWant := range []string{"unused", "UnusedConst", "UnusedType"} {
-		if contribContains(contribs, notWant) {
-			t.Fatalf("Tier-2 contribution unexpectedly contains %q: %v", notWant, contribs)
-		}
+	if reachContains(reach, "unused") {
+		t.Fatalf("subject-unreached function leaked into the reach: %v", reach)
 	}
 }
 
@@ -1300,27 +1298,12 @@ func TestExternalTestBenchmarkRoots(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/externalbench"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkExternal")
+	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkExternal")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(tr.contribs, "BenchmarkExternal") {
-		t.Fatalf("external test benchmark root missing from contributions: %v", tr.contribs)
-	}
-}
-
-func TestTier2PinsLinkedCacheModules(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkHashFiles")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if !contribContains(tr.contribs, "cache:golang.org/x/tools@v0.47.0") {
-		t.Fatalf("linked x/tools module version missing from Tier-2 contributions: %v", tr.contribs)
+	if !reachContains(reach, "BenchmarkExternal") {
+		t.Fatalf("external test benchmark root missing from the subject's reach: %v", reach)
 	}
 }
 
@@ -1355,8 +1338,7 @@ func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
 		writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
 		idx := &pkgIndex{id: "example.com/mutableasm", mutable: true, meta: &listPkg{Dir: dir, SFiles: []string{"asm.s"}}}
 		a := &tier2Analyzer{
-			filePkgs:    map[*pkgIndex]bool{idx: true},
-			seenContrib: map[string]bool{},
+			filePkgs: map[*pkgIndex]bool{idx: true},
 		}
 		if err := a.addReachedPackageFiles(); err != nil {
 			t.Fatalf("addReachedPackageFiles: %v", err)
@@ -1384,9 +1366,6 @@ func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
 			t.Fatalf("addReachedPackageFiles: %v", err)
 		}
 		requireConservative(t, a, "example.com/cacheasm")
-		if len(a.contribs) != 0 {
-			t.Fatalf("cache package source was hashed unexpectedly: %v", a.contribs)
-		}
 	})
 }
 
@@ -1405,33 +1384,18 @@ func TestStdWrapperClassBUnverifiable(t *testing.T) {
 	}
 }
 
-func TestTier2StdCallbackContributesMethod(t *testing.T) {
+func TestStdCallbackMethodStaysReached(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/stdcallback"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkSortCallback")
+	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkSortCallback")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(tr.contribs, "Less") {
-		t.Fatalf("std callback method Less missing from contributions: %v", tr.contribs)
-	}
-}
-
-func TestTier2EmbedFileContribution(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/embedfixture"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkEmbed")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if !contribContains(tr.contribs, "embed:") || !contribContains(tr.contribs, "data.txt") {
-		t.Fatalf("embed data file missing from contributions: %v", tr.contribs)
+	if !reachContains(reach, "Less") {
+		t.Fatalf("std callback method Less missing from the subject's reach: %v", reach)
 	}
 }
 
@@ -1558,21 +1522,21 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observableprocess", subject: "TestCommand"},
 		{fixture: "observableconcurrent", subject: "TestConcurrentFileRead", reason: "os.Open"},
 		{fixture: "observablefresh", subject: "TestRemoveOrdinary", reason: "os.Remove"},
-		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "os.OpenFile"},
-		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "os.Remove"},
-		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestWriteFileUncheckedBeforeRead", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestWriteFileMutationBeforeRead", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "fmt.Fprintf"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestWriteFileUncheckedBeforeRead", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationBeforeRead", reason: "os.ReadFile"},
 		{fixture: "observablefresh", subject: "TestWriteFileMutationAcrossLoop", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughAlias", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughAlias", reason: "os.WriteFile"},
 		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughDuplicateJoin", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestAncestorCleanupBeforeRead", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestAncestorCleanupBeforeRead", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "fmt.Fprintf"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperEscape"},
 		// The boundary extension admits an ignored parameter — nothing
 		// is observed — and the disciplined helper; every refusal shape
@@ -1587,8 +1551,8 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestFreshPathHelperDirectGo"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperInLoop"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee"},
-		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "testing.TempDir"},
+		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "fmt.Fprintf"},
 		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
 		// The startup caller is invisible to per-subject call-site
 		// enumeration by design; the startup walk blocks first, and
@@ -1605,14 +1569,14 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "toolchainread", subject: "TestOpenUnderToolchain", observable: true},
 		{fixture: "toolchainread", subject: "TestReadDirUnderToolchain", observable: true},
 		{fixture: "toolchainread", subject: "TestWriteIntoToolchain", reason: "os.WriteFile"},
-		{fixture: "toolchainread", subject: "TestDynamicComponent", reason: "filepath.Join"},
+		{fixture: "toolchainread", subject: "TestDynamicComponent", reason: "os.ReadFile"},
 		{fixture: "toolchainruntime", subject: "TestOtherRuntimeSurface", reason: "runtime.NumCPU"},
 		{fixture: "toolchainindirect", subject: "TestIndirectRuntimeSurface", reason: "runtime.NumCPU"},
 		{fixture: "toolchaininit", subject: "TestReadThroughInitRoot", reason: "startup effect"},
 		{fixture: "testmainhelper", subject: "TestRead", reason: "testing runtime value escapes"},
 		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
 		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
-		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "testing.Run"},
+		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "fmt.Fprintf"},
 		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
 		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
 		// User test-main flow is startup, not subject time: its effects
@@ -1841,7 +1805,7 @@ func TestTier2ReflectWidens(t *testing.T) {
 	}
 }
 
-func TestTier2GenericInterfaceEscapeHashesMethodBody(t *testing.T) {
+func TestTier2GenericInterfaceEscapeAnalyzesMethodBody(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1851,18 +1815,19 @@ func TestTier2GenericInterfaceEscapeHashesMethodBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	contribs, widened := tr.contribs, tr.widen
-	if widened {
-		t.Fatalf("generic interface escape widened to Tier-1 (imprecise): %v", contribs)
+	if tr.widen {
+		t.Fatalf("generic interface escape widened (imprecise): %+v", tr)
 	}
-	// Secret is reached only via interface escape (never called → not RTA-reachable);
-	// its instantiated object has no decl node, so the origin body must be hashed.
-	if !contribContains(contribs, "Secret") {
-		t.Fatalf("generic method body reached via interface escape missing from contributions: %v", contribs)
+	// Secret is reached only via interface escape (never called → not
+	// RTA-reachable); its instantiated object has no decl node, so the
+	// origin body must be resolved and scanned — the fixture plants an
+	// environment read there, and losing the resolution loses the effect.
+	if !hasEffectReason(tr.effects, "reaches os.Getenv (environment input)") {
+		t.Fatalf("generic method body reached via interface escape was not analyzed: %+v", tr.effects)
 	}
 }
 
-func TestTier2ConstGroupHashesImplicitContext(t *testing.T) {
+func TestTier2ConstGroupAnalyzesWithoutWiden(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1872,12 +1837,8 @@ func TestTier2ConstGroupHashesImplicitContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	contribs, widened := tr.contribs, tr.widen
-	if widened {
-		t.Fatalf("const group fixture widened to Tier-1: %v", contribs)
-	}
-	if !contribContains(contribs, "Seed") || !contribContains(contribs, "Used") {
-		t.Fatalf("implicit const group context missing from contributions: %v", contribs)
+	if tr.widen {
+		t.Fatalf("const group fixture widened: %+v", tr)
 	}
 }
 
@@ -1959,8 +1920,7 @@ func TestTier2CgoCallbackSourceWidens(t *testing.T) {
 		},
 	}
 	a := &tier2Analyzer{
-		filePkgs:    map[*pkgIndex]bool{idx: true},
-		seenContrib: map[string]bool{},
+		filePkgs: map[*pkgIndex]bool{idx: true},
 	}
 
 	if err := a.addReachedPackageFiles(); err != nil {
@@ -1968,9 +1928,6 @@ func TestTier2CgoCallbackSourceWidens(t *testing.T) {
 	}
 	if !a.widen || !strings.Contains(a.widenReason, "cgo callback source") {
 		t.Fatalf("widen = %v/%q, want cgo callback source", a.widen, a.widenReason)
-	}
-	if !contribContains(a.contribs, "file:example.com/cgocallback:cg.go=") || !contribContains(a.contribs, "file:example.com/cgocallback:bridge.c=") || !contribContains(a.contribs, "file:example.com/cgocallback:include/cfg.h=") {
-		t.Fatalf("cgo source files missing from contributions: %v", a.contribs)
 	}
 }
 
@@ -1991,12 +1948,12 @@ func TestTier2CgoSystemIncludeSkipped(t *testing.T) {
 			Module:   &listMod{Main: true, Dir: dir},
 		},
 	}
-	a := &tier2Analyzer{filePkgs: map[*pkgIndex]bool{idx: true}, seenContrib: map[string]bool{}}
+	a := &tier2Analyzer{filePkgs: map[*pkgIndex]bool{idx: true}}
 	if err := a.addReachedPackageFiles(); err != nil {
 		t.Fatalf("addReachedPackageFiles: %v, want system include skipped", err)
 	}
-	if !contribContains(a.contribs, "bridge.c") {
-		t.Fatalf("package cgo source missing from contributions: %v", a.contribs)
+	if !a.widen || !strings.Contains(a.widenReason, "cgo callback source") {
+		t.Fatalf("widen = %v/%q, want the blindspot widen with the system include skipped", a.widen, a.widenReason)
 	}
 }
 
@@ -2024,8 +1981,7 @@ func TestTier2CgoOutsideIncludeRootFailsClosed(t *testing.T) {
 		},
 	}
 	a := &tier2Analyzer{
-		filePkgs:    map[*pkgIndex]bool{idx: true},
-		seenContrib: map[string]bool{},
+		filePkgs: map[*pkgIndex]bool{idx: true},
 	}
 
 	if err := a.addReachedPackageFiles(); err == nil || !strings.Contains(err.Error(), "cgo include root outside package dir") {
@@ -2052,8 +2008,7 @@ func TestTier2CgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
 		},
 	}
 	a := &tier2Analyzer{
-		filePkgs:    map[*pkgIndex]bool{idx: true},
-		seenContrib: map[string]bool{},
+		filePkgs: map[*pkgIndex]bool{idx: true},
 	}
 
 	if err := a.addReachedPackageFiles(); err == nil || !strings.Contains(err.Error(), "cgo include escapes package dir") {
@@ -2308,7 +2263,7 @@ func TestTier2CacheInitTraversesMutableReference(t *testing.T) {
 	}
 }
 
-func TestTier2HashesReachedImports(t *testing.T) {
+func TestImportBindingAnalyzesWithoutWiden(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2319,10 +2274,7 @@ func TestTier2HashesReachedImports(t *testing.T) {
 		t.Fatalf("analysis: %v", err)
 	}
 	if tr.widen {
-		t.Fatalf("import binding fixture widened unexpectedly: %v", tr.contribs)
-	}
-	if !contribContains(tr.contribs, "imports") {
-		t.Fatalf("import declaration missing from contributions: %v", tr.contribs)
+		t.Fatalf("import binding fixture widened unexpectedly: %+v", tr)
 	}
 }
 
@@ -2454,7 +2406,7 @@ func TestUnsafePointerBasicTypeIsDetected(t *testing.T) {
 	}
 }
 
-func TestTier2LinknameLocalTargetContributes(t *testing.T) {
+func TestLinknameLocalTargetResolvesWithoutWiden(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2464,8 +2416,8 @@ func TestTier2LinknameLocalTargetContributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	if !contribContains(tr.contribs, "Hidden") || !contribContains(tr.contribs, "LocalOnly") {
-		t.Fatalf("linkname local target declarations missing from contributions: %v", tr.contribs)
+	if tr.widen {
+		t.Fatalf("locally resolvable linkname widened: %+v", tr)
 	}
 }
 
@@ -2484,65 +2436,13 @@ func TestTier2ReverseLinknameTargetEnqueued(t *testing.T) {
 		objsByLinkTarget: map[string][]types.Object{},
 		seenObjects:      map[types.Object]bool{},
 		seenTypes:        map[types.Type]bool{},
-		seenDecls:        map[string]bool{},
-		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},
-		seenContrib:      map[string]bool{},
 	}
 	a.addReverseLinkname("example.com/upper.g", lowerF)
 
 	a.addObject(upperG)
 	if len(a.objectQueue) != 1 || a.objectQueue[0] != lowerF {
 		t.Fatalf("reverse linkname queue = %v, want lower.f", a.objectQueue)
-	}
-}
-
-func TestTier2DetachedLinknameDirectiveContributes(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "p.go")
-	const source = `package p
-
-//go:linkname f example.com/cachedep.F
-
-func f() {}
-`
-	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, source, parser.ParseComments)
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
-	typesPkg, err := new(types.Config).Check("example.com/p", fset, []*ast.File{file}, info)
-	if err != nil {
-		t.Fatalf("type check: %v", err)
-	}
-	a := &tier2Analyzer{
-		h:                &Hasher{},
-		prog:             &program{prog: ssa.NewProgram(fset, ssa.InstantiateGenerics)},
-		metaByPath:       map[string]*listPkg{},
-		idxByTypes:       map[*types.Package]*pkgIndex{},
-		objByName:        map[string]types.Object{},
-		objsByLinkTarget: map[string][]types.Object{},
-		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[types.Type]bool{},
-		seenDecls:        map[string]bool{},
-		seenPkgs:         map[*pkgIndex]bool{},
-		filePkgs:         map[*pkgIndex]bool{},
-		seenContrib:      map[string]bool{},
-	}
-	idx := a.buildIndex(&packages.Package{ID: "example.com/p", PkgPath: "example.com/p", Dir: dir, Fset: fset, Types: typesPkg, TypesInfo: info, Syntax: []*ast.File{file}})
-	a.idxByTypes[typesPkg] = idx
-	obj := typesPkg.Scope().Lookup("f")
-	if obj == nil {
-		t.Fatal("f object missing")
-	}
-
-	a.addObject(obj)
-	if !contribContains(a.contribs, "linkname") {
-		t.Fatalf("detached linkname directive missing from contributions: %v", a.contribs)
 	}
 }
 
@@ -2588,37 +2488,33 @@ func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/rootcollision/bench"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkSame")
+	prog, err := h.loadCached(pkg)
 	if err != nil {
-		t.Fatalf("analysis: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if !contribContains(tr.contribs, "RealOnly") {
-		t.Fatalf("target benchmark root contribution missing RealOnly: %v", tr.contribs)
+	// Both packages declare a BenchmarkSame; the subject must root at the
+	// target package's own benchmark, never the recompiled dependency's.
+	root := prog.roots["BenchmarkSame"]
+	if root == nil || !strings.Contains(root.String(), "rootcollision/bench") {
+		t.Fatalf("BenchmarkSame root = %v, want the target package's own benchmark", root)
 	}
-	if contribContains(tr.contribs, "DepOnly") {
-		t.Fatalf("dependency benchmark root leaked into target closure: %v", tr.contribs)
+	if strings.Contains(root.String(), "rootcollision/dep") {
+		t.Fatalf("BenchmarkSame rooted at the dependency's benchmark: %v", root)
 	}
 }
 
-func contribContains(contribs []string, s string) bool {
-	for _, c := range contribs {
-		if strings.Contains(c, s) {
-			return true
-		}
-	}
-	return false
-}
-
-func contribHasAll(contribs []string, parts ...string) bool {
-	for _, c := range contribs {
-		ok := true
-		for _, p := range parts {
-			if !strings.Contains(c, p) {
-				ok = false
+// reachContains reports whether any reachable function's name carries every
+// given substring.
+func reachContains(reach map[string]bool, parts ...string) bool {
+	for name := range reach {
+		all := true
+		for _, part := range parts {
+			if !strings.Contains(name, part) {
+				all = false
 				break
 			}
 		}
-		if ok {
+		if all {
 			return true
 		}
 	}

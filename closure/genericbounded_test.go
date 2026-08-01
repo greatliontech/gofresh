@@ -3,7 +3,7 @@ package closure
 import (
 	"os"
 	"path/filepath"
-	"slices"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -90,19 +90,28 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 		t.Fatalf("bounded generic refused as open world: %+v", proof)
 	}
 
-	helperEdit, _ := compute(strings.Replace(boundedBody, "x + fixtureConstant", "x + fixtureConstant + 1", 1))
-	if slices.Equal(helperEdit.contribs, base.contribs) {
-		t.Fatal("helper edit reached only through the instantiation did not move the precise contributions")
+	// The analysis surface is effects: an effect added to content reached
+	// only through the instantiation must appear, and an unrelated
+	// effectful edit must not leak in — the precision the narrowing
+	// exists for.
+	envReason := "reaches os.Getenv (environment input)"
+	if hasEffectReason(base.effects, envReason) {
+		t.Fatalf("base fixture already carries the probe effect: %+v", base)
+	}
+	withOS := strings.Replace(boundedBody, "package bounded", "package bounded\n\nimport \"os\"", 1)
+	helperEdit, _ := compute(strings.Replace(withOS, "return x + fixtureConstant", "return x + fixtureConstant + len(os.Getenv(\"BOUNDED\"))", 1))
+	if !hasEffectReason(helperEdit.effects, envReason) {
+		t.Fatal("an effect in a helper reached only through the instantiation is missing from the analysis")
 	}
 
-	bodyEdit, _ := compute(strings.Replace(boundedBody, "return a + b", "return b + a", 1))
-	if slices.Equal(bodyEdit.contribs, base.contribs) {
-		t.Fatal("generic-body edit did not move the precise contributions")
+	bodyEdit, _ := compute(strings.Replace(withOS, "return a + b", "_ = os.Getenv(\"BOUNDED\")\n\treturn a + b", 1))
+	if !hasEffectReason(bodyEdit.effects, envReason) {
+		t.Fatal("an effect in the generic body is missing from the analysis")
 	}
 
-	unrelatedEdit, _ := compute(strings.Replace(boundedBody, `return "quiet"`, `return "quieter"`, 1))
-	if !slices.Equal(unrelatedEdit.contribs, base.contribs) {
-		t.Fatal("unrelated edit moved the bounded generic's precise contributions: the precision the narrowing exists for is absent")
+	unrelatedEdit, _ := compute(strings.Replace(withOS, `return "quiet"`, `return "quiet" + os.Getenv("BOUNDED")`, 1))
+	if !reflect.DeepEqual(unrelatedEdit.effects, base.effects) {
+		t.Fatalf("an unrelated effectful edit leaked into the bounded generic's analysis: %+v vs %+v", unrelatedEdit.effects, base.effects)
 	}
 }
 
@@ -162,9 +171,13 @@ func TestBoundedGenericWithoutInstantiationKeepsOriginFold(t *testing.T) {
 	if base.widen || base.unverifiable {
 		t.Fatalf("uninstantiated bounded generic widened: %+v", base)
 	}
-	bodyEdit := compute(strings.Replace(orphan, "return a + b", "return b + a", 1))
-	if slices.Equal(bodyEdit.contribs, base.contribs) {
-		t.Fatal("generic-body edit did not move the origin fold")
+	if hasEffectReason(base.effects, "reaches os.Getenv (environment input)") {
+		t.Fatalf("base fixture already carries the probe effect: %+v", base)
+	}
+	withOS := strings.Replace(orphan, "package bounded", "package bounded\n\nimport \"os\"", 1)
+	bodyEdit := compute(strings.Replace(withOS, "return a + b", "_ = os.Getenv(\"BOUNDED\")\n\treturn a + b", 1))
+	if !hasEffectReason(bodyEdit.effects, "reaches os.Getenv (environment input)") {
+		t.Fatal("an effect in the uninstantiated generic's body is missing from the origin fold's analysis")
 	}
 }
 
@@ -192,11 +205,11 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := newTier2Base(h, prog, metas)
-	batchedSum, err := h.tier2ReachableWithFresh(base, reachable[0], false)
+	batchedSum, err := h.tier2Reachable(base, reachable[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	batchedUnrelated, err := h.tier2ReachableWithFresh(base, reachable[1], false)
+	batchedUnrelated, err := h.tier2Reachable(base, reachable[1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +221,7 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(batchedSum.contribs, soloSum.contribs) || batchedSum.widen != soloSum.widen || batchedSum.unverifiable != soloSum.unverifiable {
+	if !reflect.DeepEqual(batchedSum.effects, soloSum.effects) || batchedSum.widen != soloSum.widen || batchedSum.unverifiable != soloSum.unverifiable {
 		t.Fatalf("batch %+v != solo %+v for the bounded generic", batchedSum, soloSum)
 	}
 	if batchedUnrelated.unverifiable || strings.Contains(batchedUnrelated.reason, "open") || strings.Contains(batchedUnrelated.widenReason, "open") {
@@ -267,9 +280,13 @@ func TestBoundedGenericRootsInstantiationFlow(t *testing.T) {
 	if base.widen || base.unverifiable {
 		t.Fatalf("instantiation-rooted dispatch did not resolve: %+v", base)
 	}
-	tagEdit := compute(strings.Replace(flowBody, `return "tag"`, `return "gat"`, 1))
-	if slices.Equal(tagEdit.contribs, base.contribs) {
-		t.Fatal("instantiation-reached method body is missing from the precise contributions: a purity-asserted serve would go stale-valid")
+	if hasEffectReason(base.effects, "reaches os.Getenv (environment input)") {
+		t.Fatalf("base fixture already carries the probe effect: %+v", base)
+	}
+	withOS := strings.Replace(flowBody, "package bounded", "package bounded\n\nimport \"os\"", 1)
+	tagEdit := compute(strings.Replace(withOS, `return "tag"`, `return os.Getenv("TAG") + "tag"`, 1))
+	if !hasEffectReason(tagEdit.effects, "reaches os.Getenv (environment input)") {
+		t.Fatal("an effect in the instantiation-reached method body is missing from the analysis: a purity-asserted serve would go stale-valid")
 	}
 }
 
@@ -341,5 +358,47 @@ func TestRecursiveConstraintsTerminateOpen(t *testing.T) {
 		if p := proofs[subject]; p.Observable || !(strings.Contains(p.Reason, "open subject world") || strings.Contains(p.Reason, "reachability is not closed")) {
 			t.Fatalf("%s: recursive constraint did not answer conservatively open: %+v", name, p)
 		}
+	}
+}
+
+// TestBoundedGenericOriginEscapeEffectsStayVisible pins the analyzer-only
+// escape path: an uninstantiated bounded generic boxes a package-local
+// concrete type, so RTA never sees the interface conversion — only the
+// origin fold's own scan models the escaped type's method set, and the
+// method's effect must surface; losing it grants a proof over an
+// unanalyzed effect (REQ-closure-observability-analysis's no-false-valid
+// direction).
+func TestBoundedGenericOriginEscapeEffectsStayVisible(t *testing.T) {
+	body := `package bounded
+
+import "os"
+
+type Number interface{ ~int | ~float64 }
+
+type probe struct{}
+
+func (p probe) Peek() string { return os.Getenv("ESCAPE") }
+
+func Sum[T Number](a, b T) T {
+	var sink any = probe{}
+	_ = sink
+	return a + b
+}
+
+func UseSum() int { return 3 }
+
+func Unrelated() string { return "quiet" }
+`
+	dir := writeBoundedFixture(t, body)
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, err := computeTier2Result(h, "example.com/bounded", "Sum")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasEffectReason(tr.effects, "reaches os.Getenv (environment input)") {
+		t.Fatalf("the escaped local type's method effect is missing from the analysis: %+v", tr.effects)
 	}
 }

@@ -2,10 +2,12 @@ package closure
 
 import "fmt"
 
-// computeTier2Result runs the per-subject precise-analysis pipeline the
-// observability proof is built on — program load, subject rooting,
+// computeTier2ResultAndReach runs the per-subject precise-analysis pipeline
+// the observability proof is built on — program load, subject rooting,
 // package listing, attributed reachability, and the analyzer projection —
-// for a single subject, returning the raw analyzer result. A symbol that
+// for a single subject, returning the raw analyzer result plus the names of
+// the subject-reachable functions (the attribution surface the analyzer
+// projects), so root-resolution tests assert reach directly. A symbol that
 // cannot be rooted in the loaded test-binary program is a subject-local
 // error naming the subject; a name declared by both the package and its
 // external test package errors naming the ambiguity.
@@ -15,25 +17,25 @@ import "fmt"
 // across many fixture packages, and retaining every whole-program SSA
 // would grow peak memory with the table instead of the largest single
 // test binary.
-func computeTier2Result(h *Hasher, pkgPath, symbol string) (tier2Result, error) {
+func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result, map[string]bool, error) {
 	prog := h.progs[pkgPath]
 	if prog == nil {
 		var err error
 		prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 		if err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 	}
 	if prog.roots[symbol] == nil {
 		if prog.ambiguous[symbol] {
-			return tier2Result{}, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", symbol, pkgPath)
+			return tier2Result{}, nil, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", symbol, pkgPath)
 		}
-		return tier2Result{}, fmt.Errorf("closure: subject %s not found in %s", symbol, pkgPath)
+		return tier2Result{}, nil, fmt.Errorf("closure: subject %s not found in %s", symbol, pkgPath)
 	}
 	_, retainList := h.lists[pkgPath]
 	metas, err := h.list(pkgPath)
 	if err != nil {
-		return tier2Result{}, err
+		return tier2Result{}, nil, err
 	}
 	defer func() {
 		if !retainList {
@@ -42,7 +44,22 @@ func computeTier2Result(h *Hasher, pkgPath, symbol string) (tier2Result, error) 
 	}()
 	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{{Package: pkgPath, Symbol: symbol}})
 	if err != nil {
-		return tier2Result{}, err
+		return tier2Result{}, nil, err
 	}
-	return h.tier2ReachableWithFresh(newTier2Base(h, prog, metas), reachable[0], false)
+	result, err := h.tier2Reachable(newTier2Base(h, prog, metas), reachable[0])
+	if err != nil {
+		return tier2Result{}, nil, err
+	}
+	reach := make(map[string]bool, len(reachable[0].functions))
+	for fn := range reachable[0].functions {
+		if fn != nil {
+			reach[fn.String()] = true
+		}
+	}
+	return result, reach, nil
+}
+
+func computeTier2Result(h *Hasher, pkgPath, symbol string) (tier2Result, error) {
+	result, _, err := computeTier2ResultAndReach(h, pkgPath, symbol)
+	return result, err
 }

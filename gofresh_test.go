@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@5" {
-		t.Fatalf("ObservationRTA = %q, want traversal-admitting proof semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@6" {
+		t.Fatalf("ObservationRTA = %q, want deterministic-diagnostic proof semantics", ObservationRTA)
 	}
 }
 

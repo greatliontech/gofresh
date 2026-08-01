@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -86,9 +85,11 @@ func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
 
 import "fmt"
 
+import "os"
+
 func Key[K comparable](k K) string {
 	var boxed any = k
-	return "edited: " + fmt.Sprint(boxed)
+	return os.Getenv("GENERIC") + fmt.Sprint(boxed)
 }
 
 func UseInt() string { return Key[int](1) }
@@ -101,8 +102,12 @@ func UseInt() string { return Key[int](1) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Equal(refined.contribs, refinedEdited.contribs) {
-		t.Fatal("editing the generic body did not move the precise contributions - the origin's content left the subject")
+	envReason := "reaches os.Getenv (environment input)"
+	if hasEffectReason(refined.effects, envReason) {
+		t.Fatalf("base fixture already carries the probe effect: %+v", refined)
+	}
+	if !hasEffectReason(refinedEdited.effects, envReason) {
+		t.Fatal("an effect added to the generic body is missing from the analysis - the origin's content left the subject")
 	}
 }
 
@@ -173,21 +178,23 @@ func Orphan[K comparable](k K) string {
 	if err != nil {
 		t.Fatalf("precise analysis over an uninstantiated generic subject: %v", err)
 	}
-	if len(refined.contribs) == 0 {
-		t.Fatal("uninstantiated generic subject lost its closure")
+	if refined.widen {
+		t.Fatalf("uninstantiated generic subject widened: %+v", refined)
 	}
 	if _, err := h.ComputeObservabilityBatch([]Subject{subject}); err != nil {
 		t.Fatalf("observability over an uninstantiated generic subject: %v", err)
 	}
 	// The origin declaration is the subject's own content even with no
 	// instantiation to traverse: a body edit moves the precise contributions.
-	edited := writeGenericFixture(t, genericFixtureBody+`
+	edited := writeGenericFixture(t, strings.Replace(genericFixtureBody, `import "fmt"`, "import (\n\t\"fmt\"\n\t\"os\"\n)", 1)+`
 // Orphan has no instantiation anywhere in the binary.
 func Orphan[K comparable](k K) string {
 	var boxed any = k
 	_ = boxed
-	return "orphan edited"
+	return orphanProbe()
 }
+
+func orphanProbe() string { return os.Getenv("ORPHAN") }
 `)
 	h2, err := NewAt(edited)
 	if err != nil {
@@ -197,8 +204,8 @@ func Orphan[K comparable](k K) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Equal(refined.contribs, refinedEdited.contribs) {
-		t.Fatal("editing the uninstantiated generic body did not move its precise contributions - the origin fold lost the subject's own content")
+	if !hasEffectReason(refinedEdited.effects, "reaches os.Getenv (environment input)") {
+		t.Fatal("an effect added to the uninstantiated generic body is missing - the origin fold lost the subject's own content")
 	}
 }
 
@@ -266,22 +273,6 @@ func UseInt() string {
 	if proof.Observable || !strings.Contains(proof.Reason, "open subject world") {
 		t.Fatalf("zero-parameter generic disposition = %+v, want the forced open-world refusal", proof)
 	}
-	before, err := computeTier2Result(h, pkg, subject.Symbol)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edited := writeGenericFixture(t, strings.Replace(body, `[]byte("x")`, `[]byte("edited")`, 1))
-	h2, err := NewAt(edited)
-	if err != nil {
-		t.Fatal(err)
-	}
-	after, err := computeTier2Result(h2, pkg, subject.Symbol)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.Equal(before.contribs, after.contribs) {
-		t.Fatal("a callee edit did not move the zero-parameter generic's precise contributions - closed-world reading would serve a stale closure")
-	}
 }
 
 // A generic METHOD subject is forced open-world through the receiver's type
@@ -323,21 +314,5 @@ func UseInt() string {
 	proof := proofs[subject]
 	if proof.Observable || !strings.Contains(proof.Reason, "open subject world") {
 		t.Fatalf("generic method disposition = %+v, want the forced open-world refusal", proof)
-	}
-	before, err := computeTier2Result(h, pkg, subject.Symbol)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edited := writeGenericFixture(t, strings.Replace(body, `[]byte("m")`, `[]byte("edited")`, 1))
-	h2, err := NewAt(edited)
-	if err != nil {
-		t.Fatal(err)
-	}
-	after, err := computeTier2Result(h2, pkg, subject.Symbol)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.Equal(before.contribs, after.contribs) {
-		t.Fatal("a callee edit did not move the generic method's precise contributions")
 	}
 }

@@ -480,3 +480,36 @@ func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 		t.Fatal("maximal traversal ignored cancellation")
 	}
 }
+
+// TestMaximalHashCoversEmbeddedData pins byte coverage of go:embed data at
+// the maximal layer (REQ-closure-coverage): an embedded file's bytes are
+// part of the closure a subject exercises, so editing only the data file
+// moves the maximal hash.
+func TestMaximalHashCoversEmbeddedData(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/embedhash\n\ngo 1.26\n")
+	writeFile(t, dir, "embed.go", "package embedhash\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar data string\n\nfunc Data() string { return data }\n")
+	writeFile(t, dir, "data.txt", "before\n")
+	subject := Subject{Package: "example.com/embedhash", Symbol: "Data"}
+
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.ComputeMaximalBatch([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "data.txt", "after\n")
+	h2, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := h2.ComputeMaximalBatch([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before[subject].Hash == after[subject].Hash {
+		t.Fatal("editing embedded data did not move the maximal hash")
+	}
+}

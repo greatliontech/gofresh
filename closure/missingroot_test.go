@@ -39,12 +39,12 @@ func TestExternal(t *testing.T) {
 	if _, err := computeTier2Result(h, pkg, unrootable.Symbol); err == nil || !strings.Contains(err.Error(), "Ok not found in "+pkg) {
 		t.Fatalf("unrootable subject analysis error = %v, want an error naming the subject", err)
 	}
-	analyzed, err := computeTier2Result(h, pkg, sibling.Symbol)
+	_, siblingReach, err := computeTier2ResultAndReach(h, pkg, sibling.Symbol)
 	if err != nil {
 		t.Fatalf("sibling analysis disturbed by the unrootable subject: %v", err)
 	}
-	if len(analyzed.contribs) == 0 {
-		t.Fatalf("sibling analysis = %+v, want normal analysis undisturbed by the unrootable subject", analyzed)
+	if len(siblingReach) == 0 {
+		t.Fatal("sibling analysis reached nothing, want normal analysis undisturbed by the unrootable subject")
 	}
 	proofs, err := h.ComputeObservabilityBatch([]Subject{unrootable, sibling})
 	if err != nil {

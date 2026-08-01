@@ -73,10 +73,11 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // proof. The version pins the engine's interpretation: any admission or
 // classification change bumps it, so persistently memoized analyses and
 // recorded proofs from the prior interpretation refuse instead of serving
-// under semantics they were not computed by — @5 widened the identity
-// admission to ".."-carrying constants (resolvability delegated to
-// observation ingest, REQ-inputs-path-congruence).
-const ObservationRTA = "gofresh/observation-rta@5"
+// under semantics they were not computed by — @6 made the refusal
+// diagnostic deterministic: the analyzer's effect projection sorts under a
+// total order, so the first blocking effect no longer varies with walk
+// order across recomputations.
+const ObservationRTA = "gofresh/observation-rta@6"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

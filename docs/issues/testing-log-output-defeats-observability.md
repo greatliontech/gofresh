@@ -23,5 +23,14 @@ testing-runtime effect handling (closure's maximalTesting classification).
 Whether it can be classified observable (or testing-runtime-internal) needs
 its own diagnosis against REQ-closure-observability-analysis's contract.
 
+Also in scope: refusal-diagnostic quality. The proof's refusal names the
+first blocking effect of the analyzer's deterministically sorted
+projection (field-lexicographic — observation-rta@6 made the choice
+deterministic across recomputations), which can surface a generic effect
+(`reaches os.ReadFile (file I/O)`) where a causal one (a fresh-path escape
+attributed to `testing.TempDir`) exists. A preference order over blocking
+effects — causal attributions first — restores the pointed diagnostics
+without giving up determinism.
+
 Lands: the observability precision pass — the next gofresh plan,
 opening immediately after this plan's close-out (chunk 12).

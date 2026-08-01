@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,27 +85,6 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 		t.Fatal("invoke subject inherited another subject's recursive runtime type")
 	}
 
-	metas, err := h.list(batchIsolationPackage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := newTier2Base(h, prog, metas)
-	for _, check := range []struct {
-		index int
-		name  string
-		part  string
-	}{
-		{index: 1, name: "DynamicCaller", part: "dynamicTarget"},
-		{index: 3, name: "Invoker", part: "concreteMethodHelper"},
-	} {
-		tr, err := h.tier2ReachableWithFresh(base, reachable[check.index], false)
-		if err != nil {
-			t.Fatalf("tier2ReachableWithFresh(%s): %v", check.name, err)
-		}
-		if contribHasAll(tr.contribs, batchIsolationPackage, "batchisolation.go", check.part) {
-			t.Fatalf("%s closure contains other subject's %s declaration: %v", check.name, check.part, tr.contribs)
-		}
-	}
 }
 
 func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
@@ -217,7 +196,7 @@ func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
 	}
 	base := newTier2Base(h, prog, metas)
 	h.ctx = &cancelAfterContext{Context: context.Background(), remaining: 3}
-	if _, err := h.tier2ReachableWithFresh(base, reachable[0], false); err == nil {
+	if _, err := h.tier2Reachable(base, reachable[0]); err == nil {
 		t.Fatal("tier-2 projection ignored cancellation during traversal")
 	}
 }
@@ -297,7 +276,7 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 	base := newTier2Base(h, prog, metas)
 	batched := make([]tier2Result, len(subjects))
 	for i, subject := range subjects {
-		batched[i], err = h.tier2ReachableWithFresh(base, reachable[i], false)
+		batched[i], err = h.tier2Reachable(base, reachable[i])
 		if err != nil {
 			t.Fatalf("batched analysis (%s): %v", subject.Symbol, err)
 		}
@@ -309,7 +288,7 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(batched[i].contribs, independent.contribs) ||
+		if !reflect.DeepEqual(batched[i].effects, independent.effects) ||
 			batched[i].widen != independent.widen ||
 			batched[i].widenReason != independent.widenReason ||
 			batched[i].unverifiable != independent.unverifiable ||
@@ -370,4 +349,18 @@ func functionName(fn *ssa.Function) string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("%s (%s)", fn.String(), fn.RelString(nil))
+}
+
+// TestWidenReasonIsDeterministic pins the selection rule: the recorded
+// widen reason is the lexicographically least of the requested set,
+// whatever order the walk fires the requests in — the reason lands
+// verbatim in persisted proofs, so it must be a function of the set.
+func TestWidenReasonIsDeterministic(t *testing.T) {
+	a := &tier2Analyzer{}
+	a.requestWiden("zebra cause")
+	a.requestWiden("alpha cause")
+	a.requestWiden("mid cause")
+	if !a.widen || a.widenReason != "alpha cause" {
+		t.Fatalf("widenReason = %q, want the lexicographically least of the requested set", a.widenReason)
+	}
 }

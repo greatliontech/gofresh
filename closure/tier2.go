@@ -2,8 +2,6 @@ package closure
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"go/ast"
 	"go/constant"
@@ -429,7 +427,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
-	subjectResult, err := h.tier2ReachableWithFresh(base, subjectReach, true)
+	subjectResult, err := h.tier2Reachable(base, subjectReach)
 	if err != nil {
 		return Observability{}, err
 	}
@@ -576,7 +574,6 @@ func isOpenFlagSymbol(symbol string) bool {
 }
 
 type tier2Result struct {
-	contribs     []string
 	effects      []externalEffect
 	widen        bool
 	widenReason  string
@@ -1024,21 +1021,15 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 	return prog != nil && pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Pkg.Path() == prog.pkgPath+".test"
 }
 
-// tier2ReachableWithFresh optionally carries the cross-boundary
-// fresh-path analysis: only the observability walk consults
-// effect.observable, so withFresh=false skips the sweep (a
-// test-driver configuration; every production proof passes true).
-func (h *Hasher) tier2ReachableWithFresh(base *tier2Base, reachable attributedReachability, withFresh bool) (tier2Result, error) {
+// tier2Reachable analyzes one attributed reachability set: effects,
+// widen, and verdict, with the cross-boundary fresh-path analysis always
+// in force (only the observability walk consults effect.observable).
+func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachability) (tier2Result, error) {
 	a := base.analyzer()
 	a.rtaResolved = reachable.resolved
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
-	if withFresh {
-		a.fresh = newFreshParamAnalysis(reachable)
-	}
-	if err := a.addLinkedCacheModules(); err != nil {
-		return tier2Result{}, err
-	}
+	a.fresh = newFreshParamAnalysis(reachable)
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
 			continue
@@ -1111,7 +1102,6 @@ type pkgIndex struct {
 	meta           *listPkg
 	id             string
 	path           string
-	dir            string
 	std            bool
 	testMain       bool
 	cache          bool
@@ -1119,11 +1109,9 @@ type pkgIndex struct {
 	decls          map[types.Object]ast.Node
 	vars           []ast.Node
 	inits          []ast.Node
-	imports        []ast.Node
 	wasmImport     bool
 	linknames      map[types.Object]string
 	linknameByName map[string]string
-	linknameDocs   map[types.Object]ast.Node
 }
 
 // tier2Base is the immutable package/source index shared by every subject in
@@ -1164,20 +1152,16 @@ type tier2Analyzer struct {
 	// (enqueueObject dedups), and the TypeString render this key replaced
 	// dominated the walk's allocations.
 	seenTypes   map[types.Type]bool
-	seenDecls   map[string]bool
-	seenPkgs    map[*pkgIndex]bool
 	filePkgs    map[*pkgIndex]bool
 	rtaReach    map[*ssa.Function]bool
 	rtaResolved map[ssa.CallInstruction]bool
 	// fresh carries the subject's cross-boundary fresh-path analysis;
 	// nil outside per-subject reachability walks (maximal tier,
 	// startup effects), where the intraprocedural grammar alone applies.
-	fresh       *freshParamAnalysis
-	openWorld   bool
-	scanned     map[*ssa.Function]bool
-	seenContrib map[string]bool
-	contribs    []string
-	effects     []externalEffect
+	fresh     *freshParamAnalysis
+	openWorld bool
+	scanned   map[*ssa.Function]bool
+	effects   []externalEffect
 
 	widen        bool
 	widenReason  string
@@ -1249,13 +1233,10 @@ func (b *tier2Base) analyzer() *tier2Analyzer {
 		objsByLinkTarget: b.objsByLinkTarget,
 		seenObjects:      map[types.Object]bool{},
 		seenTypes:        map[types.Type]bool{},
-		seenDecls:        map[string]bool{},
-		seenPkgs:         map[*pkgIndex]bool{},
 		filePkgs:         map[*pkgIndex]bool{},
 		rtaReach:         map[*ssa.Function]bool{},
 		rtaResolved:      map[ssa.CallInstruction]bool{},
 		scanned:          map[*ssa.Function]bool{},
-		seenContrib:      map[string]bool{},
 	}
 }
 
@@ -1291,16 +1272,13 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 		meta:           meta,
 		id:             p.ID,
 		path:           path,
-		dir:            p.Dir,
 		std:            std,
 		testMain:       p.Name == "main" && path == a.prog.pkgPath+".test",
 		decls:          map[types.Object]ast.Node{},
 		linknames:      map[types.Object]string{},
 		linknameByName: map[string]string{},
-		linknameDocs:   map[types.Object]ast.Node{},
 	}
 	if meta != nil {
-		idx.dir = meta.Dir
 		idx.cache = meta.Module != nil && !meta.Module.Main && a.h.underCache(meta.Dir)
 	} else if p.Module != nil {
 		idx.cache = !p.Module.Main && a.h.underCache(p.Dir)
@@ -1319,11 +1297,6 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 				fields := strings.Fields(text)
 				if len(fields) >= 3 && fields[0] == "go:linkname" {
 					idx.linknameByName[fields[1]] = fields[2]
-				}
-				if len(fields) >= 2 && fields[0] == "go:linkname" {
-					if obj := p.Types.Scope().Lookup(fields[1]); obj != nil {
-						idx.linknameDocs[obj] = cg
-					}
 				}
 				if strings.HasPrefix(text, "go:wasmimport") {
 					idx.wasmImport = true
@@ -1345,9 +1318,6 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 					}
 				}
 			case *ast.GenDecl:
-				if d.Tok == token.IMPORT {
-					idx.imports = append(idx.imports, d)
-				}
 				genLinknames := linknamesFromDoc(d.Doc)
 				for local, target := range genLinknames {
 					if obj := p.Types.Scope().Lookup(local); obj != nil {
@@ -1425,16 +1395,6 @@ func (a *tier2Analyzer) metaForPackage(p *packages.Package) *listPkg {
 	return nil
 }
 
-func (a *tier2Analyzer) addLinkedCacheModules() error {
-	for _, p := range a.metas {
-		if p.Standard || !a.h.pinnedPackage(&p) {
-			continue
-		}
-		a.addContribution("cache:" + a.h.modulePin(p.Module))
-	}
-	return nil
-}
-
 func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 	if fn == nil {
 		return
@@ -1465,11 +1425,9 @@ func (a *tier2Analyzer) addStartupPackage(idx *pkgIndex) {
 	}
 	a.markPackage(idx)
 	for _, n := range idx.vars {
-		a.addDecl(idx, "startup-var", n)
 		a.scanNodeRefs(idx, n)
 	}
 	for _, n := range idx.inits {
-		a.addDecl(idx, "init", n)
 		a.scanNodeRefs(idx, n)
 	}
 }
@@ -2918,10 +2876,6 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 		return
 	}
 	a.markPackage(idx)
-	if linkDoc := idx.linknameDocs[obj]; linkDoc != nil {
-		a.addDecl(idx, "linkname "+obj.String(), linkDoc)
-	}
-	a.addDecl(idx, obj.String(), node)
 	a.addType(obj.Type())
 	a.scanNodeRefs(idx, node)
 	if fn, ok := obj.(*types.Func); ok {
@@ -3085,7 +3039,6 @@ func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node) {
 
 func (a *tier2Analyzer) markPackage(idx *pkgIndex) {
 	if idx != nil && idx.mutable {
-		a.seenPkgs[idx] = true
 		a.filePkgs[idx] = true
 	}
 }
@@ -3115,11 +3068,6 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			effect.unrefinable = true
 			a.recordExternalEffect(effect)
 		}
-		if idx.mutable {
-			for _, n := range idx.imports {
-				a.addDecl(idx, "imports", n)
-			}
-		}
 		if hasExternalCgoMeta(idx.meta) {
 			effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
 			effect.unrefinable = true
@@ -3134,19 +3082,9 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				if root := cgoIncludeRootOutsideDir(idx.meta, modCache); root != "" {
 					return fmt.Errorf("closure: cgo include root outside package dir: %s", root)
 				}
-				a.requestWiden("cgo callback source in " + idx.id)
-			}
-			if err := a.addRelFiles(idx, "embed", idx.meta.EmbedFiles); err != nil {
-				return err
-			}
-			nonGo := append([]string{}, idx.meta.CgoFiles...)
-			for _, set := range [][]string{
-				idx.meta.CFiles, idx.meta.CXXFiles, idx.meta.MFiles, idx.meta.HFiles, idx.meta.FFiles,
-				idx.meta.SFiles, idx.meta.SwigFiles, idx.meta.SwigCXXFiles, idx.meta.SysoFiles,
-			} {
-				nonGo = append(nonGo, set...)
-			}
-			if hasCgoCallbackBlindspot(idx.meta) {
+				// The blindspot's bytes ride the maximal hash; the
+				// analyzer keeps only the escape checks — error
+				// conditions — and the widen.
 				all, err := allPackageFiles(idx.meta.Dir)
 				if err != nil {
 					return err
@@ -3156,13 +3094,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				} else if include != "" {
 					return fmt.Errorf("closure: cgo include escapes package dir: %s", include)
 				}
-				if err := a.addRelFiles(idx, "file", all); err != nil {
-					return err
-				}
-			} else {
-				if err := a.addRelFiles(idx, "file", nonGo); err != nil {
-					return err
-				}
+				a.requestWiden("cgo callback source in " + idx.id)
 			}
 		}
 		if len(idx.meta.SFiles) == 0 {
@@ -3179,95 +3111,13 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 	return nil
 }
 
-func (a *tier2Analyzer) addRelFiles(idx *pkgIndex, kind string, files []string) error {
-	sort.Strings(files)
-	for _, f := range files {
-		h, err := hashFile(filepath.Join(idx.meta.Dir, f))
-		if err != nil {
-			return err
-		}
-		a.addContribution(fmt.Sprintf("%s:%s:%s=%s", kind, idx.id, filepath.ToSlash(f), h))
-	}
-	return nil
-}
-
-func (a *tier2Analyzer) addDecl(idx *pkgIndex, label string, node ast.Node) {
-	if node == nil || idx == nil || idx.pkg.Fset == nil {
-		a.requestWiden("missing declaration source")
-		return
-	}
-	pos := nodeStart(node)
-	end := node.End()
-	file := idx.pkg.Fset.File(pos)
-	if file == nil || end == token.NoPos {
-		a.requestWiden("missing declaration position")
-		return
-	}
-	startOff := file.Offset(pos)
-	endOff := file.Offset(end)
-	if endOff < startOff {
-		a.requestWiden("invalid declaration range")
-		return
-	}
-	if names := declarationNames(node); names != "" {
-		label += " " + names
-	}
-	key := fmt.Sprintf("%s:%s:%d:%d:%s", idx.id, file.Name(), startOff, endOff, label)
-	if a.seenDecls[key] {
-		return
-	}
-	a.seenDecls[key] = true
-	content, err := os.ReadFile(file.Name())
-	if err != nil {
-		a.requestWiden("cannot read declaration source")
-		return
-	}
-	if startOff > len(content) || endOff > len(content) {
-		a.requestWiden("declaration range outside file")
-		return
-	}
-	sum := sha256.Sum256(content[startOff:endOff])
-	rel := file.Name()
-	if idx.dir != "" {
-		if r, err := filepath.Rel(idx.dir, file.Name()); err == nil && !strings.HasPrefix(r, "..") {
-			rel = r
-		}
-	}
-	a.addContribution(fmt.Sprintf("decl:%s:%s:%d:%s=%s", idx.id, filepath.ToSlash(rel), startOff, label, hex.EncodeToString(sum[:])[:32]))
-}
-
-func declarationNames(node ast.Node) string {
-	var names []string
-	switch n := node.(type) {
-	case *ast.GenDecl:
-		for _, spec := range n.Specs {
-			switch s := spec.(type) {
-			case *ast.ValueSpec:
-				for _, name := range s.Names {
-					names = append(names, name.Name)
-				}
-			case *ast.TypeSpec:
-				names = append(names, s.Name.Name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	sort.Strings(names)
-	return "[" + strings.Join(names, ",") + "]"
-}
-
-func (a *tier2Analyzer) addContribution(c string) {
-	if c == "" || a.seenContrib[c] {
-		return
-	}
-	a.seenContrib[c] = true
-	a.contribs = append(a.contribs, c)
-}
-
+// requestWiden keeps the lexicographically least reason: widen sites fire
+// in map-driven walk order, and the reason lands verbatim in persisted
+// proofs, so the selection must be a deterministic function of the reason
+// SET (the recorded-evidence stability REQ-closure-observability-memo
+// binds).
 func (a *tier2Analyzer) requestWiden(reason string) {
-	if !a.widen {
+	if !a.widen || reason < a.widenReason {
 		a.widen = true
 		a.widenReason = reason
 	}
@@ -3317,8 +3167,39 @@ func isStandardFallbackExempt(pkgPath string) bool {
 }
 
 func (a *tier2Analyzer) result() tier2Result {
-	sort.Strings(a.contribs)
-	return tier2Result{contribs: a.contribs, effects: append([]externalEffect(nil), a.effects...), widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
+	effects := append([]externalEffect(nil), a.effects...)
+	// The accumulation order follows type/object walks that range over
+	// maps; the proof's refusal diagnostic is the first blocking effect,
+	// so the projection sorts under a total order — recomputation must
+	// reproduce diagnostics byte-for-byte (the recorded-evidence
+	// stability REQ-closure-observability-memo binds).
+	sort.Slice(effects, func(i, j int) bool { return effectLess(effects[i], effects[j]) })
+	return tier2Result{effects: effects, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
+}
+
+// effectLess is a total order over effects: field-lexicographic. The
+// accumulator dedups by struct equality, so no two list elements compare
+// equal and the sort is fully deterministic.
+func effectLess(a, b externalEffect) bool {
+	if a.kind != b.kind {
+		return a.kind < b.kind
+	}
+	if a.packagePath != b.packagePath {
+		return a.packagePath < b.packagePath
+	}
+	if a.symbol != b.symbol {
+		return a.symbol < b.symbol
+	}
+	if a.detail != b.detail {
+		return a.detail < b.detail
+	}
+	if a.reason != b.reason {
+		return a.reason < b.reason
+	}
+	if a.unrefinable != b.unrefinable {
+		return b.unrefinable
+	}
+	return !a.observable && b.observable
 }
 
 func isFileIOReason(reason string) bool {
@@ -3472,28 +3353,6 @@ func isPackageLevelObject(obj types.Object) bool {
 	}
 	_, isFunc := obj.(*types.Func)
 	return isFunc
-}
-
-func nodeStart(n ast.Node) token.Pos {
-	switch x := n.(type) {
-	case *ast.FuncDecl:
-		if x.Doc != nil {
-			return x.Doc.Pos()
-		}
-	case *ast.ValueSpec:
-		if x.Doc != nil {
-			return x.Doc.Pos()
-		}
-	case *ast.TypeSpec:
-		if x.Doc != nil {
-			return x.Doc.Pos()
-		}
-	case *ast.GenDecl:
-		if x.Doc != nil {
-			return x.Doc.Pos()
-		}
-	}
-	return n.Pos()
 }
 
 func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {

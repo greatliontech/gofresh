@@ -1046,15 +1046,6 @@ func hashFiles(dir string, files []string, digests map[string]string) (string, e
 	return hex.EncodeToString(hasher.Sum(nil))[:32], nil
 }
 
-func hashFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("closure: read %s: %w", path, err)
-	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])[:32], nil
-}
-
 // list runs `go list -json -deps -test` for pkgPath and returns the parsed
 // dependency graph. The result is memoized per package path for the life of the
 // Hasher: every per-benchmark Compute call in a package (and the maximalHash
