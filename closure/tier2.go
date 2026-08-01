@@ -293,6 +293,8 @@ type packageBatch struct {
 // equals independent per-subject analysis
 // (REQ-closure-observability-batch-equivalence).
 func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
+	// One call observes one tree generation; a later call re-observes.
+	h.contribs = map[string]depContribution{}
 	results := make(map[Subject]Observability, len(subjects))
 	byPackage := map[string]*packageBatch{}
 	var groups []*packageBatch

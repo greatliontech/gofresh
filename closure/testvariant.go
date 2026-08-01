@@ -322,6 +322,11 @@ func (h *Hasher) TestVariantLedger(pkgPath string) (TestVariantLedger, error) {
 	if identity, ok := h.testVariants[pkgPath]; ok {
 		return identity.ledger.Clone(), nil
 	}
+	// This path discards the contributions it computes — the ledger and
+	// compartment derive from the walk's own file reads — so a stale
+	// armed memo entry from a prior batch call is unobservable here; a
+	// future consumer of contributions on this path must reset h.contribs
+	// like the batch entries do.
 	if _, _, err := h.maximalContributionsAndFiles(pkgPath); err != nil {
 		return TestVariantLedger{}, err
 	}

@@ -306,11 +306,16 @@ func TestTestVariantLedgerIsDeterministicallySorted(t *testing.T) {
 // core: batch results equal independent per-subject computation for both
 // hashes (REQ-closure-batch-equivalence).
 func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T) {
+	// a and b share the dependency node: the batch derives its
+	// contribution once and both packages' closures consume it — the
+	// equivalence against independent computation pins that sharing
+	// changes cost, never evidence (REQ-closure-batch-equivalence).
 	dir := writeTestVariantModule(t, map[string]string{
 		"go.mod":      "module example.com/batch\n\ngo 1.26\n",
-		"a/a.go":      "package a\n\nfunc A() int { return 1 }\n",
+		"shared/s.go": "package shared\n\nfunc S() int { return 3 }\n",
+		"a/a.go":      "package a\n\nimport \"example.com/batch/shared\"\n\nfunc A() int { return shared.S() - 2 }\n",
 		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\tif A() != 1 {\n\t\tt.Fatal(\"broken\")\n\t}\n}\n",
-		"b/b.go":      "package b\n\nfunc B() int { return 2 }\n",
+		"b/b.go":      "package b\n\nimport \"example.com/batch/shared\"\n\nfunc B() int { return shared.S() - 1 }\n",
 	})
 	subjects := []Subject{
 		{Package: "example.com/batch/a", Symbol: "A"},
@@ -321,7 +326,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	batched, err := h.ComputeMaximalBatch(subjects)
+	batched, batchedSources, err := h.ComputeMaximalBatchWithSources(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,6 +334,17 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 		independent := computeAt(t, dir, subject)
 		if batched[subject] != independent[subject] {
 			t.Fatalf("batched %v = %+v, independent = %+v", subject, batched[subject], independent[subject])
+		}
+		hIndependent, err := NewAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, independentSources, err := hIndependent.ComputeMaximalBatchWithSources([]Subject{subject})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(batchedSources[subject], independentSources[subject]) {
+			t.Fatalf("batched sources for %v = %v, independent = %v", subject, batchedSources[subject], independentSources[subject])
 		}
 	}
 	if batched[subjects[2]].TestVariants != EmptyTestVariantClosure {

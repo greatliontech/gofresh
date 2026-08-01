@@ -36,6 +36,8 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 	if err := h.contextErr(); err != nil {
 		return nil, nil, err
 	}
+	// One call observes one tree generation; a later call re-observes.
+	h.contribs = map[string]depContribution{}
 	results := make(map[Subject]Closure, len(subjects))
 	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)

@@ -24,7 +24,7 @@ chunks 1–2 are spec amendments).
       group — bounded peak, resolving the retention issue; the view load
       stays out of the bracket (its facts are construction-generation and
       the memo writes before the closing compare).
-- [ ] 6. In-pass cross-package contribution memo: shared dependency files
+- [x] 6. In-pass cross-package contribution memo: shared dependency files
       hash once per pass, not once per subject package.
 - [ ] 7. tier2 allocation diet: visited-set reuse, type-identity keys
       replacing `types.TypeString`, per-subject reachability
@@ -34,7 +34,9 @@ chunks 1–2 are spec amendments).
 - [ ] 9. Persistent memo for pinned-package effect scans (spec: extends the
       dynamic-state-memo pattern; mutable-local files never keyed).
 - [ ] 10. Persistent memo absorption for the typed testing-type scan (spec:
-      observability-memo key pattern).
+      observability-memo key pattern); observability memo writes become
+      slice-granular so a deadline mid-group keeps the completed slices'
+      proofs.
 - [ ] 11. closure decomposes into a facade over internal sub-packages
       (program loading, RTA/attribution, effects, maximal scan,
       test-variant compartment, memos) — tests move with their subsystem

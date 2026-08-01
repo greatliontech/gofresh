@@ -76,9 +76,15 @@ type Hasher struct {
 	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
-	testVariants   map[string]testVariantIdentity  // test-variant compartments by requested package
-	fileDigests    map[string]string               // per-file content digests from the closure's own reads, by absolute path
-	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
+	// contribs memoizes per-node closure contributions within ONE
+	// top-level batch call: each public batch entry resets it, so content
+	// is re-observed per call (the Hasher's pinned contract) while subjects
+	// and groups of one call share each dependency node's reads. Every
+	// Hasher starts nil (memoization off) until a batch entry arms it.
+	contribs     map[string]depContribution
+	testVariants map[string]testVariantIdentity // test-variant compartments by requested package
+	fileDigests  map[string]string              // per-file content digests from the closure's own reads, by absolute path
+	progress     func(phase, pkgPath string)    // start-of-step keep-alive events; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
@@ -432,12 +438,26 @@ func (h *Hasher) contributionFor(pkgPath string, p listPkg) (string, error) {
 	return contribution, err
 }
 
+// depContribution memoizes one listing node's closure contribution within
+// one batch call: the derivation is a pure function of the node (the one
+// subject-dependent filter, the generated test main, is applied before the
+// memo), so every subject package whose listing shares the node shares one
+// derivation and one set of file reads. The files slice is aliased —
+// callers treat it as read-only.
+type depContribution struct {
+	contribution string
+	files        []string
+}
+
 func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []string, error) {
 	if p.Standard || p.Module == nil || (pkgPath != "" && p.isGeneratedTestMainFor(pkgPath)) {
 		// stdlib cut (REQ-closure-coverage); pseudo-package ("C", whose C source rides in the
 		// importing package); or the toolchain-generated test main (boilerplate
 		// in a transient dir — deterministic, carries no source information).
 		return "", nil, nil
+	}
+	if c, ok := h.contribs[p.ImportPath]; ok {
+		return c.contribution, c.files, nil
 	}
 	if !p.Module.Main && h.underCache(p.Dir) {
 		// Immutable, version-locked cache dep (classified on the package Dir per
@@ -446,7 +466,11 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		// Module.Dir agree on under-cache classification for every reachable config;
 		// REQ-closure-mutable-local names the package Dir, so we use it.
 		rel := strings.TrimPrefix(filepath.Clean(p.Module.Dir), h.modCache+string(filepath.Separator))
-		return "cache:" + filepath.ToSlash(rel), nil, nil
+		contribution := "cache:" + filepath.ToSlash(rel)
+		if h.contribs != nil {
+			h.contribs[p.ImportPath] = depContribution{contribution: contribution}
+		}
+		return contribution, nil, nil
 	}
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
 	// so a silent edit moves the hash (REQ-closure-mutable-local).
@@ -487,7 +511,11 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 	for _, file := range files {
 		paths = append(paths, filepath.Join(p.Dir, file))
 	}
-	return "src:" + p.ImportPath + "=" + fh, paths, nil
+	contribution := "src:" + p.ImportPath + "=" + fh
+	if h.contribs != nil {
+		h.contribs[p.ImportPath] = depContribution{contribution: contribution, files: paths}
+	}
+	return contribution, paths, nil
 }
 
 func allPackageFiles(dir string) ([]string, error) {
