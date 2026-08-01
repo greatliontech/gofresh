@@ -72,7 +72,7 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 		for _, subject := range byPackage[pkgPath] {
 			results[subject] = Closure{
 				Hash:         maximalSubjectHash(hash, subject),
-				TestVariants: h.testVariants[pkgPath].hash,
+				TestVariants: h.testVariants[pkgPath].Hash,
 				Unverifiable: unverifiable,
 				Reason:       reason,
 			}
@@ -151,7 +151,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if err := h.contextErr(); err != nil {
 			return nil, "", err
 		}
-		if pkg.Standard || pkg.Module == nil || pkg.isGeneratedTestMainFor(pkgPath) {
+		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
 		if scan, ok, err := h.pinnedEffectScan(pkg); err != nil {

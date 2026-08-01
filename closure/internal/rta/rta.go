@@ -5,7 +5,7 @@
 // This file is adapted from golang.org/x/tools/go/callgraph/rta v0.46.0.
 // It preserves RTA's reachability semantics while attributing every fact to
 // the subjects that discovered it. Call graphs are intentionally omitted.
-package closure
+package rta
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-type attributedRTAResult struct {
+type Result struct {
 	Reachable map[*ssa.Function]uint64
 	Resolved  map[ssa.CallInstruction]uint64
 	Targets   map[ssa.CallInstruction]map[*ssa.Function]uint64
@@ -26,7 +26,7 @@ type attributedRTAResult struct {
 // attributedRTA is the working state of RTA. Every mask is bounded to one
 // batch of at most 64 subjects, so the state can be discarded between batches.
 type attributedRTA struct {
-	result *attributedRTAResult
+	result *Result
 	prog   *ssa.Program
 
 	reflectValueCall *ssa.Function
@@ -212,7 +212,8 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 // embedding process — fail-closed, never a crash. The breadth is deliberate:
 // a genuine regression panicking here degrades instead of crashing, and its
 // detection signal is corpus-level "unsupported analysis shape" counts.
-func analyzeAttributed(ctx context.Context, roots map[*ssa.Function]uint64) (result *attributedRTAResult, err error) {
+// Analyze runs attributed RTA over the masked roots.
+func Analyze(ctx context.Context, roots map[*ssa.Function]uint64) (result *Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result, err = nil, fmt.Errorf("closure: attributed reachability: unsupported analysis shape: %v", recovered)
@@ -233,7 +234,7 @@ func analyzeAttributed(ctx context.Context, roots map[*ssa.Function]uint64) (res
 		break
 	}
 	r := &attributedRTA{
-		result: &attributedRTAResult{
+		result: &Result{
 			Reachable: make(map[*ssa.Function]uint64),
 			Resolved:  make(map[ssa.CallInstruction]uint64),
 			Targets:   make(map[ssa.CallInstruction]map[*ssa.Function]uint64),

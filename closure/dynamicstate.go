@@ -3,6 +3,8 @@ package closure
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 )
 
 // PackageClass is the mutability class of one graph package's source, the
@@ -109,7 +111,7 @@ func LoadDynamicStateFacts(scope, bucket string) map[string]json.RawMessage {
 		return nil
 	}
 	var facts map[string]json.RawMessage
-	if !loadCacheEntry(dynamicStateDirName, scope, bucket, &facts) {
+	if !cachefile.Load(dynamicStateDirName, scope, bucket, &facts) {
 		return nil
 	}
 	return facts
@@ -122,5 +124,5 @@ func StoreDynamicStateFacts(scope, bucket string, facts map[string]json.RawMessa
 	if scope == "" {
 		return
 	}
-	mergeCacheEntry(dynamicStateDirName, scope, bucket, facts)
+	cachefile.Merge(dynamicStateDirName, scope, bucket, facts)
 }

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 )
 
 func pinnedFixture(t *testing.T, h *Hasher) (listPkg, string) {
@@ -262,7 +264,7 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), migrated); ok {
 		t.Fatal("a file migrating between the Go and cgo lists served the prior partition's scan")
 	}
-	path, err := cacheEntryPath(effectScanDirName, effectScanScope(), key)
+	path, err := cachefile.Path(effectScanDirName, effectScanScope(), key)
 	if err != nil {
 		t.Fatal(err)
 	}

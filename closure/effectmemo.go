@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"runtime"
 	"strings"
+
+	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 )
 
 // effectScanStrategy versions the per-file effect scan's semantics: the
@@ -103,7 +105,7 @@ const (
 // ok is false on any failure — the memo is a cache, never a record.
 func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
 	var payload effectScanPayload
-	if !loadCacheEntry(dirName, scope, key, &payload) {
+	if !cachefile.Load(dirName, scope, key, &payload) {
 		return maximalEffectScan{}, false
 	}
 	return maximalEffectScan{effects: decodeEffects(payload.Effects), preferred: payload.Selected}, true
@@ -113,5 +115,5 @@ func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
 // replace; failures are silent — a lost store costs one recomputation,
 // never a wrong scan.
 func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
-	storeCacheEntry(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), Selected: scan.preferred})
+	cachefile.Store(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), Selected: scan.preferred})
 }

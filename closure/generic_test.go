@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	arta "github.com/greatliontech/gofresh/closure/internal/rta"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -224,11 +225,11 @@ func TestAttributedAnalysisConvertsUnsupportedShapesToErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	origin := prog.roots["Key"]
+	origin := prog.Roots["Key"]
 	if origin == nil {
 		t.Fatal("generic origin not rooted")
 	}
-	if _, err := analyzeAttributed(context.Background(), map[*ssa.Function]uint64{origin: 1}); err == nil {
+	if _, err := arta.Analyze(context.Background(), map[*ssa.Function]uint64{origin: 1}); err == nil {
 		t.Fatal("a parameterized body walked without error")
 	}
 }

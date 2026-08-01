@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/closure/internal/testvariant"
 )
 
 func memoModule(t *testing.T) string {
@@ -216,11 +219,16 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	}
 	third.SetMemoScope("scope-a")
 	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	if _, err := third.ComputeMaximalBatch(subjects); err != nil {
+	third.variantScope = map[string]testvariant.Identity{"example.com/memo": {Hash: "stale-compartment"}}
+	batched, err := third.ComputeMaximalBatch(subjects)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if third.testBinaryKeys["example.com/memo"] == "stale-key" {
 		t.Fatal("the hashing batch retained a pre-call key generation")
+	}
+	if batched[subjects[0]].TestVariants == "stale-compartment" {
+		t.Fatal("the hashing batch served a pre-call compartment identity")
 	}
 }
 
@@ -279,7 +287,7 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var envelope cacheEnvelope
+	var envelope cachefile.Envelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatal(err)
 	}

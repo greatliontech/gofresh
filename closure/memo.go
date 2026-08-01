@@ -1,5 +1,7 @@
 package closure
 
+import "github.com/greatliontech/gofresh/closure/internal/cachefile"
+
 // SetMemoScope enables the persistent observability memo under scope -
 // the analysis identity outside the source closure: the caller supplies
 // the proof-strategy version and the code guards, and the memo key adds
@@ -20,7 +22,7 @@ const observabilityDirName = "observability"
 // on any failure - the memo is a cache, never a record.
 func loadMemo(scope, closureKey string) map[string]Observability {
 	var proofs map[string]Observability
-	if !loadCacheEntry(observabilityDirName, scope, closureKey, &proofs) {
+	if !cachefile.Load(observabilityDirName, scope, closureKey, &proofs) {
 		return nil
 	}
 	return proofs
@@ -30,7 +32,7 @@ func loadMemo(scope, closureKey string) map[string]Observability {
 // atomic replace; failures are silent - a lost store costs one
 // recomputation, never a wrong proof.
 func storeMemo(scope, closureKey string, proofs map[string]Observability) {
-	mergeCacheEntry(observabilityDirName, scope, closureKey, proofs)
+	cachefile.Merge(observabilityDirName, scope, closureKey, proofs)
 }
 
 // testBinaryClosureKey is the memo-key identity of everything the
@@ -51,7 +53,7 @@ func (h *Hasher) testBinaryClosureKey(pkgPath string) (string, error) {
 	}
 	// maximalHash derives and records the compartment identity for the
 	// package as a side effect, so the axis is in hand.
-	key := mh + "\x00" + h.testVariants[pkgPath].hash
+	key := mh + "\x00" + h.testVariants[pkgPath].Hash
 	if h.testBinaryKeys != nil {
 		h.testBinaryKeys[pkgPath] = key
 	}

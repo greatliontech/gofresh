@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh/closure/internal/rta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 )
@@ -858,7 +859,7 @@ func TestPropSourceFilesComplete(t *testing.T) {
 		FFiles: []string{"f.f"}, SFiles: []string{"s.s"}, SwigFiles: []string{"w.swig"},
 		SwigCXXFiles: []string{"wc.swigcxx"}, SysoFiles: []string{"o.syso"}, EmbedFiles: []string{"e.txt"},
 	}
-	if got := len(p.sourceFiles()); got != 12 {
+	if got := len(p.SourceFiles()); got != 12 {
 		t.Errorf("sourceFiles count: got %d, want 12 — a compiled file kind is missing", got)
 	}
 }
@@ -1280,7 +1281,7 @@ func TestBuildIndexTrustsGoListStandardForDotlessModule(t *testing.T) {
 	ssaProg := ssa.NewProgram(token.NewFileSet(), ssa.InstantiateGenerics)
 	a := &tier2Analyzer{
 		h:          &Hasher{},
-		prog:       &program{prog: ssaProg},
+		prog:       &program{Prog: ssaProg},
 		metaByPath: map[string]*listPkg{"myapp": &listPkg{ImportPath: "myapp", Standard: false, Module: &listMod{Main: true}}},
 	}
 	idx := a.buildIndex(&packages.Package{ID: "myapp", PkgPath: "myapp", Types: typesPkg})
@@ -1758,7 +1759,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := provenanceReachable(ctx, nil, 1, &attributedRTAResult{}); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable = %v, want context.Canceled", err)
 	}
 	h, err := New()
@@ -1770,9 +1771,9 @@ func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := prog.roots["TestReadFile"]
+	root := prog.Roots["TestReadFile"]
 	bounded := &cancelProvenanceContext{Context: context.Background(), remaining: 1}
-	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &attributedRTAResult{Reachable: map[*ssa.Function]uint64{root: 1}}); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &rta.Result{Reachable: map[*ssa.Function]uint64{root: 1}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable during traversal = %v, want context.Canceled", err)
 	}
 }
@@ -2079,7 +2080,7 @@ func TestTier2WasmImportUnverifiable(t *testing.T) {
 	ssaProg := ssa.NewProgram(token.NewFileSet(), ssa.InstantiateGenerics)
 	a := &tier2Analyzer{
 		h:          &Hasher{},
-		prog:       &program{prog: ssaProg},
+		prog:       &program{Prog: ssaProg},
 		metaByPath: map[string]*listPkg{},
 	}
 	idx := a.buildIndex(&packages.Package{ID: "example.com/wasmdep", PkgPath: "example.com/wasmdep", Types: typesPkg, Syntax: []*ast.File{file}})
@@ -2431,7 +2432,7 @@ func TestTier2ReverseLinknameTargetEnqueued(t *testing.T) {
 	upperIdx := &pkgIndex{pkg: &packages.Package{Types: upperTypes}, mutable: true, decls: map[types.Object]ast.Node{upperG: &ast.FuncDecl{Name: ast.NewIdent("g")}}}
 	lowerIdx := &pkgIndex{pkg: &packages.Package{Types: lowerTypes}, mutable: true, decls: map[types.Object]ast.Node{lowerF: &ast.FuncDecl{Name: ast.NewIdent("f")}}, linknames: map[types.Object]string{lowerF: "example.com/upper.g"}}
 	a := &tier2Analyzer{
-		prog:             &program{prog: ssa.NewProgram(token.NewFileSet(), ssa.InstantiateGenerics)},
+		prog:             &program{Prog: ssa.NewProgram(token.NewFileSet(), ssa.InstantiateGenerics)},
 		idxByTypes:       map[*types.Package]*pkgIndex{upperTypes: upperIdx, lowerTypes: lowerIdx},
 		objsByLinkTarget: map[string][]types.Object{},
 		seenObjects:      map[types.Object]bool{},
@@ -2466,7 +2467,7 @@ var linked int
 	}
 	a := &tier2Analyzer{
 		h:          &Hasher{},
-		prog:       &program{prog: ssa.NewProgram(fset, ssa.InstantiateGenerics)},
+		prog:       &program{Prog: ssa.NewProgram(fset, ssa.InstantiateGenerics)},
 		metaByPath: map[string]*listPkg{},
 	}
 	idx := a.buildIndex(&packages.Package{ID: "example.com/p", PkgPath: "example.com/p", Dir: dir, Types: typesPkg, TypesInfo: info, Syntax: []*ast.File{file}})
@@ -2494,7 +2495,7 @@ func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
 	}
 	// Both packages declare a BenchmarkSame; the subject must root at the
 	// target package's own benchmark, never the recompiled dependency's.
-	root := prog.roots["BenchmarkSame"]
+	root := prog.Roots["BenchmarkSame"]
 	if root == nil || !strings.Contains(root.String(), "rootcollision/bench") {
 		t.Fatalf("BenchmarkSame root = %v, want the target package's own benchmark", root)
 	}

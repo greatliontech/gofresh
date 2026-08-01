@@ -37,29 +37,25 @@ chunks 1–2 are spec amendments).
       observability-memo key pattern); observability memo writes become
       slice-granular so a deadline mid-group keeps the completed slices'
       proofs.
-- [ ] 11. closure decomposes into a facade over internal sub-packages
-      (program loading, RTA/attribution, effects, maximal scan,
-      test-variant compartment, memos) — tests move with their subsystem
-      so the suite splits into parallel, independently-cacheable
-      binaries; dead surface deleted (incl. the production-dead
-      declaration-contribution collection with its driver pins re-homed
-      onto reachable-set assertions, the single-valued withFresh
-      parameter, and stale refinement-named identifiers); the three
-      parallel persistent-memo store/load shapes (memo.go, dynamicstate,
-      effectmemo) collapse onto one cache-file helper, and the
-      module-pin derivation + pinned-classification predicate (4-5 sites
-      each, inconsistent ToSlash) collapse onto Hasher helpers; the
-      suite's user-cache isolation (XDG_CACHE_HOME, Linux-only for
-      os.UserCacheDir) becomes platform-complete as the tests move; the
-      test-binary closure key derives once per batch and package (today a
-      memo miss derives it in groupMemo and again in the testing scan,
-      and computeTestVariantIdentity re-reads the compartment on every
-      maximalContributionsAndFiles call rather than consulting
-      h.testVariants); the per-view beforePreciseAnalysis seam either
-      joins the viewTestHooks surface or stays deliberately per-view
-      (user's call at close-out); tier2's two addType +
-      typeUsesUnsafePointer + widen sites collapse onto one helper as
-      tier2 splits.
+- [ ] 11. closure consolidates and decomposes (scope decided: leaf
+      packages + same-package file split — the heavy tests are
+      Hasher-bound and stay with the facade under any split, so a full
+      effect/tier2 package split buys no suite time for its churn):
+      internal/cachefile, internal/listing, internal/testvariant (pure
+      ledger tests move with it), internal/program, internal/rta extract
+      behind zero-churn facade aliases; tier2.go splits into
+      observability/attribution/freshpath/analyzer files; dead surface
+      deleted (the production-dead declaration-contribution collection
+      with driver pins re-homed, the withFresh axis, refinement-named
+      identifiers, the write-only residue); the memo store/load shapes,
+      module-pin/pinned-classification sites, per-batch key and
+      compartment-identity derivations, and the duplicated unsafe-widen
+      sites each collapse onto one home; the per-view
+      beforePreciseAnalysis seam either joins the viewTestHooks surface
+      or stays deliberately per-view (user's call at close-out); the
+      facade suite's user-cache isolation stays XDG-scoped with the
+      rationale recorded at close-out (HOME participates in go tooling
+      env, so a portable override needs its own design).
 - [ ] 12. Re-measure: instrumented campaign + stipulator corpus check;
       results recorded against the 2026-08-01 baseline; feeds the gomutant
       pipelining decision. Close-out also dispositions the overlap between

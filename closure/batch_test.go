@@ -62,7 +62,7 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dynamicTarget := prog.roots["dynamicTarget"]
+	dynamicTarget := prog.Roots["dynamicTarget"]
 	if dynamicTarget == nil || !reachable[0].functions[dynamicTarget] {
 		t.Fatal("address-taking subject did not reach dynamicTarget")
 	}
@@ -70,14 +70,14 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 		t.Fatal("dynamic-call subject inherited another subject's address-taken function")
 	}
 
-	concreteMethod := prog.roots["concrete.Run"]
+	concreteMethod := prog.Roots["concrete.Run"]
 	if concreteMethod == nil || !reachable[2].functions[concreteMethod] {
 		t.Fatal("materializing subject did not reach concrete.Run")
 	}
 	if reachable[3].functions[concreteMethod] {
 		t.Fatal("invoke subject inherited another subject's concrete runtime type")
 	}
-	nestedMethod := prog.roots["nested.Exported"]
+	nestedMethod := prog.Roots["nested.Exported"]
 	if nestedMethod == nil || !reachable[2].functions[nestedMethod] {
 		t.Fatal("materializing subject did not reach exported method of recursive runtime type")
 	}
@@ -143,8 +143,8 @@ func TestAttributedRTARootMasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startup := prog.roots["startupHelper"]
-	testMainHelper := prog.roots["testMainHelper"]
+	startup := prog.Roots["startupHelper"]
+	testMainHelper := prog.Roots["testMainHelper"]
 	if startup == nil || !reachable[0].functions[startup] || !reachable[1].functions[startup] {
 		t.Fatal("initializer root did not propagate to every subject")
 	}
@@ -154,7 +154,7 @@ func TestAttributedRTARootMasks(t *testing.T) {
 	if !reachable[1].functions[testMainHelper] {
 		t.Fatal("test-file subject did not reach TestMain setup")
 	}
-	siblingHelper := prog.roots["benchmarkSiblingHelper"]
+	siblingHelper := prog.Roots["benchmarkSiblingHelper"]
 	if siblingHelper == nil || reachable[1].functions[siblingHelper] {
 		t.Fatal("selected benchmark reached a sibling through generated harness registration")
 	}
@@ -303,15 +303,15 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 
 func independentReachableSet(t *testing.T, prog *program, symbol string) map[*ssa.Function]bool {
 	t.Helper()
-	root := prog.roots[symbol]
+	root := prog.Roots[symbol]
 	if root == nil {
 		t.Fatalf("subject root %s not found", symbol)
 	}
 	roots := []*ssa.Function{root}
-	if prog.testMain != nil && subjectRunsThroughHarness(prog, root) {
-		roots = append(roots, prog.testMain)
+	if prog.TestMain != nil && subjectRunsThroughHarness(prog, root) {
+		roots = append(roots, prog.TestMain)
 	}
-	for _, pkg := range prog.prog.AllPackages() {
+	for _, pkg := range prog.Prog.AllPackages() {
 		if isGeneratedTestMainPackage(prog, pkg) {
 			continue
 		}

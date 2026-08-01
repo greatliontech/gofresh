@@ -1,4 +1,7 @@
-package closure
+// Package testvariant computes the test-variant compartment: the identity
+// and declaration ledger of a package's own test-only source, partitioned
+// out of the core closure (REQ-closure-test-variant-compartment).
+package testvariant
 
 import (
 	"crypto/sha256"
@@ -11,6 +14,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/greatliontech/gofresh/closure/internal/digest"
+	"github.com/greatliontech/gofresh/closure/internal/listing"
 )
 
 // EmptyTestVariantClosure is the test-variant compartment identity of a package
@@ -282,18 +288,18 @@ func (l TestVariantLedger) Clone() TestVariantLedger {
 	}
 }
 
-// testVariantIdentity is one package's computed compartment: the compartment
+// Identity is one package's computed compartment: the compartment
 // hash, its declaration ledger, and the sorted relative test-only file names,
 // all derived from one read of each file so the hash vouches for exactly the
 // bytes the ledger describes.
-type testVariantIdentity struct {
-	hash   string
-	ledger TestVariantLedger
+type Identity struct {
+	Hash   string
+	Ledger TestVariantLedger
 	dir    string
-	files  []string
+	Files  []string
 }
 
-// ownTestVariantOf reports whether p is pkgPath's own test-variant node — the
+// OwnVariantOf reports whether p is pkgPath's own test-variant node — the
 // in-package variant (pkg [pkg.test]) or the external test package
 // (pkg_test [pkg.test]) — as opposed to a dependency recompiled against the
 // test binary, which keeps its core contribution. Both own variants compile
@@ -304,8 +310,8 @@ type testVariantIdentity struct {
 // configuration (importing it from the test is a cycle), so the check keeps
 // go-list-only analysis of such a tree fail-safe rather than fixing a
 // reachable wrong verdict.
-func ownTestVariantOf(p listPkg, pkgPath, baseDir string) bool {
-	if p.ForTest != pkgPath || p.isGeneratedTestMainFor(pkgPath) {
+func OwnVariantOf(p listing.Package, pkgPath, baseDir string) bool {
+	if p.ForTest != pkgPath || p.IsGeneratedTestMainFor(pkgPath) {
 		return false
 	}
 	if baseDir != "" && p.Dir != baseDir {
@@ -315,25 +321,7 @@ func ownTestVariantOf(p listPkg, pkgPath, baseDir string) bool {
 	return base == pkgPath || base == pkgPath+"_test"
 }
 
-// TestVariantLedger returns the declaration ledger of pkgPath's test-variant
-// compartment, computed from the same file reads as the compartment hash and
-// memoized for the Hasher's lifetime. The returned value is caller-owned.
-func (h *Hasher) TestVariantLedger(pkgPath string) (TestVariantLedger, error) {
-	if identity, ok := h.testVariants[pkgPath]; ok {
-		return identity.ledger.Clone(), nil
-	}
-	// This path discards the contributions it computes — the ledger and
-	// compartment derive from the walk's own file reads — so a stale
-	// armed memo entry from a prior batch call is unobservable here; a
-	// future consumer of contributions on this path must reset h.contribs
-	// like the batch entries do.
-	if _, _, err := h.maximalContributionsAndFiles(pkgPath); err != nil {
-		return TestVariantLedger{}, err
-	}
-	return h.testVariants[pkgPath].ledger.Clone(), nil
-}
-
-// computeTestVariantIdentity hashes the compartment's files and derives the
+// ComputeIdentity hashes the compartment's files and derives the
 // declaration ledger from the same reads: each file is read once, its bytes
 // folded into the compartment hash under hashFiles's name\x00sha256 discipline
 // and, for compiled Go members, parsed syntax-only for the ledger — no type
@@ -344,8 +332,8 @@ func (h *Hasher) TestVariantLedger(pkgPath string) (TestVariantLedger, error) {
 // whole-content header, because its bytes also feed unchanged code as data
 // and any movement in them must defeat inertness. An empty file set yields
 // EmptyTestVariantClosure and an empty ledger.
-func computeTestVariantIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool, digests map[string]string) (testVariantIdentity, error) {
-	files = uniqueStrings(append([]string(nil), files...))
+func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool, digests map[string]string) (Identity, error) {
+	files = listing.UniqueStrings(append([]string(nil), files...))
 	sort.Strings(files)
 	hasher := sha256.New()
 	var ledger TestVariantLedger
@@ -353,19 +341,19 @@ func computeTestVariantIdentity(dir string, files []string, compiledGo, embedded
 		path := filepath.Join(dir, f)
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return testVariantIdentity{}, fmt.Errorf("closure: read %s: %w", path, err)
+			return Identity{}, fmt.Errorf("closure: read %s: %w", path, err)
 		}
 		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
 		if digests != nil {
 			// Compartment members are observed source identities like any
 			// core member: their per-file digests ride to the Hasher's memo
 			// (FileDigest) so drift naming covers them without a re-read.
-			digests[path] = contentDigest(content)
+			digests[path] = digest.Content(content)
 		}
 		if compiledGo[f] {
 			declarations, header, err := parseTestVariantFile(f, content)
 			if err != nil {
-				return testVariantIdentity{}, err
+				return Identity{}, err
 			}
 			ledger.Declarations = append(ledger.Declarations, declarations...)
 			if embeddedData[f] {
@@ -373,7 +361,7 @@ func computeTestVariantIdentity(dir string, files []string, compiledGo, embedded
 				// their granularity, but the header is the whole content,
 				// marked Embedded — an edit anywhere in the file moves the
 				// bytes some unchanged declaration reads.
-				header = TestVariantFileHeader{File: f, Hash: contentDigest(content), Embedded: true}
+				header = TestVariantFileHeader{File: f, Hash: digest.Content(content), Embedded: true}
 			}
 			ledger.FileHeaders = append(ledger.FileHeaders, header)
 			continue
@@ -381,7 +369,7 @@ func computeTestVariantIdentity(dir string, files []string, compiledGo, embedded
 		// Every non-compiled member — embedded data whatever its name, and
 		// non-Go compiled inputs — has no declarations; its whole content is
 		// its header identity, marked Embedded so movement defeats inertness.
-		ledger.FileHeaders = append(ledger.FileHeaders, TestVariantFileHeader{File: f, Hash: contentDigest(content), Embedded: true})
+		ledger.FileHeaders = append(ledger.FileHeaders, TestVariantFileHeader{File: f, Hash: digest.Content(content), Embedded: true})
 	}
 	sort.Slice(ledger.Declarations, func(i, j int) bool {
 		return lessDeclaration(ledger.Declarations[i], ledger.Declarations[j])
@@ -389,17 +377,12 @@ func computeTestVariantIdentity(dir string, files []string, compiledGo, embedded
 	sort.Slice(ledger.FileHeaders, func(i, j int) bool {
 		return ledger.FileHeaders[i].File < ledger.FileHeaders[j].File
 	})
-	return testVariantIdentity{
-		hash:   hex.EncodeToString(hasher.Sum(nil))[:32],
-		ledger: ledger,
+	return Identity{
+		Hash:   hex.EncodeToString(hasher.Sum(nil))[:32],
+		Ledger: ledger,
 		dir:    dir,
-		files:  files,
+		Files:  files,
 	}, nil
-}
-
-func contentDigest(content []byte) string {
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])[:32]
 }
 
 // positionalDigest folds a position Go gives semantics into a declaration's
@@ -446,7 +429,7 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 			start, end := declStart(decl.Doc, decl.Pos()), offset(decl.End())
 			spans = append(spans, span{start, end})
 			kind, receiver := "func", ""
-			hash := contentDigest(content[start:end])
+			hash := digest.Content(content[start:end])
 			if decl.Recv != nil && len(decl.Recv.List) > 0 {
 				kind = "method"
 				receiver = strings.TrimSpace(string(content[offset(decl.Recv.List[0].Type.Pos()):offset(decl.Recv.List[0].Type.End())]))
@@ -500,7 +483,7 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 					hash = positionalDigest(content[specStart:specEnd], varOrdinal)
 					varOrdinal++
 				default:
-					hash = contentDigest(content[specStart:specEnd])
+					hash = digest.Content(content[specStart:specEnd])
 				}
 				switch spec := spec.(type) {
 				case *ast.TypeSpec:
@@ -538,7 +521,7 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 			}
 			declarations = append(declarations, TestVariantDeclaration{
 				File: name, Kind: "directive", Name: strings.TrimPrefix(verb, "//"),
-				Hash: contentDigest([]byte(text)),
+				Hash: digest.Content([]byte(text)),
 			})
 		}
 	}

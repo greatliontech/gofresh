@@ -17,7 +17,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +25,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/gofresh/closure/internal/digest"
+	"github.com/greatliontech/gofresh/closure/internal/listing"
+	"github.com/greatliontech/gofresh/closure/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
@@ -82,13 +84,15 @@ type Hasher struct {
 	// and groups of one call share each dependency node's reads. Every
 	// Hasher starts nil (memoization off) until a batch entry arms it.
 	contribs map[string]depContribution
-	// testBinaryKeys memoizes per-package test-binary closure keys under
-	// the same call scope and arming discipline as contribs: nil until a
-	// batch entry arms it, reset per call.
+	// testBinaryKeys and variantScope memoize per-package test-binary
+	// closure keys and compartment identities under the same call scope
+	// and arming discipline as contribs: nil until a batch entry arms
+	// them, reset per call.
 	testBinaryKeys map[string]string
-	testVariants   map[string]testVariantIdentity // test-variant compartments by requested package
-	fileDigests    map[string]string              // per-file content digests from the closure's own reads, by absolute path
-	progress       func(phase, pkgPath string)    // start-of-step keep-alive events; nil disables
+	variantScope   map[string]testvariant.Identity
+	testVariants   map[string]testvariant.Identity // test-variant compartments by requested package
+	fileDigests    map[string]string               // per-file content digests from the closure's own reads, by absolute path
+	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
@@ -202,7 +206,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
-		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testVariantIdentity{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{},
 	}, nil
 }
@@ -233,63 +237,12 @@ func (h *Hasher) BoundAnalysis(bound context.Context) error {
 	return nil
 }
 
-type listPkg struct {
-	ImportPath   string
-	Name         string
-	Standard     bool
-	Dir          string
-	GoFiles      []string
-	CgoFiles     []string
-	CgoCFLAGS    []string
-	CgoCPPFLAGS  []string
-	CgoCXXFLAGS  []string
-	CgoFFLAGS    []string
-	CgoPkgConfig []string
-	CFiles       []string
-	CXXFiles     []string
-	MFiles       []string
-	HFiles       []string
-	FFiles       []string
-	SFiles       []string
-	SwigFiles    []string
-	SwigCXXFiles []string
-	SysoFiles    []string
-	EmbedFiles   []string
-	CgoLDFLAGS   []string
-	Imports      []string
-	ForTest      string
-	Module       *listMod
-	Error        *listErr
-}
-
-func (p listPkg) isGeneratedTestMainFor(pkgPath string) bool {
-	return p.Name == "main" && p.ImportPath == pkgPath+".test"
-}
-
-type listMod struct {
-	Path    string
-	Version string
-	Dir     string
-	Main    bool
-}
-
-type listErr struct {
-	Err string
-}
-
-// sourceFiles is every compiled/linked input of the package: a change to any of
-// these can move the benchmark's behavior, so all must be hashed (REQ-fresh-sound). Keep
-// this in lockstep with go list's file-kind fields (TestPropSourceFilesComplete).
-func (p listPkg) sourceFiles() []string {
-	var f []string
-	for _, set := range [][]string{
-		p.GoFiles, p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.HFiles, p.FFiles,
-		p.SFiles, p.SwigFiles, p.SwigCXXFiles, p.SysoFiles, p.EmbedFiles,
-	} {
-		f = append(f, set...)
-	}
-	return f
-}
+// The go-list graph vocabulary lives in internal/listing; the aliases keep
+// the package-local names every analysis site uses.
+type (
+	listPkg = listing.Package
+	listMod = listing.Module
+)
 
 // maximalHash returns the Tier-1 closure hash for the test binary of pkgPath:
 // every non-std reachable package hashed whole. This is the maximal sound closure
@@ -323,7 +276,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	compartmentDir := ""
 	for _, p := range pkgs {
 		if p.ImportPath == pkgPath && p.ForTest == "" {
-			for _, f := range p.sourceFiles() {
+			for _, f := range p.SourceFiles() {
 				baseFiles[f] = true
 			}
 			compartmentDir = p.Dir
@@ -349,7 +302,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
 		}
-		if ownTestVariantOf(p, pkgPath, compartmentDir) {
+		if testvariant.OwnVariantOf(p, pkgPath, compartmentDir) {
 			if compartmentDir == "" {
 				compartmentDir = p.Dir
 			}
@@ -363,7 +316,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 					embeddedData[f] = true
 				}
 			}
-			for _, f := range p.sourceFiles() {
+			for _, f := range p.SourceFiles() {
 				if !baseFiles[f] && !seenTestOnly[f] {
 					seenTestOnly[f] = true
 					testOnly = append(testOnly, f)
@@ -386,15 +339,22 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 			}
 		}
 	}
-	identity, err := computeTestVariantIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests)
-	if err != nil {
-		return nil, nil, err
+	identity, cached := h.variantScope[pkgPath]
+	if !cached {
+		var err error
+		identity, err = testvariant.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests)
+		if err != nil {
+			return nil, nil, err
+		}
+		if h.variantScope != nil {
+			h.variantScope[pkgPath] = identity
+		}
 	}
 	h.testVariants[pkgPath] = identity
 	// The compartment's bytes are part of the view's observed source
 	// identities: a producer's provenance and drift naming cover them like
 	// any core member (REQ-fresh-view-source-identities).
-	for _, f := range identity.files {
+	for _, f := range identity.Files {
 		path := filepath.Join(compartmentDir, f)
 		if !seenFile[path] {
 			seenFile[path] = true
@@ -422,6 +382,7 @@ var analysisTestHooks struct {
 func (h *Hasher) resetCallScope() {
 	h.contribs = map[string]depContribution{}
 	h.testBinaryKeys = map[string]string{}
+	h.variantScope = map[string]testvariant.Identity{}
 }
 
 // modulePin is the version-pin identity every persistent memo and
@@ -486,7 +447,7 @@ type depContribution struct {
 }
 
 func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []string, error) {
-	if p.Standard || p.Module == nil || (pkgPath != "" && p.isGeneratedTestMainFor(pkgPath)) {
+	if p.Standard || p.Module == nil || (pkgPath != "" && p.IsGeneratedTestMainFor(pkgPath)) {
 		// stdlib cut (REQ-closure-coverage); pseudo-package ("C", whose C source rides in the
 		// importing package); or the toolchain-generated test main (boilerplate
 		// in a transient dir — deterministic, carries no source information).
@@ -507,7 +468,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 	}
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
 	// so a silent edit moves the hash (REQ-closure-mutable-local).
-	files := p.sourceFiles()
+	files := p.SourceFiles()
 	if hasCgoCallbackBlindspot(&p) {
 		if root := cgoIncludeRootOutsideDir(&p, h.modCache); root != "" {
 			return "", nil, fmt.Errorf("closure: cgo include root outside package dir: %s", root)
@@ -535,7 +496,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 			return "", nil, err
 		}
 	}
-	files = uniqueStrings(files)
+	files = listing.UniqueStrings(files)
 	fh, err := hashFiles(p.Dir, files, h.fileDigests)
 	if err != nil {
 		return "", nil, err
@@ -1003,19 +964,6 @@ func pathWithin(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-func uniqueStrings(values []string) []string {
-	seen := map[string]bool{}
-	out := values[:0]
-	for _, v := range values {
-		if seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
-}
-
 // underCache reports whether dir is inside the module cache (a path segment
 // boundary, so "/mod" does not match "/modificator").
 func (h *Hasher) underCache(dir string) bool {
@@ -1040,7 +988,7 @@ func hashFiles(dir string, files []string, digests map[string]string) (string, e
 			// The per-file digest rides to the Hasher's memo so naming
 			// consumers reuse the exact bytes this hash was built over
 			// instead of re-reading (FileDigest).
-			digests[path] = contentDigest(content)
+			digests[path] = digest.Content(content)
 		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil))[:32], nil
@@ -1073,20 +1021,5 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 }
 
 func parseList(r io.Reader) ([]listPkg, error) {
-	dec := json.NewDecoder(r)
-	var pkgs []listPkg
-	for dec.More() {
-		var p listPkg
-		if err := dec.Decode(&p); err != nil {
-			return nil, fmt.Errorf("closure: decode go list: %w", err)
-		}
-		if p.Error != nil {
-			// go list -deps -test exits 0 but reports an unloadable package via
-			// its Error field. Hashing the surviving packages would silently
-			// under-cover the closure → false-valid. Fail loud (REQ-fresh-sound).
-			return nil, fmt.Errorf("closure: package %s failed to load: %s", p.ImportPath, p.Error.Err)
-		}
-		pkgs = append(pkgs, p)
-	}
-	return pkgs, nil
+	return listing.Parse(r)
 }

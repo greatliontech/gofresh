@@ -26,8 +26,8 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 			return tier2Result{}, nil, err
 		}
 	}
-	if prog.roots[symbol] == nil {
-		if prog.ambiguous[symbol] {
+	if prog.Roots[symbol] == nil {
+		if prog.Ambiguous[symbol] {
 			return tier2Result{}, nil, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", symbol, pkgPath)
 		}
 		return tier2Result{}, nil, fmt.Errorf("closure: subject %s not found in %s", symbol, pkgPath)
