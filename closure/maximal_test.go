@@ -2,8 +2,6 @@ package closure
 
 import (
 	"context"
-	"go/token"
-	"go/types"
 	"os"
 	"path/filepath"
 	"strings"
@@ -413,98 +411,6 @@ func TestMaximalNativeReasonsAreUnrefinable(t *testing.T) {
 	}
 }
 
-func TestAssemblyExternalStateInstructionIsClassified(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "external.s"), []byte("TEXT ·F(SB), $0-0\n\tRDTSC\n\tRET\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reason, err := asmExternalStateReason(dir, []string{"external.s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(reason, "RDTSC") {
-		t.Fatalf("assembly external-state reason = %q, want RDTSC", reason)
-	}
-}
-
-func TestAssemblySystemInstructionClassesAreExternal(t *testing.T) {
-	for _, opcode := range []string{"MRS", "XGETBV", "RDPMC", "CSRRW", "SYSCALL", "MFTB"} {
-		if !asmOpcodeReadsExternalState(opcode) {
-			t.Fatalf("assembly system opcode %s was treated as deterministic", opcode)
-		}
-	}
-	if asmOpcodeReadsExternalState("ADDQ") {
-		t.Fatal("ordinary arithmetic opcode ADDQ treated as external state")
-	}
-}
-
-func TestAssemblyExternalStateOperandsAreClassified(t *testing.T) {
-	for _, fields := range [][]string{{"MOVQ", "TLS", "AX"}, {"MOVQ", "0(FS)", "AX"}, {"MOVQ", "0(GS)", "AX"}, {"MOVQ", "0(AX)", "BX"}} {
-		if operand := asmExternalStateOperand(fields); operand == "" {
-			t.Fatalf("assembly operands %v were treated as deterministic", fields)
-		}
-	}
-	if operand := asmExternalStateOperand([]string{"MOVQ", "0(SP)", "AX"}); operand != "" {
-		t.Fatalf("ordinary stack operand classified external: %q", operand)
-	}
-	if operand := asmExternalStateOperand([]string{"MOVQ", "os·Stdout(SB)", "AX"}); operand != "cross-package SB symbol" {
-		t.Fatalf("cross-package SB operand = %q, want external", operand)
-	}
-	if operand := asmExternalStateOperand([]string{"MOVQ", "·local(SB)", "AX"}); operand != "" {
-		t.Fatalf("local SB operand classified external: %q", operand)
-	}
-}
-
-func TestAssemblySymbolAddressRelocationIsExternal(t *testing.T) {
-	fields := []string{"DATA", "·targetPC(SB)/8", "$·target(SB)"}
-	if operand := asmExternalStateOperand(fields); operand != "SB symbol address" {
-		t.Fatalf("assembly symbol relocation = %q, want SB symbol address", operand)
-	}
-}
-
-func TestStandardAssemblyTargetIsUnverifiable(t *testing.T) {
-	runtimePkg := types.NewPackage("runtime", "runtime")
-	signature := types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false)
-	target := types.NewFunc(token.NoPos, runtimePkg, "nanotime", signature)
-	if reason := standardASMTargetReason(target); !strings.Contains(reason, "runtime.nanotime") {
-		t.Fatalf("standard assembly target reason = %q, want runtime.nanotime", reason)
-	}
-}
-
-func TestAssemblyExternalStateInstructionInIncludeIsClassified(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "external.s"), []byte("#include \"ops.inc\"\nTEXT ·F(SB), $0-0\n\tRET\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ops.inc"), []byte("RDTSC\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	_, _, _, _, err := asmCallTargetsObserved(context.Background(), &reason, dir, []string{"external.s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(reason, "RDTSC") {
-		t.Fatalf("included assembly external-state reason = %q, want RDTSC", reason)
-	}
-}
-
-func TestAssemblyExternalStateMacroAndStatementAreClassified(t *testing.T) {
-	dir := t.TempDir()
-	source := "#define READSYS RDTSC\nTEXT ·F(SB), $0-0; READSYS; RET\n"
-	if err := os.WriteFile(filepath.Join(dir, "external.s"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	_, _, _, _, err := asmCallTargetsObserved(context.Background(), &reason, dir, []string{"external.s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(reason, "RDTSC") {
-		t.Fatalf("expanded assembly external-state reason = %q, want RDTSC", reason)
-	}
-}
-
 func TestMaximalFileEffectsRetainAllFactsAndLegacyDiagnostic(t *testing.T) {
 	dir := t.TempDir()
 	filename := filepath.Join(dir, "effects.go")
@@ -561,26 +467,6 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 	}
 	if len(scan.effects) != 4 {
 		t.Fatalf("package effects = %+v, want four complete facts", scan.effects)
-	}
-}
-
-func TestAssemblyExternalEffectsRetainEveryInstruction(t *testing.T) {
-	dir := t.TempDir()
-	source := "TEXT ·F(SB), $0-0\n\tRDTSC\n\tCPUID\n\tRET\n"
-	if err := os.WriteFile(filepath.Join(dir, "external.s"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	var effects []externalEffect
-	_, _, _, _, err := asmCallTargetsObservedEffectsEnv(context.Background(), &reason, &effects, dir, os.Environ(), []string{"external.s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(reason, "RDTSC") {
-		t.Fatalf("legacy assembly reason = %q, want first RDTSC", reason)
-	}
-	if len(effects) != 2 {
-		t.Fatalf("assembly effects = %+v, want RDTSC and CPUID", effects)
 	}
 }
 

@@ -1474,9 +1474,9 @@ func TestBenchmarkIterationCountIsUnverifiable(t *testing.T) {
 	}
 }
 
-// Non-standard assembly is opaque to the observation proof: even a body of
-// resolved instructions refuses, so runtime-dependent instructions can never
-// slip through unaudited.
+// Non-standard assembly is opaque to the observation proof: the package is
+// never scanned — even a body of resolved instructions refuses — so
+// runtime-dependent instructions can never slip through unaudited.
 func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F()\n")
 	assembly := "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRDTSC\n\tRET\n"
@@ -1496,8 +1496,8 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "asm call") {
-		t.Fatalf("non-standard assembly proof = %+v, want refused naming the asm call", fingerprint.ObservationProof)
+	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "non-toolchain assembly") {
+		t.Fatalf("non-standard assembly proof = %+v, want refused naming the non-toolchain assembly", fingerprint.ObservationProof)
 	}
 }
 

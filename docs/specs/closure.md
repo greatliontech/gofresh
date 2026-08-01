@@ -95,7 +95,7 @@ stale on the closure. Both unchanged keep the prior semantics
 exactly. A subject declared in a test file has its own body in the
 compartment, so an edited recorded test moves the compartment — that is the
 partition working, not a leak. A package whose core contribution widens to its
-whole directory (opaque assembly, cgo callback blind spots) may keep test files
+whole directory (non-toolchain assembly, cgo callback blind spots) may keep test files
 in the core as well: sound, merely undiscriminated. The compartment's
 declaration ledger is a read surface over the same bytes the compartment hash
 folded, derived by syntax-only parsing at the view's observation — never a
@@ -167,17 +167,21 @@ consumer's policy, never gofresh's.
 dispositions, each chosen never to under-cover:
 
 - **resolved** — the missing edge has a statically known target read directly (a
-  `//go:linkname` naming its target, an assembly function whose `.s` is already
-  hashed and whose symbol call-refs are scanned); add the edge, no widening.
+  `//go:linkname` naming its target); add the edge, no widening.
 - **widened** — the target is somewhere in analyzed source but cannot be enumerated
   (`reflect` dispatch, an `unsafe` computed call, a non-standard type converted to an
   interface, startup flow not proven complete); widen to the maximal closure.
 - **downgraded** — behavior depends on state that is not source (file or network I/O,
-  `plugin.Open`, an externally linked C library); the subject's verdict becomes
+  `plugin.Open`, an externally linked C library, non-toolchain assembly); the
+  subject's verdict becomes
   unverifiable, its closure never reported valid on source alone.
 
 A blind spot is never left to silently narrow the closure; when no disposition can be
-proven, it widens.
+proven, it widens. Assembly is never an analysis surface: an
+assembly-bearing mutable-local package contributes its whole directory to the
+hash, a reached non-toolchain assembly-bearing package widens the subject and
+blocks its observability proof, and toolchain assembly rides the toolchain
+guard like every other toolchain source.
 
 **REQ-closure-shared-dynamic-state** (invariant): A package-level variable able to
 carry dynamic behavior — a function, an interface, a channel of dynamic carriers,

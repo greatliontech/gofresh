@@ -142,65 +142,76 @@ func TestContribution(t *testing.T) {
 	}
 }
 
-func TestContributionIncludesASMIncludes(t *testing.T) {
+// TestAssemblyPackageHashesWholeDirectory pins the conservative contract for
+// assembly-bearing mutable-local packages (REQ-closure-blindspot): the package
+// contributes its whole directory, so an edit to ANY file in the directory —
+// a header an .s file includes, or a file no build list names — moves the
+// contribution, and so the maximal hash the subject widens to.
+func TestAssemblyPackageHashesWholeDirectory(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
 	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
+	writeFile(t, dir, "unlisted.txt", "v1\n")
 	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	one, err := h.contribution(pkg)
+	base, err := h.contribution(pkg)
 	if err != nil {
 		t.Fatalf("contribution: %v", err)
 	}
 	writeFile(t, dir, "defs.inc", "#define RETVAL $2\n")
-	two, err := h.contribution(pkg)
+	afterInclude, err := h.contribution(pkg)
 	if err != nil {
 		t.Fatalf("contribution after include edit: %v", err)
 	}
-	if one == two {
-		t.Fatalf("asm include edit did not change contribution: %q", one)
+	if afterInclude == base {
+		t.Fatalf("asm include edit did not change contribution: %q", base)
+	}
+	writeFile(t, dir, "unlisted.txt", "v2\n")
+	afterUnlisted, err := h.contribution(pkg)
+	if err != nil {
+		t.Fatalf("contribution after unlisted-file edit: %v", err)
+	}
+	if afterUnlisted == afterInclude {
+		t.Fatalf("edit to a file no build list names did not change contribution: %q", afterInclude)
+	}
+	writeFile(t, dir, "extra.h", "#define EXTRA 1\n")
+	afterNew, err := h.contribution(pkg)
+	if err != nil {
+		t.Fatalf("contribution after new file: %v", err)
+	}
+	if afterNew == afterUnlisted {
+		t.Fatalf("new file in the package directory did not change contribution: %q", afterUnlisted)
 	}
 }
 
-func TestContributionIncludesAbsoluteASMInclude(t *testing.T) {
+// TestAssemblyUnresolvedIncludeHashesWholeDirectory: includes in non-toolchain
+// assembly are no longer resolved — an include naming a missing file or an
+// absolute path outside the package directory is not an error and is not
+// separately tracked. The package hashes its whole directory and every subject
+// reaching it is unverifiable via the non-standard-assembly effect
+// (REQ-closure-blindspot downgrade arm), so outside-directory content can
+// never silently narrow a verdict.
+func TestAssemblyUnresolvedIncludeHashesWholeDirectory(t *testing.T) {
 	dir := t.TempDir()
-	includeDir := t.TempDir()
-	include := filepath.Join(includeDir, "defs.inc")
-	writeFile(t, includeDir, "defs.inc", "#define RETVAL $1\n")
-	writeFile(t, dir, "asm.s", "#include \""+filepath.ToSlash(include)+"\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
+	outside := t.TempDir()
+	writeFile(t, outside, "defs.inc", "#define RETVAL $1\n")
+	writeFile(t, dir, "asm.s", "#include \"missing.inc\"\n#include \""+filepath.ToSlash(filepath.Join(outside, "defs.inc"))+"\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
 	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	one, err := h.contribution(pkg)
+	base, err := h.contribution(pkg)
 	if err != nil {
-		t.Fatalf("contribution: %v", err)
+		t.Fatalf("contribution with unresolved includes: %v", err)
 	}
-	writeFile(t, includeDir, "defs.inc", "#define RETVAL $2\n")
-	two, err := h.contribution(pkg)
+	if !strings.HasPrefix(base, "src:example/p=") {
+		t.Fatalf("contribution = %q, want src:example/p=", base)
+	}
+	writeFile(t, dir, "asm.s", "#include \"missing.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
+	edited, err := h.contribution(pkg)
 	if err != nil {
-		t.Fatalf("contribution after include edit: %v", err)
+		t.Fatalf("contribution after in-dir edit: %v", err)
 	}
-	if one == two {
-		t.Fatalf("absolute asm include edit did not change contribution: %q", one)
-	}
-}
-
-func TestContributionOpaqueASMHashesPackageFiles(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
-	writeFile(t, dir, "asm.s", "#ifdef WANT\n#define RETVAL $1\n#endif\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
-	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	one, err := h.contribution(pkg)
-	if err != nil {
-		t.Fatalf("contribution: %v", err)
-	}
-	writeFile(t, dir, "defs.inc", "#define RETVAL $2\n")
-	two, err := h.contribution(pkg)
-	if err != nil {
-		t.Fatalf("contribution after include edit: %v", err)
-	}
-	if one == two {
-		t.Fatalf("opaque asm contribution did not include package file defs.inc: %q", one)
+	if edited == base {
+		t.Fatalf("in-dir asm edit did not change contribution: %q", base)
 	}
 }
 
@@ -820,63 +831,6 @@ func TestContributionCgoSymlinkHeaderHashesTarget(t *testing.T) {
 	}
 }
 
-func TestContributionRejectsUnresolvedASMInclude(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
-	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unresolved asm include") {
-		t.Fatalf("contribution error = %v, want unresolved asm include", err)
-	}
-}
-
-func TestContributionAcceptsGeneratedASMInclude(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "asm.s", "#include \"go_asm.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
-	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	if _, err := h.contribution(pkg); err != nil {
-		t.Fatalf("generated go_asm.h include: %v", err)
-	}
-	_, _, opaque, _, err := asmCallTargets(context.Background(), dir, pkg.SFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opaque {
-		t.Fatal("generated go_asm.h constants requested whole-closure widening")
-	}
-	generated, err := hasGeneratedASMInclude(dir, pkg.SFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !generated {
-		t.Fatal("generated go_asm.h include was not attributed to package source")
-	}
-}
-
-func TestContributionRejectsASMSymlinkIncludeDirDotDot(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, "pkg")
-	outside := filepath.Join(root, "outside")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(outside, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, dir, "cfg.h", "#define RETVAL $1\n")
-	writeFile(t, outside, "cfg.h", "#define RETVAL $2\n")
-	writeFile(t, dir, "asm.s", "#include \"include/../cfg.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	if err := os.Symlink(filepath.Join(outside, "sub"), filepath.Join(dir, "include")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
-	pkg := listPkg{ImportPath: "example/p", Dir: dir, SFiles: []string{"asm.s"}, Module: &listMod{Main: true, Dir: dir}}
-	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unresolved asm include") {
-		t.Fatalf("contribution error = %v, want unresolved asm include", err)
-	}
-}
-
 func TestUnderCache(t *testing.T) {
 	h := &Hasher{modCache: filepath.FromSlash("/home/u/go/pkg/mod")}
 	yes := filepath.FromSlash("/home/u/go/pkg/mod/golang.org/x/tools@v0.46.0")
@@ -1024,38 +978,6 @@ func TestListUsesBuildFlags(t *testing.T) {
 		return
 	}
 	t.Fatal("go list omitted the tagged package")
-}
-
-func TestBuildFlagsDriveASMClosure(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "go.mod", "module example.com/asmflag\n\ngo 1.26\n")
-	writeFile(t, dir, "asmflag.go", "package asmflag\n\nfunc asmEntry()\nfunc Subject() { asmEntry() }\nfunc hook() {}\nfunc helper() {}\n")
-	writeFile(t, dir, "asm.s", "#include \"textflag.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-
-	const pkg = "example.com/asmflag"
-	plain, err := NewAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plainResult, err := computeTier2Result(plain, pkg, "Subject")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plainResult.widen {
-		t.Fatalf("plain assembly closure widened (%s); flagged comparison would be vacuous", plainResult.widenReason)
-	}
-
-	flagged, err := NewAt(dir, "-asmflags=all=-D=hook=helper")
-	if err != nil {
-		t.Fatal(err)
-	}
-	flaggedResult, err := computeTier2Result(flagged, pkg, "Subject")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !flaggedResult.widen {
-		t.Fatalf("assembly define did not widen the closure: %+v", flaggedResult)
-	}
 }
 
 // TestAnalysisRootsAnySubject pins the generalized root seam: the analysis
@@ -1402,32 +1324,70 @@ func TestTier2PinsLinkedCacheModules(t *testing.T) {
 	}
 }
 
-func TestTier2ScansReachedCacheASM(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cache_amd64.s"), []byte("#include \"textflag.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL AX\n\tRET\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	typesPkg := types.NewPackage("example.com/cacheasm", "cacheasm")
-	idx := &pkgIndex{
-		id:    "example.com/cacheasm",
-		cache: true,
-		meta:  &listPkg{ImportPath: "example.com/cacheasm", Dir: dir, SFiles: []string{"cache_amd64.s"}},
-	}
-	a := &tier2Analyzer{
-		idxByTypes: map[*types.Package]*pkgIndex{typesPkg: idx},
-		filePkgs:   map[*pkgIndex]bool{},
+// TestNonToolchainAssemblyReachedPackagesWiden pins the conservative analyzer
+// contract (REQ-closure-blindspot): a reached non-toolchain assembly-bearing
+// package — mutable-local or cache — is never scanned. It widens the subject
+// naming the package and records the "reaches non-standard assembly" effect
+// that makes the subject unverifiable and blocks its observability proof.
+func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
+	requireConservative := func(t *testing.T, a *tier2Analyzer, pkgID string) {
+		t.Helper()
+		if !a.widen || a.widenReason != "non-toolchain assembly in "+pkgID {
+			t.Fatalf("widen = %v/%q, want non-toolchain assembly in %s", a.widen, a.widenReason, pkgID)
+		}
+		if !a.unverifiable {
+			t.Fatal("non-toolchain assembly did not make the subject unverifiable")
+		}
+		found := false
+		for _, effect := range a.effects {
+			if effect.kind == externalEffectNative && effect.reason == "reaches non-standard assembly" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("effects = %+v, want native \"reaches non-standard assembly\"", a.effects)
+		}
 	}
 
-	a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}})
-	if err := a.addReachedPackageFiles(); err != nil {
-		t.Fatalf("addReachedPackageFiles: %v", err)
-	}
-	if !a.widen || !strings.Contains(a.widenReason, "computed asm call") {
-		t.Fatalf("computed cache asm call did not widen: widen=%v reason=%q", a.widen, a.widenReason)
-	}
-	if len(a.contribs) != 0 {
-		t.Fatalf("cache package source was hashed unexpectedly: %v", a.contribs)
-	}
+	t.Run("mutable", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
+		writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
+		idx := &pkgIndex{id: "example.com/mutableasm", mutable: true, meta: &listPkg{Dir: dir, SFiles: []string{"asm.s"}}}
+		a := &tier2Analyzer{
+			filePkgs:    map[*pkgIndex]bool{idx: true},
+			seenContrib: map[string]bool{},
+		}
+		if err := a.addReachedPackageFiles(); err != nil {
+			t.Fatalf("addReachedPackageFiles: %v", err)
+		}
+		requireConservative(t, a, "example.com/mutableasm")
+	})
+
+	t.Run("cache", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "cache_amd64.s"), []byte("#include \"textflag.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL AX\n\tRET\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		typesPkg := types.NewPackage("example.com/cacheasm", "cacheasm")
+		idx := &pkgIndex{
+			id:    "example.com/cacheasm",
+			cache: true,
+			meta:  &listPkg{ImportPath: "example.com/cacheasm", Dir: dir, SFiles: []string{"cache_amd64.s"}},
+		}
+		a := &tier2Analyzer{
+			idxByTypes: map[*types.Package]*pkgIndex{typesPkg: idx},
+			filePkgs:   map[*pkgIndex]bool{},
+		}
+		a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}})
+		if err := a.addReachedPackageFiles(); err != nil {
+			t.Fatalf("addReachedPackageFiles: %v", err)
+		}
+		requireConservative(t, a, "example.com/cacheasm")
+		if len(a.contribs) != 0 {
+			t.Fatalf("cache package source was hashed unexpectedly: %v", a.contribs)
+		}
+	})
 }
 
 func TestStdWrapperClassBUnverifiable(t *testing.T) {
@@ -1490,37 +1450,42 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
-	for _, tc := range []struct{ pkg, bench, reason string }{
-		{"external", "BenchmarkReadFile", "file I/O"},
-		{"initfile", "BenchmarkInitFile", "file I/O"},
-		{"initcwd", "BenchmarkInitCWD", "file I/O"},
-		{"unixcwd", "BenchmarkUnixCWD", "file I/O"},
-		{"initstdhelper", "BenchmarkInitStdHelper", "file I/O"},
-		{"sharedfile", "BenchmarkSharedFile", "file I/O"},
-		{"sharedparam", "BenchmarkSharedParam", "file I/O"},
-		{"sharedglobal", "BenchmarkSharedGlobal", "file I/O"},
-		{"sharedchdir", "BenchmarkSharedChdir", "file I/O"},
-		{"sharedfchdir", "BenchmarkSharedFchdir", "file I/O"},
-		{"unixfchdir", "BenchmarkUnixFchdir", "file I/O"},
-		{"openfileread", "BenchmarkOpenFileRead", "file I/O"},
-		{"openrootread", "BenchmarkRootOpenFileRead", "file I/O"},
-		{"initdynamic", "BenchmarkInitDynamic", "file I/O"},
-		{"initstdcallback", "BenchmarkInitStdCallback", "file I/O"},
-		{"testmainfile", "BenchmarkTestMainFile", "file I/O"},
-		{"testmainruntimefile", "BenchmarkTestMainRuntimeFile", "file I/O"},
-		{"pathbinding", "BenchmarkPathBinding", "path mutation"},
-		{"syscallbinding", "BenchmarkSyscallBinding", "path mutation"},
-		{"mkdirtemp", "BenchmarkMkdirTemp", "path mutation"},
-		{"mkdir", "BenchmarkMkdir", "path mutation"},
-		{"unixatbinding", "BenchmarkUnixAtBinding", "path mutation"},
-		{"tempdir", "BenchmarkTempDir", "path mutation"},
-		{"copyfs", "BenchmarkCopyFS", "path mutation"},
-		{"createtemp", "BenchmarkCreateTemp", "filesystem mutation"},
-		{"filemutations", "BenchmarkCreate", "filesystem mutation"},
-		{"filemutations", "BenchmarkOpenFileCreate", "filesystem mutation"},
-		{"filemutations", "BenchmarkWriteFile", "filesystem mutation"},
-		{"unixopencreate", "BenchmarkUnixOpenCreate", "filesystem mutation"},
-		{"mixedexternal", "BenchmarkMixedExternal", "network I/O"},
+	// retainedEffect pins a classified fact that must survive among the
+	// subject's effects when a higher-ranked diagnostic is preferred: the
+	// unix fixtures reach golang.org/x/sys/unix, whose non-toolchain assembly
+	// downgrades the subject (REQ-closure-blindspot) ahead of the file-I/O
+	// classification of the wrapper itself.
+	for _, tc := range []struct{ pkg, bench, reason, retainedEffect string }{
+		{"external", "BenchmarkReadFile", "file I/O", ""},
+		{"initfile", "BenchmarkInitFile", "file I/O", ""},
+		{"initcwd", "BenchmarkInitCWD", "file I/O", ""},
+		{"unixcwd", "BenchmarkUnixCWD", "non-standard assembly", "file I/O"},
+		{"initstdhelper", "BenchmarkInitStdHelper", "file I/O", ""},
+		{"sharedfile", "BenchmarkSharedFile", "file I/O", ""},
+		{"sharedparam", "BenchmarkSharedParam", "file I/O", ""},
+		{"sharedglobal", "BenchmarkSharedGlobal", "file I/O", ""},
+		{"sharedchdir", "BenchmarkSharedChdir", "file I/O", ""},
+		{"sharedfchdir", "BenchmarkSharedFchdir", "file I/O", ""},
+		{"unixfchdir", "BenchmarkUnixFchdir", "non-standard assembly", "file I/O"},
+		{"openfileread", "BenchmarkOpenFileRead", "file I/O", ""},
+		{"openrootread", "BenchmarkRootOpenFileRead", "file I/O", ""},
+		{"initdynamic", "BenchmarkInitDynamic", "file I/O", ""},
+		{"initstdcallback", "BenchmarkInitStdCallback", "file I/O", ""},
+		{"testmainfile", "BenchmarkTestMainFile", "file I/O", ""},
+		{"testmainruntimefile", "BenchmarkTestMainRuntimeFile", "file I/O", ""},
+		{"pathbinding", "BenchmarkPathBinding", "path mutation", ""},
+		{"syscallbinding", "BenchmarkSyscallBinding", "path mutation", ""},
+		{"mkdirtemp", "BenchmarkMkdirTemp", "path mutation", ""},
+		{"mkdir", "BenchmarkMkdir", "path mutation", ""},
+		{"unixatbinding", "BenchmarkUnixAtBinding", "path mutation", ""},
+		{"tempdir", "BenchmarkTempDir", "path mutation", ""},
+		{"copyfs", "BenchmarkCopyFS", "path mutation", ""},
+		{"createtemp", "BenchmarkCreateTemp", "filesystem mutation", ""},
+		{"filemutations", "BenchmarkCreate", "filesystem mutation", ""},
+		{"filemutations", "BenchmarkOpenFileCreate", "filesystem mutation", ""},
+		{"filemutations", "BenchmarkWriteFile", "filesystem mutation", ""},
+		{"unixopencreate", "BenchmarkUnixOpenCreate", "filesystem mutation", ""},
+		{"mixedexternal", "BenchmarkMixedExternal", "network I/O", ""},
 	} {
 		t.Run(tc.pkg+"/"+tc.bench, func(t *testing.T) {
 			tr, err := computeTier2Result(h, base+tc.pkg, tc.bench)
@@ -1529,6 +1494,17 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 			}
 			if !tr.unverifiable || !strings.Contains(tr.reason, tc.reason) {
 				t.Fatalf("unverifiable = %v, reason = %q, want reason containing %q", tr.unverifiable, tr.reason, tc.reason)
+			}
+			if tc.retainedEffect != "" {
+				found := false
+				for _, effect := range tr.effects {
+					if strings.Contains(effect.reason, tc.retainedEffect) {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("effects = %+v, want a retained effect containing %q", tr.effects, tc.retainedEffect)
+				}
 			}
 		})
 	}
@@ -1896,7 +1872,13 @@ func TestTier2ConstGroupHashesImplicitContext(t *testing.T) {
 	}
 }
 
-func TestTier2ASMStaticCallAddsGoTarget(t *testing.T) {
+// TestNonToolchainAssemblyWidensAndBlocks pins the conservative contract
+// end-to-end (REQ-closure-blindspot): a subject reaching a non-toolchain
+// assembly-bearing package widens to the maximal closure (whose hash covers
+// the package directory whole), names the assembly as the widening cause, and
+// is unverifiable via the "reaches non-standard assembly" effect that blocks
+// its observability proof. The assembly is never analyzed for call targets.
+func TestNonToolchainAssemblyWidensAndBlocks(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1906,910 +1888,20 @@ func TestTier2ASMStaticCallAddsGoTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	contribs := tr.contribs
-	if tr.widen {
-		t.Fatalf("static asm call fixture widened unexpectedly (%s): %v", tr.widenReason, contribs)
-	}
-	if !contribContains(contribs, "helper") {
-		t.Fatalf("asm static call target helper missing from contributions: %v", contribs)
-	}
-	if !contribContains(contribs, "asm_amd64.s") {
-		t.Fatalf("asm source file missing from contributions: %v", contribs)
-	}
-	if !tr.unverifiable || !strings.Contains(tr.reason, "file I/O") {
-		t.Fatalf("asm call target Class-B = %v/%q, want file I/O", tr.unverifiable, tr.reason)
-	}
-}
-
-func TestTier2ASMStaticJumpAddsGoTarget(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkASMJump")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	contribs := tr.contribs
-	if tr.widen {
-		t.Fatalf("static asm jump fixture widened unexpectedly (%s): %v", tr.widenReason, contribs)
-	}
-	if !contribContains(contribs, "jumpHelper") {
-		t.Fatalf("asm static jump target jumpHelper missing from contributions: %v", contribs)
-	}
-}
-
-func TestTier2ASMMacroAddsGoTarget(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkASMMacro")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if tr.widen {
-		t.Fatalf("asm macro fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
-	}
-	if !contribContains(tr.contribs, "macroHelper") {
-		t.Fatalf("asm macro call target macroHelper missing from contributions: %v", tr.contribs)
-	}
-}
-
-func TestTier2ASMSymbolComponentMacroAddsGoTarget(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkASMComponentMacro")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if tr.widen {
-		t.Fatalf("asm component macro fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
-	}
-	if !contribContains(tr.contribs, "componentHelper") {
-		t.Fatalf("asm component macro target componentHelper missing from contributions: %v", tr.contribs)
-	}
-	if contribContains(tr.contribs, "COMPONENT_HELPER") {
-		t.Fatalf("asm component macro resolved pre-expanded decoy: %v", tr.contribs)
-	}
-}
-
-func TestTier2ASMLocalJumpContinuesScanning(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/asmcall"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkASMLocalJump")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if tr.widen {
-		t.Fatalf("asm local jump fixture widened unexpectedly (%s): %v", tr.widenReason, tr.contribs)
-	}
-	if !contribContains(tr.contribs, "localJumpHelper") {
-		t.Fatalf("asm call after local jump missing from contributions: %v", tr.contribs)
-	}
-}
-
-func TestASMCallTargetsExpandsParamMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsIndirectCallWidens(t *testing.T) {
-	// Every register/computed-target call or jump across Go's arches must widen
-	// (computed) so the Go function it dispatches cannot change unhashed (REQ-closure-blindspot).
-	// The ≥3-field forms (JALR/JIRL) are the ones only isASMIndirectCallOp catches
-	// (asmUnknownOpMayHideCall's 2-field and single-op rules miss them); the rest are
-	// belt-and-suspenders. Each mnemonic is the sole computed trigger — no (SB)
-	// operand on any other line — so the assertion is about that mnemonic alone.
-	for _, tc := range []struct {
-		name, line   string
-		wantComputed bool
-		wantTarget   string
-	}{
-		{"jalr riscv64 (3-field)", "JALR RA, 0(T0)", true, ""},
-		{"jirl loong64 (3-field)", "JIRL R1, R12, 0", true, ""},
-		{"jr mips", "JR R5", true, ""},
-		{"blr arm64", "BLR R0", true, ""},
-		{"bctrl ppc64", "BCTRL", true, ""},
-		{"bctr ppc64", "BCTR", true, ""},
-		{"bx arm", "BX R1", true, ""},
-		{"blx arm", "BLX R2", true, ""},
-		{"bal mips", "BAL R3", true, ""},
-		{"callind", "CALLIND R4", true, ""},
-		// Negative: a direct call to a Go symbol still RESOLVES (not over-widened),
-		// so precision is preserved for ordinary hand-asm call-outs.
-		{"direct bl to symbol", "BL ·helper(SB)", false, "·helper"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\t"+tc.line+"\n\tRET\n")
-			targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-			if err != nil {
-				t.Fatalf("asmCallTargets: %v", err)
-			}
-			if opaque {
-				t.Fatalf("opaque = true, want false")
-			}
-			if computed != tc.wantComputed {
-				t.Fatalf("computed = %v, want %v for %q", computed, tc.wantComputed, tc.line)
-			}
-			if tc.wantTarget != "" && !stringSliceContains(targets, tc.wantTarget) {
-				t.Fatalf("targets = %v, want %q resolved", targets, tc.wantTarget)
-			}
-		})
-	}
-}
-
-func TestASMCallTargetsSubstitutesBareSBParamMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(·helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") || stringSliceContains(targets, "x") {
-		t.Fatalf("targets = %v, want substituted ·helper only", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsZeroArgFuncMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_HELPER() CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER()\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsEmptyObjectMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define EMPTY\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tEMPTY CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsWhitespaceMacroSyntax(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "# define CALL_HELPER() CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER ()\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsSplitMacroArgs(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_HELPER() CALL ·helper(SB)\n#define CALL_ARG(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER( )\n\tCALL_ARG ( helper2 )\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") || !stringSliceContains(targets, "·helper2") {
-		t.Fatalf("targets = %v, want ·helper and ·helper2", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsNestedCommaMacroArg(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_HELPER(x) CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER((1,2))\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsMacroSubstitutesTokensOnly(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·xSuffix(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·xSuffix") || stringSliceContains(targets, "·helperSuffix") {
-		t.Fatalf("targets = %v, want ·xSuffix only", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsNestedMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_A(x) CALL_B(x)\n#define CALL_B(x) CALL ·x(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_A(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsOperandMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define TARGET ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsSymbolOffsetParamMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_GO(x) CALL ·x+0(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO(realHelper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·realHelper") || stringSliceContains(targets, "·x") {
-		t.Fatalf("targets = %v, want substituted ·realHelper only", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsSymbolComponentMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define NAME helper\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·NAME(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") || stringSliceContains(targets, "·NAME") {
-		t.Fatalf("targets = %v, want expanded ·helper only", targets)
-	}
-}
-
-func TestASMCallTargetsIgnoresBlockCommentedMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "/*\n#define NAME helper\n*/\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·NAME(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for macro-like unresolved target")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want commented macro ignored", targets)
-	}
-}
-
-func TestASMCallTargetsBlockCommentPreservesTokenSeparator(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL/*sep*/·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsSymbolPrefixMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define pp dep\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL pp·Helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "dep·Helper") || stringSliceContains(targets, "pp·Helper") {
-		t.Fatalf("targets = %v, want expanded dep·Helper only", targets)
-	}
-}
-
-func TestASMCallTargetsUnresolvedSymbolPrefixMacroComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL PP·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for macro-like unresolved prefix")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsSubstitutesSymbolPrefixParamMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALLP(P) CALL P·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALLP(realdep)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "realdep·helper") || stringSliceContains(targets, "P·helper") {
-		t.Fatalf("targets = %v, want substituted realdep·helper only", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsDeepMacroChain(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define M1 M2\n#define M2 M3\n#define M3 M4\n#define M4 M5\n#define M5 M6\n#define M6 M7\n#define M7 M8\n#define M8 M9\n#define M9 M10\n#define M10 CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tM1\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsHonorsMacroRedefinitionOrder(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macro.s", "#define CALL_GO CALL ·a(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO\n#undef CALL_GO\n#define CALL_GO CALL ·b(SB)\n\tCALL_GO\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·a") || !stringSliceContains(targets, "·b") {
-		t.Fatalf("targets = %v, want both ·a and ·b", targets)
-	}
-}
-
-func TestASMCallTargetsExpandsIncludedMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "callmacro.h", "#define CALL_INCLUDED(x) CALL ·x(SB)\n")
-	writeFile(t, dir, "macro.s", "#include \"callmacro.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_INCLUDED(helper)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsScansIncludedBody(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
-	writeFile(t, dir, "macro.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n#include \"body.h\"\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-	if !stringSliceContains(includes, filepath.Join(dir, "body.h")) {
-		t.Fatalf("includes = %v, want body.h", includes)
-	}
-}
-
-func TestASMCallTargetsScansMacroExpandedInclude(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
-	writeFile(t, dir, "macro.s", "#define LOAD_BODY #include \"body.h\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tLOAD_BODY\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-	if !stringSliceContains(includes, filepath.Join(dir, "body.h")) {
-		t.Fatalf("includes = %v, want body.h", includes)
-	}
-}
-
-func TestASMCallTargetsExpandsIncludeOperandMacro(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "body.h", "\tCALL ·helper(SB)\n")
-	writeFile(t, dir, "macro.s", "#define HDR \"body.h\"\n#include HDR\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tRET\n")
-	targets, computed, opaque, includes, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-	if !stringSliceContains(includes, filepath.Join(dir, "body.h")) {
-		t.Fatalf("includes = %v, want body.h", includes)
-	}
-}
-
-func TestTier2ASMIncludesContributeLocalInclude(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
-	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
-	idx := &pkgIndex{id: "example.com/includeasm", mutable: true, meta: &listPkg{Dir: dir, SFiles: []string{"asm.s"}}}
-	a := &tier2Analyzer{
-		filePkgs:    map[*pkgIndex]bool{idx: true},
-		seenContrib: map[string]bool{},
-	}
-
-	if err := a.addReachedPackageFiles(); err != nil {
-		t.Fatalf("addReachedPackageFiles: %v", err)
-	}
-	if !contribContains(a.contribs, "include:example.com/includeasm:defs.inc=") {
-		t.Fatalf("local asm include missing from contributions: %v", a.contribs)
-	}
-}
-
-func TestASMCallTargetsIndirectSBComputed(t *testing.T) {
-	for _, line := range []string{"CALL *·fp(SB)", "CALL ·table+4(SB)(AX*4)"} {
-		t.Run(line, func(t *testing.T) {
-			dir := t.TempDir()
-			writeFile(t, dir, "indirect.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\t"+line+"\n\tRET\n")
-			targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"indirect.s"})
-			if err != nil {
-				t.Fatalf("asmCallTargets: %v", err)
-			}
-			if !computed {
-				t.Fatalf("computed = false, want true")
-			}
-			if opaque {
-				t.Fatalf("opaque = true, want false")
-			}
-			if len(targets) != 0 {
-				t.Fatalf("targets = %v, want none", targets)
-			}
-		})
-	}
-}
-
-func TestASMCallTargetsUnknownOpcodeWithSBComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for unresolved opcode macro with SB operand")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsUnknownOpcodeMacroOperandComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for unresolved opcode macro operand")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsUnknownOpcodeBareMacroOperandComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALLGO TARGET\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for unresolved opcode macro operand")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsExternalLowercaseDefineComputed(t *testing.T) {
-	t.Setenv("GOFLAGS", "-asmflags=all=-D=hook=helper")
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for external lowercase symbol define")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsCallerLowercaseDefineComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"}, "-asmflags=all=-D=hook=helper")
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for caller-supplied lowercase symbol define")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsPersistentAndCallerFlags(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "goenv", "GOFLAGS=-asmflags=all=-D=hook=helper\n")
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL ·hook(SB)\n\tRET\n")
-	t.Setenv("GOENV", filepath.Join(dir, "goenv"))
-	oldFlags, hadFlags := os.LookupEnv("GOFLAGS")
-	if err := os.Unsetenv("GOFLAGS"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if hadFlags {
-			_ = os.Setenv("GOFLAGS", oldFlags)
-		} else {
-			_ = os.Unsetenv("GOFLAGS")
+	if !tr.widen || !strings.Contains(tr.widenReason, "non-toolchain assembly in "+pkg) {
+		t.Fatalf("widen = %v/%q, want non-toolchain assembly in %s", tr.widen, tr.widenReason, pkg)
+	}
+	if !tr.unverifiable {
+		t.Fatal("non-toolchain assembly subject was not unverifiable")
+	}
+	found := false
+	for _, effect := range tr.effects {
+		if effect.kind == externalEffectNative && effect.reason == "reaches non-standard assembly" {
+			found = true
 		}
-	})
-
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"}, "-tags=special")
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
 	}
-	if !computed {
-		t.Fatalf("computed = false, want true with persistent asm flag and explicit tag")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsUnknownSingleOpcodeComputed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macroflag.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macroflag.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if !computed {
-		t.Fatalf("computed = false, want true for unresolved full-line opcode macro")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if len(targets) != 0 {
-		t.Fatalf("targets = %v, want none", targets)
-	}
-}
-
-func TestASMCallTargetsScansSemicolonStatements(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "semi.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ $0, AX; CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"semi.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsScansLabelPrefixedInstruction(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "label.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\nentry: CALL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"label.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsScansStaticBranchLink(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "branch.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tBL ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"branch.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsScansConditionalBranchLink(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "branch.s", "TEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tBL.NE ·helper(SB)\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"branch.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsScansMacroExpandedSemicolonStatements(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "macrosemi.s", "#define CALL_HELPER MOVQ $0, AX; CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_HELPER\n\tRET\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macrosemi.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsLineCommentRespectsStringLiteral(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "stringcomment.s", "#define X DATA ·s+0(SB)/8, $\"http://\"; CALL ·helper(SB)\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tX\n\tRET\nGLOBL ·s(SB), 8, $8\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"stringcomment.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·helper") {
-		t.Fatalf("targets = %v, want ·helper", targets)
-	}
-}
-
-func TestASMCallTargetsRepeatsIncludedBodyWithCurrentMacros(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "call.h", "\tCALL_GO\n")
-	writeFile(t, dir, "macro.s", "#define CALL_GO CALL ·a(SB)\n#include \"call.h\"\n#undef CALL_GO\n#define CALL_GO CALL ·b(SB)\n#include \"call.h\"\n")
-	targets, computed, opaque, _, err := asmCallTargets(context.Background(), dir, []string{"macro.s"})
-	if err != nil {
-		t.Fatalf("asmCallTargets: %v", err)
-	}
-	if computed {
-		t.Fatalf("computed = true, want false")
-	}
-	if opaque {
-		t.Fatalf("opaque = true, want false")
-	}
-	if !stringSliceContains(targets, "·a") || !stringSliceContains(targets, "·b") {
-		t.Fatalf("targets = %v, want both ·a and ·b", targets)
-	}
-}
-
-func TestTier2ASMOpaquePreprocessorWidens(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "opaque.s", "#ifdef WANT\n#define CALL_GO CALL ·helper(SB)\n#endif\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tCALL_GO\n\tRET\n")
-	idx := &pkgIndex{id: "example.com/opaqueasm", mutable: true, meta: &listPkg{Dir: dir, SFiles: []string{"opaque.s"}}}
-	a := &tier2Analyzer{
-		filePkgs:    map[*pkgIndex]bool{idx: true},
-		seenContrib: map[string]bool{},
-	}
-
-	if err := a.addReachedPackageFiles(); err != nil {
-		t.Fatalf("addReachedPackageFiles: %v", err)
-	}
-	if !a.widen || !strings.Contains(a.widenReason, "opaque asm preprocessing") {
-		t.Fatalf("widen = %v/%q, want opaque asm preprocessing", a.widen, a.widenReason)
-	}
-	if a.unverifiable {
-		t.Fatalf("unverifiable = true/%q, want false for source-only opaque asm", a.reason)
-	}
-}
-
-func TestOpaqueASMSubjectWidens(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/opaqueasm"
-	tr, err := computeTier2Result(h, pkg, "BenchmarkOpaqueASM")
-	if err != nil {
-		t.Fatalf("analysis: %v", err)
-	}
-	if !tr.widen {
-		t.Fatalf("opaque asm did not widen to the maximal closure: %+v", tr)
+	if !found {
+		t.Fatalf("effects = %+v, want native \"reaches non-standard assembly\"", tr.effects)
 	}
 }
 
@@ -3037,49 +2129,6 @@ func TestTier2WasmImportUnverifiable(t *testing.T) {
 	a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
 	if !a.unverifiable || !strings.Contains(a.reason, "go:wasmimport") {
 		t.Fatalf("wasmimport Class-B = %v/%q, want go:wasmimport", a.unverifiable, a.reason)
-	}
-}
-
-func TestTier2ASMPrefixedTargetResolvesPackage(t *testing.T) {
-	benchTypes := types.NewPackage("example.com/bench", "bench")
-	depTypes := types.NewPackage("example.com/dep", "dep")
-	helper := types.NewFunc(token.NoPos, depTypes, "Helper", types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false))
-	depTypes.Scope().Insert(helper)
-	benchIdx := &pkgIndex{pkg: &packages.Package{Name: "bench", Types: benchTypes}}
-	depIdx := &pkgIndex{pkg: &packages.Package{Name: "dep", Types: depTypes}}
-	a := &tier2Analyzer{
-		idxByTypes:  map[*types.Package]*pkgIndex{benchTypes: benchIdx, depTypes: depIdx},
-		seenObjects: map[types.Object]bool{},
-	}
-
-	a.addASMTarget(benchIdx, "dep·Helper")
-	if a.widen {
-		t.Fatalf("prefixed asm target widened unexpectedly: %s", a.widenReason)
-	}
-	if len(a.objectQueue) != 1 || a.objectQueue[0] != helper {
-		t.Fatalf("prefixed asm target queue = %v, want Helper", a.objectQueue)
-	}
-}
-
-func TestTier2ASMPathPrefixedTargetResolvesPackage(t *testing.T) {
-	benchTypes := types.NewPackage("example.com/bench", "bench")
-	httpTypes := types.NewPackage("net/http", "http")
-	get := types.NewFunc(token.NoPos, httpTypes, "Get", types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false))
-	httpTypes.Scope().Insert(get)
-	benchIdx := &pkgIndex{pkg: &packages.Package{Name: "bench", Types: benchTypes}}
-	httpIdx := &pkgIndex{pkg: &packages.Package{Name: "http", Types: httpTypes}, path: "net/http", std: true}
-	a := &tier2Analyzer{
-		idxByTypes:  map[*types.Package]*pkgIndex{benchTypes: benchIdx, httpTypes: httpIdx},
-		idxByPath:   map[string]*pkgIndex{"net/http": httpIdx},
-		seenObjects: map[types.Object]bool{},
-	}
-
-	a.addASMTarget(benchIdx, "net/http·Get")
-	if a.widen {
-		t.Fatalf("path-prefixed asm target widened unexpectedly: %s", a.widenReason)
-	}
-	if len(a.objectQueue) != 1 || a.objectQueue[0] != get {
-		t.Fatalf("path-prefixed asm target queue = %v, want net/http.Get", a.objectQueue)
 	}
 }
 

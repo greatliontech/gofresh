@@ -446,22 +446,15 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	if len(p.SFiles) > 0 {
-		_, _, opaque, includes, err := asmCallTargetsEnv(h.ctx, p.Dir, h.env, p.SFiles, h.buildFlags...)
+		// Non-toolchain assembly is never analyzed: the package contributes
+		// its whole directory, so every .s file and anything it includes
+		// from the package tree moves the hash (REQ-closure-blindspot's
+		// downgrade arm; the subject is unverifiable regardless via the
+		// package's non-standard-assembly effect).
+		var err error
+		files, err = allPackageFiles(p.Dir)
 		if err != nil {
 			return "", nil, err
-		}
-		if opaque {
-			files, err = allPackageFiles(p.Dir)
-			if err != nil {
-				return "", nil, err
-			}
-		}
-		for _, path := range includes {
-			rel, err := filepath.Rel(p.Dir, path)
-			if err != nil {
-				rel = path
-			}
-			files = append(files, rel)
 		}
 	}
 	files = uniqueStrings(files)
