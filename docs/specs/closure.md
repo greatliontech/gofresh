@@ -263,7 +263,18 @@ root provenance: any external effect attributable to a package initializer or to
 user test-main flow rather than the subject is outside subject-time observation and
 blocks the proof, while subject flow is classified against the admitted observation
 set. Every reachable call and effect is classified to the walk's end; the preferred
-human diagnostic is derived afterward and can never select which facts participate. A complete maximal-tier negative scan
+human diagnostic is derived afterward and can never select which facts
+participate: a refusal names the highest-ranked blocking effect under one
+cause-preference order shared with the legacy single-reason projection —
+structural findings, mutations, and every classification not expressly
+down-ranked (standard input, network, plugin, native, linkage included)
+rank top; then the generic file read; then ambient formatting and
+environment; then the unaudited and test-runtime classifications; the
+legacy projection alone adds one weakest stratum below all of these, the
+audited harness fact — with the refusal's ties resolved by the effect
+projection's total order and the legacy projection's ties resolved
+lexicographically on the reason text, so both diagnostics are
+deterministic and causal-first. A complete maximal-tier negative scan
 may reject opaque linkage, native code, process execution, dot imports, unaudited
 standard-library access, or other unclassified external-capable syntax, but can never
 grant the proof on its own. The audited-pure standard set — packages and named

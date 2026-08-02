@@ -82,8 +82,12 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // subject's own flow (shared mutable state refuses) — and, for
 // packages without a user TestMain, stops pre-blocking the whole
 // package on the maximal scan's receiver-escape rejection, so
-// testing.TB-taking helpers can earn proofs.
-const ObservationRTA = "gofresh/observation-rta@8"
+// testing.TB-taking helpers can earn proofs; @9 makes the refusal
+// diagnostic causal-first — the proof names the highest-ranked
+// blocking effect under the shared cause-preference order (structural
+// findings and mutations before generic reads before ambient
+// classifications) instead of the projection's first blocking entry.
+const ObservationRTA = "gofresh/observation-rta@9"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

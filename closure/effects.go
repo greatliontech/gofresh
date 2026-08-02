@@ -2,9 +2,10 @@ package closure
 
 type externalEffectKind uint8
 
-// The enum ORDER is the effect projection's primary sort key, and the
-// proof's refusal diagnostic is the first blocking effect of that order —
-// inserting or reordering members moves recorded diagnostic texts and owes
+// The enum ORDER is the effect projection's primary sort key; the proof's
+// refusal names the highest-ranked blocking effect under effectCauseRank
+// with this order as the tie-break — so inserting or reordering members
+// AND editing the rank table both move recorded diagnostic texts and owe
 // an ObservationRTA bump (the recorded-evidence versioning clause).
 const (
 	externalEffectOpaque externalEffectKind = iota

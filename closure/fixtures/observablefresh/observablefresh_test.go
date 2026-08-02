@@ -306,3 +306,11 @@ func TestFreshPathHelperClosureCallee(t *testing.T) {
 	helper(t.TempDir())
 	_ = sink
 }
+
+func TestOpenDynamicHandleClose(t *testing.T) {
+	path := os.Getenv("OBSERVABLEFRESH_BASELINE")
+	file, _ := os.Open(path)
+	if file != nil {
+		_ = file.Close()
+	}
+}

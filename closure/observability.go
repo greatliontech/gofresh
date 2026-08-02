@@ -255,10 +255,25 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 			return Observability{Reason: "package scan: " + effect.reason}, nil
 		}
 	}
-	for _, effect := range subjectResult.effects {
-		if !effect.observable {
-			return Observability{Reason: effect.reason}, nil
+	// The refusal names the highest-ranked blocking effect under the
+	// shared cause-preference order; the projection is already sorted
+	// under the total order, so the first max-rank hit is deterministic —
+	// among rank-equals the projection order decides, kind first
+	// (REQ-closure-observability-analysis's diagnostic clause).
+	var blocking *externalEffect
+	blockingRank := 0
+	for i := range subjectResult.effects {
+		effect := &subjectResult.effects[i]
+		if effect.observable {
+			continue
 		}
+		if rank := effectCauseRank(*effect); blocking == nil || rank > blockingRank {
+			blocking = effect
+			blockingRank = rank
+		}
+	}
+	if blocking != nil {
+		return Observability{Reason: blocking.reason}, nil
 	}
 	return Observability{Observable: true}, nil
 }

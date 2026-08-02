@@ -1,6 +1,6 @@
 # Observability precision
 
-Spec: docs/specs/closure.md (REQ-closure-observability-analysis, REQ-closure-observability-batch-equivalence, REQ-closure-observability-memo); docs/specs/runtime-inputs.md governs chunk 3.
+Spec: docs/specs/closure.md (REQ-closure-observability-analysis, REQ-closure-observability-batch-equivalence, REQ-closure-observability-memo); docs/specs/runtime-inputs.md governs chunk 4.
 
 - [x] 1. Testing-harness failure/logging channel: amend the audited-pure set with a
   method-scoped, output-only carve-out for `testing.(*common)`'s failure/logging
@@ -22,7 +22,7 @@ Spec: docs/specs/closure.md (REQ-closure-observability-analysis, REQ-closure-obs
   `harnesstb/TestHelperTBFatal` re-pins from refused to observable. (The
   bound-method form `f := t.Fatal; f(x)` already classifies — the SSA wrapper
   carries the method object — and is pinned by `harnesslog/TestBoundMethodFatal`.)
-- [ ] 3. Refusal-diagnostic preference order: the proof's refusal names the first
+- [x] 3. Refusal-diagnostic preference order: the proof's refusal names the first
   blocking effect under a causal-attributions-first preference order (fresh-path
   and attributed escapes before generic classifications), deterministic across
   recomputations; spec's diagnostic clause gains the order; corpus rows whose

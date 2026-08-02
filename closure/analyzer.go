@@ -191,6 +191,7 @@ type tier2Analyzer struct {
 	widenReason  string
 	unverifiable bool
 	reason       string
+	reasonRank   int
 }
 
 func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
@@ -1090,20 +1091,12 @@ func (a *tier2Analyzer) requestWiden(reason string) {
 	}
 }
 
-func (a *tier2Analyzer) markUnverifiable(reason string) {
-	a.recordExternalEffect(opaqueExternalEffect(externalEffectOpaque, reason))
-}
-
 func (a *tier2Analyzer) recordExternalEffect(effect externalEffect) {
 	a.collectExternalEffect(effect)
-	reason := effect.reason
-	// Prefer a non-file-I/O reason when several apply: file I/O is the most common
-	// and least specific external dependence, so a network/plugin/cgo cause is the
-	// more informative one to surface.
-	currentRank := unverifiableReasonRank(a.reason)
-	newRank := unverifiableReasonRank(reason)
-	if !a.unverifiable || newRank > currentRank || (newRank == currentRank && reason < a.reason) {
-		a.reason = reason
+	rank := effectCauseRank(effect)
+	if !a.unverifiable || rank > a.reasonRank || (rank == a.reasonRank && effect.reason < a.reason) {
+		a.reason = effect.reason
+		a.reasonRank = rank
 	}
 	a.unverifiable = true
 }
@@ -1114,18 +1107,30 @@ func (a *tier2Analyzer) collectExternalEffect(effect externalEffect) bool {
 	return len(a.effects) != before
 }
 
-func unverifiableReasonRank(reason string) int {
-	switch {
-	// The audited harness fact is the strictly weakest reason: it flips
-	// unverifiable when it is the only effect, but never displaces a
-	// causal classification — including its own rank-0 siblings.
-	case strings.Contains(reason, "test harness logging"):
+// effectCauseRank is the one cause-preference order both diagnostic
+// projections share: the legacy single-reason projection keeps the
+// highest-ranked recorded effect, and the observation proof's refusal
+// names the highest-ranked blocking effect. Structural findings and
+// mutations outrank the generic file read, which outranks ambient
+// formatting and environment, which outrank the unaudited and
+// test-runtime classifications; the audited harness fact is strictly
+// weakest — it flips the legacy projection when it is the only effect
+// but never displaces a causal classification.
+func effectCauseRank(effect externalEffect) int {
+	if effect.kind == externalEffectTestRuntime && effect.observable {
 		return -1
-	case strings.Contains(reason, "unaudited standard operation"), strings.Contains(reason, "test runtime configuration"), strings.Contains(reason, "test runtime execution"):
+	}
+	if effect.packagePath == "" {
+		// Opaque structural findings (receiver escapes, wasm imports, cgo
+		// libraries) carry no symbol yet name the mechanism directly.
+		return 4
+	}
+	switch effect.kind {
+	case externalEffectUnauditedStandard, externalEffectTestRuntime:
 		return 0
-	case strings.Contains(reason, "formatted output"), strings.Contains(reason, "environment input"):
+	case externalEffectFormattedOutput, externalEffectEnvironment:
 		return 1
-	case isFileIOReason(reason):
+	case externalEffectFileIO:
 		return 3
 	default:
 		return 4
@@ -1141,10 +1146,11 @@ func isStandardFallbackExempt(pkgPath string) bool {
 func (a *tier2Analyzer) result() tier2Result {
 	effects := append([]externalEffect(nil), a.effects...)
 	// The accumulation order follows type/object walks that range over
-	// maps; the proof's refusal diagnostic is the first blocking effect,
-	// so the projection sorts under a total order — recomputation must
-	// reproduce diagnostics byte-for-byte (the recorded-evidence
-	// stability REQ-closure-observability-memo binds).
+	// maps; the proof's refusal names the highest-ranked blocking effect
+	// with the projection order as tie-break, so the projection sorts
+	// under a total order — recomputation must reproduce diagnostics
+	// byte-for-byte (the recorded-evidence stability
+	// REQ-closure-observability-memo binds).
 	sort.Slice(effects, func(i, j int) bool { return effectLess(effects[i], effects[j]) })
 	return tier2Result{effects: effects, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
 }
@@ -1172,14 +1178,6 @@ func effectLess(a, b externalEffect) bool {
 		return b.unrefinable
 	}
 	return !a.observable && b.observable
-}
-
-func isFileIOReason(reason string) bool {
-	return strings.Contains(reason, "file I/O")
-}
-
-func isFilesystemMutationReason(reason string) bool {
-	return strings.Contains(reason, "mutation")
 }
 
 func classBEffectForFunction(fn *ssa.Function) (externalEffect, bool) {

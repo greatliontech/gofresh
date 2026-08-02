@@ -1539,20 +1539,21 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observableprocess", subject: "TestCommand"},
 		{fixture: "observableconcurrent", subject: "TestConcurrentFileRead", reason: "os.Open"},
 		{fixture: "observablefresh", subject: "TestRemoveOrdinary", reason: "os.Remove"},
-		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "reaches os.OpenFile (filesystem mutation)"},
 		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "os.Remove"},
-		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestWriteFileUncheckedBeforeRead", reason: "os.ReadFile"},
-		{fixture: "observablefresh", subject: "TestWriteFileMutationBeforeRead", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "reaches os.OpenFile (filesystem mutation)"},
+		{fixture: "observablefresh", subject: "TestOpenDynamicHandleClose", reason: "os.File.Close on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestWriteFileUncheckedBeforeRead", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestWriteFileMutationBeforeRead", reason: "reaches testing.TempDir (process or path mutation)"},
 		{fixture: "observablefresh", subject: "TestWriteFileMutationAcrossLoop", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughAlias", reason: "os.WriteFile"},
 		{fixture: "observablefresh", subject: "TestWriteFileMutationThroughDuplicateJoin", reason: "testing.TempDir"},
-		{fixture: "observablefresh", subject: "TestAncestorCleanupBeforeRead", reason: "os.ReadFile"},
-		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "os.ReadFile"},
-		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "os.ReadFile"},
-		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "os.ReadFile"},
+		{fixture: "observablefresh", subject: "TestAncestorCleanupBeforeRead", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "reaches testing.TempDir (process or path mutation)"},
+		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "reaches testing.TempDir (process or path mutation)"},
 		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperEscape"},
 		// The boundary extension admits an ignored parameter — nothing
@@ -1568,8 +1569,8 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestFreshPathHelperDirectGo"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperInLoop"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee"},
-		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "os.File.Name on an unattributed file handle"},
+		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "reaches os.OpenFile (filesystem mutation)"},
+		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "reaches os.OpenFile (filesystem mutation)"},
 		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
 		// The startup caller is invisible to per-subject call-site
 		// enumeration by design; the startup walk blocks first, and
@@ -2041,7 +2042,7 @@ func TestClassBReasonNetDialContext(t *testing.T) {
 
 func TestTier2CgoExternalLibraryUnverifiable(t *testing.T) {
 	// End-to-end (through scanFunction → hasExternalCgoMeta → hasExternalCgo →
-	// markUnverifiable), not just the hasExternalCgo predicate: a plain `-lm` and a
+	// recordExternalEffect), not just the hasExternalCgo predicate: a plain `-lm` and a
 	// grouped linker flag `-Wl,-Bstatic,-lfoo,-Bdynamic` (which hides the `-l` inside
 	// one whitespace token) must both mark the closure unverifiable, else the external
 	// library could change while the benchmark reports valid (REQ-closure-blindspot).
@@ -2341,21 +2342,58 @@ func TestTier2ReflectReferenceScansClassB(t *testing.T) {
 }
 
 func TestUnverifiableReasonSelectionIsDeterministic(t *testing.T) {
-	reasons := []string{
-		"reaches fmt.Print (formatted output)",
-		"reaches net.Dial (network I/O)",
-		"reaches os.ReadFile (file I/O)",
+	effects := []externalEffect{
+		symbolExternalEffect(externalEffectFormattedOutput, "fmt", "Print", "reaches fmt.Print (formatted output)"),
+		symbolExternalEffect(externalEffectNetwork, "net", "Dial", "reaches net.Dial (network I/O)"),
+		symbolExternalEffect(externalEffectFileIO, "os", "ReadFile", "reaches os.ReadFile (file I/O)"),
 	}
 	first := &tier2Analyzer{}
-	for _, reason := range reasons {
-		first.markUnverifiable(reason)
+	for _, effect := range effects {
+		first.recordExternalEffect(effect)
 	}
 	second := &tier2Analyzer{}
-	for i := len(reasons) - 1; i >= 0; i-- {
-		second.markUnverifiable(reasons[i])
+	for i := len(effects) - 1; i >= 0; i-- {
+		second.recordExternalEffect(effects[i])
 	}
 	if first.reason != second.reason {
 		t.Fatalf("unverifiable reason depends on traversal order: %q != %q", first.reason, second.reason)
+	}
+	if !strings.Contains(first.reason, "network I/O") {
+		t.Fatalf("legacy reason = %q, want the top-ranked network cause", first.reason)
+	}
+}
+
+// TestEffectCauseRankStrata pins the cause-preference strata boundaries
+// themselves — a flatten of any adjacent pair is a diagnostic-semantics
+// change that owes an ObservationRTA bump, so it must fail here rather
+// than pass silently.
+func TestEffectCauseRankStrata(t *testing.T) {
+	mutation := symbolExternalEffect(externalEffectPathMutation, "os", "Remove", "reaches os.Remove (path mutation)")
+	read := symbolExternalEffect(externalEffectFileIO, "os", "ReadFile", "reaches os.ReadFile (file I/O)")
+	output := symbolExternalEffect(externalEffectFormattedOutput, "fmt", "Print", "reaches fmt.Print (formatted output)")
+	unaudited := symbolExternalEffect(externalEffectUnauditedStandard, "time", "Now", "reaches unaudited standard operation time.Now")
+	harness := harnessLoggingEffect("Log")
+	ordered := []externalEffect{mutation, read, output, unaudited, harness}
+	for i := 0; i+1 < len(ordered); i++ {
+		if effectCauseRank(ordered[i]) <= effectCauseRank(ordered[i+1]) {
+			t.Errorf("effectCauseRank(%s) = %d, want above %s (%d)", ordered[i].reason, effectCauseRank(ordered[i]), ordered[i+1].reason, effectCauseRank(ordered[i+1]))
+		}
+	}
+	// The strata drive the legacy projection end to end: a generic read
+	// outranks ambient output and the unaudited classification.
+	a := &tier2Analyzer{}
+	for _, effect := range []externalEffect{unaudited, output, read} {
+		a.recordExternalEffect(effect)
+	}
+	if !strings.Contains(a.reason, "file I/O") {
+		t.Fatalf("legacy reason = %q, want the file I/O cause over output and unaudited", a.reason)
+	}
+	b := &tier2Analyzer{}
+	for _, effect := range []externalEffect{unaudited, output} {
+		b.recordExternalEffect(effect)
+	}
+	if !strings.Contains(b.reason, "formatted output") {
+		t.Fatalf("legacy reason = %q, want the formatted-output cause over unaudited", b.reason)
 	}
 }
 
