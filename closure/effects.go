@@ -126,6 +126,37 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 	return externalEffect{}, false
 }
 
+// auditedHarnessLogging reports whether a testing-package symbol is the
+// harness's failure/logging channel: output lands only in the harness's
+// own in-memory buffer and the run's captured output, both already part
+// of the recorded test outcome, so the channel is output-only and adds
+// no testlog-invisible input (REQ-closure-observability-analysis).
+// Argument method sets stay visible to reachability at the call site,
+// exactly as fmt's Sprint family. Deliberately excluded: the harness's
+// ambient-input and mutation surfaces (Setenv, Chdir, TempDir, the
+// runtime-configuration reads) keep their own classifications.
+func auditedHarnessLogging(pkgPath, name string) bool {
+	if pkgPath != "testing" {
+		return false
+	}
+	switch name {
+	case "Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow":
+		return true
+	}
+	return false
+}
+
+// harnessLoggingEffect is the admitted harness fact the walk records in
+// place of descending into harness internals: observable, so the
+// observation proof never blocks on it, while the record still flips the
+// legacy unverifiable projection — an audited harness call is not purity
+// evidence.
+func harnessLoggingEffect(name string) externalEffect {
+	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+" (test harness logging)")
+	effect.observable = true
+	return effect
+}
+
 // classBPureStandard audits specific operations of effect-bearing
 // standard packages as pure: value-to-value computation with no ambient
 // acquisition and no testlog-invisible channel. fmt's Sprint family

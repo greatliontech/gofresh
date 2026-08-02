@@ -73,11 +73,12 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // proof. The version pins the engine's interpretation: any admission or
 // classification change bumps it, so persistently memoized analyses and
 // recorded proofs from the prior interpretation refuse instead of serving
-// under semantics they were not computed by — @6 made the refusal
-// diagnostic deterministic: the analyzer's effect projection sorts under a
-// total order, so the first blocking effect no longer varies with walk
-// order across recomputations.
-const ObservationRTA = "gofresh/observation-rta@6"
+// under semantics they were not computed by — @7 admits the testing
+// harness's failure/logging channel (output-only into the harness's own
+// buffer, part of the recorded outcome) as an audited harness fact
+// instead of descending into harness internals, so subjects failing
+// through t.Fatal or logging through t.Log can earn proofs.
+const ObservationRTA = "gofresh/observation-rta@7"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

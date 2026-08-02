@@ -45,8 +45,13 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
+			if !ok && harnessLoggingFunction(target) {
+				a.recordExternalEffect(harnessLoggingEffect(functionSymbolName(target)))
+				continue
+			}
 			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(idx.path) {
-				effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, target.Name(), "reaches unaudited standard operation "+idx.path+"."+target.Name())
+				name := functionSymbolName(target)
+				effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
 				ok = true
 			}
 			if ok {
@@ -468,7 +473,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && (classifiedOK && classified.kind == externalEffectFileIO || atomicObservabilityOperation(fn)) {
+	if idx.std && (classifiedOK && classified.kind == externalEffectFileIO || atomicObservabilityOperation(fn) || harnessLoggingFunction(fn)) {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -499,10 +504,7 @@ func atomicObservabilityOperation(fn *ssa.Function) bool {
 	if fn == nil {
 		return false
 	}
-	pkgPath, name := funcPkgPath(fn), fn.Name()
-	if object := fn.Object(); object != nil {
-		name = object.Name()
-	}
+	pkgPath, name := funcPkgPath(fn), functionSymbolName(fn)
 	if pkgPath == "testing" && name == "TempDir" || pkgPath == "path/filepath" && name == "Join" {
 		return true
 	}
@@ -639,10 +641,10 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if callee == nil {
 		return
 	}
-	pkgPath := funcPkgPath(callee)
-	name := callee.Name()
-	if obj := callee.Object(); obj != nil {
-		name = obj.Name()
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
+	if auditedHarnessLogging(pkgPath, name) {
+		a.recordExternalEffect(harnessLoggingEffect(name))
+		return
 	}
 	if observableFileMethod(callee) {
 		if len(c.Args) != 0 && fileValueFromAdmittedOpen(c.Args[0], make(map[ssa.Value]bool)) {
@@ -1092,6 +1094,11 @@ func (a *tier2Analyzer) collectExternalEffect(effect externalEffect) bool {
 
 func unverifiableReasonRank(reason string) int {
 	switch {
+	// The audited harness fact is the strictly weakest reason: it flips
+	// unverifiable when it is the only effect, but never displaces a
+	// causal classification — including its own rank-0 siblings.
+	case strings.Contains(reason, "test harness logging"):
+		return -1
 	case strings.Contains(reason, "unaudited standard operation"), strings.Contains(reason, "test runtime configuration"), strings.Contains(reason, "test runtime execution"):
 		return 0
 	case strings.Contains(reason, "formatted output"), strings.Contains(reason, "environment input"):
@@ -1157,12 +1164,22 @@ func classBEffectForFunction(fn *ssa.Function) (externalEffect, bool) {
 	if fn == nil {
 		return externalEffect{}, false
 	}
-	pkgPath := funcPkgPath(fn)
-	name := fn.Name()
+	return classBEffect(funcPkgPath(fn), functionSymbolName(fn))
+}
+
+func functionSymbolName(fn *ssa.Function) string {
 	if obj := fn.Object(); obj != nil {
-		name = obj.Name()
+		return obj.Name()
 	}
-	return classBEffect(pkgPath, name)
+	return fn.Name()
+}
+
+// harnessLoggingFunction gates both the body-scan cut and the
+// dynamic-target admission on the same audited set, so a harness logging
+// method reached through an interface method set or an RTA-resolved
+// dispatch classifies exactly as a static call to it would.
+func harnessLoggingFunction(fn *ssa.Function) bool {
+	return fn != nil && auditedHarnessLogging(funcPkgPath(fn), functionSymbolName(fn))
 }
 
 func classBReasonForFunction(fn *ssa.Function) string {

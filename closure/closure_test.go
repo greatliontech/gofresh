@@ -1517,6 +1517,15 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observable", subject: "TestOpen", observable: true},
 		{fixture: "observable", subject: "TestReadDir", observable: true},
 		{fixture: "observableopenfile", subject: "TestOpenFile", observable: true},
+		{fixture: "harnesslog", subject: "TestReadFileFatal", observable: true},
+		{fixture: "harnesslog", subject: "TestReadFileLogAndError", observable: true},
+		{fixture: "harnesslog", subject: "TestReadFileSkipAndFail", observable: true},
+		{fixture: "harnesslog", subject: "TestLocalTBFatal", observable: true},
+		{fixture: "harnesslog", subject: "TestLogOnly", observable: true},
+		{fixture: "harnesslog", subject: "TestBoundMethodFatal", observable: true},
+		{fixture: "harnessarg", subject: "TestLogEffectfulArgument", reason: "os.ReadFile"},
+		{fixture: "harnesssetenv", subject: "TestSetenvStaysBlocked", reason: "testing.Setenv"},
+		{fixture: "harnesstb", subject: "TestHelperTBFatal", reason: "interface invoke outside RTA"},
 		{fixture: "observablefresh", subject: "TestTempDirWriteReadCleanup", observable: true},
 		{fixture: "observablefresh", subject: "TestTempDirOpenFile", observable: true},
 		{fixture: "observablestat", subject: "TestStat"},
@@ -1525,7 +1534,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observableconcurrent", subject: "TestConcurrentFileRead", reason: "os.Open"},
 		{fixture: "observablefresh", subject: "TestRemoveOrdinary", reason: "os.Remove"},
 		{fixture: "observablefresh", subject: "TestOpenFileMutatesOrdinary", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "fmt.Fprintf"},
+		{fixture: "observablefresh", subject: "TestRemoveNeverCreated", reason: "os.Remove"},
 		{fixture: "observablefresh", subject: "TestOpenFileMutatesNeverCreated", reason: "os.File.Close on an unattributed file handle"},
 		{fixture: "observablefresh", subject: "TestOpenFileUnknownFlags", reason: "os.File.Close on an unattributed file handle"},
 		{fixture: "observablefresh", subject: "TestOpenFreshDirectoryRead", reason: "os.File.Close on an unattributed file handle"},
@@ -1538,7 +1547,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestJoinParentTraversal", reason: "os.ReadFile"},
 		{fixture: "observablefresh", subject: "TestReservedDevicePath", reason: "os.ReadFile"},
 		{fixture: "observablefresh", subject: "TestPathConcatenation", reason: "os.ReadFile"},
-		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "fmt.Fprintf"},
+		{fixture: "observablefresh", subject: "TestGeneratedPathComparison", reason: "testing.TempDir"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperEscape"},
 		// The boundary extension admits an ignored parameter — nothing
 		// is observed — and the disciplined helper; every refusal shape
@@ -1554,7 +1563,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestFreshPathHelperInLoop"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee"},
 		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "os.File.Close on an unattributed file handle"},
-		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "fmt.Fprintf"},
+		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "os.File.Name on an unattributed file handle"},
 		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
 		// The startup caller is invisible to per-subject call-site
 		// enumeration by design; the startup walk blocks first, and

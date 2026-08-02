@@ -277,7 +277,26 @@ pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
 are channels the testlog cannot audit. Widening the
 audited set changes proof semantics and rides the strategy-version bump like
-any other proof change. The admitted observation set includes the guard-pinned
+any other proof change. The audited set carries the testing harness's
+failure/logging channel — exactly the testing-package symbols named `Fatal`,
+`Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
+`Fail`, and `FailNow`, matched by package and symbol name; the admission is
+sound only while every testing-package declaration of an audited name is the
+harness's shared embedded core or an outcome-only delegate to it (today:
+the core plus `(*F).Fail`, a misuse panic delegating to the core), and the
+toolchain's declaration inventory is walked by an enforcement test so drift
+refuses instead of silently widening — whose
+output lands only in the harness's own in-memory buffer and
+the run's captured output, both already part of the recorded test outcome: the
+channel is output-only for outcome bits (the run-flag presentation state the
+logging path reads shapes recorded-output bytes only and is outside the
+proof's claim), argument method sets stay visible to reachability
+exactly as fmt's Sprint family, and the walk records the reached call as an
+admitted harness fact instead of descending into harness internals. The
+admission applies to statically and RTA-resolved callees only — an
+unresolvable reference stays refused like any other — and the harness's
+ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
+runtime-configuration reads) keep their own classifications. The admitted observation set includes the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
 surfaces — whose value the toolchain guard already fixes, together with read-position
 uses of paths derived from it through constant-component joins: reads under the

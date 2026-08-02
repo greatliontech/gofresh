@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "7309714290afce9c6e897557aa8fcfec083425a89852f3ce25ccdfbcfc582b95"
+  content_hash: "4416bbf9bdf7e500d57b617059ca2a62fd9b24ec54a45db51657ce5ea8efba10"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
   role: BINDING_ROLE_IMPLEMENTS
@@ -102,7 +102,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "7309714290afce9c6e897557aa8fcfec083425a89852f3ce25ccdfbcfc582b95"
+  content_hash: "4416bbf9bdf7e500d57b617059ca2a62fd9b24ec54a45db51657ce5ea8efba10"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
@@ -539,4 +539,31 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/closure.FuzzMaximalClosureFloor"
   role: BINDING_ROLE_TESTS
   shape_hash: "2ff5f86b5a7fb362f293bfd5299a6ab40fc4948bffb347836ee38d69f5690a3f"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "4416bbf9bdf7e500d57b617059ca2a62fd9b24ec54a45db51657ce5ea8efba10"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestAuditedHarnessLoggingBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7f11653dfb0077d466c13e1ed94f1f3f13c642bdd37889ebaa17db318f7d5706"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "4416bbf9bdf7e500d57b617059ca2a62fd9b24ec54a45db51657ce5ea8efba10"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingIsNotPurityEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "67adb1189ce80613527443cb2fdf54ae75d687f8ce6d35108dc35acd9dea72f2"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "4416bbf9bdf7e500d57b617059ca2a62fd9b24ec54a45db51657ce5ea8efba10"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingDeclarationInventory"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d2aae91ac426104f9272ec9cb58a3fb1595e139bcbaf1e49db0bf6b18821eaac"
 }

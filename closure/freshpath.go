@@ -120,10 +120,7 @@ func guardPinnedPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 	if callee == nil {
 		return false
 	}
-	pkgPath, name := funcPkgPath(callee), callee.Name()
-	if object := callee.Object(); object != nil {
-		name = object.Name()
-	}
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	if pkgPath == "runtime" && name == "GOROOT" {
 		return true
 	}
@@ -181,10 +178,7 @@ func freshPathValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnal
 		if callee == nil {
 			return false
 		}
-		pkgPath, name := funcPkgPath(callee), callee.Name()
-		if object := callee.Object(); object != nil {
-			name = object.Name()
-		}
+		pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 		if pkgPath == "testing" && name == "TempDir" {
 			return true
 		}
@@ -246,10 +240,7 @@ func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value, 
 	}
 	call := site.Common()
 	callee := call.StaticCallee()
-	pkgPath, name := funcPkgPath(callee), callee.Name()
-	if object := callee.Object(); object != nil {
-		name = object.Name()
-	}
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	// Crossing into a static user function is admitted when every
 	// attributed call site of the callee passes fresh at the value's
 	// positions and the parameter's uses stay within the graph
@@ -513,11 +504,7 @@ func freshRootPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 		if callee == nil {
 			return false
 		}
-		name := callee.Name()
-		if object := callee.Object(); object != nil {
-			name = object.Name()
-		}
-		return funcPkgPath(callee) == "testing" && name == "TempDir"
+		return funcPkgPath(callee) == "testing" && functionSymbolName(callee) == "TempDir"
 	default:
 		return false
 	}

@@ -296,11 +296,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	if analyzer == nil || callee == nil || observableFileMethod(callee) || observableDirEntryCall(site) || isTestingMRun(callee) {
 		return
 	}
-	pkgPath := funcPkgPath(callee)
-	name := callee.Name()
-	if object := callee.Object(); object != nil {
-		name = object.Name()
-	}
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
 	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) {
