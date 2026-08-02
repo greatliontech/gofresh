@@ -6,7 +6,7 @@ dot as standard-library. A local module legally named without a dot
 `nonStandardFunctions`: the startup effect walk — recorded effects and
 the test-main dispatch widen alike — runs over an empty set, and every
 startup refusal silently disappears (observed while probing the
-observability-precision plan's chunk 5: identical fixtures flip every
+test-main dispatch closure that landed as gofresh cb4620d: identical fixtures flip every
 disposition between `module probe` and `module example.com/probe`).
 The classification should consult the module graph the Hasher already
 lists rather than a path-shape heuristic.

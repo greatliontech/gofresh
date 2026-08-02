@@ -3,13 +3,18 @@
 Parked deferrals. Each entry carries a `Lands:` trigger; the doc is deleted
 when its work lands (git holds history).
 
-- **[testing-log-output-defeats-observability](testing-log-output-defeats-observability.md)** — the
-  observability proof classifies `t.Fatal`'s formatted output as unobservable, so file-reading
-  oracles that can fail through it are permanently uncacheable under the observed policy.
-  *Lands: the observability precision pass — the next gofresh plan, opening immediately after
-  this plan's close-out.*
 - **[dotless-module-paths-classified-standard](dotless-module-paths-classified-standard.md)** — isStdImportPath
   treats any dotless first path element as standard-library, so a module named without a
   dot has its whole startup walk silently filtered out and every startup refusal
   (effects and the test-main dispatch widen alike) disabled.
   *Lands: the next gofresh plan.*
+- **[one-dispatch-site-classifier](one-dispatch-site-classifier.md)** — the observability
+  walks grew five partial implementations of one call-site judgment (classification
+  ladders, wrapper-receiver provenance, parameter eligibility, body cuts, diagnostic
+  selection); sketch for collapsing them onto one site classifier.
+  *Lands: the next gofresh plan.*
+- **[startup-effect-precision](startup-effect-precision.md)** — with the subject-tier
+  walls down, 99.5% of cerebro's 2,119 subjects still refuse at STARTUP on
+  argument-insensitive classifications (fmt.Fprintf into local buffers, math/big and
+  fixed-argument time construction, std init closures); measured histogram inside.
+  *Lands: the next gofresh plan — this is its charter.*
