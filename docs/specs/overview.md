@@ -171,9 +171,12 @@ purity assertion, package listing, syntax tree, SSA program, and reachability fa
 used by one fingerprint or verdict MUST belong to the same analysis view — never a
 mixture of cached metadata from an earlier tree with bytes or environment values
 from a later one — because a mixed generation can agree with a recording while
-describing no build that existed. Analysis state does not cross view boundaries;
-constructing a current-tree view re-observes the tree and environment rather than
-inheriting first-use state from an older view. The complete process environment used
+describing no build that existed. Analysis state does not cross view
+generations: constructing a current-tree view re-observes the tree and
+environment rather than inheriting first-use state from an older view,
+while sibling views derived from one parent share that parent's single
+observation by contract (REQ-fresh-producer-view's sibling clause) —
+one generation, never a mixture. The complete process environment used
 for Go commands and package loading is immutable analysis configuration: by default
 the environment captured when the engine is constructed, or an explicit complete
 environment supplied by the caller. Values the go command additionally reads from
@@ -223,7 +226,18 @@ content drift keeps the bare refusal, naming being advisory where detection
 is the comparison itself. The naming is advisory prose for a human or an
 error-wrapping consumer, never a machine grammar; construction-time
 agreement refusals name identically — the construction race is the one
-refusal with no reproduction path afterward.
+refusal with no reproduction path afterward. A view MAY derive sibling
+views over subsets of its subjects: a sibling's recorded facts are
+exclusively the parent's one observation — closures, guards, purity,
+source identities, digests, ledgers, and captured observation proofs —
+so derivation itself observes nothing, and a caller whose parent
+captured proofs batch-wide runs one producer transaction per measured
+subset for one observation; the sibling owns its transaction
+(runtime-evidence attachment and its own validation seal, with a sealed
+parent still free to derive). Comparison-side observation is unchanged:
+a sibling's validation re-observes the tree exactly as any view's, an
+observed capture over a subject whose proof the parent never captured
+computes it fresh, and a subject outside the parent refuses.
 
 **REQ-fresh-context** (behavior): Analysis-view construction, checking —
 maximal and observed alike — and producer validation MUST honor caller

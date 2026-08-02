@@ -34,7 +34,9 @@ var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailab
 
 // View is one immutable observation of the source, build, guards, and purity
 // behind a caller-supplied subject set. It can serve a current check batch or a
-// producer transaction; analysis state is never shared with another View.
+// producer transaction. Analysis state never crosses view generations; within
+// one generation, Sibling derives subset views sharing this view's observation
+// while owning their producer transactions.
 type View struct {
 	mu        sync.RWMutex
 	engine    *Engine
@@ -117,25 +119,9 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		return nil, err
 	}
 
-	unique := make([]Subject, 0, len(subjects))
-	seen := make(map[Subject]bool, len(subjects))
-	packages := make([]string, 0, len(subjects))
-	seenPackage := make(map[string]bool, len(subjects))
-	requests := make([]closure.Subject, 0, len(subjects))
-	for _, subject := range subjects {
-		if subject.Package == "" || subject.Symbol == "" {
-			return nil, fmt.Errorf("gofresh: invalid empty subject %+v", subject)
-		}
-		if seen[subject] {
-			continue
-		}
-		seen[subject] = true
-		unique = append(unique, subject)
-		requests = append(requests, closure.Subject{Package: subject.Package, Symbol: subject.Symbol})
-		if !seenPackage[subject.Package] {
-			seenPackage[subject.Package] = true
-			packages = append(packages, subject.Package)
-		}
+	unique, requests, packages, err := scopeSubjects(subjects)
+	if err != nil {
+		return nil, err
 	}
 
 	first, err := e.observeView(ctx, unique, requests, packages, moduleDir, kind)
@@ -289,16 +275,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 		observation.testVariantLedgers[pkg] = ledger
 	}
-	seenSource := map[string]bool{}
+	sourceGroups := make([][]string, 0, len(requests))
 	for _, request := range requests {
-		for _, path := range sources[request] {
-			if !seenSource[path] {
-				seenSource[path] = true
-				observation.sourceFiles = append(observation.sourceFiles, path)
-			}
-		}
+		sourceGroups = append(sourceGroups, sources[request])
 	}
-	sort.Strings(observation.sourceFiles)
+	observation.sourceFiles = sortedUniqueUnion(sourceGroups)
 	observation.fileDigests = make(map[string]string, len(observation.sourceFiles))
 	for _, path := range observation.sourceFiles {
 		if err := ctx.Err(); err != nil {
@@ -822,6 +803,142 @@ func (v *View) Validate(ctx context.Context) error {
 		return err
 	}
 	return ctx.Err()
+}
+
+// scopeSubjects derives one view scope — the deduplicated subjects,
+// their closure requests, and their unique packages, in first-seen
+// order — the single recipe every view construction and derivation
+// shares, so two scopes over one subject set can never disagree.
+func scopeSubjects(subjects []Subject) (unique []Subject, requests []closure.Subject, packages []string, err error) {
+	seen := make(map[Subject]bool, len(subjects))
+	seenPackage := make(map[string]bool, len(subjects))
+	for _, subject := range subjects {
+		if subject.Package == "" || subject.Symbol == "" {
+			return nil, nil, nil, fmt.Errorf("gofresh: invalid empty subject %+v", subject)
+		}
+		if seen[subject] {
+			continue
+		}
+		seen[subject] = true
+		unique = append(unique, subject)
+		requests = append(requests, closure.Subject{Package: subject.Package, Symbol: subject.Symbol})
+		if !seenPackage[subject.Package] {
+			seenPackage[subject.Package] = true
+			packages = append(packages, subject.Package)
+		}
+	}
+	return unique, requests, packages, nil
+}
+
+// sortedUniqueUnion folds per-subject source-identity lists into the
+// observation's canonical union form — sorted, deduplicated — the one
+// recipe construction and sibling derivation share, so a derived
+// union always compares equal to a freshly observed one on an
+// unchanged tree.
+func sortedUniqueUnion(groups [][]string) []string {
+	seen := map[string]bool{}
+	var union []string
+	for _, group := range groups {
+		for _, path := range group {
+			if !seen[path] {
+				seen[path] = true
+				union = append(union, path)
+			}
+		}
+	}
+	sort.Strings(union)
+	return union
+}
+
+// Sibling derives a view over a subset of this view's subjects that
+// shares this view's single observation: every fact the sibling serves —
+// closures, guards, purity, source identities, digests, ledgers, and
+// captured observation proofs — is the parent's, so no generation can
+// mix (REQ-fresh-coherent-view), and the guards remain the family's one
+// capture (REQ-guard-view-lifetime). What the sibling owns is its
+// producer transaction: fresh runtime-observation attachment state and
+// its own validation seal, so a caller running one producer transaction
+// per measured subset — a mutation campaign's per-target attach and
+// validate cycles — pays the expensive observation once. Validation on
+// a sibling re-observes the tree for comparison exactly as on any view;
+// only the recorded facts are shared. Every requested subject must
+// belong to the parent view. A sealed parent still derives — the
+// sibling's own validation is its drift gate, and the facts are
+// construction-time either way. Inherited captured-proof flags commit
+// the sibling to the observed validation arm: a sibling of an observed
+// parent validates through attachment, exactly as the parent would.
+func (v *View) Sibling(subjects []Subject) (*View, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(subjects) == 0 {
+		return nil, errors.New("gofresh: sibling view requires at least one subject")
+	}
+	parent := make(map[Subject]bool, len(v.subjects))
+	for _, subject := range v.subjects {
+		parent[subject] = true
+	}
+	for _, subject := range subjects {
+		if !parent[subject] {
+			return nil, fmt.Errorf("gofresh: sibling subject %s.%s is not in the parent view", subject.Package, subject.Symbol)
+		}
+	}
+	unique, requests, packages, err := scopeSubjects(subjects)
+	if err != nil {
+		return nil, err
+	}
+	// The narrowed union follows the observation's own recipe (sorted
+	// unique union of the subset's per-subject identities), so a
+	// validation-time observation over the subset compares equal on an
+	// unchanged tree.
+	sourceFilesBySubject := make(map[Subject][]string, len(unique))
+	maximal := make(map[Subject]closure.Closure, len(unique))
+	observable := make(map[Subject]closure.Observability, len(unique))
+	purity := make(map[Subject]string, len(unique))
+	capturedObserved := make(map[Subject]bool, len(unique))
+	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
+	groups := make([][]string, 0, len(unique))
+	for _, subject := range unique {
+		sourceFilesBySubject[subject] = v.sourceFilesBySubject[subject]
+		groups = append(groups, v.sourceFilesBySubject[subject])
+		if contribution, ok := v.maximal[subject]; ok {
+			maximal[subject] = contribution
+		}
+		if proof, ok := v.observable[subject]; ok {
+			observable[subject] = proof
+		}
+		if assertion, ok := v.purity[subject]; ok {
+			purity[subject] = assertion
+		}
+		if v.capturedObserved[subject] {
+			capturedObserved[subject] = true
+		}
+	}
+	sourceFiles := sortedUniqueUnion(groups)
+	for _, pkg := range packages {
+		if ledger, ok := v.testVariantLedgers[pkg]; ok {
+			ledgers[pkg] = ledger
+		}
+	}
+	return &View{
+		engine:               v.engine,
+		subjects:             unique,
+		requests:             requests,
+		packages:             packages,
+		moduleDir:            v.moduleDir,
+		kind:                 v.kind,
+		snapshot:             v.snapshot,
+		maximal:              maximal,
+		observable:           observable,
+		guards:               v.guards,
+		purity:               purity,
+		sourceFiles:          sourceFiles,
+		sourceFilesBySubject: sourceFilesBySubject,
+		fileDigests:          v.fileDigests,
+		testVariantLedgers:   ledgers,
+		capturedObserved:     capturedObserved,
+		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
+		runtimeCurrent:       v.runtimeCurrent,
+	}, nil
 }
 
 // newSeededValidationView builds the validation arm's view from one fresh

@@ -116,8 +116,11 @@ equivalence, and evidence that disagrees with recomputation from source can neve
 make an unsound result look valid.
 
 **REQ-guard-view-lifetime** (invariant): Environment guards MUST be re-observed for
-every new analysis view, with capture shared only by subjects inside that view and
-never memoized by module directory across views. Each view re-observes facts under its
+every new analysis view generation, with capture shared only by subjects inside
+that generation — a derived sibling view shares its parent's guard capture
+exactly as it shares the rest of the parent's one observation
+(REQ-fresh-producer-view's sibling clause) — and never memoized by module
+directory across views. Each view re-observes facts under its
 engine's immutable complete process environment; constructing a new engine captures
 later ambient process-environment drift. A producer view therefore freezes the guards
 inherited by its producing process, while a current view under newly constructed

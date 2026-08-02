@@ -149,7 +149,8 @@ type Verdict struct {
 
 // Engine is immutable analysis configuration. Source, guards, purity directives,
 // and derived analysis state live in an explicit View and never cross view
-// boundaries (REQ-fresh-coherent-view).
+// generations (REQ-fresh-coherent-view); within one generation, sibling views
+// derived from a parent share its recorded facts by contract.
 type Engine struct {
 	assumePure     func(Subject) bool
 	buildFlags     []string

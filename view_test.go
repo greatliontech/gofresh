@@ -3006,3 +3006,270 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		t.Fatalf("capture-to-validate drift refused after %d observations, want 1 (the seeded read)", observations)
 	}
 }
+
+// A sibling view shares the parent's single observation — identical
+// fingerprints, zero additional observation passes — while carrying its
+// own producer transaction: the parent's validation seal never blocks a
+// sibling's attach/validate cycle, and one subject attaches its own
+// runtime evidence once per sibling (the per-target transaction shape a
+// mutation campaign runs). REQ-fresh-coherent-view: nothing the sibling
+// serves is re-read.
+func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/sibling\n\ngo 1.26\n",
+		"a/a.go": "package a\n\nfunc F() int { return 1 }\n",
+		"b/b.go": "package b\n\nfunc G() int { return 2 }\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aF := Subject{Package: "example.com/sibling/a", Symbol: "F"}
+	bG := Subject{Package: "example.com/sibling/b", Symbol: "G"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := engine.NewView(context.Background(), []Subject{aF, bG}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentF, err := parent.Capture(context.Background(), aF)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observations := 0
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
+	siblingOne, err := parent.Sibling([]Subject{aF})
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingTwo, err := parent.Sibling([]Subject{aF, bG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observations != 0 {
+		t.Fatalf("sibling derivation performed %d observations, want 0 — every served fact must be the parent's", observations)
+	}
+	if _, err := parent.Sibling([]Subject{{Package: "example.com/sibling/a", Symbol: "Absent"}}); err == nil {
+		t.Fatal("sibling over a subject outside the parent view derived, want refusal")
+	}
+	oneF, err := siblingOne.Capture(context.Background(), aF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oneF != parentF {
+		t.Fatalf("sibling fingerprint = %+v, parent = %+v — shared observation must serve identical evidence", oneF, parentF)
+	}
+
+	// The parent's validation seals only the parent's transaction.
+	if err := parent.Validate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parent.Capture(context.Background(), aF); err == nil {
+		t.Fatal("parent capture after validation succeeded, want the seal")
+	}
+	if _, err := siblingOne.Capture(context.Background(), aF); err != nil {
+		t.Fatalf("sibling capture after the parent's validation: %v", err)
+	}
+	if err := siblingOne.Validate(context.Background()); err != nil {
+		t.Fatalf("sibling validation after the parent's: %v", err)
+	}
+	// A sealed parent still derives: the facts are construction-time and
+	// the sibling's own validation is its drift gate. This parent never
+	// captured an observed proof, so the derived sibling's observed
+	// capture computes one fresh rather than serving an absent
+	// inherited proof.
+	sealedSibling, err := parent.Sibling([]Subject{aF})
+	if err != nil {
+		t.Fatalf("sibling derivation from a sealed parent: %v", err)
+	}
+	observations = 0
+	if _, err := sealedSibling.CaptureObserved(context.Background(), aF); err != nil {
+		t.Fatalf("observed capture over a subject the parent never captured: %v", err)
+	}
+	if observations == 0 {
+		t.Fatal("proof-less observed capture completed without observing, want a fresh proof computation")
+	}
+	// A sibling sealed by its own validation never seals the family, and
+	// a single-subject sibling's validation compares against the SUBSET's
+	// source union — the parent's wider union would refuse an unchanged
+	// tree.
+	if _, err := siblingTwo.Capture(context.Background(), bG); err != nil {
+		t.Fatalf("second sibling capture after first sibling's validation: %v", err)
+	}
+	if err := siblingTwo.Validate(context.Background()); err != nil {
+		t.Fatalf("second sibling validation: %v", err)
+	}
+
+	// Runtime-evidence attachment is per sibling: two siblings attach the
+	// same subject's evidence independently, and one sibling attaches a
+	// subject once.
+	attachParent, err := engine.NewView(context.Background(), []Subject{aF, bG}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedFPs, err := attachParent.CaptureObservedBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachOne, err := attachParent.Sibling([]Subject{aF})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachTwo, err := attachParent.Sibling([]Subject{aF, bG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.IncompleteEnv(dir, "probe", "probe reason", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := attachOne.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+		t.Fatalf("first sibling attach: %v", err)
+	}
+	if _, err := attachTwo.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+		t.Fatalf("second sibling attach of the same subject: %v", err)
+	}
+	if _, err := attachOne.AttachObservation(aF, observedFPs[aF], observation); err == nil {
+		t.Fatal("re-attachment on one sibling succeeded, want the once-per-transaction refusal")
+	}
+	// The campaign's endgame: a sibling of an observed parent attaches
+	// its target's runtime evidence and validates through the observed
+	// arm on an unchanged tree.
+	if _, err := attachTwo.AttachObservation(bG, observedFPs[bG], observation); err != nil {
+		t.Fatal(err)
+	}
+	if err := attachTwo.Validate(context.Background()); err != nil {
+		t.Fatalf("observed-arm sibling validation on an unchanged tree: %v", err)
+	}
+	// Subject order never shapes the narrowed union: a reversed-order
+	// sibling over both packages still validates the unchanged tree (the
+	// union recipe sorts; an order-carrying union would falsely refuse).
+	reversed, err := attachParent.Sibling([]Subject{bG, aF})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reversed.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reversed.AttachObservation(bG, observedFPs[bG], observation); err != nil {
+		t.Fatal(err)
+	}
+	if err := reversed.Validate(context.Background()); err != nil {
+		t.Fatalf("reversed-order sibling validation on an unchanged tree: %v", err)
+	}
+}
+
+// A drifted tree refuses a sibling's validation exactly as any view's:
+// sharing the parent's recorded facts never weakens the compare side.
+func TestSiblingValidationRefusesDrift(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/siblingdrift\n\ngo 1.26\n",
+		"a/a.go": "package a\n\nfunc F() int { return 1 }\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aF := Subject{Package: "example.com/siblingdrift/a", Symbol: "F"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := engine.NewView(context.Background(), []Subject{aF}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := parent.Sibling([]Subject{aF})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "a.go"), []byte("package a\n\nfunc F() int { return 3 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sibling.Validate(context.Background()); err == nil {
+		t.Fatal("sibling validated a drifted tree, want refusal")
+	}
+}
+
+// A sibling whose one subject's closure spans two in-module packages
+// derives a narrowed union that still covers the full cross-package
+// closure and compares equal to a fresh subset observation on an
+// unchanged tree. This leg pins the cross-package narrowing only;
+// order canonicalization is TestSortedUniqueUnionCanonicalizes' pin —
+// every production feeder arrives pre-sorted, so no integration path
+// can discriminate the recipe's own sort.
+func TestSiblingCrossPackageClosureValidatesUnchangedTree(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/siblingdeps\n\ngo 1.26\n",
+		"a/a.go": "package a\n\nimport \"example.com/siblingdeps/b\"\n\nfunc F() int { return b.G() }\n",
+		"b/b.go": "package b\n\nfunc G() int { return 2 }\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aF := Subject{Package: "example.com/siblingdeps/a", Symbol: "F"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := engine.NewView(context.Background(), []Subject{aF}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := parent.Sibling([]Subject{aF})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Guard against vacuity: the one subject's union must really span
+	// both packages, or the cross-package claim above tests nothing.
+	var hasA, hasB bool
+	for _, f := range sibling.SourceFiles() {
+		if strings.HasSuffix(f, filepath.Join("a", "a.go")) {
+			hasA = true
+		}
+		if strings.HasSuffix(f, filepath.Join("b", "b.go")) {
+			hasB = true
+		}
+	}
+	if !hasA || !hasB {
+		t.Fatalf("cross-package closure union = %v, want both packages' sources", sibling.SourceFiles())
+	}
+	if err := sibling.Validate(context.Background()); err != nil {
+		t.Fatalf("cross-package-closure sibling validation on an unchanged tree: %v", err)
+	}
+}
+
+// sortedUniqueUnion's sorted, deduplicated output is the union recipe's
+// own contract — the canonical form is what lets a derived union compare
+// equal to a freshly observed one REGARDLESS of feeder order. Every
+// production feeder today happens to arrive pre-sorted (the closure
+// layer sorts per-package lists, and per-subject clones are sorted at
+// store time), so this pin — not any integration path — is what holds
+// the recipe to canonicalizing rather than trusting its callers.
+func TestSortedUniqueUnionCanonicalizes(t *testing.T) {
+	got := sortedUniqueUnion([][]string{{"b/b.go", "a/a.go"}, {"a/a.go", "c/c.go"}})
+	want := []string{"a/a.go", "b/b.go", "c/c.go"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("sortedUniqueUnion = %v, want %v", got, want)
+	}
+}
