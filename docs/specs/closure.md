@@ -308,7 +308,14 @@ admission applies to statically and RTA-resolved callees only — an
 unresolvable reference stays refused like any other — and the harness's
 ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
 runtime-configuration reads) keep their own classifications. An interface
-dispatch the walk cannot resolve widens the subject world, with one
+dispatch the walk cannot resolve widens the subject world — the synthetic
+interface-method wrapper family (any interface, the harness included)
+carries the same obligation in the closed-value walk itself: a bound
+wrapper's closure value closes only through its captured receiver, a
+thunk value never closes (its receiver arrives at call sites the value
+walk cannot see) and a static thunk call judges its receiver argument, so
+a wrapper over sibling-planted shared state refuses exactly as the direct
+invoke would, whatever carried the wrapper to the call — with one
 harness-dispatch admission: a site does not widen when its RTA-enumerated,
 subject-attributed target set is non-empty and entirely audited harness
 methods AND the dispatch operand's dynamic types are fully determined by
@@ -324,15 +331,20 @@ enumeration cannot see. A target set containing any non-harness method
 keeps the widen regardless of that target's own effects, because
 classifiability is a property of the dispatch shape, never of what the
 extra target happens to do. The maximal scan's receiver-escape rejection
-is package-scan diagnostic, not a package blocker, for packages without a
-user TestMain: every subject-tier dispatch on an escaped harness value is
-classified — admitted only under this admission, widened or
-effect-recorded otherwise — so the whole-package negative backstop must
-not pre-block what the walk classifies. A package with a user TestMain
-keeps the escape backstop, because startup flow after the harness run can
-dispatch a test-planted value and the startup walk records attributed
-effects but cannot widen an unattributed invoke; the scoping lifts when
-the startup walk learns to widen. The admitted observation set includes the guard-pinned
+is package-scan diagnostic, not a package blocker: every subject-tier
+dispatch on an escaped harness value is classified — admitted only under
+this admission, widened or effect-recorded otherwise — and user test-main
+flow, the one startup flow that can dispatch a test-planted value after
+the harness run, widens the startup result on any dispatch whose provenance
+is not locally closed — the operand under the same wrapper-carrying
+closed-value walk, with a static thunk call judged by its receiver
+argument, because the wrapper family's toolchain-attributed bodies
+perform the real dispatch where no walk records effects; the planted
+channel is a load from shared mutable state, while a test-main's own
+constructions keep their classification — blocking the proof like any
+other startup effect. Initializer flow keeps attributed-effect recording alone:
+nothing is plantable before tests run, so an initializer's unattributed
+dispatch is not the demonstrated channel and stays unwidened. The admitted observation set includes the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
 surfaces — whose value the toolchain guard already fixes, together with read-position
 uses of paths derived from it through constant-component joins: reads under the

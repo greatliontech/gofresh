@@ -35,7 +35,7 @@ Spec: docs/specs/closure.md (REQ-closure-observability-analysis, REQ-closure-obs
   (anchor: the d2cf048 measurement record — stall 100.5s on the cerebro repro at
   9d0fe5a2) via the tailprobe instrument; fix per the diagnosis at the narrowest
   level, or decompose into sub-chunks if the mechanism demands it.
-- [ ] 5. Startup-flow dispatch closure: `directExternalEffects` records
+- [x] 5. Startup-flow dispatch closure: `directExternalEffects` records
   classified static and attributed dynamic-target effects but cannot widen an
   invoke with no attributed targets, so a `TestMain` dispatching on a
   test-planted global after `m.Run()` reaches effects the startup walk never

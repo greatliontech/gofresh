@@ -1065,7 +1065,37 @@ func closedDynamicValue(value ssa.Value, seen, done map[ssa.Value]bool, fp *fres
 
 func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	switch v := value.(type) {
-	case *ssa.Function, *ssa.Builtin, *ssa.Const, *ssa.MakeClosure, *ssa.MakeInterface:
+	case *ssa.Builtin, *ssa.Const:
+		return true
+	case *ssa.MakeInterface:
+		// An interface value pins its dynamic type at this instruction —
+		// closed for dispatch enumeration. A FUNCTION laundered through an
+		// interface is different: an interface is never invoked as a
+		// function (its contents must be asserted back out first), so the
+		// walk here is judging the function value's provenance, and the
+		// interface hop must not wash the wrapper obligation — recurse.
+		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc {
+			return closedDynamicValue(v.X, seen, done, fp)
+		}
+		return true
+	case *ssa.Function:
+		// A synthetic interface-method thunk as a VALUE is never closed:
+		// its receiver arrives at call sites the value walk cannot see.
+		// Direct static calls to a thunk judge the receiver argument at
+		// the site instead and never consult the value walk for it.
+		return !(syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0)
+	case *ssa.MakeClosure:
+		// A synthetic interface-method bound wrapper performs the real
+		// dispatch on its captured receiver inside a body no walk scans:
+		// the closure value is closed only through its bindings, whatever
+		// later carries it to a call site.
+		if fn, ok := v.Fn.(*ssa.Function); ok && syntheticInterfaceMethodWrapper(fn) {
+			for _, binding := range v.Bindings {
+				if !closedDynamicValue(binding, seen, done, fp) {
+					return false
+				}
+			}
+		}
 		return true
 	case *ssa.ChangeInterface:
 		return closedDynamicValue(v.X, seen, done, fp)
@@ -1123,4 +1153,39 @@ func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool,
 		}
 	}
 	return true
+}
+
+// syntheticInterfaceMethodWrapper reports whether fn is a compiler
+// synthetic (bound wrapper or thunk) over an interface method: the one
+// wrapper family whose std-attributed body performs a real dynamic
+// dispatch the walks never scan, so the dispatch provenance must be
+// read at the wrapper's call site instead.
+func syntheticInterfaceMethodWrapper(fn *ssa.Function) bool {
+	if fn == nil || fn.Synthetic == "" {
+		return false
+	}
+	obj, ok := fn.Object().(*types.Func)
+	if !ok || obj == nil {
+		return false
+	}
+	sig, ok := obj.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	_, isInterface := types.Unalias(sig.Recv().Type()).Underlying().(*types.Interface)
+	return isInterface
+}
+
+// wrapperReceiver returns the value carrying a static wrapper call's
+// dispatch provenance: a thunk's receiver argument (thunks close over
+// nothing and take the receiver first), or the operand itself for a
+// bound wrapper — whose bindings the closed-value walk already gates.
+func wrapperReceiver(c *ssa.CallCommon, callee *ssa.Function) ssa.Value {
+	if len(callee.FreeVars) == 0 {
+		if len(c.Args) == 0 {
+			return nil
+		}
+		return c.Args[0]
+	}
+	return c.Value
 }

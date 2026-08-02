@@ -234,6 +234,13 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		}
 		return Observability{Reason: "startup effect: " + reason}, nil
 	}
+	if startupResult.widen {
+		reason := startupResult.widenReason
+		if reason == "" {
+			reason = "startup dispatch is not closed"
+		}
+		return Observability{Reason: "startup effect: " + reason}, nil
+	}
 	if subjectResult.widen || subjectReach.openWorld {
 		reason := subjectResult.widenReason
 		if reason == "" {
@@ -246,7 +253,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		return Observability{}, err
 	}
 	for _, effect := range maximalEffects {
-		if maximalObservabilityBlocker(effect, base.prog.TestMain != nil) {
+		if maximalObservabilityBlocker(effect) {
 			// The tier names itself: a package-scan block is the
 			// whole-package negative backstop, not the subject's own
 			// attributed flow — measurably distinct, so a corpus can
@@ -292,6 +299,19 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 					continue
 				}
 				callee := site.Common().StaticCallee()
+				// User test-main flow is the one startup flow that can
+				// dispatch a test-planted value (after m.Run). The planted
+				// channel is always a load from shared mutable state, so any
+				// dispatch here — interface invoke or computed call alike —
+				// widens unless its operand is locally closed; a static
+				// callee is an *ssa.Function, closed by construction, so a
+				// test-main's own calls and constructions keep today's
+				// shape. Initializer flow stays unwidened: nothing is
+				// plantable before tests run
+				// (REQ-closure-observability-analysis's startup clause).
+				if reachable.testMainFunctions[function] && !testMainDispatchClosed(site) {
+					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
+				}
 				if callee != nil {
 					recordDirectCallEffect(analyzer, callee, site)
 				}
@@ -305,6 +325,24 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 		}
 	}
 	return analyzer.result()
+}
+
+// testMainDispatchClosed reports whether a test-main call site's
+// dispatch provenance is the flow's own. A static call to a synthetic
+// interface-method wrapper judges the receiver (a thunk's first
+// argument, a bound wrapper's operand — whose bindings the closed-value
+// walk gates wherever the closure value derives); every other site
+// judges the operand. The wrapper family's toolchain-attributed bodies
+// perform the real dispatch and no walk scans them; a user-written
+// closure needs no such check — its body stays user-attributed and the
+// walk records its effects.
+func testMainDispatchClosed(site ssa.CallInstruction) bool {
+	c := site.Common()
+	if callee := c.StaticCallee(); callee != nil && syntheticInterfaceMethodWrapper(callee) {
+		receiver := wrapperReceiver(c, callee)
+		return receiver != nil && locallyClosedDynamicValue(receiver, make(map[ssa.Value]bool))
+	}
+	return locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
 }
 
 func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.CallInstruction) {
@@ -341,21 +379,18 @@ func nonStandardFunctions(functions map[*ssa.Function]bool) map[*ssa.Function]bo
 	return filtered
 }
 
-func maximalObservabilityBlocker(effect externalEffect, hasUserTestMain bool) bool {
+func maximalObservabilityBlocker(effect externalEffect) bool {
 	if effect.packagePath == "testing" && effect.symbol == "Run" {
 		return false
 	}
-	// The receiver-escape rejection is package-scan diagnostic for
-	// packages without a user TestMain: the subject tier classifies every
-	// subject-tier dispatch on an escaped harness value precisely —
-	// audited-harness invokes are admitted, everything else widens or
-	// records its own effect. A package WITH a user TestMain keeps the
-	// backstop: startup flow after m.Run() can dispatch a test-planted
-	// value, and the startup walk records attributed effects but cannot
-	// widen an unattributed invoke (REQ-closure-observability-analysis;
-	// the scoping lifts when the startup walk learns to widen).
+	// The receiver-escape rejection is package-scan diagnostic, never a
+	// package blocker: subject-tier dispatch on an escaped harness value
+	// is classified precisely (admitted, widened, or effect-recorded),
+	// and user test-main flow — the one startup flow that can dispatch a
+	// test-planted value — widens on any invoke the startup walk cannot
+	// enumerate (REQ-closure-observability-analysis).
 	if effect.reason == "testing runtime value escapes analyzable receiver" {
-		return hasUserTestMain
+		return false
 	}
 	// The subject tier classifies the guard-pinned toolchain accessor
 	// precisely; the maximal AST scan must not pre-block it.

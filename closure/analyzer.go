@@ -665,6 +665,19 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		return
 	}
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
+	// A synthetic interface-method wrapper — any interface, the harness
+	// included — performs the real dispatch inside a body no walk scans,
+	// so the receiver's provenance is judged at the call site: a wrapper
+	// over sibling-planted shared state refuses exactly as the direct
+	// invoke would, while a subject-closed receiver keeps the wrapped
+	// method's ordinary classification.
+	if !callerStd && syntheticInterfaceMethodWrapper(callee) {
+		receiver := wrapperReceiver(c, callee)
+		if receiver == nil || !subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), a.fresh) {
+			a.requestWiden("interface dispatch on unattributable state in " + caller.String())
+			return
+		}
+	}
 	if auditedHarnessLogging(pkgPath, name) {
 		a.recordExternalEffect(harnessLoggingEffect(name))
 		return

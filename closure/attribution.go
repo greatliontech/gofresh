@@ -14,8 +14,12 @@ type attributedReachability struct {
 	functions        map[*ssa.Function]bool
 	subjectFunctions map[*ssa.Function]bool
 	startupFunctions map[*ssa.Function]bool
-	resolved         map[ssa.CallInstruction]bool
-	dynamicTargets   map[ssa.CallInstruction]map[*ssa.Function]bool
+	// testMainFunctions is the user-TestMain-flow slice of the startup
+	// provenance: the one startup flow that can dispatch a test-planted
+	// value (after m.Run), so the one whose unattributed invokes widen.
+	testMainFunctions map[*ssa.Function]bool
+	resolved          map[ssa.CallInstruction]bool
+	dynamicTargets    map[ssa.CallInstruction]map[*ssa.Function]bool
 	// instantiatedOrigins marks parameterized origins whose materialized
 	// instantiations were rooted for this subject: the origin's body
 	// scan yields to theirs.
@@ -143,6 +147,12 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res)
 		if err != nil {
 			return nil, err
+		}
+		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
+			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for fn, masks := range res.Reachable {
 			if masks&mask != 0 {

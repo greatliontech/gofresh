@@ -86,8 +86,12 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // diagnostic causal-first — the proof names the highest-ranked
 // blocking effect under the shared cause-preference order (structural
 // findings and mutations before generic reads before ambient
-// classifications) instead of the projection's first blocking entry.
-const ObservationRTA = "gofresh/observation-rta@9"
+// classifications) instead of the projection's first blocking entry;
+// @10 widens user test-main flow on any dispatch whose operand is not
+// locally closed (the one startup flow that can run a test-planted
+// value; interface invokes and computed calls alike) and fully lifts
+// the receiver-escape package backstop it replaces.
+const ObservationRTA = "gofresh/observation-rta@10"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
