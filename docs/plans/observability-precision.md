@@ -31,7 +31,7 @@ Spec: docs/specs/closure.md (REQ-closure-observability-analysis, REQ-closure-obs
   reason rank onto `externalEffect.kind` (the rank currently re-derives the
   classification by substring), so one preference mechanism serves both
   projections.
-- [ ] 4. Observe-path stall: diagnose the ~100s warm-run stall in the observe phase
+- [x] 4. Observe-path stall: diagnose the ~100s warm-run stall in the observe phase
   (anchor: the d2cf048 measurement record — stall 100.5s on the cerebro repro at
   9d0fe5a2) via the tailprobe instrument; fix per the diagnosis at the narrowest
   level, or decompose into sub-chunks if the mechanism demands it.
