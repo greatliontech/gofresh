@@ -32,5 +32,4 @@ attributed to `testing.TempDir`) exists. A preference order over blocking
 effects — causal attributions first — restores the pointed diagnostics
 without giving up determinism.
 
-Lands: the observability precision pass — the next gofresh plan,
-opening immediately after this plan's close-out (chunk 12).
+Lands: the observability precision pass — the next gofresh plan.

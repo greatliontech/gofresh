@@ -531,3 +531,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "f56e08cbb45b631a81a8ecbc0776aff759fc4c495a062101c1f489a7d957728f"
 }
+
+bindings {
+  requirement_id: "REQ-closure-batch-equivalence"
+  content_hash: "9e1a4a09163cb76ef01b2a3f144774a4f445bb0dae41477111bb2ce67763616e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzMaximalClosureFloor"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2ff5f86b5a7fb362f293bfd5299a6ab40fc4948bffb347836ee38d69f5690a3f"
+}
