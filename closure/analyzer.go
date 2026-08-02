@@ -36,6 +36,23 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		if callerIdx == nil || callerIdx.testMain {
 			continue
 		}
+		// The harness-dispatch admission: a site whose enumerated target
+		// set is non-empty and entirely audited harness methods does not
+		// widen (REQ-closure-observability-analysis). The bound is the
+		// target SET — one non-harness target keeps the widen regardless
+		// of that target's own effects.
+		if a.rtaResolved[site] && !a.openWorld && len(targets) != 0 {
+			allHarness := true
+			for target := range targets {
+				if !harnessLoggingFunction(target) {
+					allHarness = false
+					break
+				}
+			}
+			if allHarness {
+				a.harnessOnlyInvokes[site] = true
+			}
+		}
 		for target := range targets {
 			if observableDirEntryCall(site) {
 				continue
@@ -158,6 +175,10 @@ type tier2Analyzer struct {
 	filePkgs    map[*pkgIndex]bool
 	rtaReach    map[*ssa.Function]bool
 	rtaResolved map[ssa.CallInstruction]bool
+	// harnessOnlyInvokes marks invoke sites whose RTA-enumerated target
+	// set is entirely audited harness methods: the one dispatch shape an
+	// unresolved invoke may take without widening the subject world.
+	harnessOnlyInvokes map[ssa.CallInstruction]bool
 	// fresh carries the subject's cross-boundary fresh-path analysis;
 	// nil outside per-subject reachability walks (maximal tier,
 	// startup effects), where the intraprocedural grammar alone applies.
@@ -226,20 +247,21 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 
 func (b *tier2Base) analyzer() *tier2Analyzer {
 	return &tier2Analyzer{
-		h:                b.h,
-		buildFlags:       b.buildFlags,
-		prog:             b.prog,
-		metas:            b.metas,
-		metaByPath:       b.metaByPath,
-		idxByTypes:       b.idxByTypes,
-		objByName:        b.objByName,
-		objsByLinkTarget: b.objsByLinkTarget,
-		seenObjects:      map[types.Object]bool{},
-		seenTypes:        map[types.Type]bool{},
-		filePkgs:         map[*pkgIndex]bool{},
-		rtaReach:         map[*ssa.Function]bool{},
-		rtaResolved:      map[ssa.CallInstruction]bool{},
-		scanned:          map[*ssa.Function]bool{},
+		h:                  b.h,
+		buildFlags:         b.buildFlags,
+		prog:               b.prog,
+		metas:              b.metas,
+		metaByPath:         b.metaByPath,
+		idxByTypes:         b.idxByTypes,
+		objByName:          b.objByName,
+		objsByLinkTarget:   b.objsByLinkTarget,
+		seenObjects:        map[types.Object]bool{},
+		seenTypes:          map[types.Type]bool{},
+		filePkgs:           map[*pkgIndex]bool{},
+		rtaReach:           map[*ssa.Function]bool{},
+		rtaResolved:        map[ssa.CallInstruction]bool{},
+		harnessOnlyInvokes: map[ssa.CallInstruction]bool{},
+		scanned:            map[*ssa.Function]bool{},
 	}
 }
 
@@ -629,7 +651,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		return
 	}
 	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
-	if c.IsInvoke() && !resolved && !callerStd {
+	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.harnessOnlyInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
 		a.requestWiden("interface invoke outside RTA")
 	}
 	if !c.IsInvoke() && c.StaticCallee() == nil {

@@ -1018,39 +1018,109 @@ func observableFileMethod(fn *ssa.Function) bool {
 	}
 }
 
+// locallyClosedDynamicValue is the intraprocedural projection of
+// subjectClosedDynamicValue: with no caller-edge analysis, the
+// parameter arm fails closed, so only locally constructed values close.
 func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
-	if value == nil || seen[value] {
+	return subjectClosedDynamicValue(value, seen, nil)
+}
+
+// subjectClosedDynamicValue extends locallyClosedDynamicValue across
+// exactly one boundary kind: a parameter is subject-closed when every
+// subject-attributed call site of its function passes a subject-closed
+// value at its position, so the operand's dynamic types are fully
+// determined by the subject's own flow. A load from a global or field
+// refuses: analysis is subject-scoped but the process heap is shared,
+// so a sibling subject's runtime flow can plant an implementation the
+// subject's attributed enumeration cannot see
+// (REQ-closure-observability-analysis's harness-dispatch admission).
+func subjectClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	return closedDynamicValue(value, seen, map[ssa.Value]bool{}, fp)
+}
+
+// closedDynamicValue walks with a gray set (cycle guard — one value
+// legitimately feeds several call sites of one parameter, so a
+// completed evaluation must not poison the next) and a done memo (a
+// completed result is reused, bounding the walk linearly where DAG
+// revisits would otherwise re-evaluate exponentially). A refusal forced
+// by a gray ancestor memoizes conservatively: deterministic under SSA
+// operand order, fail-closed, never a wrong acceptance — gray only ever
+// forces false and every combinator is conjunctive.
+func closedDynamicValue(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if value == nil {
+		return false
+	}
+	if r, ok := done[value]; ok {
+		return r
+	}
+	if seen[value] {
 		return false
 	}
 	seen[value] = true
-	switch value := value.(type) {
-	case *ssa.Function, *ssa.Builtin, *ssa.Const, *ssa.MakeClosure:
-		return true
-	case *ssa.MakeInterface:
+	defer delete(seen, value)
+	r := closedDynamicValueUncached(value, seen, done, fp)
+	done[value] = r
+	return r
+}
+
+func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	switch v := value.(type) {
+	case *ssa.Function, *ssa.Builtin, *ssa.Const, *ssa.MakeClosure, *ssa.MakeInterface:
 		return true
 	case *ssa.ChangeInterface:
-		return locallyClosedDynamicValue(value.X, seen)
+		return closedDynamicValue(v.X, seen, done, fp)
 	case *ssa.TypeAssert:
-		// Asserting narrows the dynamic-type set of X, never widens it:
-		// the asserted value is closed exactly when its operand is.
-		return locallyClosedDynamicValue(value.X, seen)
+		return closedDynamicValue(v.X, seen, done, fp)
 	case *ssa.ChangeType:
-		return locallyClosedDynamicValue(value.X, seen)
+		return closedDynamicValue(v.X, seen, done, fp)
 	case *ssa.Convert:
-		return locallyClosedDynamicValue(value.X, seen)
+		return closedDynamicValue(v.X, seen, done, fp)
 	case *ssa.Phi:
-		if len(value.Edges) == 0 {
+		if len(v.Edges) == 0 {
 			return false
 		}
-		for _, edge := range value.Edges {
-			if !locallyClosedDynamicValue(edge, seen) {
+		for _, edge := range v.Edges {
+			if !closedDynamicValue(edge, seen, done, fp) {
 				return false
 			}
 		}
 		return true
 	case *ssa.Extract:
-		return locallyClosedDynamicValue(value.Tuple, seen)
+		return closedDynamicValue(v.Tuple, seen, done, fp)
+	case *ssa.Parameter:
+		return subjectClosedParameter(v, seen, done, fp)
 	default:
 		return false
 	}
+}
+
+func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	fn := param.Parent()
+	if fn == nil || fp == nil || fp.dynamic[fn] || len(fn.FreeVars) > 0 || fn.Signature.Variadic() {
+		return false
+	}
+	idx := -1
+	for i, p := range fn.Params {
+		if p == param {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	sites := fp.callers[fn]
+	if len(sites) == 0 {
+		// No attributed caller means no provable provenance — fail closed.
+		// (The subject root's own harness parameter never reaches here: it
+		// is concrete *testing.T/B/F, and every concrete-to-interface
+		// boundary materializes a MakeInterface the walk closes on.)
+		return false
+	}
+	for _, site := range sites {
+		args := site.Common().Args
+		if idx >= len(args) || !closedDynamicValue(args[idx], seen, done, fp) {
+			return false
+		}
+	}
+	return true
 }

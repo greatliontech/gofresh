@@ -296,7 +296,32 @@ admitted harness fact instead of descending into harness internals. The
 admission applies to statically and RTA-resolved callees only — an
 unresolvable reference stays refused like any other — and the harness's
 ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
-runtime-configuration reads) keep their own classifications. The admitted observation set includes the guard-pinned
+runtime-configuration reads) keep their own classifications. An interface
+dispatch the walk cannot resolve widens the subject world, with one
+harness-dispatch admission: a site does not widen when its RTA-enumerated,
+subject-attributed target set is non-empty and entirely audited harness
+methods AND the dispatch operand's dynamic types are fully determined by
+the subject's own flow — the operand derives from local construction or
+from a parameter whose function is not dynamically targeted, closes over
+nothing, is not variadic, and has at least one subject-attributed call
+site, every such site feeding a subject-closed value (zero enumerable
+callers is absence of provenance, refused, never a vacuous pass); a load
+from shared mutable state refuses, because analysis is
+subject-scoped while the process heap is shared, so a sibling subject's
+runtime flow can plant an implementation the subject's attributed
+enumeration cannot see. A target set containing any non-harness method
+keeps the widen regardless of that target's own effects, because
+classifiability is a property of the dispatch shape, never of what the
+extra target happens to do. The maximal scan's receiver-escape rejection
+is package-scan diagnostic, not a package blocker, for packages without a
+user TestMain: every subject-tier dispatch on an escaped harness value is
+classified — admitted only under this admission, widened or
+effect-recorded otherwise — so the whole-package negative backstop must
+not pre-block what the walk classifies. A package with a user TestMain
+keeps the escape backstop, because startup flow after the harness run can
+dispatch a test-planted value and the startup walk records attributed
+effects but cannot widen an unattributed invoke; the scoping lifts when
+the startup walk learns to widen. The admitted observation set includes the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
 surfaces — whose value the toolchain guard already fixes, together with read-position
 uses of paths derived from it through constant-component joins: reads under the

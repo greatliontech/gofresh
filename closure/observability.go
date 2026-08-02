@@ -246,7 +246,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		return Observability{}, err
 	}
 	for _, effect := range maximalEffects {
-		if maximalObservabilityBlocker(effect) {
+		if maximalObservabilityBlocker(effect, base.prog.TestMain != nil) {
 			// The tier names itself: a package-scan block is the
 			// whole-package negative backstop, not the subject's own
 			// attributed flow — measurably distinct, so a corpus can
@@ -326,9 +326,21 @@ func nonStandardFunctions(functions map[*ssa.Function]bool) map[*ssa.Function]bo
 	return filtered
 }
 
-func maximalObservabilityBlocker(effect externalEffect) bool {
+func maximalObservabilityBlocker(effect externalEffect, hasUserTestMain bool) bool {
 	if effect.packagePath == "testing" && effect.symbol == "Run" {
 		return false
+	}
+	// The receiver-escape rejection is package-scan diagnostic for
+	// packages without a user TestMain: the subject tier classifies every
+	// subject-tier dispatch on an escaped harness value precisely —
+	// audited-harness invokes are admitted, everything else widens or
+	// records its own effect. A package WITH a user TestMain keeps the
+	// backstop: startup flow after m.Run() can dispatch a test-planted
+	// value, and the startup walk records attributed effects but cannot
+	// widen an unattributed invoke (REQ-closure-observability-analysis;
+	// the scoping lifts when the startup walk learns to widen).
+	if effect.reason == "testing runtime value escapes analyzable receiver" {
+		return hasUserTestMain
 	}
 	// The subject tier classifies the guard-pinned toolchain accessor
 	// precisely; the maximal AST scan must not pre-block it.
