@@ -73,7 +73,11 @@ type View struct {
 	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
 	// beforePreciseAnalysis observes the start of drift-forced precise analysis
 	// (the observability proof). Tests use it to pin which check paths run
-	// analysis and to inject cancellation at the analysis boundary.
+	// analysis and to inject cancellation at the analysis boundary. It stays
+	// per-view — outside the package-level viewTestHooks surface — because
+	// its granularity is load-bearing: pass-economy tests count analyses on
+	// one view while another is live, which a package-global hook cannot
+	// attribute.
 	beforePreciseAnalysis func()
 }
 

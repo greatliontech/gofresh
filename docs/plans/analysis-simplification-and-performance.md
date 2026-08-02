@@ -51,8 +51,9 @@ chunks 1–2 are spec amendments).
       module-pin/pinned-classification sites, per-batch key and
       compartment-identity derivations, and the duplicated unsafe-widen
       sites each collapse onto one home; the per-view
-      beforePreciseAnalysis seam either joins the viewTestHooks surface
-      or stays deliberately per-view (user's call at close-out); the
+      beforePreciseAnalysis seam stays deliberately per-view (user
+      decision at close-out: its granularity is load-bearing for
+      pass-economy counting across live views); the
       facade suite's user-cache isolation stays XDG-scoped with the
       rationale recorded at close-out (HOME participates in go tooling
       env, so a portable override needs its own design).
