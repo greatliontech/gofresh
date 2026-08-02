@@ -37,7 +37,7 @@ chunks 1–2 are spec amendments).
       observability-memo key pattern); observability memo writes become
       slice-granular so a deadline mid-group keeps the completed slices'
       proofs.
-- [ ] 11. closure consolidates and decomposes (scope decided: leaf
+- [x] 11. closure consolidates and decomposes (scope decided: leaf
       packages + same-package file split — the heavy tests are
       Hasher-bound and stay with the facade under any split, so a full
       effect/tier2 package split buys no suite time for its churn):

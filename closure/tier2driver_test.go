@@ -1,6 +1,10 @@
 package closure
 
-import "fmt"
+import (
+	"fmt"
+
+	progpkg "github.com/greatliontech/gofresh/closure/internal/program"
+)
 
 // computeTier2ResultAndReach runs the per-subject precise-analysis pipeline
 // the observability proof is built on — program load, subject rooting,
@@ -21,7 +25,7 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 	prog := h.progs[pkgPath]
 	if prog == nil {
 		var err error
-		prog, err = loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+		prog, err = progpkg.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 		if err != nil {
 			return tier2Result{}, nil, err
 		}

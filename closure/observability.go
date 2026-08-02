@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/ssa"
+
+	prog "github.com/greatliontech/gofresh/closure/internal/program"
 )
 
 // parameterizedBody reports whether fn's body is generic (uninstantiated):
@@ -31,7 +33,7 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 		return nil, err
 	}
 	h.emitProgress("load", pkgPath)
-	p, err := loadEnv(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+	p, err := prog.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 	if err != nil {
 		if h.ctx.Err() == nil {
 			h.progErrs[pkgPath] = err

@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1012,14 +1011,10 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	if err != nil {
 		return nil, err
 	}
-	pkgs, err := parseList(bytes.NewReader(out))
+	pkgs, err := listing.Parse(bytes.NewReader(out))
 	if err != nil {
 		return nil, err
 	}
 	h.lists[pkgPath] = pkgs
 	return pkgs, nil
-}
-
-func parseList(r io.Reader) ([]listPkg, error) {
-	return listing.Parse(r)
 }

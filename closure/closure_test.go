@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/closure/internal/rta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -898,7 +899,7 @@ func TestPropMutableLocalContentSensitivity(t *testing.T) {
 func TestParseListError(t *testing.T) {
 	const stream = `{"ImportPath":"ok/pkg","Dir":"/x","Module":{"Main":true}}
 {"ImportPath":"bad/pkg","Error":{"Err":"cannot find package"}}`
-	if _, err := parseList(strings.NewReader(stream)); err == nil {
+	if _, err := listing.Parse(strings.NewReader(stream)); err == nil {
 		t.Error("expected error when a package reports a load Error")
 	}
 }
