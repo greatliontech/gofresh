@@ -18,3 +18,7 @@ when its work lands (git holds history).
   argument-insensitive classifications (fmt.Fprintf into local buffers, math/big and
   fixed-argument time construction, std init closures); measured histogram inside.
   *Lands: the next gofresh plan — this is its charter.*
+- **[runtimeinput-producer-facade](runtimeinput-producer-facade.md)** — stipulator, gomutant,
+  and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
+  on env fidelity before review caught it; a runtimeinput facade would collapse all three.
+  *Lands: the next gofresh plan.*
