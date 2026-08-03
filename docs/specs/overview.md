@@ -226,7 +226,7 @@ content drift keeps the bare refusal, naming being advisory where detection
 is the comparison itself. The naming is advisory prose for a human or an
 error-wrapping consumer, never a machine grammar; construction-time
 agreement refusals name identically — the construction race is the one
-refusal with no reproduction path afterward. A view MAY derive sibling
+refusal with no reproduction path afterward. A view also derives sibling
 views over subsets of its subjects: a sibling's recorded facts are
 exclusively the parent's one observation — closures, guards, purity,
 source identities, digests, ledgers, and captured observation proofs —
