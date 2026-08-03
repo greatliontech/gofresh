@@ -515,7 +515,8 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 }
 
 // Check compares recorded against subject's current facts under this View's
-// result kind and the caller's context.
+// result kind and the caller's context. Under a deferred-close engine the
+// verdict is provisional until the view validates (WithDeferredCheckClose).
 func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
 	if _, ok := v.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
@@ -528,7 +529,9 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 }
 
 // CheckBatch checks a caller-supplied recording set under the shared
-// evidence ladder (REQ-fresh-hierarchical-check).
+// evidence ladder (REQ-fresh-hierarchical-check). Under a deferred-close
+// engine the verdicts are provisional until the view validates
+// (WithDeferredCheckClose).
 func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	return v.checkBatch(ctx, recorded)
 }
@@ -538,7 +541,8 @@ func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 // It is the single-record form of CheckObservedBatch, so both share one window
 // semantics: a runtime input moving mid-check stales a record whose verdict is
 // not already stale, and demonstrated staleness is preferred over
-// unverifiability.
+// unverifiability. Under a deferred-close engine the verdict is
+// provisional until the view validates (WithDeferredCheckClose).
 func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
 	if _, ok := v.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
@@ -555,7 +559,9 @@ func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject 
 // observation window, and one drift-forced precise analysis across the set.
 // Every subject's verdict equals a single CheckObserved of its recording over
 // the same view; an unavailable shared analysis degrades only the drifted
-// subjects, and caller cancellation returns the context error.
+// subjects, and caller cancellation returns the context error. Under a
+// deferred-close engine the verdicts are provisional until the view
+// validates (WithDeferredCheckClose).
 func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil observation proof context")
@@ -609,10 +615,8 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		if err != nil {
 			return nil, err
 		}
-		if hasRuntimeInputs {
-			if err := v.reobserveBase(ctx); err != nil {
-				return nil, err
-			}
+		if err := v.closeCheckWindow(ctx, hasRuntimeInputs); err != nil {
+			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -676,10 +680,8 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		if err != nil {
 			return nil, err
 		}
-		if hasRuntimeInputs {
-			if err := v.reobserveBase(ctx); err != nil {
-				return nil, err
-			}
+		if err := v.closeCheckWindow(ctx, hasRuntimeInputs); err != nil {
+			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1195,6 +1197,19 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 		}
 	}
 	return ctx.Err()
+}
+
+// closeCheckWindow closes one check's runtime-input window: the base
+// re-observation proves the tree stable across the window's reads. A
+// deferred-close engine skips it — the view's validation is the one
+// close for every deferred interval (REQ-fresh-coherent-view's deferred
+// close) — and a window that read no runtime inputs has nothing to
+// close.
+func (v *View) closeCheckWindow(ctx context.Context, hasRuntimeInputs bool) error {
+	if hasRuntimeInputs && !v.engine.deferredCheckClose {
+		return v.reobserveBase(ctx)
+	}
+	return nil
 }
 
 // reobserveBase detects source, guard, or purity drift since view construction

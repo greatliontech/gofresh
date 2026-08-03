@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "369e2bc29343ac0c652d5f0963c7a9af86d6cb26eb7ef4de0e705c6790dedbfd"
+  content_hash: "ed5ecfcdec20b94c5e2242d28103866ede75473e4c7f299985095d7c462d33c4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS
@@ -300,9 +300,18 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "369e2bc29343ac0c652d5f0963c7a9af86d6cb26eb7ef4de0e705c6790dedbfd"
+  content_hash: "ed5ecfcdec20b94c5e2242d28103866ede75473e4c7f299985095d7c462d33c4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSiblingSharesObservationAndIsolatesTransactions"
   role: BINDING_ROLE_TESTS
   shape_hash: "2b2dd000366a5d8c9b1c6134e8dbdca030f2f44ca0eac2c0a4c2193f70470d90"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "ed5ecfcdec20b94c5e2242d28103866ede75473e4c7f299985095d7c462d33c4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cdbf14b3984c8132d18bf53e7e0ce2f74baa5849259b565c8d98d01e9938370f"
 }

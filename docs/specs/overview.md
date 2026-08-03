@@ -209,6 +209,15 @@ captured facts — requires no agreement pair: a single observation suffices —
 or, for an analysis bracket or a runtime-input window, it opens on
 already-agreed facts and reads only at close — because a torn read can only compare unequal and
 refuse, and an equal torn read is exactly the excluded restore interval.
+A caller whose check verdicts are consumed only under a later successful
+validation of the same view can defer each check's closing base
+observation to that validation: the validation's one comparison
+observation closes every deferred interval at once — a change persisting
+to it refuses there, and the refusal discards the provisional verdicts
+with it — while the change-and-restore residual widens from each check's
+own close to the validation, carried by the same caller-owned
+execution-span exclusion that producer validation states
+(REQ-fresh-producer-view).
 
 **REQ-fresh-producer-view** (behavior): A caller producing results for several
 subjects MUST persist fingerprints captured before execution, with runtime-input

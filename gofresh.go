@@ -152,14 +152,15 @@ type Verdict struct {
 // generations (REQ-fresh-coherent-view); within one generation, sibling views
 // derived from a parent share its recorded facts by contract.
 type Engine struct {
-	assumePure     func(Subject) bool
-	buildFlags     []string
-	buildInputs    []string
-	dir            string
-	env            []string
-	envSet         bool
-	analysisBudget time.Duration
-	progress       func(Progress)
+	assumePure         func(Subject) bool
+	buildFlags         []string
+	buildInputs        []string
+	dir                string
+	env                []string
+	envSet             bool
+	analysisBudget     time.Duration
+	progress           func(Progress)
+	deferredCheckClose bool
 }
 
 // viewTestHooks is the package's one test-observation surface: each field
@@ -241,6 +242,25 @@ func WithAssumePure(pred func(Subject) bool) Option {
 			e.assumePure = pred
 		}
 	}
+}
+
+// WithDeferredCheckClose defers each check's closing base observation —
+// the re-observation proving the tree stable across the check's
+// runtime-input reads — to the view's validation: the validation's one
+// comparison observation closes every deferred interval at once, and a
+// change persisting to it refuses there. Verdicts return provisional
+// under this option: the caller MUST consume them only under a later
+// successful validation of the same view — any validation outcome short
+// of success (refusal, a failed observation, unavailable analysis)
+// discards every served verdict — the producer-view discipline
+// (REQ-fresh-producer-view). The
+// change-and-restore residual widens from each check's own close to the
+// validation, carried by the caller's execution-span exclusion. For a
+// pipeline running many checks against one quiescent view, the deferral
+// collapses per-check base observations into validation's single
+// comparison observation (REQ-fresh-coherent-view's deferred close).
+func WithDeferredCheckClose() Option {
+	return func(e *Engine) { e.deferredCheckClose = true }
 }
 
 // WithDir roots the engine at dir: every package load and go invocation

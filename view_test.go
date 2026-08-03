@@ -1814,6 +1814,157 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 	}
 }
 
+// A deferred-close engine's checks skip the per-check closing base
+// observation and return provisional verdicts; the view's validation is
+// the one close (REQ-fresh-coherent-view's deferred close). The default
+// engine pays each check's own close and refuses an edit itself; the
+// deferred engine's check serves the provisional verdict and the same
+// edit refuses at validation, discarding it.
+func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
+	fixture := filepath.Join(dir, "fixture")
+	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := Subject{Package: "example.com/view", Symbol: "F"}
+	g := Subject{Package: "example.com/view", Symbol: "G"}
+	producerEngine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := producerEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := map[Subject]Fingerprint{}
+	for _, subject := range []Subject{f, g} {
+		fingerprint, err := producer.Capture(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint.RuntimeInputs = state.Manifest
+		fingerprint.RuntimeDigest = state.Digest
+		recorded[subject] = fingerprint
+	}
+
+	deferredEngine, err := New(WithDir(dir), WithDeferredCheckClose())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferredView, err := deferredEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultView, err := producerEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// On a quiescent tree, the default check pays exactly its one closing
+	// base observation and the deferred check pays none; both serve the
+	// same valid verdicts.
+	observations := 0
+	viewTestHooks.observe = func() { observations++ }
+	t.Cleanup(func() { viewTestHooks.observe = nil })
+	defaultVerdicts, err := defaultView.CheckBatch(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultPasses := observations
+	observations = 0
+	deferredVerdicts, err := deferredView.CheckBatch(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferredPasses := observations
+	viewTestHooks.observe = nil
+	if defaultPasses != 1 || deferredPasses != 0 {
+		t.Fatalf("closing base observations: default = %d, deferred = %d; want 1 and 0", defaultPasses, deferredPasses)
+	}
+	for _, subject := range []Subject{f, g} {
+		if defaultVerdicts[subject].Status != Valid || deferredVerdicts[subject].Status != Valid {
+			t.Fatalf("quiescent verdicts: default %+v, deferred %+v, want both valid", defaultVerdicts[subject], deferredVerdicts[subject])
+		}
+	}
+	// The observed check path defers identically: an observed-class
+	// recording's check pays the one closing base observation by default
+	// and none under the deferred engine.
+	obsProducer, err := producerEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedRecorded := map[Subject]Fingerprint{}
+	for _, subject := range []Subject{f, g} {
+		fingerprint, err := obsProducer.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint.RuntimeInputs = state.Manifest
+		fingerprint.RuntimeDigest = state.Digest
+		observedRecorded[subject] = fingerprint
+	}
+	observations = 0
+	viewTestHooks.observe = func() { observations++ }
+	if _, err := defaultView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+		t.Fatal(err)
+	}
+	defaultObservedPasses := observations
+	observations = 0
+	if _, err := deferredView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+		t.Fatal(err)
+	}
+	deferredObservedPasses := observations
+	viewTestHooks.observe = nil
+	if defaultObservedPasses != 1 || deferredObservedPasses != 0 {
+		t.Fatalf("observed closing base observations: default = %d, deferred = %d; want 1 and 0", defaultObservedPasses, deferredObservedPasses)
+	}
+
+	// The deferred view's one close: validation on the unchanged tree
+	// succeeds with a single comparison observation, so the provisional
+	// verdicts of both check classes stand at the cost of one pass.
+	observations = 0
+	viewTestHooks.observe = func() { observations++ }
+	if err := deferredView.Validate(context.Background()); err != nil {
+		t.Fatalf("deferred close on an unchanged tree: %v", err)
+	}
+	viewTestHooks.observe = nil
+	if observations != 1 {
+		t.Fatalf("the deferred close cost %d observations, want 1 — validation's one comparison observation closes every deferred interval", observations)
+	}
+
+	// An edit after construction: the default check's own close refuses;
+	// the deferred check serves provisionally and the refusal lands at
+	// validation, discarding the verdicts with it.
+	editedDeferred, err := deferredEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	editedDefault, err := producerEngine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 1 }\nfunc G() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := editedDefault.CheckBatch(context.Background(), recorded); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("default check across an edit = %v, want ErrViewChanged at the check's own close", err)
+	}
+	provisional, err := editedDeferred.CheckBatch(context.Background(), recorded)
+	if err != nil {
+		t.Fatalf("deferred check across an edit = %v, want provisional verdicts", err)
+	}
+	if provisional[f].Status != Valid {
+		t.Fatalf("provisional verdict = %+v, want valid pending the deferred close", provisional[f])
+	}
+	if err := editedDeferred.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("deferred close across an edit = %v, want ErrViewChanged discarding the provisional verdicts", err)
+	}
+}
+
 func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
 	fixture := filepath.Join(dir, "fixture")
