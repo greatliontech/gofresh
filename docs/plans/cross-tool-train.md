@@ -22,7 +22,8 @@ its root-cause class.
       as the LAST spec operation of the change set.
 - [ ] 3. pew, gomutant, stipulator: ride the chunk-2 gofresh release;
       pew's scratch-dirs issue closes; confirm the field repo's
-      manifests shrink.
+      manifests shrink — field measurements run against a pinned copy
+      of the workload repo, never a live checkout.
 - [ ] 4. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
@@ -34,7 +35,9 @@ its root-cause class.
       the compartment ledger the preflight surfaces).
 - [ ] 7. gomutant: pipeline preparation with execution
       (gomutant docs/issues/pipeline-preparation-with-execution.md —
-      includes the measured pre-baseline stall).
+      includes the measured pre-baseline stall; before/after measured
+      on a pinned copy of an available workload repo, its own baseline
+      pair).
 - [ ] 8. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
 - [ ] 9. gofresh: open the startup-effect-precision plan
