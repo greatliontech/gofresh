@@ -147,7 +147,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-view-lifetime"
-  content_hash: "30bf052695a5a080867d83d91ce7e682112216606e9465d4971c85703e5e4f74"
+  content_hash: "db1494624d20607ae6b2b837105c6a013f8be423b0e4457b4863ef14cbed8e65"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEngineCheckUsesFreshView"
   role: BINDING_ROLE_TESTS
@@ -242,4 +242,13 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/guard.TestLogicalCoresIgnoreProcessAffinity"
   role: BINDING_ROLE_TESTS
   shape_hash: "3e5dfb22f889f01e2e5e44f201fb5f99befc2573507378dd4adc0ec4ec907472"
+}
+
+bindings {
+  requirement_id: "REQ-guard-view-lifetime"
+  content_hash: "db1494624d20607ae6b2b837105c6a013f8be423b0e4457b4863ef14cbed8e65"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSiblingSharesObservationAndIsolatesTransactions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2b2dd000366a5d8c9b1c6134e8dbdca030f2f44ca0eac2c0a4c2193f70470d90"
 }

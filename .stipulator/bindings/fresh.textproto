@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "74f2ba5b2317e083b64d029ca0cffa9e0c5e7eb89d3e11640c42a06fadf70c0e"
+  content_hash: "369e2bc29343ac0c652d5f0963c7a9af86d6cb26eb7ef4de0e705c6790dedbfd"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS
@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-producer-view"
-  content_hash: "6a472f163890f81d003cac233f26c0944d6d4f0d21536139c7a0af66bf1370d6"
+  content_hash: "648740e594a5c393001f35a9c56630badc2578b729e5876f77badba7d7ab1e79"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerViewValidatesAfterSourceChange"
   role: BINDING_ROLE_TESTS
@@ -269,4 +269,40 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestCaptureObservedBatchReturnsContextErrorAtAnalysisBoundary"
   role: BINDING_ROLE_TESTS
   shape_hash: "e6a1004debf9cf50ceccda1c4e687bda9802e761e62c4fa3d0d94271fc77bf7e"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-producer-view"
+  content_hash: "648740e594a5c393001f35a9c56630badc2578b729e5876f77badba7d7ab1e79"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSiblingSharesObservationAndIsolatesTransactions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2b2dd000366a5d8c9b1c6134e8dbdca030f2f44ca0eac2c0a4c2193f70470d90"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-producer-view"
+  content_hash: "648740e594a5c393001f35a9c56630badc2578b729e5876f77badba7d7ab1e79"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSiblingValidationRefusesDrift"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a20a2dce5a7ce1037060286583a1aede8e80fee28d1d5a523ebc84263c2d9717"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-producer-view"
+  content_hash: "648740e594a5c393001f35a9c56630badc2578b729e5876f77badba7d7ab1e79"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSiblingCrossPackageClosureValidatesUnchangedTree"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ab95dba06ceb08da0fea1606b38d9e9b2fe404143e70c50a85c2ff799462c406"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "369e2bc29343ac0c652d5f0963c7a9af86d6cb26eb7ef4de0e705c6790dedbfd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSiblingSharesObservationAndIsolatesTransactions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2b2dd000366a5d8c9b1c6134e8dbdca030f2f44ca0eac2c0a4c2193f70470d90"
 }
