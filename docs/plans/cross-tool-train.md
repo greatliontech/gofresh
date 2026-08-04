@@ -35,23 +35,38 @@ its root-cause class.
       docs/issues/oracle-deadline-aborts-run-nothing-persisted.md) —
       inserted ahead of the throughput tail: a campaign losing every
       verdict to one slow mutant gates the tail's field measurements.
-- [ ] 5. gomutant: preflight plan phase + execution progress
+- [ ] 5. gofresh: bracket-declared static inputs
+      (gofresh docs/issues/bracket-declared-static-inputs.md) — the
+      bracket vocabulary admits declared static inputs (repo files and
+      committed trees whose digests ride the generation snapshot) and
+      excludes non-corpus session dot-dirs; ~60% of cerebro's
+      uncacheable witness mass.
+- [ ] 6. gofresh: purity bars narrowed
+      (gofresh docs/issues/purity-bars-dynamic-and-fmt.md) —
+      caller-supplied dynamic narrows to escaping dynamism, fmt taint
+      keys on the sink; the same measurement's classifier half (~955
+      witnesses).
+- [ ] 7. stipulator: ride the chunk-5/6 gofresh release; re-measure the
+      cerebro check against the warm floor; closes stipulator
+      docs/issues/cerebro-uncacheable-mass-measured.md and the two
+      gofresh docs at their close-outs.
+- [ ] 8. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
       wires both).
-- [ ] 6. gomutant: confirmation uses stability evidence
+- [ ] 9. gomutant: confirmation uses stability evidence
       (gomutant docs/issues/confirmation-ignores-stability-evidence.md).
-- [ ] 7. gomutant: kill-cache keying by killing-oracle content
+- [ ] 10. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
       the compartment ledger the preflight surfaces).
-- [ ] 8. gomutant: pipeline preparation with execution
+- [ ] 11. gomutant: pipeline preparation with execution
       (gomutant docs/issues/pipeline-preparation-with-execution.md —
       includes the measured pre-baseline stall; before/after measured
       on a pinned copy of an available workload repo, its own baseline
       pair).
-- [ ] 9. pew: one go-invocation environment
+- [ ] 12. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
-- [ ] 10. gofresh: open the startup-effect-precision plan
+- [ ] 13. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).
