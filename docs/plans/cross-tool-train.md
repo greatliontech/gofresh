@@ -35,7 +35,7 @@ its root-cause class.
       docs/issues/oracle-deadline-aborts-run-nothing-persisted.md) —
       inserted ahead of the throughput tail: a campaign losing every
       verdict to one slow mutant gates the tail's field measurements.
-- [ ] 5. gofresh: bracket-declared static inputs
+- [x] 5. gofresh: bracket-declared static inputs
       (gofresh docs/issues/bracket-declared-static-inputs.md) — the
       bracket vocabulary admits declared static inputs (repo files and
       committed trees whose digests ride the generation snapshot) and
