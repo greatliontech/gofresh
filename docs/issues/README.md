@@ -23,6 +23,13 @@ when its work lands (git holds history).
   observation facts; extracting the facts into one mutex-free struct makes read-only sharing
   structural and collapses the three literals (and possibly viewObservation) into one shape.
   *Lands: user decision.*
+- **[fresh-mutation-in-module-scratch](fresh-mutation-in-module-scratch.md)** — the
+  fresh-mutation proof admits only `testing.TempDir`-rooted scratch; widening the
+  capability source to in-module `MkdirTemp`/`CreateTemp` would make disciplined
+  in-module scratch recordless with no caller declaration, the declaration-free
+  complement to the enforced scratch namespace.
+  *Lands: the extension admits in-module minting, or the widening is settled
+  infeasible in the runtime-inputs spec.*
 - **[runtimeinput-producer-facade](runtimeinput-producer-facade.md)** — stipulator, gomutant,
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.

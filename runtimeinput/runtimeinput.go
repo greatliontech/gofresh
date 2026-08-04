@@ -240,9 +240,70 @@ type testLogConfig struct {
 	// ephemeralRoots are declared temp roots whose own identity records
 	// nothing (REQ-inputs-ephemeral-root).
 	ephemeralRoots []string
-	process        string
-	bracket        *Bracket
-	err            error
+	// scratchNamespaces are declared in-module run-scratch namespaces
+	// whose endpoint-absent reads record nothing
+	// (REQ-inputs-scratch-namespace).
+	scratchNamespaces []scratchNamespace
+	process           string
+	bracket           *Bracket
+	err               error
+}
+
+// scratchNamespace is one declared run-scratch namespace: the direct
+// children of dir whose basename matches prefix*suffix — the shape
+// os.MkdirTemp and os.CreateTemp mint — and everything beneath them.
+type scratchNamespace struct {
+	dir    pathID
+	prefix string
+	suffix string
+}
+
+// matches reports whether id lies strictly inside the namespace: a
+// matching direct child of dir, or deeper.
+func (n scratchNamespace) matches(id pathID) bool {
+	if id.Kind != pathRel {
+		return false
+	}
+	rel := ""
+	if n.dir.Path == "." {
+		rel = id.Path
+	} else if strings.HasPrefix(id.Path, n.dir.Path+"/") {
+		rel = id.Path[len(n.dir.Path)+1:]
+	} else {
+		return false
+	}
+	first, _, _ := strings.Cut(rel, "/")
+	if len(first) < len(n.prefix)+len(n.suffix) {
+		return false
+	}
+	return strings.HasPrefix(first, n.prefix) && strings.HasSuffix(first[len(n.prefix):], n.suffix)
+}
+
+// childOffset returns the walk offset, relative to the bracket root, of
+// the namespace's matching child on id's path — the anchor of the
+// freshness proof. id must satisfy matches. A child at or above the
+// root itself maps to ".", which the capture listing always carries for
+// a root that existed — a conservative veto.
+func (n scratchNamespace) childOffset(root, id pathID) string {
+	rel := id.Path
+	if n.dir.Path != "." {
+		rel = id.Path[len(n.dir.Path)+1:]
+	}
+	first, _, _ := strings.Cut(rel, "/")
+	child := first
+	if n.dir.Path != "." {
+		child = n.dir.Path + "/" + first
+	}
+	if root.Path == "." {
+		return child
+	}
+	if child == root.Path {
+		return "."
+	}
+	if strings.HasPrefix(child, root.Path+"/") {
+		return child[len(root.Path)+1:]
+	}
+	return "."
 }
 
 type guardRootDecl struct {
@@ -359,6 +420,48 @@ func guardRootOption(root, excludeSub string) TestLogOption {
 			return
 		}
 		c.guardRoots = append(c.guardRoots, guardRootDecl{path: root, excludeSub: excludeSub})
+	}
+}
+
+// WithScratchNamespace declares one in-module run-scratch namespace
+// (REQ-inputs-scratch-namespace): the direct children of dir — a
+// module-relative identity-form path, "." for the module root — whose
+// basename matches pattern under os.MkdirTemp semantics (the random
+// string replaces the last "*", or is appended when the pattern has
+// none), and everything beneath them. A read inside the namespace is
+// admitted recordless only when the engine proves the path absent at
+// BOTH bracket endpoints — absent from the observation bracket's
+// capture listing and absent again at observation ingest, under the
+// bracket's fail-closed resolution rules — so a pre-existing object the
+// pattern happens to match stays observed and a run-created object that
+// outlives the run stays observed and dirty-marked. The declaration is
+// the caller's assertion that an absence-probe of a name the pattern
+// matches is not a meaningful input of the subject: that appearance-pin
+// is the namespace's one forfeited protection, a blast radius one
+// declared namespace wide. A namespace not covered by a declared
+// observation-bracket root is inert: without the bracket's endpoint
+// evidence nothing can be proven absent-before, so its reads stay
+// observed.
+func WithScratchNamespace(dir, pattern string) TestLogOption {
+	return func(c *testLogConfig) {
+		if pattern == "" || !utf8.ValidString(pattern) || strings.ContainsAny(pattern, "\x00\r\n") || strings.ContainsAny(pattern, `/\`) {
+			c.err = fmt.Errorf("runtimeinputs: scratch namespace pattern must be a non-empty single path component, got %q", pattern)
+			return
+		}
+		if dir == "" || filepath.IsAbs(dir) || !utf8.ValidString(dir) || strings.ContainsAny(dir, "\x00\r\n") {
+			c.err = fmt.Errorf("runtimeinputs: scratch namespace dir must be a module-relative path, got %q", dir)
+			return
+		}
+		clean := path.Clean(filepath.ToSlash(dir))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			c.err = fmt.Errorf("runtimeinputs: scratch namespace dir escapes module: %q", dir)
+			return
+		}
+		prefix, suffix := pattern, ""
+		if i := strings.LastIndex(pattern, "*"); i >= 0 {
+			prefix, suffix = pattern[:i], pattern[i+1:]
+		}
+		c.scratchNamespaces = append(c.scratchNamespaces, scratchNamespace{dir: pathID{Kind: pathRel, Path: clean}, prefix: prefix, suffix: suffix})
 	}
 }
 
@@ -488,6 +591,15 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	traversalMemo := map[string]bool{}
 	existenceBound := map[pathID]bool{}
 	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
+	// Scratch-namespace admission: a read inside a declared namespace,
+	// absent from the covering bracket root's capture membership and
+	// absent again at ingest, is the process's own scratch — recorded
+	// identities would be unre-observable noise (random per-run names
+	// churning every later union comparison), and the bracket's own
+	// revalidation polices the masquerade direction
+	// (REQ-inputs-scratch-namespace).
+	ephemera := cfg.bracket.ephemera(cfg.scratchNamespaces)
+	ephemeraMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
 	// PWD's runtime value is the spawn directory, which no env-name
@@ -546,7 +658,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -571,7 +683,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			// An external directory's stat binds existence alone — an
@@ -620,9 +732,12 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				m.Paths = append(m.Paths, pathInput{pathID: id})
 			}
 			// A stat under a DECLARED bracket root needs no metadata
-			// seal: the bracket fingerprint observes content and
-			// metadata together over the whole run-to-ingest span, and
-			// the entry digest binds both for later checks. A parse-time
+			// seal: the bracket fingerprint spans content and metadata
+			// over the whole run-to-ingest span — a directory object's
+			// own size and mtime excepted, which nothing in the admitted
+			// observation set can consume (metadata-returning methods
+			// block) — and the entry digest binds the observed state for
+			// later checks. A parse-time
 			// admission - the seal is never added - so the bracket never
 			// removes a reason (REQ-inputs-bracket-coverage's
 			// never-weakens clause holds; REQ-inputs-unbounded).
@@ -978,7 +1093,7 @@ func envEntryDigest(env []string, name string) string {
 // same framed stream hashPath has always produced, into its own hasher.
 func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string) (string, bool, string, error) {
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, true)
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -1150,35 +1265,46 @@ func ephemeralScratch(p string, roots [][2]string, memo map[string]bool) bool {
 		if _, err := os.Lstat(p); !os.IsNotExist(err) {
 			return false
 		}
-		// Walk to the nearest existing ancestor and demand it resolve
-		// inside a declared root: an existing out-of-root link on the
-		// path means the runtime read escaped and must stay observed.
-		anc := filepath.Dir(p)
-		for {
-			resolved, err := filepath.EvalSymlinks(anc)
-			if err == nil {
-				for _, r := range roots {
-					if underPath(resolved, r[1]) {
-						return true
-					}
-				}
-				return false
-			}
-			// An ancestor that EXISTS but does not resolve — a dangling
-			// link — is detectable evidence the runtime read escaped the
-			// root: refuse. Only a truly absent ancestor ascends.
-			if _, lerr := os.Lstat(anc); !os.IsNotExist(lerr) {
-				return false
-			}
-			parent := filepath.Dir(anc)
-			if parent == anc {
-				return false
-			}
-			anc = parent
+		// The nearest existing ancestor must resolve inside a declared
+		// root: an existing out-of-root link on the path means the
+		// runtime read escaped and must stay observed.
+		resolved, ok := nearestExistingAncestorResolved(p)
+		if !ok {
+			return false
 		}
+		for _, r := range roots {
+			if underPath(resolved, r[1]) {
+				return true
+			}
+		}
+		return false
 	}()
 	memo[p] = res
 	return res
+}
+
+// nearestExistingAncestorResolved walks up from p's parent to the
+// nearest existing ancestor and resolves it. An ancestor that EXISTS
+// but does not resolve — a dangling link — is detectable evidence the
+// runtime read escaped and refuses; only a truly absent ancestor
+// ascends. Shared by the ephemeral-scratch and scratch-namespace
+// admissions so both keep identical fail-closed resolution.
+func nearestExistingAncestorResolved(p string) (string, bool) {
+	anc := filepath.Dir(p)
+	for {
+		resolved, err := filepath.EvalSymlinks(anc)
+		if err == nil {
+			return resolved, true
+		}
+		if _, lerr := os.Lstat(anc); !os.IsNotExist(lerr) {
+			return "", false
+		}
+		parent := filepath.Dir(anc)
+		if parent == anc {
+			return "", false
+		}
+		anc = parent
+	}
 }
 
 // bracketStatCover holds the declared bracket roots in identity form
@@ -1560,7 +1686,7 @@ var currentMachineFacts = guard.CurrentMachineFacts
 // root must fingerprint content — an existence-bound root would hold
 // still while everything beneath it churns — so bracket hashing keeps
 // the refusal.
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, existenceBindsExternalDirs bool) (bool, string, error) {
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -1611,7 +1737,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && id.Kind == pathRel:
-		sum, unv, reason, err := dirHashFiltered(ctx, target, skip)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, skip, visit)
 		if err != nil {
 			return false, "", err
 		}
@@ -1695,13 +1821,16 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 }
 
 func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
-	return dirHashFiltered(ctx, root, nil)
+	return dirHashFiltered(ctx, root, nil, nil)
 }
 
 // dirHashFiltered is dirHash with a skip predicate over the slash-form path of
 // each entry relative to root; a skipped directory's subtree contributes
-// nothing to the digest. A nil skip digests the complete tree.
-func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool) ([32]byte, bool, string, error) {
+// nothing to the digest. A nil skip digests the complete tree. A non-nil
+// visit receives each digested entry's slash-form rel (the root's own "."
+// included), letting a bracket capture retain the walked membership without
+// a second walk that could diverge from the hashing semantics.
+func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool, visit func(rel string)) ([32]byte, bool, string, error) {
 	h := sha256.New()
 	unverifiable := false
 	reason := ""
@@ -1739,10 +1868,20 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			}
 			return nil
 		}
+		if visit != nil {
+			visit(rel)
+		}
 		switch {
 		case d.IsDir():
-			fprintf(h, "dir %s/ ", rel)
-			writeStat(h, info)
+			// A directory object contributes its membership (the walk's
+			// entry lines) and its mode; never its size or mtime, which
+			// count only the churn of entries created and deleted within
+			// the span. Nothing in the admitted observation set can read a
+			// directory's own metadata (metadata methods block), so the
+			// dropped fields guard nothing a subject could observe, and
+			// keeping them would make a completed process's own restored
+			// scratch churn indistinguishable from real drift.
+			fprintf(h, "dir %s/ mode %x\n", rel, uint64(info.Mode()))
 		case info.Mode().IsRegular():
 			writeStat(h, info)
 			sum, err := fileHash(ctx, path)

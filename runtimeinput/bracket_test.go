@@ -439,16 +439,19 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 			site  string
 			apply func() error
 		}
-		// confined mutations change nothing outside their site identity, so an
-		// exclusion of that identity must blind the fingerprint to them; the
-		// structural mutations also move the parent directory's metadata,
-		// which stays bracketed even when the mutated object is excluded.
-		var confined, structural []mutation
+		// every mutation is confined to its site identity — a directory
+		// object contributes membership and mode, never the size and mtime
+		// that would let a member's churn leak into its parent — so an
+		// exclusion of the mutated identity must blind the fingerprint to
+		// any of them, structural mutations included.
+		var mutations []mutation
 		for _, file := range files {
-			confined = append(confined,
+			mutations = append(mutations,
 				mutation{file, func() error { return os.WriteFile(file, []byte("edited-content"), 0o644) }},
-			)
-			structural = append(structural,
+				mutation{file, func() error {
+					when := time.Now().Add(-2 * time.Hour)
+					return os.Chtimes(file, when, when)
+				}},
 				mutation{file, func() error { return os.Remove(file) }},
 				mutation{file, func() error {
 					if err := os.Remove(file); err != nil {
@@ -459,13 +462,12 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 			)
 		}
 		for _, dir := range dirs {
-			confined = append(confined, mutation{dir, func() error {
-				return os.WriteFile(filepath.Join(dir, "zz-new.txt"), []byte("created"), 0o644)
-			}})
-		}
-		mutations := confined
-		if !excludeSite {
-			mutations = append(append([]mutation(nil), confined...), structural...)
+			mutations = append(mutations,
+				mutation{dir, func() error {
+					return os.WriteFile(filepath.Join(dir, "zz-new.txt"), []byte("created"), 0o644)
+				}},
+				mutation{dir, func() error { return os.Chmod(dir, 0o700) }},
+			)
 		}
 		chosen := mutations[int(pick)%len(mutations)]
 		var opts []BracketOption

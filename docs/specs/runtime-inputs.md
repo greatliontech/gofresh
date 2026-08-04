@@ -25,8 +25,11 @@ array of strings, `env` is an array of objects with keys `n` (the variable name)
 `rel` for a slash-separated module-relative path or `abs` for a clean absolute host
 path. Each `d` is that input's entry digest: 32 lowercase hex characters of truncated
 SHA-256 — for an environment input over its presence and value hash, for a path input
-over the identity-framed object-state stream (content, mode, size, modification time;
-a module-relative directory's membership walk; an external directory's existence
+over the identity-framed object-state stream (a regular file's content, mode, size,
+and modification time; a module-relative directory's membership walk, in which member
+files and symlinks carry their full state while directory objects carry membership
+and mode alone, their own size and mtime deliberately unobserved as the observation
+bracket term states; an external directory's existence
 marker) — so the combined state digest is the fold, in
 canonical manifest order, of the version, each identity with its entry digest, and
 each recorded unverifiable reason, and a mismatch attributes to named inputs. The
@@ -57,7 +60,18 @@ starts and revalidated when its testlog becomes an observation, so a change to a
 bracketed object persisting across the run-to-observation span is detected. The
 fingerprint observes content and metadata together, so a restoration that does not
 reproduce the recorded metadata still moves the bracket — toward recomputation,
-never reuse.
+never reuse. One class of metadata is deliberately outside the fingerprint: a
+directory object within the walk contributes its membership and its mode, never
+its own size or modification time — no read in the admitted observation set can
+consume a directory's own metadata (metadata-returning methods block), and those
+fields move whenever any entry is created or deleted beneath the directory, so
+observing them would only convert a completed process's membership-restored churn
+— entries that existed at neither endpoint — into a standing refusal while
+protecting nothing a subject could observe. Every member file's and symlink's
+full state, and the membership itself, remain observed: a pre-existing object's
+change, appearance, disappearance, or retype still moves the bracket. The
+capture additionally retains each directory root's walked listing, the pre-run
+membership evidence the scratch-namespace admission consults.
 
 ## The guard
 
@@ -227,7 +241,9 @@ fingerprint binds the digest of every bracket-covered recorded path identity to 
 values read at any time in the capture-to-revalidation span, up to an intra-span
 mutation-and-restore interval — the residual REQ-inputs-observation-coherence
 already declares unprovable; a restore is tolerated only when it reproduces content
-and metadata alike. An observed identity is bracket-covered only when the object it
+and metadata alike — metadata as the fingerprint observes it, so a directory
+object's own size and mtime, which the observation-bracket term carves out,
+never bar a restoration they alone would distinguish. An observed identity is bracket-covered only when the object it
 materializes to under kernel path-walk semantics resolves, after every symlink in
 the walk, to a path under a declared root's own resolved path, and every symlink
 the walk traverses — directory components included — itself lies under a
@@ -440,6 +456,58 @@ subject reading the root's listing as data is outside the admitted
 observation set, exactly as covered-tree metadata and
 cache-objects-as-data dependence already are.
 
+**REQ-inputs-scratch-namespace** (behavior): Observation construction from a
+test-harness log MUST accept caller-declared in-module run-scratch namespaces —
+each a module-relative directory plus a single-component name pattern with
+`os.MkdirTemp` semantics (the minted string replaces the last `*`, or extends a
+pattern carrying none), naming the directory's matching direct children and
+everything beneath them. A read inside a declared namespace records neither a
+path identity nor a per-path disposition exactly when the engine proves the
+namespace's matching child freshly minted and the path gone again: the
+matching child — the entry the pattern names, the anchor every deeper path
+shares — is absent from the covering observation-bracket root's capture
+listing, as a legitimate scratch mint always is, and the read path is absent
+again at observation ingest, under the same fail-closed resolution rules as
+the ephemeral-root scratch admission — the nearest existing ancestor must
+resolve under the covering root's resolved position, so a traversal through an
+escaping link stays observed. Anchoring the freshness proof at the matching
+child means a pre-existing matching object vetoes everything beneath it, not
+merely its own identity — in particular a pre-existing symlink the pattern
+happens to name, whose target (a bracket-excluded subtree included, where the
+bracket digest could not backstop a consumed-and-removed target) would
+otherwise be reachable through a fresh-looking deeper path. The admission is
+byte-keyed: a name unrepresentable as an identity still admits when both
+endpoints prove out, exactly as the sibling admissions decide before identity
+formation. The class exists because the identity-only testlog records no
+outcomes: a process's own scratch — created, read, and removed within the run,
+its content derived from inputs the record already pins — is indistinguishable
+in the log from an absence-probe whose appearance must stale the record, so no
+outcome-blind automatic rule can drop the one and keep the other; the
+declaration supplies exactly that missing bit, and the engine enforces
+everything it can. The enforcement is fail-closed in every direction: a
+pre-existing object the pattern matches stays observed (the capture listing
+vetoes); scratch that outlives the run stays observed and has already moved
+the bracket; pre-existing state the run consumed and removed is vetoed by the
+listing AND moves the bracket at revalidation, so the masquerade direction
+seals the observation toward recomputation; a namespace under a bracket
+exclusion, or covered by no declared bracket root, admits nothing — without
+endpoint evidence nothing is provably scratch. A since-vanished link the
+process itself minted inside the namespace, redirecting a runtime read
+elsewhere before disappearing, is the class's accepted residual, one process
+run wide, exactly as the ephemeral-root scratch admission states for its
+roots — and equally outside what the pre-revision per-identity records
+pinned. The declaration's one forfeited
+protection is named: an absence-probe of a name the pattern matches loses its
+appearance-pin, a blast radius one namespace wide, carried with the same
+caller soundness responsibility as an exclusion — and unlike an exclusion,
+which silences a subtree unconditionally, the namespace silences only paths
+proven absent at both endpoints. Absence-probes outside every declared
+namespace keep their per-identity missing-arm records and appearance-pins
+unchanged. Where the fresh-mutation observability extension can statically
+prove a read's target freshly created, that proof remains the
+declaration-free instrument; the namespace is the enforced fallback for
+scratch disciplines no sound flow analysis can follow.
+
 **REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
 the unix contentless sink device; on platforms whose sink is not an absolute
 path (windows `NUL`) nothing is admitted and the reads stay observed,
@@ -554,8 +622,10 @@ comparison is returned rather than interpreted as clean.
 **REQ-inputs-unbounded** (behavior): An observed input whose full observed value the
 analysis cannot bound — a metadata-only inspection of an identity outside every
 DECLARED bracket root (a stat under a declared root never takes the seal at all:
-the bracket fingerprint observes content and metadata together over the whole
-span, and the entry digest binds both thereafter — an admission decided at
+the bracket fingerprint spans content and metadata over the whole
+span — a directory object's own size and mtime excepted, which no admitted
+read can consume, the proof's metadata-method block being the backstop — and
+the entry digest binds the observed state thereafter — an admission decided at
 parse time, so the bracket never removes a recorded reason), a directory or symlink resolving
 outside the module (the existence-bound stat form of an external directory
 excepted, REQ-inputs-external-dir-existence), a relative path under a

@@ -19,8 +19,11 @@ import (
 // the producing process starts and revalidated when its testlog becomes an
 // observation, so a change to any bracketed object persisting across the
 // run-to-observation span is detected. The fingerprint observes content and
-// metadata together, so a restoration that does not reproduce the recorded
-// metadata still moves the bracket — toward recomputation, never reuse. Only
+// metadata together — directory objects excepted, which contribute membership
+// and mode but never their own size or mtime (the spec's observation-bracket
+// term states the carve-out) — so a restoration that does not reproduce the
+// recorded state still moves the bracket — toward recomputation, never reuse.
+// Only
 // CaptureBracket constructs a usable value; a zero or copied-and-altered
 // Bracket fails its seal and is refused rather than read as unchanged.
 type Bracket struct {
@@ -34,10 +37,15 @@ type Bracket struct {
 
 // bracketRoot is one declared root with the digest of its captured stream. The
 // per-root digest lets revalidation attribute a moved fingerprint to the root
-// that moved.
+// that moved. members is the capture-time listing of the root's directory
+// walk — every digested entry's slash-form offset — retained so observation
+// ingest can decide whether an observed identity existed before the run
+// (the run-ephemera classification); nil for a root whose capture ran no
+// walk (a file, an absent object, an absolute root).
 type bracketRoot struct {
-	id     pathID
-	digest string
+	id      pathID
+	digest  string
+	members map[string]bool
 }
 
 // BracketOption configures bracket capture.
@@ -251,7 +259,7 @@ func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions [
 		if err := ctx.Err(); err != nil {
 			return bracketCapture{}, err
 		}
-		digest, unverifiable, reason, err := fingerprintBracketRoot(ctx, moduleDir, id, exclusions)
+		digest, members, unverifiable, reason, err := fingerprintBracketRoot(ctx, moduleDir, id, exclusions)
 		if err != nil {
 			return bracketCapture{}, err
 		}
@@ -259,7 +267,7 @@ func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions [
 			capture.reason = reason
 		}
 		fprintf(combined, "root %s %s %s\n", id.Kind, id.Path, digest)
-		capture.roots = append(capture.roots, bracketRoot{id: id, digest: digest})
+		capture.roots = append(capture.roots, bracketRoot{id: id, digest: digest, members: members})
 	}
 	capture.fingerprint = hex.EncodeToString(combined.Sum(nil))
 	return capture, nil
@@ -267,22 +275,30 @@ func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions [
 
 // fingerprintBracketRoot digests one root with the hashing semantics its
 // materialized object would receive as an observed identity of its kind
-// (REQ-inputs-bracket-coverage). A root that is itself excluded contributes a
+// (REQ-inputs-bracket-coverage), retaining the walked membership when the
+// object is a directory. A root that is itself excluded contributes a
 // constant: its subtree is removed from the fingerprint entirely.
-func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, exclusions []pathID) (string, bool, string, error) {
+func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, exclusions []pathID) (string, map[string]bool, bool, string, error) {
 	if excludesIdentity(exclusions, id) {
-		return "excluded", false, "", nil
+		return "excluded", nil, false, "", nil
 	}
 	p, err := materializePath(moduleDir, id)
 	if err != nil {
-		return "", false, "", err
+		return "", nil, false, "", err
 	}
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), false)
-	if err != nil {
-		return "", false, "", err
+	var members map[string]bool
+	visit := func(rel string) {
+		if members == nil {
+			members = map[string]bool{}
+		}
+		members[rel] = true
 	}
-	return hex.EncodeToString(h.Sum(nil)), unverifiable, reason, nil
+	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false)
+	if err != nil {
+		return "", nil, false, "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), members, unverifiable, reason, nil
 }
 
 // bracketSkip filters a root's directory walk by exclusion identity: an entry
@@ -551,6 +567,124 @@ func walkIdentity(root pathID, offset string) pathID {
 	return pathID{Kind: pathAbs, Path: filepath.Join(root.Path, filepath.FromSlash(offset))}
 }
 
+// bracketEphemera is the ingest-side scratch-namespace admission view: per
+// declared module-relative root, its lexical and resolved absolute bases
+// plus the capture membership, so the open/stat ladder can decide whether
+// an observed path existed before the run without re-walking anything.
+// Only reads inside a declared scratch namespace are candidates: the
+// testlog carries no outcomes, so an endpoint-absent path is otherwise
+// indistinguishable from an absence-probe whose appearance-pin must stay
+// recorded (REQ-inputs-scratch-namespace).
+type bracketEphemera struct {
+	roots      []ephemeraRoot
+	namespaces []scratchNamespace
+	exclusions []pathID
+}
+
+type ephemeraRoot struct {
+	id       pathID
+	lexBase  string
+	resolved string
+	members  map[string]bool
+}
+
+// ephemera builds the scratch-namespace admission view. A nil or
+// capture-unverifiable bracket admits nothing, exactly as it declares no
+// stat roots, and no declared namespace admits nothing; absolute roots
+// are outside the admission — an absolute directory root already makes
+// the bracket unverifiable, and the rare file-shaped declarations stay
+// observed, the safe direction.
+func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
+	e := bracketEphemera{}
+	if b == nil || b.reason != "" || len(namespaces) == 0 {
+		return e
+	}
+	e.namespaces = namespaces
+	e.exclusions = b.exclusions
+	for _, root := range b.roots {
+		if root.id.Kind != pathRel {
+			continue
+		}
+		lexBase := filepath.Join(b.moduleDir, filepath.FromSlash(root.id.Path))
+		resolved, err := filepath.EvalSymlinks(lexBase)
+		if err != nil {
+			// An unresolvable root (absent, or broken along its chain)
+			// grants no admission: its reads stay observed.
+			continue
+		}
+		e.roots = append(e.roots, ephemeraRoot{id: root.id, lexBase: lexBase, resolved: resolved, members: root.members})
+	}
+	return e
+}
+
+// admits reports whether p is declared run scratch under a declared
+// bracket root: strictly inside a declared scratch namespace, absent from
+// the covering root's capture membership, and absent again at observation
+// ingest — with both endpoints proven, the declaration's only assertion is
+// that an absence-probe of a namespace-matching name is not a meaningful
+// input. Fail-closed on resolution exactly as the ephemeral-scratch
+// admission: the nearest existing ancestor must resolve under the root's
+// resolved base, so a traversal through an existing escaping link stays
+// observed. A path in the capture membership is never admitted — and a
+// pre-existing object the run consumed and removed also moves the root's
+// digest at revalidation, so the masquerade direction seals the whole
+// observation rather than binding. An identity under a bracket exclusion
+// is refused: its subtree is outside the fingerprint, so pre-run absence
+// is unknowable.
+func (e bracketEphemera) admits(p string, memo map[string]bool) bool {
+	if len(e.roots) == 0 {
+		return false
+	}
+	if v, ok := memo[p]; ok {
+		return v
+	}
+	res := func() bool {
+		for _, root := range e.roots {
+			offset, under := pathOffset(root.lexBase, p)
+			if !under {
+				offset, under = pathOffset(root.resolved, p)
+			}
+			if !under || offset == "." {
+				continue
+			}
+			id := walkIdentity(root.id, offset)
+			var matched scratchNamespace
+			inNamespace := false
+			for _, ns := range e.namespaces {
+				if ns.matches(id) {
+					matched, inNamespace = ns, true
+					break
+				}
+			}
+			if !inNamespace {
+				continue
+			}
+			if excludesIdentity(e.exclusions, id) {
+				continue
+			}
+			// The freshness proof anchors at the namespace's matching child:
+			// a legitimate scratch mint is freshly created, so its child is
+			// never in the capture listing. A pre-existing matching child —
+			// a data directory the pattern happens to name, or a symlink
+			// aliasing real state elsewhere (a bracket-excluded subtree
+			// included, where the bracket digest could not backstop the
+			// consumed-and-removed direction) — vetoes everything beneath
+			// it, not just its own identity.
+			if root.members[offset] || root.members[matched.childOffset(root.id, id)] {
+				return false
+			}
+			if _, err := os.Lstat(p); !os.IsNotExist(err) {
+				return false
+			}
+			resolved, ok := nearestExistingAncestorResolved(p)
+			return ok && underPath(resolved, root.resolved)
+		}
+		return false
+	}()
+	memo[p] = res
+	return res
+}
+
 // sealBracket pins every capture-derived field, so revalidation can refuse a
 // bracket that capture did not produce.
 func sealBracket(b Bracket) string {
@@ -561,6 +695,21 @@ func sealBracket(b Bracket) string {
 	}
 	for _, root := range b.roots {
 		fprintf(h, "root %s %s %s\n", root.id.Kind, root.id.Path, root.digest)
+		// The membership listing decides run-ephemera admissions at ingest,
+		// so an altered set must fail the seal exactly as an altered digest
+		// would.
+		members := make([]string, 0, len(root.members))
+		for member := range root.members {
+			members = append(members, member)
+		}
+		sort.Strings(members)
+		for _, member := range members {
+			// %q, not %s: walked member names are unconstrained filesystem
+			// bytes (a declared root refuses framing bytes, a member never
+			// did), so plain framing would let "a\nmember b" collide with
+			// {"a", "member b"}.
+			fprintf(h, "member %q\n", member)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

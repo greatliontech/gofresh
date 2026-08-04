@@ -7,21 +7,27 @@ Ordering for the gomutant tail follows the `Lands:` lines in that repo's
 issue docs; the two lead chunks are the field-blocking overlay defect and
 its root-cause class.
 
-- [ ] 1. gomutant: overlay commit cost + quarantine
+- [x] 1. gomutant: overlay commit cost + quarantine
       (gomutant docs/issues/store-update-reparses-whole-overlay.md) —
       stat-keyed overlay parse cache (O(changed) per commit; the
       whole-set merge and prune semantics preserved) plus a size-ceiling
       quarantine treating oversized entries as evictable cache content.
-- [ ] 2. gofresh: run-ephemera runtime-input classification
-      (direction in pew
-      docs/issues/bench-scratch-dirs-recorded-as-runtime-inputs.md) —
-      paths under the observation bracket root absent from the pre-run
-      fingerprint and absent again at close classify as the process's
-      own ephemera under the completed-process assumption; runtimeinput
-      spec amendment + strategy/format revision; corpus pin re-consent
+- [ ] 2. gofresh: run-scratch runtime-input handling
+      (charter: pew
+      docs/issues/bench-scratch-dirs-recorded-as-runtime-inputs.md;
+      that doc's automatic-classification direction proved unsound —
+      the identity-only testlog cannot split own-scratch from
+      absence-probes) — enforced scratch-namespace admission
+      (caller-declared MkdirTemp-shaped namespace, gofresh proves
+      absence at both bracket endpoints before dropping a record) plus
+      directory objects contributing membership+mode, never own
+      size/mtime, to bracket and path digests; runtimeinput spec
+      amendment + observation-strategy revision; corpus pin re-consent
       as the LAST spec operation of the change set.
 - [ ] 3. pew, gomutant, stipulator: ride the chunk-2 gofresh release;
-      pew's scratch-dirs issue closes; confirm the field repo's
+      pew grows the per-package scratch-namespace declaration (its
+      wiring does change, contra the issue doc's claim) and its
+      scratch-dirs issue closes; confirm the field repo's
       manifests shrink — field measurements run against a pinned copy
       of the workload repo, never a live checkout.
 - [ ] 4. gomutant: preflight plan phase + execution progress

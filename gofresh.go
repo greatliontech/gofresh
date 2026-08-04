@@ -90,8 +90,15 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // @10 widens user test-main flow on any dispatch whose operand is not
 // locally closed (the one startup flow that can run a test-planted
 // value; interface invokes and computed calls alike) and fully lifts
-// the receiver-escape package backstop it replaces.
-const ObservationRTA = "gofresh/observation-rta@10"
+// the receiver-escape package backstop it replaces; @11 revises the
+// runtime-observation interpretation: directory objects in path and
+// bracket digests contribute membership and mode instead of full stat
+// (their own size and mtime observe nothing in the admitted set and
+// only count member churn), and reads inside a caller-declared
+// scratch namespace proven absent at both bracket endpoints are
+// admitted recordless — digests and recorded manifests from the prior
+// interpretation compare unequal and re-measure rather than serve.
+const ObservationRTA = "gofresh/observation-rta@11"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
