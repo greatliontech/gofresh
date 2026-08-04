@@ -64,7 +64,7 @@ its root-cause class.
       with withdrawal-bound evidence); repo-anchored oracle reads route
       through cerebro-side bracket_paths config, deliberately not
       tool-side static roots.
-- [ ] 10. gomutant: preflight plan phase + execution progress
+- [x] 10. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
       wires both).
