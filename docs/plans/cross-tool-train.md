@@ -59,10 +59,11 @@ its root-cause class.
       argument every in-view call site pins to view-analyzed values is
       not dynamism; enumeration-refused, escaping, or
       outside-view-supplied dynamism keeps the refusal.
-- [ ] 9. stipulator: ride the purity/statics gofresh release; re-measure the
-      cerebro check against the warm floor; closes stipulator
-      docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
-      and 8 fixes) and the two gofresh docs at their close-outs.
+- [x] 9. stipulator: ride the purity/statics gofresh release — dep bump
+      to v0.47.1 plus reviewed observation exclusions (excluded_paths
+      with withdrawal-bound evidence); repo-anchored oracle reads route
+      through cerebro-side bracket_paths config, deliberately not
+      tool-side static roots.
 - [ ] 10. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
@@ -85,7 +86,13 @@ its root-cause class.
       evidence stored under the recording's provenance conjunction;
       status gains the attribution verdict, stat the profile-diff view;
       the consumer hand protocol stays as the derivation loop.
-- [ ] 16. gofresh: open the startup-effect-precision plan
+- [ ] 16. re-measure the cerebro check against the warm floor (requires
+      the machine with cerebro checked out): policy gains
+      excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and
+      the spec-doc tree; closes stipulator
+      docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
+      8, and 9 fixes) and the two gofresh docs at their close-outs.
+- [ ] 17. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).
