@@ -30,7 +30,7 @@ its root-cause class.
       scratch-dirs issue closes; confirm the field repo's
       manifests shrink — field measurements run against a pinned copy
       of the workload repo, never a live checkout.
-- [ ] 4. gomutant: run survives any single oracle outcome + incremental
+- [x] 4. gomutant: run survives any single oracle outcome + incremental
       persistence (gomutant
       docs/issues/oracle-deadline-aborts-run-nothing-persisted.md) —
       inserted ahead of the throughput tail: a campaign losing every
