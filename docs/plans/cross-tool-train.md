@@ -54,7 +54,7 @@ its root-cause class.
       half — ~308 witnesses) — the writer-first print family is
       Sprint-equivalent when the writer provably pins an audited
       in-memory sink; unproven writers keep the refusal.
-- [ ] 8. gofresh: caller-supplied dynamic narrows to escaping dynamism
+- [x] 8. gofresh: caller-supplied dynamic narrows to escaping dynamism
       (the same doc's dynamic half — ~647 witnesses) — a dynamic
       argument every in-view call site pins to view-analyzed values is
       not dynamism; enumeration-refused, escaping, or
