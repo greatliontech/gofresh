@@ -1607,6 +1607,38 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "harnesserrshared", subject: "TestUseErrBound", reason: "interface dispatch on unattributable state"},
 		{fixture: "harnessmainphi", subject: "TestRead", reason: "test-main dispatch on unattributable state"},
 		{fixture: "initglobaldispatch", subject: "TestRead", observable: true},
+		// The writer-sink admission: fmt's writer-first print family is
+		// Sprint-equivalent when the writer provably pins an audited
+		// in-memory sink; every unproven provenance — call results, phi
+		// escapes, mixed helper callers — keeps the formatted-output
+		// refusal (REQ-closure-observability-analysis).
+		{fixture: "fmtsink", subject: "TestFprintfBuffer", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintlnBuilder", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfHelperBuffer", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfPhiBuffers", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfCallResult", reason: "fmt.Fprintf"},
+		{fixture: "fmtsink", subject: "TestFprintfPhiCallEscape", reason: "fmt.Fprintf"},
+		{fixture: "fmtsink", subject: "TestFprintfHelperMixed", reason: "fmt.Fprintf"},
+		{fixture: "fmtsink", subject: "TestFprintfLocalWriterType", reason: "fmt.Fprintf"},
+		{fixture: "fmtsink", subject: "TestFprintfGlobalBuffer", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfFieldBuffer", observable: true},
+		// A dynamic reach in subject flow is never admitted, whatever
+		// the arguments carry — the site refuses before the writer is
+		// ever consulted.
+		{fixture: "fmtsinkvalue", subject: "TestValueFormatBuffer"},
+		// The AST scan's Fprint carve-out never unblocks the escaping
+		// sink itself: the os.Stdout selector still pre-blocks the
+		// package, so a stdout writer refuses before the subject tier.
+		{fixture: "fmtsinkstdout", subject: "TestFprintfStdout", reason: "package scan: reaches unaudited standard operation os.Stdout"},
+		// Startup flow closes locally constructed writers — an init
+		// formatting into its own buffer is pure value computation —
+		// while a dynamically reached Fprint keeps its effect
+		// regardless of site arguments (the writer-sink admission's
+		// static-leg bound) and a writer crossing a call boundary
+		// refuses (startup carries no attributed parameter analysis).
+		{fixture: "initfmtsink", subject: "TestAfterInitFormat", observable: true},
+		{fixture: "initfmtvalue", subject: "TestAfterInitValueFormat", reason: "startup effect: reaches fmt.Fprintf"},
+		{fixture: "initfmthelper", subject: "TestAfterInitHelperFormat", reason: "startup effect: reaches fmt.Fprintf"},
 		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
 		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
 		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "fmt.Fprintf"},

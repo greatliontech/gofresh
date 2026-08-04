@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@11" {
-		t.Fatalf("ObservationRTA = %q, want scratch-namespace and directory-membership digest semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@12" {
+		t.Fatalf("ObservationRTA = %q, want writer-sink fmt admission semantics", ObservationRTA)
 	}
 }
 

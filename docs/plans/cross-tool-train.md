@@ -49,32 +49,37 @@ its root-cause class.
       issue docs premised on surfaces; gomutant loses the adapter and
       format-sniff, its own config document becoming the one producer
       schema.
-- [ ] 7. gofresh: purity bars narrowed
-      (gofresh docs/issues/purity-bars-dynamic-and-fmt.md) —
-      caller-supplied dynamic narrows to escaping dynamism, fmt taint
-      keys on the sink; the same measurement's classifier half (~955
-      witnesses).
-- [ ] 8. stipulator: ride the purity/statics gofresh release; re-measure the
+- [ ] 7. gofresh: fmt taint keys on the sink
+      (gofresh docs/issues/purity-bars-dynamic-and-fmt.md, the fmt
+      half — ~308 witnesses) — the writer-first print family is
+      Sprint-equivalent when the writer provably pins an audited
+      in-memory sink; unproven writers keep the refusal.
+- [ ] 8. gofresh: caller-supplied dynamic narrows to escaping dynamism
+      (the same doc's dynamic half — ~647 witnesses) — a dynamic
+      argument every in-view call site pins to view-analyzed values is
+      not dynamism; enumeration-refused, escaping, or
+      outside-view-supplied dynamism keeps the refusal.
+- [ ] 9. stipulator: ride the purity/statics gofresh release; re-measure the
       cerebro check against the warm floor; closes stipulator
-      docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5 and chunk-7 fixes) and the two
-      gofresh docs at their close-outs.
-- [ ] 9. gomutant: preflight plan phase + execution progress
+      docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
+      and 8 fixes) and the two gofresh docs at their close-outs.
+- [ ] 10. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
       wires both).
-- [ ] 10. gomutant: confirmation uses stability evidence
+- [ ] 11. gomutant: confirmation uses stability evidence
       (gomutant docs/issues/confirmation-ignores-stability-evidence.md).
-- [ ] 11. gomutant: kill-cache keying by killing-oracle content
+- [ ] 12. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
       the compartment ledger the preflight surfaces).
-- [ ] 12. gomutant: pipeline preparation with execution
+- [ ] 13. gomutant: pipeline preparation with execution
       (gomutant docs/issues/pipeline-preparation-with-execution.md —
       includes the measured pre-baseline stall; before/after measured
       on a pinned copy of an available workload repo, its own baseline
       pair).
-- [ ] 13. pew: one go-invocation environment
+- [ ] 14. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
-- [ ] 14. gofresh: open the startup-effect-precision plan
+- [ ] 15. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).

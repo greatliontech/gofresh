@@ -1125,9 +1125,32 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 }
 
 func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	args, ok := attributedParameterArgs(param, fp)
+	if !ok {
+		return false
+	}
+	for _, arg := range args {
+		if !closedDynamicValue(arg, seen, done, fp) {
+			return false
+		}
+	}
+	return true
+}
+
+// attributedParameterArgs returns the value passed at param's position by
+// every subject-attributed call site of its function, or ok=false when
+// the crossing is unavailable — the function is dynamically targeted,
+// closes over state, is variadic, or has no attributed caller (absence
+// of provenance is refused, never a vacuous pass). It is the one
+// caller-boundary discipline shared by every value walk that crosses a
+// parameter. (The subject root's own harness parameter never reaches the
+// dispatch walk's crossing: it is concrete *testing.T/B/F, and every
+// concrete-to-interface boundary materializes a MakeInterface the walk
+// closes on.)
+func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ssa.Value, bool) {
 	fn := param.Parent()
 	if fn == nil || fp == nil || fp.dynamic[fn] || len(fn.FreeVars) > 0 || fn.Signature.Variadic() {
-		return false
+		return nil, false
 	}
 	idx := -1
 	for i, p := range fn.Params {
@@ -1136,23 +1159,110 @@ func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool,
 		}
 	}
 	if idx < 0 {
-		return false
+		return nil, false
 	}
 	sites := fp.callers[fn]
 	if len(sites) == 0 {
-		// No attributed caller means no provable provenance — fail closed.
-		// (The subject root's own harness parameter never reaches here: it
-		// is concrete *testing.T/B/F, and every concrete-to-interface
-		// boundary materializes a MakeInterface the walk closes on.)
+		return nil, false
+	}
+	args := make([]ssa.Value, 0, len(sites))
+	for _, site := range sites {
+		siteArgs := site.Common().Args
+		if idx >= len(siteArgs) {
+			return nil, false
+		}
+		args = append(args, siteArgs[idx])
+	}
+	return args, true
+}
+
+// inMemoryFormattedSink reports whether a fmt writer operand provably
+// pins every dynamic type it can carry to an audited in-memory sink —
+// *bytes.Buffer or *strings.Builder — so the formatted bytes never leave
+// process memory and the call is Sprint-equivalent value computation
+// (REQ-closure-observability-analysis's writer-sink admission). The
+// concrete type at each pinning MakeInterface decides alone: which
+// buffer instance receives the bytes never changes which Write runs, and
+// mutation of shared memory is the shared-dynamic-state rules' domain,
+// not an ambient effect — the same footing as a direct Write on that
+// buffer. Everything unpinned — loads, call results, globals, function
+// values — fails closed, and a parameter crosses only through the
+// attributed-caller discipline the dispatch walks share.
+func inMemoryFormattedSink(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if value == nil {
 		return false
 	}
-	for _, site := range sites {
-		args := site.Common().Args
-		if idx >= len(args) || !closedDynamicValue(args[idx], seen, done, fp) {
+	if r, ok := done[value]; ok {
+		return r
+	}
+	if seen[value] {
+		return false
+	}
+	seen[value] = true
+	defer delete(seen, value)
+	r := inMemoryFormattedSinkUncached(value, seen, done, fp)
+	done[value] = r
+	return r
+}
+
+func inMemoryFormattedSinkUncached(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	switch v := value.(type) {
+	case *ssa.MakeInterface:
+		return auditedInMemorySinkType(v.X.Type())
+	case *ssa.ChangeInterface:
+		return inMemoryFormattedSink(v.X, seen, done, fp)
+	case *ssa.TypeAssert:
+		return inMemoryFormattedSink(v.X, seen, done, fp)
+	case *ssa.ChangeType:
+		return inMemoryFormattedSink(v.X, seen, done, fp)
+	case *ssa.Convert:
+		return inMemoryFormattedSink(v.X, seen, done, fp)
+	case *ssa.Phi:
+		if len(v.Edges) == 0 {
 			return false
 		}
+		for _, edge := range v.Edges {
+			if !inMemoryFormattedSink(edge, seen, done, fp) {
+				return false
+			}
+		}
+		return true
+	case *ssa.Extract:
+		return inMemoryFormattedSink(v.Tuple, seen, done, fp)
+	case *ssa.Parameter:
+		args, ok := attributedParameterArgs(v, fp)
+		if !ok {
+			return false
+		}
+		for _, arg := range args {
+			if !inMemoryFormattedSink(arg, seen, done, fp) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
 	}
-	return true
+}
+
+// auditedInMemorySinkType admits exactly the two standard sinks whose
+// Write appends to process memory and acquires nothing ambient. Both
+// implement io.Writer on the pointer receiver only, so the pointer form
+// is the whole surface.
+func auditedInMemorySinkType(t types.Type) bool {
+	pointer, ok := types.Unalias(t).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
+	case "bytes.Buffer", "strings.Builder":
+		return true
+	}
+	return false
 }
 
 // syntheticInterfaceMethodWrapper reports whether fn is a compiler

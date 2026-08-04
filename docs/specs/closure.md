@@ -286,7 +286,26 @@ two exclusions that are soundness, not caution: reflect defeats static
 reachability itself, and registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
-are channels the testlog cannot audit. Widening the
+are channels the testlog cannot audit. One admission in the audited set is
+operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
+Fprintln) is Sprint-equivalent value computation exactly when the writer
+operand provably pins every dynamic type it can carry to an audited
+in-memory sink — `*bytes.Buffer` or `*strings.Builder`, whose write appends
+to process memory and acquires nothing ambient — judged by a closed-value
+walk under the dispatch admissions' discipline: the pinning MakeInterface's
+concrete type decides, subject-attributed parameter crossing included, and
+startup flow, carrying no subject attribution, closes locally constructed
+writers only; an unproven writer — an interface-typed value the walk
+cannot trace to pinning MakeInterfaces (a loaded interface, a call result,
+any mixed or enumeration-refused provenance) — keeps the formatted-output
+classification, while a concrete `*bytes.Buffer`/`*strings.Builder`
+expression pins regardless of which instance it denotes (which instance
+receives the bytes never changes which write runs — the footing a direct
+write on the audited type already has), a dynamically reached Fprint keeps it
+regardless of site arguments (they belong to the dynamic signature, not
+fmt's shape), and the maximal scan's package-level Fprint finding, blind to
+operands, narrows to a diagnostic so the writer-sensitive tiers decide.
+Widening the
 audited set changes proof semantics and rides the strategy-version bump like
 any other proof change. The audited set carries the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,

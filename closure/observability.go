@@ -364,6 +364,20 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
 		classified = true
 	}
+	// The writer-sink admission applies to the static leg only: a
+	// dynamically reached Fprint's site arguments belong to the dynamic
+	// signature, not to fmt's writer-first shape, so the writer is not
+	// judgeable there and the effect stays. Startup flow carries no
+	// subject-attributed parameter analysis, so only locally
+	// constructed writers close — an init formatting into its own
+	// buffer is pure value computation; anything crossing a boundary
+	// keeps the effect.
+	if classified && fmtFprintFamily(pkgPath, name) && site.Common().StaticCallee() == callee {
+		if args := site.Common().Args; len(args) != 0 &&
+			inMemoryFormattedSink(args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, analyzer.fresh) {
+			classified = false
+		}
+	}
 	if classified {
 		analyzer.recordExternalEffect(effect)
 	}
@@ -395,6 +409,13 @@ func maximalObservabilityBlocker(effect externalEffect) bool {
 	// The subject tier classifies the guard-pinned toolchain accessor
 	// precisely; the maximal AST scan must not pre-block it.
 	if effect.packagePath == "runtime" && effect.symbol == "GOROOT" {
+		return false
+	}
+	// The subject and startup tiers classify fmt's writer-first print
+	// family writer-sensitively; the AST scan cannot see the writer and
+	// must not pre-block what those tiers can prove in-memory. Print and
+	// the Scan families carry their channel in the symbol and stay.
+	if fmtFprintFamily(effect.packagePath, effect.symbol) {
 		return false
 	}
 	if effect.packagePath == "testing" && effect.symbol == "TempDir" {

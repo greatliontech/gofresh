@@ -100,8 +100,17 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // only count member churn), and reads inside a caller-declared
 // scratch namespace proven absent at both bracket endpoints are
 // admitted recordless — digests and recorded manifests from the prior
-// interpretation compare unequal and re-measure rather than serve.
-const ObservationRTA = "gofresh/observation-rta@11"
+// interpretation compare unequal and re-measure rather than serve;
+// @12 admits fmt's writer-first print family (Fprint, Fprintf,
+// Fprintln) when the writer operand provably pins an audited in-memory
+// sink — *bytes.Buffer or *strings.Builder — under the closed-value
+// walk the dispatch admissions use (subject-attributed parameter
+// crossing included; startup flow judges locally constructed writers
+// only): a proven call is Sprint-equivalent value computation at every
+// tier, and the maximal scan's package-level Fprint finding narrows to
+// a diagnostic so the writer-sensitive tiers decide; an unproven
+// writer keeps the formatted-output classification.
+const ObservationRTA = "gofresh/observation-rta@12"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

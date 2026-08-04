@@ -703,6 +703,14 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
 		classified = true
 	}
+	if classified && fmtFprintFamily(pkgPath, name) && len(c.Args) != 0 &&
+		inMemoryFormattedSink(c.Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, a.fresh) {
+		// Sprint-equivalent: the writer provably pins an audited
+		// in-memory sink, so the formatted bytes never leave process
+		// memory (the writer-sink admission). Argument methods stay
+		// visible to reachability exactly as for the Sprint family.
+		classified = false
+	}
 	if classified {
 		effect.observable = observableCallEffect(effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {

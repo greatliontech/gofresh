@@ -176,6 +176,24 @@ func classBPureStandard(pkgPath, name string) bool {
 	return false
 }
 
+// fmtFprintFamily names fmt's writer-first print operations — the one
+// classified family whose effect is decided by an operand: the writer
+// receives every formatted byte, so a writer proven to be an audited
+// in-memory sink makes the call Sprint-equivalent value computation,
+// while Print (implicit stdout) and the Scan families carry their
+// channel in the symbol itself
+// (REQ-closure-observability-analysis's writer-sink admission).
+func fmtFprintFamily(pkgPath, name string) bool {
+	if pkgPath != "fmt" {
+		return false
+	}
+	switch name {
+	case "Fprint", "Fprintf", "Fprintln":
+		return true
+	}
+	return false
+}
+
 func classBReason(pkgPath, name string) string {
 	effect, ok := classBEffect(pkgPath, name)
 	if !ok {
