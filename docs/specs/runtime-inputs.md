@@ -451,7 +451,13 @@ deterministically regardless). Otherwise every deeper read stays observed,
 an unresolvable root declares nothing, a root lying inside the module tree
 in either form is refused outright — it would vacate a content-bearing
 module digest, not an external refusal — and the wrong-root blast radius
-for admissible roots is one external identity wide by construction. A
+for admissible roots is one external identity wide by construction. The
+converse containment never widens the class: a module tree lying inside a
+declared root — a repository checked out beneath the system temp
+directory — does not surrender its identities, because a module-relative
+read is content-bearing surface, never external temp machinery; no path
+inside the module tree takes the root's admissions, so module-relative
+absence-probes keep their records and their appearance-pins. A
 subject reading the root's listing as data is outside the admitted
 observation set, exactly as covered-tree metadata and
 cache-objects-as-data dependence already are.

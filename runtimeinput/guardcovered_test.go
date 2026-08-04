@@ -1163,3 +1163,69 @@ func TestAbsentExternalStatBindsAbsence(t *testing.T) {
 		t.Fatal("appeared identity did not move the digest")
 	}
 }
+
+// A module tree lying inside a declared ephemeral root does not
+// surrender its identities: a module-relative absence-probe keeps its
+// missing-arm record — its appearance must stale — while a genuinely
+// external absent read under the same root stays admitted
+// (REQ-inputs-ephemeral-root).
+func TestEphemeralRootNeverSwallowsModuleInteriorReads(t *testing.T) {
+	outer := t.TempDir()
+	moduleDir := filepath.Join(outer, "mod")
+	if err := os.MkdirAll(filepath.Join(moduleDir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := "open " + filepath.Join(moduleDir, "pkg", "sb-1", "out.txt") + "\n" +
+		"open " + filepath.Join(outer, "gone", "scratch.txt") + "\n"
+	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
+		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
+		WithEphemeralTempRoot(outer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Describe(st.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths) != 1 || d.Paths[0] != filepath.Join(moduleDir, "pkg", "sb-1", "out.txt") {
+		t.Fatalf("paths = %+v, want exactly the module-interior probe recorded", d.Paths)
+	}
+}
+
+// An alias route into the module — a second symlink under the declared
+// root resolving to the module tree — must not re-open what the lexical
+// module-interiority gate closed: the ancestor's resolved position is
+// refused under the module, so the aliased absence-probe stays recorded
+// (REQ-inputs-ephemeral-root).
+func TestEphemeralRootRefusesAliasRouteIntoModule(t *testing.T) {
+	outer := t.TempDir()
+	moduleDir := filepath.Join(outer, "mod")
+	if err := os.MkdirAll(filepath.Join(moduleDir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moduleDir, filepath.Join(outer, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	log := "open " + filepath.Join(outer, "alias", "pkg", "sb-1", "out.txt") + "\n"
+	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
+		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
+		WithEphemeralTempRoot(outer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Describe(st.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Paths)+len(d.Unverifiable) == 0 {
+		t.Fatal("aliased module-interior probe admitted recordless")
+	}
+}

@@ -591,6 +591,19 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	traversalMemo := map[string]bool{}
 	existenceBound := map[pathID]bool{}
 	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
+	// A module tree lying inside a declared ephemeral root does not
+	// surrender its identities: module-relative reads are content-bearing
+	// surface, never external temp machinery, so they keep their records
+	// and the temp admissions never fire on them — declaring the system
+	// temp directory stays sound for a repository checked out beneath it
+	// (REQ-inputs-ephemeral-root).
+	resolvedModule, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		resolvedModule = moduleDir
+	}
+	moduleInterior := func(p string) bool {
+		return underPath(p, moduleDir) || underPath(p, resolvedModule)
+	}
 	// Scratch-namespace admission: a read inside a declared namespace,
 	// absent from the covering bracket root's capture membership and
 	// absent again at ingest, is the process's own scratch — recorded
@@ -658,7 +671,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -683,7 +696,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, scratchMemo) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			// An external directory's stat binds existence alone — an
@@ -1244,7 +1257,12 @@ func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error
 // link ancestor refuses — so a traversal through an existing escaping
 // link stays observed; a since-vanished redirecting link component is
 // the class's accepted one-run residual (REQ-inputs-ephemeral-root).
-func ephemeralScratch(p string, roots [][2]string, memo map[string]bool) bool {
+// A module tree inside the root never surrenders its identities: the
+// caller gates on lexical module interiority, and the ancestor's
+// RESOLVED position is additionally refused under resolvedModule here,
+// so an alias route into the module (outer/alias -> mod) cannot re-open
+// what the lexical gate closed.
+func ephemeralScratch(p string, roots [][2]string, resolvedModule string, memo map[string]bool) bool {
 	if len(roots) == 0 {
 		return false
 	}
@@ -1270,6 +1288,9 @@ func ephemeralScratch(p string, roots [][2]string, memo map[string]bool) bool {
 		// runtime read escaped and must stay observed.
 		resolved, ok := nearestExistingAncestorResolved(p)
 		if !ok {
+			return false
+		}
+		if underPath(resolved, resolvedModule) {
 			return false
 		}
 		for _, r := range roots {

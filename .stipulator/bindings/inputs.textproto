@@ -723,7 +723,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "d3191dc06dd23cdd7d54741d1f056b9d45def63ad5faf3255fbaedba1e8f5e80"
+  content_hash: "769b55ad41d9464b113fec6d76f337eeb44544df61d1fa6aee28548f091e45bf"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.WithEphemeralTempRoot"
   role: BINDING_ROLE_IMPLEMENTS
@@ -732,7 +732,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "d3191dc06dd23cdd7d54741d1f056b9d45def63ad5faf3255fbaedba1e8f5e80"
+  content_hash: "769b55ad41d9464b113fec6d76f337eeb44544df61d1fa6aee28548f091e45bf"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEphemeralTempRootAdmitsOnlyItsOwnIdentity"
   role: BINDING_ROLE_TESTS
@@ -804,7 +804,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "d3191dc06dd23cdd7d54741d1f056b9d45def63ad5faf3255fbaedba1e8f5e80"
+  content_hash: "769b55ad41d9464b113fec6d76f337eeb44544df61d1fa6aee28548f091e45bf"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEphemeralScratchAbsentAtIngestRecordsNothing"
   role: BINDING_ROLE_TESTS
