@@ -49,7 +49,7 @@ its root-cause class.
       issue docs premised on surfaces; gomutant loses the adapter and
       format-sniff, its own config document becoming the one producer
       schema.
-- [ ] 7. gofresh: fmt taint keys on the sink
+- [x] 7. gofresh: fmt taint keys on the sink
       (gofresh docs/issues/purity-bars-dynamic-and-fmt.md, the fmt
       half — ~308 witnesses) — the writer-first print family is
       Sprint-equivalent when the writer provably pins an audited
