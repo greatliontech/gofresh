@@ -24,7 +24,7 @@ its root-cause class.
       size/mtime, to bracket and path digests; runtimeinput spec
       amendment + observation-strategy revision; corpus pin re-consent
       as the LAST spec operation of the change set.
-- [ ] 3. pew, gomutant, stipulator: ride the chunk-2 gofresh release;
+- [x] 3. pew, gomutant, stipulator: ride the chunk-2 gofresh release;
       pew grows the per-package scratch-namespace declaration (its
       wiring does change, contra the issue doc's claim) and its
       scratch-dirs issue closes; confirm the field repo's
