@@ -3,6 +3,13 @@
 Parked deferrals. Each entry carries a `Lands:` trigger; the doc is deleted
 when its work lands (git holds history).
 
+- **[bracket-declared-static-inputs](bracket-declared-static-inputs.md)** — repo-anchored static
+  inputs (go.mod, committed trees, session dot-dirs) defeat observation brackets wholesale:
+  1,440 of cerebro's 2,407 uncacheable witnesses; admit declared static inputs and exclude
+  non-corpus dot-dirs. *Lands: with the check-view-cardinality fix family.*
+- **[purity-bars-dynamic-and-fmt](purity-bars-dynamic-and-fmt.md)** — the caller-supplied-dynamic
+  and fmt-taint bars refuse ~955 benign cerebro witnesses; narrow to escaping dynamism and
+  sink-keyed fmt taint. *Lands: with the bracket item — the classifier half.*
 - **[dotless-module-paths-classified-standard](dotless-module-paths-classified-standard.md)** — isStdImportPath
   treats any dotless first path element as standard-library, so a module named without a
   dot has its whole startup walk silently filtered out and every startup refusal
