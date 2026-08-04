@@ -12,7 +12,7 @@ its root-cause class.
       stat-keyed overlay parse cache (O(changed) per commit; the
       whole-set merge and prune semantics preserved) plus a size-ceiling
       quarantine treating oversized entries as evictable cache content.
-- [ ] 2. gofresh: run-scratch runtime-input handling
+- [x] 2. gofresh: run-scratch runtime-input handling
       (charter: pew
       docs/issues/bench-scratch-dirs-recorded-as-runtime-inputs.md;
       that doc's automatic-classification direction proved unsound —
@@ -30,23 +30,28 @@ its root-cause class.
       scratch-dirs issue closes; confirm the field repo's
       manifests shrink — field measurements run against a pinned copy
       of the workload repo, never a live checkout.
-- [ ] 4. gomutant: preflight plan phase + execution progress
+- [ ] 4. gomutant: run survives any single oracle outcome + incremental
+      persistence (gomutant
+      docs/issues/oracle-deadline-aborts-run-nothing-persisted.md) —
+      inserted ahead of the throughput tail: a campaign losing every
+      verdict to one slow mutant gates the tail's field measurements.
+- [ ] 5. gomutant: preflight plan phase + execution progress
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
       wires both).
-- [ ] 5. gomutant: confirmation uses stability evidence
+- [ ] 6. gomutant: confirmation uses stability evidence
       (gomutant docs/issues/confirmation-ignores-stability-evidence.md).
-- [ ] 6. gomutant: kill-cache keying by killing-oracle content
+- [ ] 7. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
       the compartment ledger the preflight surfaces).
-- [ ] 7. gomutant: pipeline preparation with execution
+- [ ] 8. gomutant: pipeline preparation with execution
       (gomutant docs/issues/pipeline-preparation-with-execution.md —
       includes the measured pre-baseline stall; before/after measured
       on a pinned copy of an available workload repo, its own baseline
       pair).
-- [ ] 8. pew: one go-invocation environment
+- [ ] 9. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
-- [ ] 9. gofresh: open the startup-effect-precision plan
+- [ ] 10. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).
