@@ -244,9 +244,13 @@ type testLogConfig struct {
 	// whose endpoint-absent reads record nothing
 	// (REQ-inputs-scratch-namespace).
 	scratchNamespaces []scratchNamespace
-	process           string
-	bracket           *Bracket
-	err               error
+	// staticRoots are declared static-input roots: module-relative repo
+	// content whose digests the caller's own record already carries, so
+	// reads provably inside record nothing (REQ-inputs-static-inputs).
+	staticRoots []string
+	process     string
+	bracket     *Bracket
+	err         error
 }
 
 // scratchNamespace is one declared run-scratch namespace: the direct
@@ -423,6 +427,36 @@ func guardRootOption(root, excludeSub string) TestLogOption {
 	}
 }
 
+// WithStaticInputRoot declares one static-input root
+// (REQ-inputs-static-inputs): a module-relative identity-form path — a
+// committed file or tree such as go.mod or cmd/ — whose content the
+// caller's own record already pins (a generation snapshot digesting the
+// named surface), so a read provably inside it records neither a path
+// identity nor a per-path disposition: re-observing content the record
+// pins adds no protection and forfeits reuse for free. The resolution
+// rules are the guard-covered class's, fail-closed: missing objects,
+// ambiguous traversals, and symlink chains leaving the declared region
+// stay observed. The declaration carries the guard-covered soundness
+// responsibility and blast radius — a root the caller's record does not
+// actually pin silently vacates observation beneath it, one declared
+// surface wide. The module root itself is refused: declaring the whole
+// module static is the attach-no-manifest assertion in disguise and
+// would vacate every module-relative observation.
+func WithStaticInputRoot(root string) TestLogOption {
+	return func(c *testLogConfig) {
+		if root == "" || filepath.IsAbs(root) || !utf8.ValidString(root) || strings.ContainsAny(root, "\x00\r\n") {
+			c.err = fmt.Errorf("runtimeinputs: static-input root must be a module-relative path, got %q", root)
+			return
+		}
+		clean := path.Clean(filepath.ToSlash(root))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			c.err = fmt.Errorf("runtimeinputs: static-input root %q must name a proper in-module surface", root)
+			return
+		}
+		c.staticRoots = append(c.staticRoots, clean)
+	}
+}
+
 // WithScratchNamespace declares one in-module run-scratch namespace
 // (REQ-inputs-scratch-namespace): the direct children of dir — a
 // module-relative identity-form path, "." for the module root — whose
@@ -582,15 +616,6 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	pathSeen := map[pathID]bool{}
 	unverifiableSeen := map[string]bool{}
 	guardRoots := resolveGuardRoots(cfg.guardRoots)
-	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir)
-	if err != nil {
-		return Observation{}, err
-	}
-	guardMemo := map[string]bool{}
-	scratchMemo := map[string]bool{}
-	traversalMemo := map[string]bool{}
-	existenceBound := map[pathID]bool{}
-	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
 	// A module tree lying inside a declared ephemeral root does not
 	// surrender its identities: module-relative reads are content-bearing
 	// surface, never external temp machinery, so they keep their records
@@ -601,6 +626,37 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 	if err != nil {
 		resolvedModule = moduleDir
 	}
+	// A static root must RESOLVE strictly inside the module tree: a
+	// committed symlink pointing at the module root, an ancestor, or an
+	// external target would vacate surface the caller's record cannot
+	// pin (git records the link string, never target content), and a
+	// root that does not resolve is a named repo surface with a typo —
+	// both refuse loudly rather than silently declaring nothing or,
+	// worse, everything (REQ-inputs-static-inputs).
+	staticRoots := make([]guardRootPair, 0, len(cfg.staticRoots))
+	for _, root := range cfg.staticRoots {
+		lexical := filepath.Join(moduleDir, filepath.FromSlash(root))
+		resolved, err := filepath.EvalSymlinks(lexical)
+		if err != nil {
+			return Observation{}, fmt.Errorf("runtimeinputs: static-input root %q does not resolve: %w", root, err)
+		}
+		strictlyInside := (underPath(resolved, moduleDir) && resolved != moduleDir) ||
+			(underPath(resolved, resolvedModule) && resolved != resolvedModule)
+		if !strictlyInside {
+			return Observation{}, fmt.Errorf("runtimeinputs: static-input root %q resolves to %q, outside the module tree's interior; the caller's record cannot pin that surface", root, resolved)
+		}
+		staticRoots = append(staticRoots, guardRootPair{lexical: lexical, resolved: resolved})
+	}
+	staticMemo := map[string]bool{}
+	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir)
+	if err != nil {
+		return Observation{}, err
+	}
+	guardMemo := map[string]bool{}
+	scratchMemo := map[string]bool{}
+	traversalMemo := map[string]bool{}
+	existenceBound := map[pathID]bool{}
+	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
 	moduleInterior := func(p string) bool {
 		return underPath(p, moduleDir) || underPath(p, resolvedModule)
 	}
@@ -671,7 +727,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			// whose lexical cleaning may not match the filesystem, or a
 			// relative read after a directory change, is never provably
 			// inside a root (REQ-inputs-guard-covered fail-closed).
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || guardCovered(p, staticRoots, staticMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
@@ -696,7 +752,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
-			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
+			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || guardCovered(p, staticRoots, staticMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
 			// An external directory's stat binds existence alone — an

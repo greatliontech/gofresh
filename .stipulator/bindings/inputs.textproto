@@ -1044,3 +1044,48 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "bdab63f8fd07f11ed1dab67a6c68da32c59826cf502ece930330600ba25c7249"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-static-inputs"
+  content_hash: "0a462fa26cc0ce2384445db50468dab9ecdcbc2ba864161079a70358a8ecc701"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.WithStaticInputRoot"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "6ff5c22c8e9ed0f85a3540c67b295fe5b8c0249e0d750357df820e3b6f952ea6"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-static-inputs"
+  content_hash: "0a462fa26cc0ce2384445db50468dab9ecdcbc2ba864161079a70358a8ecc701"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStaticInputRootsSkipPinnedReads"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "55a4490a9afdaf50e67b35396190f7dd74bc134275a54a08701cc352d867019a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-static-inputs"
+  content_hash: "0a462fa26cc0ce2384445db50468dab9ecdcbc2ba864161079a70358a8ecc701"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStaticInputResolutionIsFailClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "707285cf7f53cdaf57bd639f3e18344baba60f60af47e8376cde4bed1a679792"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-static-inputs"
+  content_hash: "0a462fa26cc0ce2384445db50468dab9ecdcbc2ba864161079a70358a8ecc701"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStaticInputRootRejectsMalformedDeclarations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f246f7d4b0b31d2332ca1436485f17b956add55d272294ff50b3705dda1970ee"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-static-inputs"
+  content_hash: "0a462fa26cc0ce2384445db50468dab9ecdcbc2ba864161079a70358a8ecc701"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStaticInputRootRefusesUnsoundResolutions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "836fc4123d3938a13f8f666ab928623dc47686e2c69a69e0abced03b57791c17"
+}

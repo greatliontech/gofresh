@@ -424,6 +424,42 @@ observation for everything beneath it, and the declared roots' link topology rid
 same hold-still span REQ-inputs-observation-coherence already places on the caller —
 guards pin covered content, never the shape of the path that reached it.
 
+**REQ-inputs-static-inputs** (behavior): Observation construction from a
+test-harness log MUST accept caller-declared static-input roots — each a
+module-relative identity-form path naming a committed file or tree (go.mod,
+a committed command or spec tree) whose content the CALLER's own record
+already pins, a generation snapshot digesting the named surface being the
+motivating class. A read provably inside a declared static root records
+neither a path identity nor a per-path disposition, under exactly the
+guard-covered class's resolution rules: inside in its declared or resolved
+form, the existing object it resolves to inside, every traversed symlink
+inside, and missing, uninspectable, or ambiguously resolved objects staying
+observed — the region's fail-closed boundary is the guard-covered one with
+the pinning evidence swapped from a toolchain guard to the caller's record.
+The declaration exists because re-observing content the caller's record
+pins adds no protection while its churn forfeits reuse for free: the
+repo-root discovery walk every source-reading test performs, and
+tree-scanning oracles over committed content, otherwise convert static repo
+surface into per-witness runtime-input records that can never prove
+reusable. The soundness input is the guard-covered class's, stated the same
+way: declaring a root is the caller's assertion that its record pins the
+named surface for the span, and a declaration the record does not actually
+pin silently vacates observation for everything beneath it — one declared
+surface wide. The module root itself is refused outright: a whole-module
+static declaration is the attach-no-manifest assertion in disguise
+(REQ-inputs-absent-asserted) and would vacate every module-relative
+observation rather than name a surface. The refusal binds in BOTH forms and
+loudly: a declared root must resolve strictly inside the module tree's
+interior — a committed symlink at the declared position pointing to the
+module root, an ancestor, or an external target refuses at ingest, because
+the caller's record pins the link string, never the target's content — and
+a root that does not resolve refuses the same way, a typo'd repo surface
+being a declaration error, never an empty one. Metadata rides the
+guard-covered carve-out with the evidence swapped: the motivating snapshot
+digests content, never mtimes, so a subject depending on a static surface's
+metadata beyond what the caller's record pins is outside the admitted
+observation set, exactly as covered-tree metadata dependence already is.
+
 **REQ-inputs-ephemeral-root** (behavior): Observation construction from a
 test-harness log MUST accept caller-declared ephemeral temp roots — the
 producing environment's temp directories, each a clean absolute path — whose
