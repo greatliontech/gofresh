@@ -229,7 +229,7 @@ func TestAttributedAnalysisConvertsUnsupportedShapesToErrors(t *testing.T) {
 	if origin == nil {
 		t.Fatal("generic origin not rooted")
 	}
-	if _, err := arta.Analyze(context.Background(), map[*ssa.Function]uint64{origin: 1}); err == nil {
+	if _, err := arta.Analyze(context.Background(), map[*ssa.Function]uint64{origin: 1}, nil); err == nil {
 		t.Fatal("a parameterized body walked without error")
 	}
 }

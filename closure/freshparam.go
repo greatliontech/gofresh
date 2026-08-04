@@ -30,6 +30,13 @@ type freshParamAnalysis struct {
 	// capability cannot be proven through dispatch the analysis cannot
 	// enumerate call sites for.
 	dynamic map[*ssa.Function]bool
+	// enumRoot/enumSites carry a signature-open subject root's
+	// whole-view caller enumeration (REQ-closure-analysis): the
+	// closed-value walks cross the root's own parameters to these
+	// sites. They never join callers — the fresh-path capability
+	// fixpoint stays subject-internal.
+	enumRoot  *ssa.Function
+	enumSites []ssa.CallInstruction
 
 	argFresh map[freshParamKey]bool
 	usesOK   map[freshParamKey]bool
@@ -47,6 +54,10 @@ func newFreshParamAnalysis(reach attributedReachability) *freshParamAnalysis {
 		dynamic:   map[*ssa.Function]bool{},
 		argFresh:  map[freshParamKey]bool{},
 		usesOK:    map[freshParamKey]bool{},
+	}
+	if len(reach.enumeratedRootSites) > 0 {
+		fp.enumRoot = reach.subjectRoot
+		fp.enumSites = reach.enumeratedRootSites
 	}
 	for fn := range reach.functions {
 		for _, block := range fn.Blocks {

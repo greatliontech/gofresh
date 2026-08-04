@@ -25,6 +25,11 @@ when its work lands (git holds history).
   argument-insensitive classifications (fmt.Fprintf into local buffers, math/big and
   fixed-argument time construction, std init closures); measured histogram inside.
   *Lands: the next gofresh plan — this is its charter.*
+- **[enumeration-targets-over-approximated](enumeration-targets-over-approximated.md)** — a
+  subject-closed dispatch pins its value set exactly, but the recorded target set is RTA's
+  whole-mask over-approximation; an init-flow closure of matching signature drags initializer
+  content into sibling subjects — spurious refusals, never false valids. *Lands: the next
+  gofresh plan, with the startup-effect precision family.*
 - **[observation-facts-struct](observation-facts-struct.md)** — newView, View.Sibling, and
   newSeededValidationView hand-build near-identical View literals around the same immutable
   observation facts; extracting the facts into one mutex-free struct makes read-only sharing

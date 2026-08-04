@@ -79,7 +79,13 @@ its root-cause class.
       pair).
 - [ ] 14. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
-- [ ] 15. gofresh: open the startup-effect-precision plan
+- [ ] 15. pew: profile capture and attribution as recording
+      companions (pew docs/issues/profile-capture-attribution.md) —
+      --profile captures per-arm cpu (and mem, where B/op is claimed)
+      evidence stored under the recording's provenance conjunction;
+      status gains the attribution verdict, stat the profile-diff view;
+      the consumer hand protocol stays as the derivation loop.
+- [ ] 16. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).

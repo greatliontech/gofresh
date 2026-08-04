@@ -1636,6 +1636,28 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// regardless of site arguments (the writer-sink admission's
 		// static-leg bound) and a writer crossing a call boundary
 		// refuses (startup carries no attributed parameter analysis).
+		// Whole-view caller enumeration: a dynamic-carrying subject
+		// whose only references are direct static calls with
+		// caller-frame-closed arguments analyzes closed; a caller-passed
+		// closure's or materialized type's effects are the subject's
+		// own; value references, zero references, and unclosed
+		// arguments keep the open world (REQ-closure-analysis).
+		{fixture: "dyncaller", subject: "RunCheck", observable: true},
+		{fixture: "dyncaller", subject: "RunEffect", reason: "os.WriteFile"},
+		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "RunDead", reason: "open subject world"},
+		{fixture: "dyncaller", subject: "FormatLoaded", reason: "open subject world"},
+		{fixture: "dyncaller", subject: "FormatLocal", observable: true},
+		{fixture: "dyncaller", subject: "Runner.RunM", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "Counter.RunP", reason: "computed function call"},
+		{fixture: "dyninit", subject: "RunInit", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "RunGen", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "RunGo", observable: true},
+		{fixture: "dyncaller", subject: "RunCallArg", reason: "computed function call"},
+		{fixture: "dyncaller", subject: "Measure", observable: true},
+		{fixture: "dyncaller", subject: "MeasureFile", reason: "os.WriteFile"},
 		{fixture: "initfmtsink", subject: "TestAfterInitFormat", observable: true},
 		{fixture: "initfmtvalue", subject: "TestAfterInitValueFormat", reason: "startup effect: reaches fmt.Fprintf"},
 		{fixture: "initfmthelper", subject: "TestAfterInitHelperFormat", reason: "startup effect: reaches fmt.Fprintf"},

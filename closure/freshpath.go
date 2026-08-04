@@ -1162,6 +1162,12 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 		return nil, false
 	}
 	sites := fp.callers[fn]
+	if fn == fp.enumRoot {
+		// The subject root's own parameters cross to its whole-view
+		// caller enumeration; any subject-internal recursion sites join
+		// the conjunction rather than replacing it.
+		sites = append(append([]ssa.CallInstruction(nil), sites...), fp.enumSites...)
+	}
 	if len(sites) == 0 {
 		return nil, false
 	}

@@ -233,7 +233,41 @@ unsafe reach open; a channel opens exactly when its element does);
 `any` and `comparable` bound nothing — closes
 the caller's choice, anything else keeps the subject open-world,
 where observability refuses exactly as for any
-open subject world. A
+open subject world. A non-generic function subject whose ordinary
+signature carries dynamic reach closes the same way a bounded generic
+does — by enumeration, never by signature shape alone (a
+receiver-bearing subject keeps its signature-shaped open world: a
+method's interface invocability leaves no reference the scan can see —
+a pointer-receiver invoke synthesizes no wrapper and takes no
+address): it analyzes closed
+exactly when every reference to it in the whole analyzed program is a
+direct static call from a body the enumeration can judge and, at every
+such site, each argument in
+a dynamic-reaching position closes in the calling function's own frame
+(locally constructed values under the closed-value walk with no
+cross-boundary crossing — the caller's parameters, loads, and call
+results refuse), in which case the sites' closed function values root
+the reachability walk under the subject's provenance and their
+materialized concrete types enter the runtime-type walk, so everything
+the caller can actually hand the subject is analyzed view content whose
+edit moves the subject's closure — a caller-passed closure executing in
+subject flow contributes its effects to the subject's effect set exactly
+as an instantiation's body does. Anything else keeps the open world:
+zero enumerable references (absence of provenance, refused, never a
+vacuous pass), any reference that is not a direct static call (an
+address capture, a stored value, a wrapper, a dynamic invocation of the
+subject), any call held by a body the enumeration cannot judge as a
+caller (a synthetic function — wrapper re-dispatch, package
+initializer — or a parameterized origin, whose arguments are never
+judged), any unclosed dynamic-position argument, or a subject reached
+through the harness's own dispatch rather than enumerable sites — with
+the one standing exception the tiers already share: a harness-signature
+subject's single dynamic-reaching parameter is the recognized harness's
+own value, governed by the harness admissions, and confers no open
+world. The
+enumeration is decided against the same analyzed binary the walk
+describes, so a caller added later changes the closure and re-measures
+rather than serving under an enumeration it was never part of. A
 constraint-bounded parameterized subject analyzes closed: its
 materialized in-binary instantiations root the reachability walk — each
 dispatches concretely, so instantiation-reached content enters the

@@ -109,8 +109,18 @@ const DynamicStateStrategy = "gofresh/dynamic-state@1"
 // only): a proven call is Sprint-equivalent value computation at every
 // tier, and the maximal scan's package-level Fprint finding narrows to
 // a diagnostic so the writer-sensitive tiers decide; an unproven
-// writer keeps the formatted-output classification.
-const ObservationRTA = "gofresh/observation-rta@12"
+// writer keeps the formatted-output classification; @13 closes a
+// non-generic dynamic-carrying subject by whole-view caller enumeration
+// exactly as bounded generics close by instantiation: when every
+// reference to the subject is a direct static call whose every
+// dynamic-position argument closes in the calling function's own frame,
+// the sites' closed function values and materialized concrete types
+// seed the walk (dispatch candidates and runtime types under the
+// subject's mask) and the subject analyzes closed — caller-passed
+// closures become analyzed view content whose effects and edits are the
+// subject's own; zero references, any non-call reference, any unclosed
+// argument, or harness-dispatched reach keeps the open world.
+const ObservationRTA = "gofresh/observation-rta@13"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

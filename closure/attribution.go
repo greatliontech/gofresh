@@ -3,6 +3,7 @@ package closure
 import (
 	"context"
 	"go/types"
+	"sort"
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/rta"
@@ -25,6 +26,13 @@ type attributedReachability struct {
 	// scan yields to theirs.
 	instantiatedOrigins map[*ssa.Function]bool
 	openWorld           bool
+	// enumeratedRootSites is the subject root's whole-view caller
+	// enumeration when its dynamic-carrying signature closed by it:
+	// the sites the closed-value walk crosses to when judging the
+	// root's own parameters. Nil for every other subject; subjectRoot
+	// names the function the sites call.
+	enumeratedRootSites []ssa.CallInstruction
+	subjectRoot         *ssa.Function
 }
 
 // attributedReachableSets runs package-local RTA once and projects its masks
@@ -94,7 +102,50 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	for _, init := range initRoots {
 		roots[init] |= allMasks
 	}
-	res, err := rta.Analyze(ctx, roots)
+	// Whole-view caller enumeration for signature-open subjects
+	// (REQ-closure-analysis): one deterministic pass collects every
+	// candidate's references; a subject whose only references are direct
+	// static calls with caller-frame-closed dynamic arguments analyzes
+	// closed, its enumerated candidates seeded into the walk. Everything
+	// else keeps the open world.
+	enumClosed := map[int]enumerationClosure{}
+	var seeds *rta.Seeds
+	openCandidates := map[*ssa.Function]int{}
+	for i, subject := range subjects {
+		root := prog.Roots[subject.Symbol]
+		if root == nil || parameterizedBody(root) || !rootMayReceiveUnknownDynamic(prog, root) {
+			continue
+		}
+		openCandidates[root] = i
+	}
+	if len(openCandidates) > 0 {
+		if allFunctions == nil {
+			allFunctions = ssautil.AllFunctions(prog.Prog)
+		}
+		candidateSet := make(map[*ssa.Function]bool, len(openCandidates))
+		for root := range openCandidates {
+			candidateSet[root] = true
+		}
+		callerSites, valueRefs := enumerateCallerReferences(candidateSet, allFunctions)
+		for root, i := range openCandidates {
+			enc, ok := subjectEnumerationClosure(root, callerSites[root], valueRefs[root])
+			if !ok {
+				continue
+			}
+			mask := uint64(1) << i
+			if seeds == nil {
+				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
+			}
+			for fn := range enc.addrTaken {
+				seeds.AddrTaken[fn] |= mask
+			}
+			for _, t := range enc.types {
+				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: mask})
+			}
+			enumClosed[i] = enc
+		}
+	}
+	res, err := rta.Analyze(ctx, roots, seeds)
 	if err != nil {
 		return nil, err
 	}
@@ -109,12 +160,15 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	}
 	reachable := make([]attributedReachability, len(subjects))
 	for i := range reachable {
+		enc, enumerated := enumClosed[i]
 		reachable[i] = attributedReachability{
 			functions:           make(map[*ssa.Function]bool, len(res.Reachable)),
 			resolved:            make(map[ssa.CallInstruction]bool, len(res.Resolved)),
 			dynamicTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins: instantiated[uint64(1)<<i],
-			openWorld:           rootMayReceiveUnknownDynamic(prog, prog.Roots[subjects[i].Symbol]),
+			openWorld:           !enumerated && rootMayReceiveUnknownDynamic(prog, prog.Roots[subjects[i].Symbol]),
+			enumeratedRootSites: enc.sites,
+			subjectRoot:         prog.Roots[subjects[i].Symbol],
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.Roots[subjects[i].Symbol]
@@ -205,6 +259,146 @@ func isTestingMRun(fn *ssa.Function) bool {
 		return false
 	}
 	return strings.Contains(fn.String(), "testing.M).Run")
+}
+
+// enumerationClosure is one signature-open subject's whole-view caller
+// closure (REQ-closure-analysis): the direct static call sites that are
+// its only references, plus the dispatch candidates those sites pass —
+// closed function values seeded address-taken, materialized concrete
+// types seeded into the runtime-type walk — so everything an enumerable
+// caller can hand the subject is analyzed view content.
+type enumerationClosure struct {
+	sites     []ssa.CallInstruction
+	addrTaken map[*ssa.Function]bool
+	types     []types.Type
+}
+
+// enumerateCallerReferences makes one deterministic pass over the whole
+// analyzed program, collecting for each candidate root its direct static
+// call sites and whether any other reference exists — an address
+// capture, a stored value, a dynamic use, or a call held by a body the
+// enumeration cannot judge as a caller. Function order is sorted so
+// site order, and every judgment derived from it, is run-to-run stable.
+func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.Function]bool) (map[*ssa.Function][]ssa.CallInstruction, map[*ssa.Function]bool) {
+	ordered := make([]*ssa.Function, 0, len(all))
+	for fn := range all {
+		if fn != nil {
+			ordered = append(ordered, fn)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
+	sites := make(map[*ssa.Function][]ssa.CallInstruction)
+	valueRef := make(map[*ssa.Function]bool)
+	var space [16]*ssa.Value
+	for _, fn := range ordered {
+		// A body the enumeration cannot judge as a caller — a synthetic
+		// function (wrapper re-dispatch, package initializer) or a
+		// parameterized origin (open over type parameters) — makes any
+		// call it holds a refusing reference, exactly like a value
+		// capture: its arguments are never judged, so they must never
+		// count as an enumerated site.
+		judgeable := fn.Synthetic == "" && !parameterizedBody(fn)
+		for _, b := range fn.Blocks {
+			for _, instr := range b.Instrs {
+				rands := instr.Operands(space[:0])
+				if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
+					if callee := site.Common().StaticCallee(); callee != nil && candidates[callee] {
+						if judgeable {
+							sites[callee] = append(sites[callee], site)
+						} else {
+							valueRef[callee] = true
+						}
+					}
+					if !site.Common().IsInvoke() {
+						// The callee operand is the call itself, not a
+						// value reference.
+						rands = rands[1:]
+					}
+				}
+				for _, op := range rands {
+					if g, ok := (*op).(*ssa.Function); ok && candidates[g] {
+						valueRef[g] = true
+					}
+				}
+			}
+		}
+	}
+	return sites, valueRef
+}
+
+// subjectEnumerationClosure judges one open-signature root against its
+// collected references: closed exactly when references are direct static
+// calls only, at least one exists, and every dynamic-reaching argument
+// position closes in the calling function's own frame (the caller-local
+// walk — the caller's parameters, loads, and call results refuse).
+func subjectEnumerationClosure(root *ssa.Function, sites []ssa.CallInstruction, valueRef bool) (enumerationClosure, bool) {
+	// Functions only: a method's interface invocability leaves no
+	// reference the scan can see (a pointer-receiver invoke synthesizes
+	// no wrapper and takes no address), so a receiver-bearing subject
+	// keeps its signature-shaped open world.
+	if root.Signature != nil && root.Signature.Recv() != nil {
+		return enumerationClosure{}, false
+	}
+	if valueRef || len(sites) == 0 {
+		return enumerationClosure{}, false
+	}
+	enc := enumerationClosure{sites: sites, addrTaken: map[*ssa.Function]bool{}}
+	for _, site := range sites {
+		args := site.Common().Args
+		if len(args) != len(root.Params) {
+			return enumerationClosure{}, false
+		}
+		for i, param := range root.Params {
+			if !typeMayCarryDynamic(param.Type(), make(map[types.Type]bool)) {
+				continue
+			}
+			if !locallyClosedDynamicValue(args[i], make(map[ssa.Value]bool)) {
+				return enumerationClosure{}, false
+			}
+			collectClosedDynamicSeeds(args[i], &enc, map[ssa.Value]bool{})
+		}
+	}
+	return enc, true
+}
+
+// collectClosedDynamicSeeds walks an already-closed argument value and
+// gathers what it can hand the subject: function values become dispatch
+// candidates, materialized concrete types enter the runtime-type walk.
+// The case set mirrors the closed-value walk that admitted the value;
+// bindings of ordinary closures are not collected — a free-variable
+// dispatch inside the body refuses per-site when the body is scanned.
+func collectClosedDynamicSeeds(value ssa.Value, enc *enumerationClosure, seen map[ssa.Value]bool) {
+	if value == nil || seen[value] {
+		return
+	}
+	seen[value] = true
+	switch v := value.(type) {
+	case *ssa.Function:
+		enc.addrTaken[v] = true
+	case *ssa.MakeClosure:
+		if fn, ok := v.Fn.(*ssa.Function); ok {
+			enc.addrTaken[fn] = true
+		}
+	case *ssa.MakeInterface:
+		enc.types = append(enc.types, v.X.Type())
+		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc {
+			collectClosedDynamicSeeds(v.X, enc, seen)
+		}
+	case *ssa.ChangeInterface:
+		collectClosedDynamicSeeds(v.X, enc, seen)
+	case *ssa.TypeAssert:
+		collectClosedDynamicSeeds(v.X, enc, seen)
+	case *ssa.ChangeType:
+		collectClosedDynamicSeeds(v.X, enc, seen)
+	case *ssa.Convert:
+		collectClosedDynamicSeeds(v.X, enc, seen)
+	case *ssa.Extract:
+		collectClosedDynamicSeeds(v.Tuple, enc, seen)
+	case *ssa.Phi:
+		for _, edge := range v.Edges {
+			collectClosedDynamicSeeds(edge, enc, seen)
+		}
+	}
 }
 
 func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {

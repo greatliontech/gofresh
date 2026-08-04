@@ -204,6 +204,29 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 	}
 }
 
+// Seeds carries per-subject facts established outside the walk — the
+// caller-enumeration closure of a dynamic-carrying subject hands the
+// walk exactly what enumerable callers can pass: function values become
+// dispatch candidates (address-taken under the subject's mask, so the
+// subject's own dynamic sites resolve to them and their bodies join the
+// subject's reachability only if actually dispatched), and materialized
+// concrete types enter the runtime-type walk (so interface dispatch on
+// a parameter enumerates them and their exported method sets stay
+// visible). Seeding never forces reachability by itself: an undispatched
+// candidate contributes nothing, mirroring RTA's own address-taken
+// semantics.
+type Seeds struct {
+	AddrTaken    map[*ssa.Function]uint64
+	RuntimeTypes []TypeSeed
+}
+
+// TypeSeed is one concrete type materialized at an enumerated caller
+// site, entering the runtime-type walk under the subjects of Masks.
+type TypeSeed struct {
+	Type  types.Type
+	Masks uint64
+}
+
 // analyzeAttributed performs RTA for up to 64 subjects at once. roots maps each
 // root function to the subjects for which it is an independent-analysis root.
 // The walk mirrors upstream RTA, whose internal assertions panic on shapes it
@@ -212,8 +235,8 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 // embedding process — fail-closed, never a crash. The breadth is deliberate:
 // a genuine regression panicking here degrades instead of crashing, and its
 // detection signal is corpus-level "unsupported analysis shape" counts.
-// Analyze runs attributed RTA over the masked roots.
-func Analyze(ctx context.Context, roots map[*ssa.Function]uint64) (result *Result, err error) {
+// Analyze runs attributed RTA over the masked roots and seeds.
+func Analyze(ctx context.Context, roots map[*ssa.Function]uint64, seeds *Seeds) (result *Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result, err = nil, fmt.Errorf("closure: attributed reachability: unsupported analysis shape: %v", recovered)
@@ -257,6 +280,22 @@ func Analyze(ctx context.Context, roots map[*ssa.Function]uint64) (result *Resul
 	r.interfaceTypes.SetHasher(hasher)
 	r.runtimeTypes.SetHasher(hasher)
 
+	// Seeds precede root processing so a subject's first-visited dynamic
+	// site already sees its enumerated candidates and types; the visit
+	// maps are delta-driven, so order affects nothing but avoids a
+	// re-walk.
+	if seeds != nil {
+		for f, masks := range seeds.AddrTaken {
+			if f != nil && masks != 0 {
+				r.visitAddrTakenFunc(f, masks)
+			}
+		}
+		for _, seed := range seeds.RuntimeTypes {
+			if seed.Type != nil && seed.Masks != 0 {
+				r.addRuntimeType(seed.Type, seed.Masks, false)
+			}
+		}
+	}
 	for root, masks := range roots {
 		r.addReachable(root, masks)
 	}

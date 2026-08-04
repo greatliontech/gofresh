@@ -651,7 +651,17 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if c.IsInvoke() && observableDirEntryCall(site) {
 		return
 	}
-	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
+	// For an enumeration-closed subject the operand walk crosses
+	// subject-attributed parameters through to the root's whole-view
+	// caller sites — that crossing is the enumeration design itself.
+	// Every other subject keeps the local walk: classifiability stays a
+	// property of the dispatch shape, never of what a crossed-in
+	// target's effects happen to be (the harnesswrap pin).
+	operandClosed := locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
+	if !operandClosed && a.fresh != nil && a.fresh.enumRoot != nil {
+		operandClosed = subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
+	}
+	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && operandClosed
 	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.harnessOnlyInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
 		a.requestWiden("interface invoke outside RTA")
 	}
