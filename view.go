@@ -399,11 +399,10 @@ func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
 	if _, ok := v.maximal[subject]; !ok {
 		return TestVariantLedger{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	ledger := v.testVariantLedgers[subject.Package]
-	return TestVariantLedger{
-		Declarations: slices.Clone(ledger.Declarations),
-		FileHeaders:  slices.Clone(ledger.FileHeaders),
-	}, nil
+	// Clone, not a shallow struct copy: declarations carry reference-list
+	// slices, and a shallow copy would alias them into the view's internal
+	// ledger, breaking caller ownership.
+	return v.testVariantLedgers[subject.Package].Clone(), nil
 }
 
 // CaptureBatch captures a fingerprint for every subject in the view,

@@ -109,7 +109,37 @@ spec's ordinal within its group (iota and implicit expression repetition), a
 var spec's and an init function's ordinal within its file (package-level
 initialization order) — so an insertion that shifts a sibling's value or a
 reorder of initialization surfaces as changed declarations, never as a silent
-add or an empty delta; per directive-shaped comment (`//go:…` other than
+add or an empty delta; beside the hash, the declaration's referenced names —
+every identifier appearing in its declaring node, selector members and local
+names included, the blank identifier (which resolves nothing) excluded, and
+a const spec with an omitted expression list folding in its group's
+governing spec's references and declared names — the blank name included,
+as the ledger edge to an unnamed governor — since Go repeats that list
+textually and the compiled code resolves names the spec never
+writes — a syntax-only
+over-approximation of
+the top-level names the declaration's compiled code can resolve by
+identifier, derived from the bytes the content hash folds — equal hashes
+carry equal reference lists, with the one stated exception of an
+omitted-list const spec, whose fold also tracks its group's governing list:
+there the governing spec's declared names always ride the fold — the blank
+name included, naming the ledger entry itself when the governor declares
+nothing else — and any change
+in that list is that governing entry's own movement, so a consumer walking
+the current ledger's references still observes every movement an unchanged
+declaration can textually repeat; the list is
+served for a consumer to attribute a delta to the declarations that can
+reach it — gofresh renders no reachability judgment, and directive entries
+carry no references; and the declaring file's package clause name, so a
+consumer can tell the two compartment packages' same-named declarations
+apart — a method's receiver type resolves within its own package only; the
+clause is part of the delta's declaration identity, because a
+package-clause-only rename re-homes every declaration semantically (methods
+re-attach across same-named types, unexported access changes) while
+touching no declaration's bytes: the rename surfaces as removed and added
+declarations, never as an empty delta hiding behind its licensed header
+change;
+per directive-shaped comment (`//go:…` other than
 `//go:build`, wherever it sits in the file) a "directive" entry named by its
 verb and hashed over its text, because directives are behavior-bearing from
 any position — `//go:debug` ahead of the package clause, a floating

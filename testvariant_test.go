@@ -297,6 +297,21 @@ func TestViewServesTestVariantLedgerFromItsSnapshot(t *testing.T) {
 	if len(captured.Declarations) != 1 || captured.Declarations[0].Name != "TestF" || captured.Declarations[0].Kind != "func" {
 		t.Fatalf("captured ledger = %+v, want the one recorded test", captured.Declarations)
 	}
+	// Caller-owned all the way down: mutating a served reference list never
+	// surfaces through the view's internal ledger or later callers.
+	if len(captured.Declarations[0].References) == 0 {
+		t.Fatalf("captured declaration carries no references: %+v", captured.Declarations[0])
+	}
+	original := captured.Declarations[0].References[0]
+	captured.Declarations[0].References[0] = "mutated"
+	refetched, err := view.TestVariantLedger(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(refetched.Declarations[0].References, "mutated") {
+		t.Fatalf("view ledger shares reference backing arrays with callers: %v", refetched.Declarations[0].References)
+	}
+	captured.Declarations[0].References[0] = original
 	// The compartment's bytes are among the view's exposed source identities,
 	// so a producer's provenance covers them like any core member
 	// (REQ-fresh-view-source-identities).

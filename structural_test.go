@@ -32,6 +32,8 @@ func TestVariantLedgerTypesAreExportedData(t *testing.T) {
 		structural.FieldOf[string]("Name"),
 		structural.FieldOf[string]("Receiver"),
 		structural.FieldOf[string]("Hash"),
+		structural.FieldOf[string]("Package"),
+		structural.FieldOf[[]string]("References"),
 	)
 	structural.ExportedData[TestVariantFileHeader](t,
 		structural.FieldOf[string]("File"),

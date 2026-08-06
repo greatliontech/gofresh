@@ -279,3 +279,208 @@ func TestDocCommentRidesTheDeclarationHash(t *testing.T) {
 		t.Fatal("doc-comment edit moved the file header identity")
 	}
 }
+
+// The referenced-name list is the syntax-only reference surface: every
+// identifier under the declaration — called helpers, selector members,
+// receiver and parameter types, locals — deduplicated and sorted, with the
+// blank identifier dropped and directive entries carrying none
+// (REQ-closure-test-variant-compartment reference surface).
+func TestDeclarationReferencesCollectIdentifiersAndSelectors(t *testing.T) {
+	const src = "package p\n\n" +
+		"//go:generate stub\n" +
+		"type suite struct{ n int }\n\n" +
+		"func (s *suite) run() int { return helperA() }\n\n" +
+		"func TestF(t *T) {\n\tvar local suite\n\t_ = local.run()\n\ts := fmt.Sprint(helperB())\n\t_ = s\n}\n\n" +
+		"var (\n\ttableA = helperA()\n\ttableB = helperB()\n)\n"
+	ledger := parseLedger(t, "a_test.go", src)
+	byName := map[string]TestVariantDeclaration{}
+	for _, declaration := range ledger.Declarations {
+		byName[declaration.Kind+"/"+declaration.Name] = declaration
+	}
+	test := byName["func/TestF"]
+	for _, want := range []string{"helperB", "run", "suite", "fmt", "Sprint", "local", "TestF"} {
+		if !slicesContains(test.References, want) {
+			t.Fatalf("TestF references %v, want %q present", test.References, want)
+		}
+	}
+	if slicesContains(test.References, "_") {
+		t.Fatalf("blank identifier collected: %v", test.References)
+	}
+	if !sort.StringsAreSorted(test.References) {
+		t.Fatalf("references not sorted: %v", test.References)
+	}
+	method := byName["method/run"]
+	for _, want := range []string{"suite", "helperA"} {
+		if !slicesContains(method.References, want) {
+			t.Fatalf("method run references %v, want %q present", method.References, want)
+		}
+	}
+	// Grouped specs reference spec-locally: tableA sees helperA, not helperB.
+	if got := byName["var/tableA"].References; !slicesContains(got, "helperA") || slicesContains(got, "helperB") {
+		t.Fatalf("tableA references %v, want helperA without helperB", got)
+	}
+	if got := byName["directive/go:generate"].References; len(got) != 0 {
+		t.Fatalf("directive carries references: %v", got)
+	}
+	// Every entry names its declaring file's package clause.
+	for key, declaration := range byName {
+		if declaration.Package != "p" {
+			t.Fatalf("%s carries package %q, want the file's package clause p", key, declaration.Package)
+		}
+	}
+	// Deduplicated: "local" appears twice in TestF's source (declaration
+	// and use) and exactly once in its reference list.
+	occurrences := 0
+	for _, name := range test.References {
+		if name == "local" {
+			occurrences++
+		}
+	}
+	if occurrences != 1 {
+		t.Fatalf("local appears %d times in %v, want deduplication to one", occurrences, test.References)
+	}
+}
+
+// A const spec with an omitted expression list repeats the group's governing
+// list textually, so its compiled code resolves that list's names without
+// writing them: the governing spec's references fold into the empty-listed
+// sibling, and a later spec with its own list resets the fold
+// (REQ-closure-test-variant-compartment reference surface).
+func TestImplicitConstRepetitionFoldsGoverningReferences(t *testing.T) {
+	const src = "package p\n\nconst (\n\tkindA = otherConst + 1\n\tkindB\n\tkindC = plainConst\n\tkindD\n)\n"
+	ledger := parseLedger(t, "a_test.go", src)
+	byName := map[string][]string{}
+	for _, declaration := range ledger.Declarations {
+		byName[declaration.Name] = declaration.References
+	}
+	if !slicesContains(byName["kindB"], "otherConst") {
+		t.Fatalf("kindB references %v, want the governing list's otherConst folded in", byName["kindB"])
+	}
+	// The governing spec's own name is the load-bearing edge: an edit to
+	// the governing list is that entry's own movement, so a consumer walk
+	// reaching kindA observes every change kindB textually repeats.
+	if !slicesContains(byName["kindB"], "kindA") {
+		t.Fatalf("kindB references %v, want the governing spec's own name folded in", byName["kindB"])
+	}
+	if !slicesContains(byName["kindD"], "plainConst") || slicesContains(byName["kindD"], "otherConst") {
+		t.Fatalf("kindD references %v, want plainConst governing without the stale otherConst", byName["kindD"])
+	}
+	if !sort.StringsAreSorted(byName["kindB"]) {
+		t.Fatalf("folded references not sorted: %v", byName["kindB"])
+	}
+
+	// A blank-named governor declares nothing a test can write, so the
+	// fold's edge to it is the blank name itself: the ledger's "_" entry is
+	// a walkable node, and without the edge an empty-listed sibling's
+	// repetition of `_ = expr` would be attributable to nothing.
+	blank := parseLedger(t, "b_test.go", "package p\n\nconst (\n\t_ = helperA\n\tblankKind\n)\n")
+	blankFound := false
+	for _, declaration := range blank.Declarations {
+		if declaration.Name == "blankKind" {
+			blankFound = true
+			if !slicesContains(declaration.References, "_") {
+				t.Fatalf("blankKind references %v, want the blank governor's ledger edge", declaration.References)
+			}
+		}
+	}
+	if !blankFound {
+		t.Fatalf("blankKind entry missing from ledger: %+v", blank.Declarations)
+	}
+}
+
+// A package-clause-only rename re-homes every declaration semantically —
+// methods re-attach across same-named types, unexported access changes —
+// while leaving every declaration's bytes and the file's declaration set
+// untouched. The package clause is part of the diff identity, so the rename
+// surfaces as removed and added declarations, never as an empty (inert)
+// delta hiding behind a licensed header change
+// (REQ-closure-test-variant-compartment).
+func TestPackageClauseRenameSurfacesAsMembershipChange(t *testing.T) {
+	recorded := parseLedger(t, "a_test.go", "package p\n\nfunc (T) Error() string { return \"\" }\n\nfunc TestF(t *X) {}\n")
+	renamed := parseLedger(t, "a_test.go", "package p_test\n\nfunc (T) Error() string { return \"\" }\n\nfunc TestF(t *X) {}\n")
+	if got := recorded.Declarations[0].Package; got != "p" {
+		t.Fatalf("in-package clause = %q, want p", got)
+	}
+	if got := renamed.Declarations[0].Package; got != "p_test" {
+		t.Fatalf("external clause = %q, want p_test", got)
+	}
+	delta := DiffTestVariantLedgers(recorded, renamed)
+	if len(delta.Removed) != 2 || len(delta.Added) != 2 || delta.Inert() {
+		t.Fatalf("clause rename delta = %+v (inert=%v), want every declaration removed and re-added", delta, delta.Inert())
+	}
+}
+
+// Delta classification never reads the reference surface: two ledgers whose
+// declarations differ only in References diff to an empty, inert delta
+// (REQ-closure-test-variant-compartment — classification is hash-based).
+func TestClassificationIgnoresReferences(t *testing.T) {
+	ledger := parseLedger(t, "a_test.go", "package p\n\nfunc TestF(t *T) { helper() }\n\nfunc helper() {}\n")
+	doctored := ledger.Clone()
+	for i := range doctored.Declarations {
+		doctored.Declarations[i].References = []string{"unrelated"}
+	}
+	delta := DiffTestVariantLedgers(ledger, doctored)
+	if len(delta.Added) != 0 || len(delta.Changed) != 0 || len(delta.Removed) != 0 || len(delta.HeaderChanges) != 0 || !delta.Inert() {
+		t.Fatalf("reference-only difference classified as movement: %+v", delta)
+	}
+}
+
+// Equal declaration hashes carry equal reference lists — references derive
+// from the bytes the hash folds — and a positional-digest movement
+// (a shifted const ordinal) moves the hash while the references, a pure
+// function of the spec's own bytes when it carries its own expression
+// list, stay identical. The omitted-list fold is the one stated exception,
+// pinned by TestImplicitConstRepetitionFoldsGoverningReferences
+// (REQ-closure-test-variant-compartment reference surface).
+func TestDeclarationReferencesAreAPureFunctionOfTheBytes(t *testing.T) {
+	const src = "package p\n\nconst (\n\tkindA = iota\n\tkindB = kindA + 1\n)\n\nfunc TestF(t *T) { _ = kindB }\n"
+	first := parseLedger(t, "a_test.go", src)
+	second := parseLedger(t, "a_test.go", src)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("parse not deterministic:\n%+v\n%+v", first, second)
+	}
+	shifted := parseLedger(t, "a_test.go", "package p\n\nconst (\n\tkindZ = iota\n\tkindA = iota\n\tkindB = kindA + 1\n)\n\nfunc TestF(t *T) { _ = kindB }\n")
+	pick := func(ledger TestVariantLedger, name string) TestVariantDeclaration {
+		for _, declaration := range ledger.Declarations {
+			if declaration.Name == name {
+				return declaration
+			}
+		}
+		t.Fatalf("%s not in ledger", name)
+		return TestVariantDeclaration{}
+	}
+	before, after := pick(first, "kindB"), pick(shifted, "kindB")
+	if len(before.References) == 0 {
+		t.Fatalf("kindB carries no references; the equality below would be vacuous")
+	}
+	if before.Hash == after.Hash {
+		t.Fatalf("shifted iota sibling kept its hash")
+	}
+	if !reflect.DeepEqual(before.References, after.References) {
+		t.Fatalf("byte-identical spec's references moved: %v vs %v", before.References, after.References)
+	}
+}
+
+// Clone hands the caller an isolated ledger: mutating a clone's reference
+// list never surfaces through the original.
+func TestCloneIsolatesReferences(t *testing.T) {
+	ledger := parseLedger(t, "a_test.go", "package p\n\nfunc TestF(t *T) { helper() }\n")
+	clone := ledger.Clone()
+	for i := range clone.Declarations {
+		for j := range clone.Declarations[i].References {
+			clone.Declarations[i].References[j] = "mutated"
+		}
+	}
+	if slicesContains(ledger.Declarations[0].References, "mutated") {
+		t.Fatalf("clone shares reference backing array with original")
+	}
+}
+
+func slicesContains(list []string, want string) bool {
+	for _, have := range list {
+		if have == want {
+			return true
+		}
+	}
+	return false
+}

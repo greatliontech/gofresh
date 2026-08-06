@@ -67,6 +67,36 @@ type TestVariantDeclaration struct {
 	Name     string
 	Receiver string
 	Hash     string
+	// Package is the declaring file's package clause name — the base name
+	// for the in-package variant, the "_test"-suffixed name for the
+	// external one — so a consumer can tell same-named declarations of the
+	// two compartment packages apart (a method's receiver type resolves
+	// within its own package only). Unlike References it is NOT derivable
+	// from the hash-pinned bytes (the clause lives in the file header), so
+	// it is part of the diff identity: a package-clause-only rename
+	// re-homes every declaration semantically (methods re-attach across
+	// same-named types, unexported access changes) and surfaces as removed
+	// and added declarations, never as an empty delta. It stays outside
+	// the content hash.
+	Package string
+	// References is the declaration's referenced-name list: every identifier
+	// appearing in its declaring node — selector members, receiver and
+	// parameter type names, and local names included; the blank identifier
+	// excluded — deduplicated and sorted. It is a syntax-only
+	// over-approximation of the top-level names the declaration's compiled
+	// code can resolve by identifier, derived from the bytes the hash
+	// vouches for: equal hashes carry equal reference lists, except an
+	// omitted-list const spec, whose fold also tracks its group's governing
+	// expression list — there the governing spec's declared names always
+	// ride the fold, the blank name included (naming the ledger entry
+	// itself when the governor declares nothing else), and a change in
+	// that list is the governing entry's own movement, so a consumer
+	// walking current references still observes every movement an
+	// unchanged declaration can textually repeat. It is
+	// served for a consumer to attribute a compartment delta to the
+	// declarations that can reach it; gofresh itself renders no
+	// reachability judgment. Directive entries carry none.
+	References []string
 }
 
 // TestVariantFileHeader is one compartment file's non-declaration identity.
@@ -172,13 +202,13 @@ func (d TestVariantDelta) Inert() bool {
 // current ones as added. The result is deterministic for any two ledgers.
 func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 	type identity struct {
-		file, kind, receiver, name string
+		file, pkg, kind, receiver, name string
 	}
 	group := func(declarations []TestVariantDeclaration) (map[identity][]TestVariantDeclaration, []identity) {
 		grouped := make(map[identity][]TestVariantDeclaration, len(declarations))
 		var order []identity
 		for _, declaration := range declarations {
-			key := identity{declaration.File, declaration.Kind, declaration.Receiver, declaration.Name}
+			key := identity{declaration.File, declaration.Package, declaration.Kind, declaration.Receiver, declaration.Name}
 			if _, ok := grouped[key]; !ok {
 				order = append(order, key)
 			}
@@ -282,8 +312,12 @@ func lessDeclaration(a, b TestVariantDeclaration) bool {
 
 // Clone returns a caller-owned deep copy of the ledger.
 func (l TestVariantLedger) Clone() TestVariantLedger {
+	declarations := append([]TestVariantDeclaration(nil), l.Declarations...)
+	for i := range declarations {
+		declarations[i].References = append([]string(nil), declarations[i].References...)
+	}
 	return TestVariantLedger{
-		Declarations: append([]TestVariantDeclaration(nil), l.Declarations...),
+		Declarations: declarations,
 		FileHeaders:  append([]TestVariantFileHeader(nil), l.FileHeaders...),
 	}
 }
@@ -397,6 +431,47 @@ func positionalDigest(content []byte, ordinal int) string {
 	return hex.EncodeToString(hasher.Sum(nil))[:32]
 }
 
+// referencedNames collects every identifier name appearing under node,
+// deduplicated and sorted — the syntax-only reference surface a consumer
+// attributes compartment deltas with. Locals and field names over-count by
+// name collision; over-counting is the safe direction (a consumer re-checks
+// more, never less). The blank identifier resolves nothing and is dropped.
+func referencedNames(node ast.Node) []string {
+	if node == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var names []string
+	ast.Inspect(node, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok && ident.Name != "_" && !seen[ident.Name] {
+			seen[ident.Name] = true
+			names = append(names, ident.Name)
+		}
+		return true
+	})
+	sort.Strings(names)
+	return names
+}
+
+// mergedNames unions two sorted-unique name lists into a sorted-unique one.
+func mergedNames(a, b []string) []string {
+	if len(b) == 0 {
+		return a
+	}
+	seen := make(map[string]bool, len(a)+len(b))
+	merged := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, name := range list {
+			if !seen[name] {
+				seen[name] = true
+				merged = append(merged, name)
+			}
+		}
+	}
+	sort.Strings(merged)
+	return merged
+}
+
 // parseTestVariantFile extracts one Go file's ledger entries from its bytes:
 // one declaration entry per top-level function, method, init, var, const, and
 // type name, plus the file header over the non-declaration remainder. Import
@@ -440,7 +515,7 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 			}
 			declarations = append(declarations, TestVariantDeclaration{
 				File: name, Kind: kind, Name: decl.Name.Name, Receiver: receiver,
-				Hash: hash,
+				Hash: hash, References: referencedNames(decl), Package: file.Name.Name,
 			})
 		case *ast.GenDecl:
 			if decl.Tok == token.IMPORT {
@@ -459,6 +534,13 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 			default:
 				continue
 			}
+			// A const spec with an omitted expression list repeats the
+			// group's governing (nearest preceding non-empty) list
+			// textually, so its compiled code resolves that list's names
+			// without writing them; the governing spec's references fold
+			// into the empty-listed sibling to keep the reference surface
+			// an over-approximation of what the code can resolve.
+			var governingConstRefs []string
 			for si, spec := range decl.Specs {
 				specStart, specEnd := start, end
 				if decl.Lparen.IsValid() {
@@ -487,10 +569,28 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 				}
 				switch spec := spec.(type) {
 				case *ast.TypeSpec:
-					declarations = append(declarations, TestVariantDeclaration{File: name, Kind: kind, Name: spec.Name.Name, Hash: hash})
+					declarations = append(declarations, TestVariantDeclaration{File: name, Kind: kind, Name: spec.Name.Name, Hash: hash, References: referencedNames(spec), Package: file.Name.Name})
 				case *ast.ValueSpec:
+					references := referencedNames(spec)
+					if decl.Tok == token.CONST {
+						if len(spec.Values) > 0 {
+							// The fold carries the governing spec's declared
+							// names too, the blank name included: a test can
+							// never write "_", but the ledger's "_" entry is
+							// a walkable node, and without that edge an
+							// empty-listed sibling's textual repetition of a
+							// blank-named governor would be attributable to
+							// nothing.
+							governingConstRefs = references
+							for _, specName := range spec.Names {
+								governingConstRefs = mergedNames(governingConstRefs, []string{specName.Name})
+							}
+						} else {
+							references = mergedNames(references, governingConstRefs)
+						}
+					}
 					for _, specName := range spec.Names {
-						declarations = append(declarations, TestVariantDeclaration{File: name, Kind: kind, Name: specName.Name, Hash: hash})
+						declarations = append(declarations, TestVariantDeclaration{File: name, Kind: kind, Name: specName.Name, Hash: hash, References: references, Package: file.Name.Name})
 					}
 				}
 			}
@@ -521,7 +621,7 @@ func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration
 			}
 			declarations = append(declarations, TestVariantDeclaration{
 				File: name, Kind: "directive", Name: strings.TrimPrefix(verb, "//"),
-				Hash: digest.Content([]byte(text)),
+				Hash: digest.Content([]byte(text)), Package: file.Name.Name,
 			})
 		}
 	}
