@@ -70,7 +70,7 @@ its root-cause class.
       wires both).
 - [x] 11. gomutant: confirmation uses stability evidence
       (gomutant docs/issues/confirmation-ignores-stability-evidence.md).
-- [ ] 12. gomutant: kill-cache keying by killing-oracle content
+- [x] 12. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
       the compartment ledger the preflight surfaces).
 - [ ] 13. gomutant: pipeline preparation with execution
