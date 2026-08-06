@@ -68,7 +68,7 @@ its root-cause class.
       (gomutant docs/issues/preflight-plan-phase.md and
       docs/issues/silent-execution-no-progress.md — one run-loop pass
       wires both).
-- [ ] 11. gomutant: confirmation uses stability evidence
+- [x] 11. gomutant: confirmation uses stability evidence
       (gomutant docs/issues/confirmation-ignores-stability-evidence.md).
 - [ ] 12. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
