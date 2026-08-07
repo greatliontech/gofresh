@@ -46,3 +46,8 @@ when its work lands (git holds history).
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
   *Lands: the next gofresh plan.*
+- **[memo-store-ownership](memo-store-ownership.md)** — the closure package's effect-scan
+  memos write `$XDG_CACHE_HOME/gofresh` unconditionally from any consumer process, with no
+  API to disable, redirect, or attribute; carries the dead `SetMemoScope` opt-in surface no
+  consumer calls. Cost/policy-only — entries are never trusted beyond their content key.
+  *Lands: cross-tool train chunk 20.*

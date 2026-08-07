@@ -96,3 +96,19 @@ its root-cause class.
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).
+- [ ] 18. stipulator: incremental witness publication (stipulator
+      docs/issues/witness-evidence-published-only-at-run-end.md) — the
+      run's drop-path decision moves to witness completion (or a staged
+      install-then-confirm), so a dying check keeps every record it
+      produced; the degraded path still publishes nothing.
+- [ ] 19. stipulator + gofresh: bracket digest sharing within a run
+      (stipulator docs/issues/cold-check-bracket-digest-amplification.md)
+      — one digest of an unchanged bracket tree serves every witness in
+      the run, with mid-run mutation of bracketed trees still detected;
+      mechanism home (gofresh per-process memo vs run-scoped reuse in
+      the witness runner) decided at triage.
+- [ ] 20. gofresh: memo-store consumer control (gofresh
+      docs/issues/memo-store-ownership.md) — consumers gain
+      disable/redirect control over the persistent memo store; the
+      dead SetMemoScope opt-in surface is dispositioned in the same
+      change.
