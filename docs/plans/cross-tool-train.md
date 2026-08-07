@@ -6,9 +6,9 @@ loop there; gofresh chunks release before consumer chunks bump. WIP = 1.
 Ordering for the gomutant tail follows the `Lands:` lines in that repo's
 issue docs; the two lead chunks are the field-blocking overlay defect and
 its root-cause class. Remaining chunks execute bottoms-up by layer:
-gofresh first (21, 22, 20, 17), one gofresh release, then stipulator
-(18, 19) and its bump, then the re-measure (16), then pew (15), then
-plan close-out.
+gofresh first (21, 22, 23, 20, 17), one gofresh release, then
+stipulator (18, 19) and its bump, then the re-measure (16), then pew
+(15), then plan close-out.
 
 - [x] 1. gomutant: overlay commit cost + quarantine
       (gomutant docs/issues/store-update-reparses-whole-overlay.md) —
@@ -125,7 +125,14 @@ plan close-out.
       unreachable while the downgrade sweeps the corpus).
 - [ ] 22. gofresh: init-only-reachable registration state (gofresh
       docs/issues/init-only-reachable-registration-state.md) - a
-      registry mutated solely through helpers unreachable from any
-      non-init root is startup-deterministic state; mechanism (prove
-      init-only reachability vs keep fail-closed) decided at triage,
-      spec-first.
+      mutation inside an unexported helper whose every reference is,
+      transitively, an initializer expression or init body is init
+      flow (user decision: full tool-side precision; the fail-closed
+      and workload-directive alternatives declined).
+- [ ] 23. gofresh: receiver-effect facts (gofresh
+      docs/issues/receiver-effect-facts.md) - per-package method facts
+      record whether a method writes receiver-reachable state, so a
+      pointer-receiver method call on a package-level carrier marks
+      mutation only when the method (or anything it hands the receiver
+      to) demonstrably writes; unknown methods stay fail-closed
+      address captures.

@@ -56,3 +56,7 @@ when its work lands (git holds history).
   registries mutated only through helpers unreachable from any non-init root are
   startup-deterministic in fact but fail-closed by the syntactic walk; the dominant
   first-party residual after use-shape precision. *Lands: cross-tool train chunk 22.*
+- **[receiver-effect-facts](receiver-effect-facts.md)** — pointer-receiver method reads
+  (`registry.Get`) mark as address-capture mutation, keeping registration-shaped APIs
+  downgraded even when nothing writes post-init; per-package receiver-effect facts let
+  call sites mark only demonstrably-writing methods. *Lands: cross-tool train chunk 23.*

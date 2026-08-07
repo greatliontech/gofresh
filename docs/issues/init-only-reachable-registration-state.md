@@ -9,12 +9,17 @@ this is the dominant first-party residual after the use-shape
 precision landed - a `declarations.Declare(name, ...)` helper opens
 its package and downgrades every importer.
 
-Mechanism options for triage (spec-first): prove init-only
-reachability over the whole-program call graph (no non-init root
-reaches the mutating body) and treat such writes as init flow; or
-keep fail-closed and route the pattern to the workload (registries
-populated in initializer expressions or init bodies directly). The
-property-test library's runtime caches are NOT this class - they are
-genuinely runtime-mutated - and stay correctly open either way.
+Mechanism (user decision: full tool-side precision): a mutation
+inside an unexported function whose every in-package reference is a
+call from an initializer expression, an init body, or another such
+init-only function - transitively, with any value reference,
+export, or method-value bind refusing the class - is init flow.
+Package-local and fact-compatible; fail-closed on every other shape.
+Discharging the read side of pointer-typed registries (method calls
+like Get marking as address captures) is the separate
+receiver-effect-facts item - both are needed before the registration
+pattern fully discharges. The property-test library's runtime caches
+are NOT this class - they are genuinely runtime-mutated - and stay
+correctly open either way.
 
 Lands: cross-tool train chunk 22.
