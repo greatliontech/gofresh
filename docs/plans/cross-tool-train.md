@@ -7,7 +7,7 @@ Ordering for the gomutant tail follows the `Lands:` lines in that repo's
 issue docs; the two lead chunks are the field-blocking overlay defect and
 its root-cause class. Remaining chunks execute bottoms-up by layer:
 gofresh first (21, 22, 23, 24, 20, 17), one gofresh release, then
-stipulator (18, 19) and its bump, then the re-measure (16), then pew
+stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
 (15), then plan close-out.
 
 - [x] 1. gomutant: overlay commit cost + quarantine
@@ -92,6 +92,12 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       further pew issue folds in here (user-flagged, content briefed at
       chunk open); the chunk opens with a design discussion covering it
       and any surface redesign it implies, before implementation.
+- [ ] 25. gofresh: cross-package init-only registration (gofresh
+      docs/issues/cross-package-init-only-registration.md) - the
+      chunk-22 fixed point lifted to composition: function-attributed
+      mutation facts plus per-fact foreign-reference regions prove an
+      exported constructor init-only across the graph; the field
+      probe's last first-party blocker.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and
