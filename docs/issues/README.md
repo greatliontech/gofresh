@@ -48,5 +48,5 @@ when its work lands (git holds history).
   field diagnosis blocked on an unnamed verdict.*
 - **[func-value-self-capture](func-value-self-capture.md)** — receiver-stored func values
   whose closures capture the receiver read as reach-free, laundering receiver writes
-  through proven-read-only bindings; pre-existing Signature-classification hole. *Lands:
-  the next gofresh plan.*
+  through proven-read-only bindings; pre-existing Signature-classification hole. *Lands: startup-effect-precision
+  plan, per each doc.*
