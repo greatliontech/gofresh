@@ -67,7 +67,7 @@ type Subject struct {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@2"
+const DynamicStateStrategy = "gofresh/dynamic-state@3"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

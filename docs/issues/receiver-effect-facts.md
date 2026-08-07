@@ -24,4 +24,19 @@ dispatch - so mutex-guarded read paths can prove read-only. The
 returned-alias rung (reflect.Type returns) is chunk 24's
 returned-alias-disposition doc.
 
+Mid-chunk finding: the audited synchronization set must exist at BOTH
+tiers - the receiver-effect proof (landed) and the external-effect
+classification, where a mutex-guarded subject currently refuses with
+"reaches sync (potential external dependence)" from the import-level
+potentialExternal fallback (closure/maximal.go) before the
+shared-dynamic-state discharge even matters. The admission: a sync
+import whose every file use is Mutex/RWMutex does not set
+potentialExternal, and the RTA analyzer's unaudited-standard-operation
+branch admits the audited lock methods - an ObservationRTA bump (@14),
+the audited-harness admission pattern. Pinned red by the
+mutex-guarded-read fixture; every other receiver-effect fixture
+(discharges and refusals alike, generic receiver included) is green.
+
+Lands: cross-tool train chunk 23 (this doc's own chunk).
+
 Lands: cross-tool train chunk 23.

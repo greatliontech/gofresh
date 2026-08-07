@@ -3016,6 +3016,10 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"registry map read shapes":       "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
 		"non-opaque sentinel comparison": "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
 		"slice capacity read":            "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
+		"read-only method call discharges": "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"mutex-guarded read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+		"read-only chain discharges":      "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.raw() }\n\nfunc (r *reg) raw() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"generic receiver read discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
 		"init-only helper registration":  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 		"helper chain registration":      "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 	} {
@@ -3117,6 +3121,22 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		"go-statement callee races program code": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc init() { go declare(\"k\") }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 			culprit: "example.com/view.Hooks is mutated",
+		},
+		"writer method call marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Bump() { r.n++ }\n\nfunc F() { R.Bump() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"method value bind keeps the mark": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int {\n\tg := R.Count\n\treturn g()\n}\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"alias-returning method call marks": {
+			source:  "package view\n\ntype reg struct {\n\thooks map[string]func()\n}\n\nvar R = &reg{hooks: map[string]func(){}}\n\nfunc (r *reg) Hooks() map[string]func() { return r.hooks }\n\nfunc F() int { return len(R.Hooks()) }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"receiver-escaping method call marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc probe(v any) int { return 0 }\n\nfunc (r *reg) Count() int { return probe(r) }\n\nfunc F() int { return R.Count() }\n",
+			culprit: "example.com/view.R is mutated",
 		},
 		"method helper never qualifies": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\ntype reg struct{}\n\nvar _ = reg{}.declare(\"k\")\n\nfunc (reg) declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",

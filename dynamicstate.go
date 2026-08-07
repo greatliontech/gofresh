@@ -9,6 +9,7 @@ import (
 	"go/ast"
 	"go/types"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -41,6 +42,15 @@ type dynamicStateFact struct {
 	// immutable constructions, so no holder of the value can mutate the
 	// shared object.
 	Opaque []string `json:"opaque,omitempty"`
+	// ReceiverReadOnly holds the full method keys (package path,
+	// receiver type, method) this package declares and proves unable to
+	// write receiver-reachable state.
+	ReceiverReadOnly []string `json:"receiverReadOnly,omitempty"`
+	// MethodUses holds deferred method-use marks: variable key and
+	// method key joined by NUL. At composition the use is discharged
+	// only when the method key is proven read-only by its declaring
+	// fact; otherwise the variable marks mutated - fail-closed.
+	MethodUses []string `json:"methodUses,omitempty"`
 	// OpacityBreaks holds interface variable keys - own or foreign -
 	// whose object-closure this package's init flow breaks: a
 	// non-audited, indirect, or address-capturing init store. Unioned at
@@ -62,8 +72,21 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	var fact dynamicStateFact
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	initOnly := initOnlyReachableHelpers(p)
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly)
+	methodUses := map[string]map[string]bool{}
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses)
 	recordOpaqueDynamicVars(p, opaque, breaks, initOnly)
+	for method := range receiverReadOnlyMethods(p) {
+		if p.Types != nil {
+			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"."+method)
+		}
+	}
+	sort.Strings(fact.ReceiverReadOnly)
+	for varKey, methodKeys := range methodUses {
+		for methodKey := range methodKeys {
+			fact.MethodUses = append(fact.MethodUses, varKey+"\x00"+methodKey)
+		}
+	}
+	sort.Strings(fact.MethodUses)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}
@@ -367,6 +390,31 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 			for _, key := range fact.Escapes {
 				escaped[key] = true
+			}
+		}
+	}
+	// Deferred method uses resolve against the read-only union: a use
+	// whose method no fact proves read-only marks the variable mutated
+	// - fail-closed, the address-capture semantics the call site
+	// withheld (REQ-closure-shared-dynamic-state).
+	readOnly := map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, key := range fact.ReceiverReadOnly {
+				readOnly[key] = true
+			}
+		}
+	}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, use := range fact.MethodUses {
+				varKey, methodKey, ok := strings.Cut(use, "\x00")
+				if !ok || !readOnly[methodKey] {
+					if ok {
+						mutated[varKey] = true
+					}
+					continue
+				}
 			}
 		}
 	}

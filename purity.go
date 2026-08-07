@@ -481,7 +481,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p))
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -494,7 +494,7 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 // length/capacity, comparison — mark neither, and initOnly names the
 // init-only-reachable helpers whose bodies are init flow
 // (REQ-closure-shared-dynamic-state).
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool) {
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -542,6 +542,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		// children, so the shape records its operand idents ahead of the
 		// ident visit that would otherwise classify them as escapes.
 		readContext := map[*ast.Ident]bool{}
+		calledSelectors := map[*ast.SelectorExpr]bool{}
 		markRead := func(expr ast.Expr) {
 			switch expr := expr.(type) {
 			case *ast.Ident:
@@ -606,6 +607,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					markRead(n.Y)
 				}
 			case *ast.CallExpr:
+				if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
+					calledSelectors[sel] = true
+				}
 				if ident, ok := n.Fun.(*ast.Ident); ok {
 					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
 						switch ident.Name {
@@ -624,8 +628,28 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			case *ast.SelectorExpr:
 				// A pointer-receiver method USE — bind or call alike —
 				// is an implicit address capture of its receiver chain.
+				// A direct CALL on a statically-typed (non-interface)
+				// package-var receiver defers to the method's own
+				// receiver-effect proof at composition; binds and
+				// interface dispatch keep the fail-closed mark
+				// (REQ-closure-shared-dynamic-state).
 				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 					if fn, ok := selection.Obj().(*types.Func); ok {
+						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) {
+							if ident, ok := n.X.(*ast.Ident); ok {
+								if obj, ok := resolve(ident); ok {
+									if variable, ok := dynamicPackageVar(obj); ok {
+										key := dynamicVarKey(variable)
+										if methodUses[key] == nil {
+											methodUses[key] = map[string]bool{}
+										}
+										methodUses[key][methodFactKey(fn)] = true
+										readContext[ident] = true
+										return true
+									}
+								}
+							}
+						}
 						if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
 							if _, pointer := types.Unalias(sig.Recv().Type()).(*types.Pointer); pointer {
 								markTargets(n.X)
@@ -881,6 +905,335 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 	}
 	mark("")
 	return reachable
+}
+
+// receiverReadOnlyMethods proves, in the declaring package alone, which
+// methods cannot write receiver-reachable state: the receiver never
+// stands in a write position (assignment target, inc/dec, send,
+// address capture), never escapes (argument, return, store, binding,
+// or any unrecognized use), and chains only into sibling methods
+// already proven read-only - an intra-package fixed point, fail-closed
+// on every other shape, cross-package chains included
+// (REQ-closure-shared-dynamic-state). Keys are "Recv.Method"; the fact
+// layer prefixes the package path.
+func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
+	if p == nil || p.TypesInfo == nil {
+		return nil
+	}
+	type methodBody struct {
+		decl *ast.FuncDecl
+		recv *ast.Ident
+	}
+	methods := map[string]methodBody{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || fd.Name == nil || fd.Body == nil || len(fd.Recv.List) != 1 {
+				continue
+			}
+			recvName := recvTypeName(fd)
+			if recvName == "" {
+				continue
+			}
+			var recvIdent *ast.Ident
+			if names := fd.Recv.List[0].Names; len(names) == 1 && names[0].Name != "_" {
+				recvIdent = names[0]
+			}
+			// A blank or anonymous receiver cannot be referenced: the
+			// body cannot write receiver state at all.
+			methods[recvName+"."+fd.Name.Name] = methodBody{decl: fd, recv: recvIdent}
+		}
+	}
+	if len(methods) == 0 {
+		return nil
+	}
+	// chains[m] lists sibling method keys m's receiver chains into;
+	// disqualified[m] marks a demonstrated write or escape.
+	disqualified := map[string]bool{}
+	chains := map[string]map[string]bool{}
+	for key, m := range methods {
+		if m.recv == nil {
+			continue
+		}
+		recvObj := p.TypesInfo.Defs[m.recv]
+		if recvObj == nil {
+			disqualified[key] = true
+			continue
+		}
+		isRecv := func(expr ast.Expr) bool {
+			ident, ok := expr.(*ast.Ident)
+			return ok && p.TypesInfo.Uses[ident] == recvObj
+		}
+		// recvRooted reports whether the expression is the receiver or
+		// a field-selector chain rooted at it.
+		var recvRooted func(expr ast.Expr) bool
+		recvRooted = func(expr ast.Expr) bool {
+			switch expr := expr.(type) {
+			case *ast.Ident:
+				return isRecv(expr)
+			case *ast.SelectorExpr:
+				return recvRooted(expr.X)
+			case *ast.IndexExpr:
+				return recvRooted(expr.X)
+			case *ast.StarExpr:
+				return recvRooted(expr.X)
+			case *ast.ParenExpr:
+				return recvRooted(expr.X)
+			default:
+				return false
+			}
+		}
+		allowed := map[ast.Node]bool{}
+		var rootIdent func(expr ast.Expr) *ast.Ident
+		rootIdent = func(expr ast.Expr) *ast.Ident {
+			switch expr := expr.(type) {
+			case *ast.Ident:
+				return expr
+			case *ast.SelectorExpr:
+				return rootIdent(expr.X)
+			case *ast.IndexExpr:
+				return rootIdent(expr.X)
+			case *ast.StarExpr:
+				return rootIdent(expr.X)
+			case *ast.ParenExpr:
+				return rootIdent(expr.X)
+			default:
+				return nil
+			}
+		}
+		consume := func(expr ast.Expr) {
+			if ident := rootIdent(expr); ident != nil {
+				allowed[ident] = true
+			}
+		}
+		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range n.Lhs {
+					if recvRooted(lhs) {
+						disqualified[key] = true
+					}
+				}
+			case *ast.IncDecStmt:
+				if recvRooted(n.X) {
+					disqualified[key] = true
+				}
+			case *ast.SendStmt:
+				if recvRooted(n.Chan) {
+					disqualified[key] = true
+				}
+			case *ast.UnaryExpr:
+				if n.Op == token.AND && recvRooted(n.X) {
+					disqualified[key] = true
+				}
+			case *ast.RangeStmt:
+				// Ranging the receiver or a field chain reads; the
+				// bindings are locals. Receiver channels disqualify
+				// via the type check below.
+				if recvRooted(n.X) {
+					consume(n.X)
+					if t := p.TypesInfo.TypeOf(n.X); t != nil {
+						if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
+							disqualified[key] = true
+						}
+					}
+				}
+			case *ast.CallExpr:
+				// A sibling-method call on the receiver chain defers to
+				// that method's own proof; the receiver in call-ARG
+				// position is an escape, handled by the ident visit.
+				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
+					if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
+						if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(fn) {
+							// The audited synchronization set: lock state
+							// cannot change dispatch, so a lock operation
+							// on a receiver-reachable mutex is
+							// receiver-neutral by source audit
+							// (REQ-closure-shared-dynamic-state).
+							consume(sel.X)
+							break
+						}
+						if fn, ok := selection.Obj().(*types.Func); ok && fn.Pkg() == p.Types {
+							target := recvTypeNameOf(p, sel) + "." + fn.Name()
+							if _, sibling := methods[target]; sibling {
+								if chains[key] == nil {
+									chains[key] = map[string]bool{}
+								}
+								chains[key][target] = true
+								consume(sel.X)
+								break
+							}
+						}
+					}
+					disqualified[key] = true
+				}
+			case *ast.IndexExpr:
+				if recvRooted(n.X) {
+					// An indexed-out alias value escaping is caught by
+					// the read-shape condition on the produced type.
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+						disqualified[key] = true
+					} else {
+						consume(n.X)
+					}
+				}
+			case *ast.SelectorExpr:
+				// A field read off the receiver is allowed only when
+				// the produced value is not alias-handing; a method
+				// VALUE bind is an escape.
+				if isRecv(n.X) {
+					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
+						break // judged at the enclosing CallExpr or disqualified below
+					}
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+						disqualified[key] = true
+					} else {
+						consume(n.X)
+					}
+				}
+			case *ast.BinaryExpr:
+				if n.Op == token.EQL || n.Op == token.NEQ {
+					if recvRooted(n.X) {
+						consume(n.X)
+					}
+					if recvRooted(n.Y) {
+						consume(n.Y)
+					}
+				}
+			case *ast.Ident:
+				if isRecv(n) && !allowed[n] {
+					// Any receiver use not consumed by an allowed shape
+					// above - argument, return, store, bare bind - is
+					// an escape.
+					disqualified[key] = true
+				}
+			}
+			return true
+		})
+		// The allowed-set consumption above marks receiver idents only
+		// when the ident node itself is the allowed expression; a
+		// selector chain's root ident needs the same consumption.
+		_ = allowed
+	}
+	// Fixed point: chaining into a disqualified sibling disqualifies.
+	for changed := true; changed; {
+		changed = false
+		for key, targets := range chains {
+			if disqualified[key] {
+				continue
+			}
+			for target := range targets {
+				if disqualified[target] {
+					disqualified[key] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	readOnly := map[string]bool{}
+	for key, m := range methods {
+		if m.recv == nil || !disqualified[key] {
+			readOnly[key] = true
+		}
+	}
+	return readOnly
+}
+
+// interfaceReceiver reports whether the method's receiver is an
+// interface - dispatch the per-package proof cannot resolve.
+func interfaceReceiver(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return true
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if pointer, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(pointer.Elem())
+	}
+	_, isInterface := t.Underlying().(*types.Interface)
+	return isInterface
+}
+
+// methodFactKey is the cross-package identity of a method's
+// receiver-effect proof: declaring package path, receiver type name,
+// method name.
+func methodFactKey(fn *types.Func) string {
+	sig, _ := fn.Type().(*types.Signature)
+	recvName := ""
+	if sig != nil && sig.Recv() != nil {
+		t := types.Unalias(sig.Recv().Type())
+		if pointer, ok := t.(*types.Pointer); ok {
+			t = types.Unalias(pointer.Elem())
+		}
+		if named, ok := t.(*types.Named); ok && named.Obj() != nil {
+			recvName = named.Obj().Name()
+		}
+	}
+	pkg := ""
+	if fn.Pkg() != nil {
+		pkg = fn.Pkg().Path()
+	}
+	return pkg + "." + recvName + "." + fn.Name()
+}
+
+// auditedSynchronization reports whether the method is in the audited
+// synchronization set: sync.Mutex and sync.RWMutex lock operations,
+// receiver-neutral because lock state cannot change dispatch. Grows
+// only by source audit (REQ-closure-shared-dynamic-state).
+func auditedSynchronization(fn *types.Func) bool {
+	if fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+		return false
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if pointer, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(pointer.Elem())
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "Mutex", "RWMutex":
+	default:
+		return false
+	}
+	switch fn.Name() {
+	case "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock":
+		return true
+	default:
+		return false
+	}
+}
+
+// recvTypeNameOf resolves the receiver type name of a selection's
+// method through its declaring type, mirroring recvTypeName's shape.
+func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
+	selection, ok := p.TypesInfo.Selections[sel]
+	if !ok {
+		return ""
+	}
+	fn, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return ""
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return ""
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if pointer, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(pointer.Elem())
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil {
+		return ""
+	}
+	return named.Obj().Name()
 }
 
 // recordOpaqueDynamicVars judges, in the declaring package alone, which
