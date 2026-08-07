@@ -129,7 +129,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       transitively, an initializer expression or init body is init
       flow (user decision: full tool-side precision; the fail-closed
       and workload-directive alternatives declined).
-- [ ] 23. gofresh: receiver-effect facts (gofresh
+- [x] 23. gofresh: receiver-effect facts (gofresh
       docs/issues/receiver-effect-facts.md) - per-package method facts
       record whether a method writes receiver-reachable state, so a
       pointer-receiver method call on a package-level carrier marks

@@ -52,10 +52,6 @@ when its work lands (git holds history).
   internally, so consumer control must cover both memo classes through one knob.
   Cost/policy-only — entries are never trusted beyond their content key.
   *Lands: cross-tool train chunk 20.*
-- **[receiver-effect-facts](receiver-effect-facts.md)** — pointer-receiver method reads
-  (`registry.Get`) mark as address-capture mutation, keeping registration-shaped APIs
-  downgraded even when nothing writes post-init; per-package receiver-effect facts let
-  call sites mark only demonstrably-writing methods. *Lands: cross-tool train chunk 23.*
 - **[returned-alias-disposition](returned-alias-disposition.md)** — a receiver-read-only
   method returning alias-handing values (reflect.Type off registry internals) still hands
   out mutable reach; returned-type immutability audits complete the discharge. *Lands:
