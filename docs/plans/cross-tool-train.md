@@ -109,6 +109,6 @@ its root-cause class.
       the witness runner) decided at triage.
 - [ ] 20. gofresh: memo-store consumer control (gofresh
       docs/issues/memo-store-ownership.md) — consumers gain
-      disable/redirect control over the persistent memo store; the
-      dead SetMemoScope opt-in surface is dispositioned in the same
-      change.
+      disable/redirect control over the persistent memo store, one
+      knob covering both memo classes (unconditional effect scans and
+      the view-enabled observability memo).

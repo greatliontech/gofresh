@@ -16,11 +16,12 @@ wholesale, and one shared store lets any tool analyzing the same code
 reuse another's scans. The defect is the absence of consumer control,
 not the default location.
 
-Adjacent dead surface, same disposition point: `SetMemoScope` (the
-opt-in observability memo) is called by no consumer — the memo
-machinery it gates never runs in any tool. Decide together: give the
-observability memo the same consumer-controlled enablement, or retire
-the opt-in surface.
+The observability memo (`SetMemoScope`) is not a separate case: the
+opt-in is exercised internally by the view layer (`view.go` sets the
+scope from the proof-strategy version and code guards), so every
+view-consuming tool writes it too. Consumer control must cover both
+memo classes — the unconditional effect scans and the view-enabled
+observability memo — through one knob.
 
 Not a correctness defect: no entry is trusted beyond its content key;
 a missing or deleted store only costs recomputation.

@@ -48,6 +48,7 @@ when its work lands (git holds history).
   *Lands: the next gofresh plan.*
 - **[memo-store-ownership](memo-store-ownership.md)** — the closure package's effect-scan
   memos write `$XDG_CACHE_HOME/gofresh` unconditionally from any consumer process, with no
-  API to disable, redirect, or attribute; carries the dead `SetMemoScope` opt-in surface no
-  consumer calls. Cost/policy-only — entries are never trusted beyond their content key.
+  API to disable, redirect, or attribute; the view layer enables the observability memo
+  internally, so consumer control must cover both memo classes through one knob.
+  Cost/policy-only — entries are never trusted beyond their content key.
   *Lands: cross-tool train chunk 20.*
