@@ -58,3 +58,7 @@ when its work lands (git holds history).
   2,407 of 2,775 field-corpus witnesses refused, with the downgrade sharing its reason
   string with signature dynamism so the channels are indistinguishable. *Lands: cross-tool
   train chunk 21.*
+- **[init-only-reachable-registration-state](init-only-reachable-registration-state.md)** —
+  registries mutated only through helpers unreachable from any non-init root are
+  startup-deterministic in fact but fail-closed by the syntactic walk; the dominant
+  first-party residual after use-shape precision. *Lands: cross-tool train chunk 22.*

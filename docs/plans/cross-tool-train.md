@@ -5,7 +5,10 @@ chunk is one commit in its named repo, run through the full adversarial
 loop there; gofresh chunks release before consumer chunks bump. WIP = 1.
 Ordering for the gomutant tail follows the `Lands:` lines in that repo's
 issue docs; the two lead chunks are the field-blocking overlay defect and
-its root-cause class.
+its root-cause class. Remaining chunks execute bottoms-up by layer:
+gofresh first (21, 22, 20, 17), one gofresh release, then stipulator
+(18, 19) and its bump, then the re-measure (16), then pew (15), then
+plan close-out.
 
 - [x] 1. gomutant: overlay commit cost + quarantine
       (gomutant docs/issues/store-update-reparses-whole-overlay.md) —
@@ -120,3 +123,9 @@ its root-cause class.
       distinguishes its channel from signature dynamism; chunk 16's
       re-measure re-runs after this lands (its warm floor is
       unreachable while the downgrade sweeps the corpus).
+- [ ] 22. gofresh: init-only-reachable registration state (gofresh
+      docs/issues/init-only-reachable-registration-state.md) - a
+      registry mutated solely through helpers unreachable from any
+      non-init root is startup-deterministic state; mechanism (prove
+      init-only reachability vs keep fail-closed) decided at triage,
+      spec-first.
