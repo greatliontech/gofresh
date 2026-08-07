@@ -123,7 +123,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       distinguishes its channel from signature dynamism; chunk 16's
       re-measure re-runs after this lands (its warm floor is
       unreachable while the downgrade sweeps the corpus).
-- [ ] 22. gofresh: init-only-reachable registration state (gofresh
+- [x] 22. gofresh: init-only-reachable registration state (gofresh
       docs/issues/init-only-reachable-registration-state.md) - a
       mutation inside an unexported helper whose every reference is,
       transitively, an initializer expression or init body is init
