@@ -112,3 +112,11 @@ its root-cause class.
       disable/redirect control over the persistent memo store, one
       knob covering both memo classes (unconditional effect scans and
       the view-enabled observability memo).
+- [ ] 21. gofresh: shared-dynamic-state mutation precision (gofresh
+      docs/issues/shared-dynamic-state-any-use-downgrade.md) — the
+      any-use marking of alias carriers narrows to demonstrated
+      mutation, init-exempt startup state recognizes the harness
+      registration tables, and the downgrade's reason string
+      distinguishes its channel from signature dynamism; chunk 16's
+      re-measure re-runs after this lands (its warm floor is
+      unreachable while the downgrade sweeps the corpus).

@@ -52,3 +52,9 @@ when its work lands (git holds history).
   internally, so consumer control must cover both memo classes through one knob.
   Cost/policy-only — entries are never trusted beyond their content key.
   *Lands: cross-tool train chunk 20.*
+- **[shared-dynamic-state-any-use-downgrade](shared-dynamic-state-any-use-downgrade.md)** —
+  the mutation walk marks alias-handing package vars mutated on any use (reading an error
+  sentinel counts), and the import-walk contagion downgrades every reaching view package:
+  2,407 of 2,775 field-corpus witnesses refused, with the downgrade sharing its reason
+  string with signature dynamism so the channels are indistinguishable. *Lands: cross-tool
+  train chunk 21.*
