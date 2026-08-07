@@ -3102,6 +3102,18 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Run func()\n\nvar _ = declare()\n\nfunc declare() bool {\n\tRun = func() { install(\"k\") }\n\treturn true\n}\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 			culprit: "example.com/view.Hooks is mutated",
 		},
+		"helper go-statement argument escapes": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = setup()\n\nfunc setup() bool { go mutate(Hooks); return true }\n\nfunc mutate(m map[string]func()) { m[\"k\"] = func() {} }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks escapes writable",
+		},
+		"init go-statement argument escapes": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc mutate(m map[string]func()) { m[\"k\"] = func() {} }\n\nfunc init() { go mutate(Hooks) }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks escapes writable",
+		},
+		"go literal-call argument escapes": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = setup()\n\nfunc setup() bool {\n\tgo func(m map[string]func()) { m[\"k\"] = func() {} }(Hooks)\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks escapes writable",
+		},
 		"go-statement callee races program code": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc init() { go declare(\"k\") }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 			culprit: "example.com/view.Hooks is mutated",

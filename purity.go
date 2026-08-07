@@ -661,8 +661,18 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// init body (REQ-closure-shared-dynamic-state).
 					if decl.Body != nil {
 						ast.Inspect(decl.Body, func(n ast.Node) bool {
-							if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
-								walkBody(lit.Body)
+							switch n := n.(type) {
+							case *ast.FuncLit:
+								if n.Body != nil {
+									walkBody(n.Body)
+								}
+								return false
+							case *ast.GoStmt:
+								// A go statement launched from init flow is
+								// program code in its entirety - the
+								// arguments outlive initialization with
+								// the goroutine.
+								walkBody(n)
 								return false
 							}
 							return true
@@ -676,8 +686,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// like one nested in a package-level declaration.
 					if decl.Body != nil {
 						ast.Inspect(decl.Body, func(n ast.Node) bool {
-							if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
-								walkBody(lit.Body)
+							switch n := n.(type) {
+							case *ast.FuncLit:
+								if n.Body != nil {
+									walkBody(n.Body)
+								}
+								return false
+							case *ast.GoStmt:
+								// Program code in its entirety, exactly as
+								// in a qualified helper.
+								walkBody(n)
 								return false
 							}
 							return true

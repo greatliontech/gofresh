@@ -249,10 +249,11 @@ audited-construction set grows only by source audit.
 init-only-reachable helpers: unexported plain functions whose every in-package
 reference is a direct call from an initializer expression, an `init` body, or
 another such helper — transitively, with any value reference, any receiver, any
-export, any go-statement callee (the goroutine races program code even when
-launched from init; a deferred init call stays init flow), or any reference
-from ordinary program code — a nested function literal included, wherever it
-appears — refusing the class fail-closed, and a qualified helper's stores audited for object-closure exactly
+export, or any reference from ordinary program code — a nested function
+literal wherever it appears, and a go statement launched from init flow in its
+entirety, callee and arguments alike, since the goroutine outlives
+initialization (a deferred init call stays init flow) — refusing the class
+fail-closed, and a qualified helper's stores audited for object-closure exactly
 as an `init` body's are. Function bodies nested in package-level declarations,
 in `init` bodies, or in qualified helpers are program code, not initialization;
 non-Go writes need no rule here — packages built with cgo or
