@@ -236,12 +236,12 @@ address capture, or a rebinding is mutation; every other use — escaping the va
 into a call argument, a store, a return, a binding, a method call on it, or a
 type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. One narrowing applies to the escape class alone: an
-interface-typed variable is object-closed when its initializer and every
-`init`-flow store in its declaring package is a provably-immutable audited
-construction (`errors.New`; the nil zero value); any other init-flow appearance
-— a store from another package, an indirect or range-bound store, an address
-capture, or a non-audited value — breaks the closure from whichever package
-performs it. No holder of
+interface-typed variable is object-closed when every attributable `init`-flow
+store — a direct store the auditing package resolves to the variable, from any
+package — is a provably-immutable audited construction (`errors.New`; the nil
+zero value), the initializer included; an init-flow appearance the audit cannot
+attribute — an indirect or range-bound store, an address capture, or a
+non-audited value — breaks the closure from whichever package performs it. No holder of
 an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere. The
 audited-construction set grows only by source audit.
