@@ -102,7 +102,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).
-- [ ] 18. stipulator: incremental witness publication (stipulator
+- [x] 18. stipulator: incremental witness publication (stipulator
       docs/issues/witness-evidence-published-only-at-run-end.md) — the
       run's drop-path decision moves to witness completion (or a staged
       install-then-confirm), so a dying check keeps every record it
