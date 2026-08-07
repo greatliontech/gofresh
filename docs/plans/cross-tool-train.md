@@ -78,7 +78,7 @@ its root-cause class.
       includes the measured pre-baseline stall; before/after measured
       on a pinned copy of an available workload repo, its own baseline
       pair).
-- [ ] 14. pew: one go-invocation environment
+- [x] 14. pew: one go-invocation environment
       (pew docs/issues/one-go-invocation-environment.md).
 - [ ] 15. pew: profile capture and attribution as recording
       companions (pew docs/issues/profile-capture-attribution.md) —
