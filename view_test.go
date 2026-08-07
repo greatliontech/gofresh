@@ -2998,8 +2998,110 @@ func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "caller-supplied") {
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
 				t.Fatalf("verdict = %+v, want the shared-dynamic-state downgrade", verdict)
+			}
+		})
+	}
+}
+
+// Writeless reads of alias carriers and object-closed sentinels are not
+// mutation: indexing, iteration, length, and comparison discharge, and
+// an errors.New sentinel stays closed through an escape
+// (REQ-closure-shared-dynamic-state).
+func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
+	for name, source := range map[string]string{
+		"sentinel escape into errors.Is": "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() bool { return errors.Is(nil, ErrX) }\n",
+		"sentinel comparison":            "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\nvar ErrY = errors.New(\"y\")\n\nfunc F() bool { return ErrX == ErrY }\n",
+		"registry map read shapes":       "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
+		"non-opaque sentinel comparison": "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
+		"slice capacity read":            "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			engine, err := New(WithDir(dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := view.Capture(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := view.Check(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - a writeless read downgraded", verdict)
+			}
+		})
+	}
+}
+
+// Escapes of writable carriers and sentinel rebinds stay mutation, and
+// the refusal names the owning package and variable
+// (REQ-closure-shared-dynamic-state).
+func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
+	for name, tc := range map[string]struct{ source, culprit string }{
+		"sentinel rebind": {
+			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() { ErrX = errors.New(\"y\") }\n",
+			culprit: "example.com/view.ErrX is mutated",
+		},
+		"mutable-object sentinel escape": {
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			culprit: "example.com/view.ErrX escapes writable",
+		},
+		"registry map escape": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc take(m map[string]func()) {}\n\nfunc F() { take(Hooks) }\n",
+			culprit: "example.com/view.Hooks escapes writable",
+		},
+		"channel range receives": {
+			source:  "package view\n\nvar Ch = make(chan func(), 1)\n\nfunc F() { for f := range Ch { f() } }\n",
+			culprit: "example.com/view.Ch is mutated",
+		},
+		"indexed-out alias escapes": {
+			source:  "package view\n\nvar Registry = []map[string]func(){{}}\n\nfunc take(m map[string]func()) {}\n\nfunc F() { take(Registry[0]) }\n",
+			culprit: "example.com/view.Registry escapes writable",
+		},
+		"init-nested literal rebind": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar f func()\n\nfunc init() { f = func() { Hooks[\"k\"] = nil } }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"goroutine-in-init sentinel rebind": {
+			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc use(err error) {}\n\nfunc init() { go func() { ErrX = errors.New(\"later\") }() }\n\nfunc F() { use(ErrX) }\n",
+			culprit: "example.com/view.ErrX is mutated",
+		},
+		"indirect init store breaks opacity": {
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nfunc init() { p := &ErrX; *p = &impl{} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			culprit: "example.com/view.ErrX escapes writable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, tc.source)
+			engine, err := New(WithDir(dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := view.Capture(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := view.Check(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
+				t.Fatalf("verdict = %+v, want the downgrade naming %q", verdict, tc.culprit)
 			}
 		})
 	}

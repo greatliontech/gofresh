@@ -303,6 +303,10 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			maximal.Unverifiable = true
 			maximal.Reason = "subject accepts caller-supplied dynamic behavior"
 		}
+		if reason := scan.downgradeReason[subject]; reason != "" {
+			maximal.Unverifiable = true
+			maximal.Reason = reason
+		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
 			// is refused for this subject alone — the maximal package

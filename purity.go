@@ -119,6 +119,10 @@ type subjectScan struct {
 	known     map[Subject]bool
 	openWorld map[Subject]bool
 	external  map[Subject]bool
+	// downgradeReason maps each subject of a shared-dynamic-state
+	// downgraded package to the refusal reason naming the owning package
+	// and variable (REQ-closure-shared-dynamic-state).
+	downgradeReason map[Subject]string
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -136,11 +140,12 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:      map[Subject]bool{},
-		known:     map[Subject]bool{},
-		openWorld: map[Subject]bool{},
-		external:  map[Subject]bool{},
-		ambiguous: map[Subject]string{},
+		pure:            map[Subject]bool{},
+		known:           map[Subject]bool{},
+		openWorld:       map[Subject]bool{},
+		external:        map[Subject]bool{},
+		downgradeReason: map[Subject]string{},
+		ambiguous:       map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -273,10 +278,13 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 	// The shared-dynamic-state downgrade: every subject of a package whose
 	// graph carries mutated shared dynamic state is unverifiable
 	// (REQ-closure-shared-dynamic-state); the reachability came from the
-	// pass's dynamic-state derivation over the metadata graph.
+	// pass's dynamic-state derivation over the metadata graph. The
+	// downgrade carries its own reason naming the owning package and
+	// variable — its channel is separately actionable from signature
+	// dynamism.
 	for subject := range known {
-		if state.downgraded[subject.Package] {
-			openWorld[subject] = true
+		if reason := state.downgraded[subject.Package]; reason != "" {
+			scan.downgradeReason[subject] = "package graph shares mutated dynamic state: " + reason
 		}
 	}
 	return scan, nil
@@ -473,6 +481,19 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
+	recordDynamicGlobalUses(p, mutated, map[string]bool{})
+}
+
+// recordDynamicGlobalUses classifies every package-level dynamic-capable
+// variable use in one package's syntax: mutated collects demonstrated
+// mutations (writes, growth/deletion, sends, address captures,
+// pointer-receiver method uses, rebindings), escaped collects
+// alias-carrier values handed to code that may write them (call
+// arguments, stores, returns, bindings, method calls, type
+// assertions). Reads that provably cannot write — indexing, iteration,
+// length/capacity, comparison — mark neither
+// (REQ-closure-shared-dynamic-state).
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -514,11 +535,36 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 		})
 	}
 	walkBody := func(body ast.Node) {
+		// readContext collects ident occurrences whose enclosing shape is
+		// a provably-writeless read: indexing, iteration source,
+		// length/capacity, comparison. Inspect visits parents before
+		// children, so the shape records its operand idents ahead of the
+		// ident visit that would otherwise classify them as escapes.
+		readContext := map[*ast.Ident]bool{}
+		markRead := func(expr ast.Expr) {
+			switch expr := expr.(type) {
+			case *ast.Ident:
+				readContext[expr] = true
+			case *ast.SelectorExpr:
+				// A cross-package read names the variable through a
+				// selector; the selector's field ident is what the
+				// escape classification would otherwise see.
+				readContext[expr.Sel] = true
+			}
+		}
 		ast.Inspect(body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
 					markTargets(lhs)
+					// The written element's container is read-shaped on
+					// the left too: m[k] = v writes the entry through m,
+					// which the AssignStmt mark above already records as
+					// mutation — the ident visit must not double it as
+					// an escape.
+					if index, ok := lhs.(*ast.IndexExpr); ok {
+						markRead(index.X)
+					}
 				}
 			case *ast.IncDecStmt:
 				markTargets(n.X)
@@ -529,11 +575,50 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 				if n.Value != nil {
 					markTargets(n.Value)
 				}
+				// Ranging a channel receives - mutation, not a read - and
+				// the iteration discharge holds only when the produced
+				// bindings are not themselves alias-handing
+				// (REQ-closure-shared-dynamic-state).
+				if t := p.TypesInfo.TypeOf(n.X); t != nil {
+					if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
+						markTargets(n.X)
+					} else if !rangeBindsAlias(t) {
+						markRead(n.X)
+					}
+				}
 			case *ast.SendStmt:
 				markTargets(n.Chan)
 			case *ast.UnaryExpr:
-				if n.Op == token.AND {
+				if n.Op == token.AND || n.Op == token.ARROW {
 					markTargets(n.X)
+				}
+			case *ast.IndexExpr:
+				// The discharge holds only when the produced element is
+				// not itself alias-handing - an indexed-out map or slice
+				// still writes through (REQ-closure-shared-dynamic-state).
+				if t := p.TypesInfo.TypeOf(n); t == nil || !typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+					markRead(n.X)
+				}
+			case *ast.BinaryExpr:
+				if n.Op == token.EQL || n.Op == token.NEQ {
+					markRead(n.X)
+					markRead(n.Y)
+				}
+			case *ast.CallExpr:
+				if ident, ok := n.Fun.(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+						switch ident.Name {
+						case "len", "cap":
+							for _, arg := range n.Args {
+								markRead(arg)
+							}
+						case "delete", "clear":
+							// Deletion is mutation, not an escape.
+							if len(n.Args) > 0 {
+								markTargets(n.Args[0])
+							}
+						}
+					}
 				}
 			case *ast.SelectorExpr:
 				// A pointer-receiver method USE — bind or call alike —
@@ -548,11 +633,16 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 					}
 				}
 			case *ast.Ident:
-				// Alias-handing carriers: any use hands shared mutable
-				// access, so any use is mutation-equivalent.
+				// Alias-handing carriers: any use that is neither a
+				// demonstrated mutation (the statement shapes above) nor
+				// a provably-writeless read hands the value to code that
+				// may write it — the escape class.
+				if readContext[n] {
+					return true
+				}
 				if obj, ok := resolve(n); ok {
 					if variable, ok := dynamicPackageVar(obj); ok && typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
-						mutated[dynamicVarKey(variable)] = true
+						escaped[dynamicVarKey(variable)] = true
 					}
 				}
 			}
@@ -564,6 +654,18 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
 				if decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init" {
+					// init flow is exempt, but a function literal nested
+					// in an init body is callable program code exactly
+					// like one nested in a package-level declaration.
+					if decl.Body != nil {
+						ast.Inspect(decl.Body, func(n ast.Node) bool {
+							if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
+								walkBody(lit.Body)
+								return false
+							}
+							return true
+						})
+					}
 					continue
 				}
 				if decl.Body != nil {
@@ -583,6 +685,168 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 				})
 			}
 		}
+	}
+}
+
+// recordOpaqueDynamicVars judges, in the declaring package alone, which
+// interface-typed package-level variables are object-closed: the
+// initializer and every init-flow store are provably-immutable audited
+// constructions (errors.New; the nil zero value), so no holder of the
+// value can mutate the shared object and escapes of it are not
+// mutation. Rebinding stays mutation everywhere — a non-init store is a
+// demonstrated write in whatever package performs it, so opacity never
+// needs to audit those. The audited-construction set grows only by
+// source audit (REQ-closure-shared-dynamic-state).
+func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool) {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return
+	}
+	auditedImmutable := func(expr ast.Expr) bool {
+		switch expr := expr.(type) {
+		case *ast.Ident:
+			return expr.Name == "nil" && p.TypesInfo.Uses[expr] == types.Universe.Lookup("nil")
+		case *ast.CallExpr:
+			sel, ok := expr.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return false
+			}
+			fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func)
+			return ok && fn.Pkg() != nil && fn.Pkg().Path() == "errors" && fn.Name() == "New"
+		default:
+			return false
+		}
+	}
+	interfacePackageVar := func(obj types.Object) (*types.Var, bool) {
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, false
+		}
+		_, isInterface := types.Unalias(variable.Type()).Underlying().(*types.Interface)
+		return variable, isInterface
+	}
+	failed := map[string]bool{}
+	scope := p.Types.Scope()
+	for _, name := range scope.Names() {
+		if variable, ok := interfacePackageVar(scope.Lookup(name)); ok {
+			opaque[dynamicVarKey(variable)] = true
+		}
+	}
+	audit := func(target ast.Expr, value ast.Expr) {
+		ident, ok := target.(*ast.Ident)
+		if !ok {
+			return
+		}
+		obj, ok := p.TypesInfo.Defs[ident]
+		if !ok || obj == nil {
+			if obj, ok = p.TypesInfo.Uses[ident]; !ok {
+				return
+			}
+		}
+		if variable, ok := interfacePackageVar(obj); ok {
+			if value == nil || !auditedImmutable(value) {
+				failed[dynamicVarKey(variable)] = true
+			}
+		}
+	}
+	failTargets := func(expr ast.Expr) {
+		ast.Inspect(expr, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if obj, ok := p.TypesInfo.Uses[ident]; ok {
+				if variable, ok := interfacePackageVar(obj); ok {
+					failed[dynamicVarKey(variable)] = true
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, ident := range vs.Names {
+						var value ast.Expr
+						if i < len(vs.Values) {
+							value = vs.Values[i]
+						}
+						if len(vs.Values) == 0 {
+							// No initializer: the zero value nil, audited.
+							continue
+						}
+						audit(ident, value)
+					}
+				}
+			case *ast.FuncDecl:
+				if decl.Recv != nil || decl.Name == nil || decl.Name.Name != "init" || decl.Body == nil {
+					continue
+				}
+				ast.Inspect(decl.Body, func(n ast.Node) bool {
+					switch n := n.(type) {
+					case *ast.FuncLit:
+						// A literal nested in an init body is program
+						// code, not init flow - its stores are the
+						// mutation walk's to judge, never audited here.
+						return false
+					case *ast.AssignStmt:
+						for i, lhs := range n.Lhs {
+							if _, ok := lhs.(*ast.Ident); !ok {
+								// An indirect or selector store the audit
+								// cannot attribute fails every interface
+								// variable the target subtree reaches.
+								failTargets(lhs)
+								continue
+							}
+							var value ast.Expr
+							if i < len(n.Rhs) {
+								value = n.Rhs[i]
+							}
+							audit(lhs, value)
+						}
+					case *ast.UnaryExpr:
+						if n.Op == token.AND {
+							// An init-flow address capture licenses later
+							// unattributable stores - fail-close.
+							failTargets(n.X)
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+	for key := range failed {
+		delete(opaque, key)
+		// A break can name a foreign package's variable - a cross-package
+		// init store the declaring package cannot see. The composition
+		// unions breaks from every fact, so the foreign opacity falls.
+		breaks[key] = true
+	}
+}
+
+// rangeBindsAlias reports whether ranging the type binds an
+// alias-handing value into the iteration variables.
+func rangeBindsAlias(t types.Type) bool {
+	switch t := types.Unalias(t).Underlying().(type) {
+	case *types.Map:
+		return typeHandsOutDynamicAlias(t.Key(), make(map[types.Type]bool)) || typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+	case *types.Slice:
+		return typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+	case *types.Array:
+		return typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+	case *types.Pointer:
+		if arr, ok := types.Unalias(t.Elem()).Underlying().(*types.Array); ok {
+			return typeHandsOutDynamicAlias(arr.Elem(), make(map[types.Type]bool))
+		}
+		return true
+	default:
+		return false
 	}
 }
 

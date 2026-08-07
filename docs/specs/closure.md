@@ -226,11 +226,33 @@ capture, or a pointer-receiver method use outside `init` flow anywhere in the
 program — reads copy and cannot reach the shared cell. An alias-handing carrier —
 an interface value (its concrete object is shared), a channel, or a pointer, map,
 or slice reaching a dynamic carrier, or an unsafe pointer — hands shared mutable
-access to every reader, so ANY use outside initialization is mutation-equivalent.
-Function bodies nested in package-level declarations are program code, not
-initialization; non-Go writes need no rule here — packages built with cgo or
+access through the value, so it is judged by use shape, still fail-closed: a read
+that provably cannot write — indexing or iterating the carrier, taking its length
+or capacity, or comparing it — is not mutation, and the indexing and iteration
+discharges hold only when the produced value is not itself alias-handing (an
+indexed-out map still writes through) and never for a channel (ranging a channel
+receives); a write through the carrier, growth or deletion, a send or receive, an
+address capture, or a rebinding is mutation; every other use — escaping the value
+into a call argument, a store, a return, a binding, a method call on it, or a
+type assertion — is mutation-equivalent, because the receiving code may write
+what it was handed. One narrowing applies to the escape class alone: an
+interface-typed variable is object-closed when its initializer and every
+`init`-flow store — in any package, the declaring one or an importer's — is a
+provably-immutable audited construction (`errors.New`; the nil zero value); an
+init store the audit cannot attribute (indirect, through an address capture, or
+non-audited) breaks the closure from whichever package performs it. No holder of
+an object-closed value can mutate the shared object, so escapes of the value are
+not mutation, while rebinding the variable remains mutation everywhere. The
+audited-construction set grows only by source audit.
+Function bodies nested in package-level declarations or in `init` bodies are
+program code, not initialization; non-Go writes need no rule here — packages built with cgo or
 assembly sources are already downgraded whole by the native-code and linkage
-blind-spot dispositions. A dynamic-capable variable the program never mutates under these
+blind-spot dispositions. The toolchain-generated test-main package is startup
+scaffolding, not an analysis surface: its registration tables contribute neither
+declarations nor mutations, the same disposition REQ-closure-analysis gives its
+registration initializer. The downgrade's refusal reason MUST name the owning
+package and a mutated variable and be distinct from the signature-dynamism
+refusal — the two channels are separately actionable. A dynamic-capable variable the program never mutates under these
 rules is ordinary source — the closure hashes its initializer like any
 declaration — and confers no downgrade; the unconditional type-level blanket would
 refuse verifiability to nearly every real program, since hook-typed package

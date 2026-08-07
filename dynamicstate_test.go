@@ -135,7 +135,17 @@ func TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives(t *testing
 		"go.mod": "module example.com/factsrc\n\ngo 1.26\n",
 		"lib.go": `package factsrc
 
+import "errors"
+
 var Hook func()
+
+var ErrSentinel = errors.New("sentinel")
+
+var Hooks = map[string]func(){}
+
+func take(map[string]func()) {}
+
+func Escape() { take(Hooks) }
 
 func Rebind() { Hook = nil }
 
@@ -181,6 +191,12 @@ func (Widget) External() int { return 2 }
 	wantKey := "example.com/factsrc.Hook"
 	if !contains(restored.Mutates, wantKey) || !contains(restored.Declares, wantKey) {
 		t.Fatalf("fact lost mutation content: %+v", restored)
+	}
+	if !contains(restored.Escapes, "example.com/factsrc.Hooks") {
+		t.Fatalf("fact lost escape content - a dropped escape silently closes an open package: %+v", restored)
+	}
+	if !contains(restored.Opaque, "example.com/factsrc.ErrSentinel") {
+		t.Fatalf("fact lost opacity content: %+v", restored)
 	}
 	if restored.PureMethods["Widget.Pure"] == "" || restored.ExternalMethods["Widget.External"] == "" {
 		t.Fatalf("fact lost method directives: %+v", restored)
@@ -281,7 +297,7 @@ func TestDynamicStateLocalFactsDeriveFreshEachScan(t *testing.T) {
 	subject := Subject{Package: pkg, Symbol: "Use"}
 
 	before := runScan(t, scope, dir, pkg)
-	if before.openWorld[subject] {
+	if before.downgradeReason[subject] != "" {
 		t.Fatal("unmutated hook already downgraded the subject")
 	}
 	mutated := depSource + "\nfunc Rebind() { Hook = nil }\n"
@@ -289,7 +305,7 @@ func TestDynamicStateLocalFactsDeriveFreshEachScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := runScan(t, scope, dir, pkg)
-	if !after.openWorld[subject] {
+	if after.downgradeReason[subject] == "" {
 		t.Fatal("a fresh local mutation did not downgrade the subject on the next scan - a cache layer held a mutable-local fact")
 	}
 }
@@ -388,14 +404,14 @@ func TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass(t *testin
 	processFactCache = sync.Map{}
 
 	before := runScan(t, scope, dir, pkg)
-	if before.openWorld[subject] {
+	if before.downgradeReason[subject] != "" {
 		t.Fatal("an int-typed hook already downgraded the subject")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "y", "y.go"), []byte("package y\n\ntype T func()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	after := runScan(t, scope, dir, pkg)
-	if !after.openWorld[subject] {
+	if after.downgradeReason[subject] == "" {
 		t.Fatal("a mutable-local type edit did not move the pinned dependency's fact - a cache layer laundered local state through a pinned key")
 	}
 }
@@ -428,7 +444,7 @@ func TestIntermediateRecompilationsScanFromTheirOwnCompilation(t *testing.T) {
 	if !result.known[subject] {
 		t.Fatal("scan lost the subject")
 	}
-	if !result.openWorld[subject] {
+	if result.downgradeReason[subject] == "" {
 		t.Fatal("the intermediate recompilation's mutation did not downgrade the tested package's subjects")
 	}
 }

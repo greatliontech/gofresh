@@ -25,9 +25,28 @@ type dynamicStateFact struct {
 	// here by construction — the downgrade analysis has always excluded
 	// module-less packages from its declaration side.
 	Declares []string `json:"declares,omitempty"`
-	// Mutates holds the variable keys this package's code mutates after
-	// initialization, judged fail-closed by carrier shape.
+	// Mutates holds the variable keys this package's code demonstrably
+	// mutates after initialization — writes, growth/deletion, sends,
+	// address captures, pointer-receiver method uses, rebindings —
+	// judged fail-closed by carrier shape.
 	Mutates []string `json:"mutates,omitempty"`
+	// Escapes holds the alias-carrier variable keys this package's code
+	// hands to code that may write them — call arguments, stores,
+	// returns, bindings, method calls, type assertions. An escape is
+	// mutation-equivalent unless the variable is object-closed in its
+	// declaring package.
+	Escapes []string `json:"escapes,omitempty"`
+	// Opaque holds the declaring package's object-closed interface
+	// variable keys: initializer and every init-flow store are audited
+	// immutable constructions, so no holder of the value can mutate the
+	// shared object.
+	Opaque []string `json:"opaque,omitempty"`
+	// OpacityBreaks holds interface variable keys - own or foreign -
+	// whose object-closure this package's init flow breaks: a
+	// non-audited, indirect, or address-capturing init store. Unioned at
+	// composition so a cross-package init store fails the declaring
+	// package's opacity.
+	OpacityBreaks []string `json:"opacityBreaks,omitempty"`
 	// PureMethods and ExternalMethods map "Recv.Method" to the declaration
 	// key of a method declaration carrying the respective directive, so a
 	// method promoted into a scanned type honors its directive without the
@@ -41,12 +60,25 @@ type dynamicStateFact struct {
 // package's selected syntax and type environment.
 func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	var fact dynamicStateFact
-	mutated := map[string]bool{}
-	recordDynamicGlobalMutations(p, mutated)
+	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	recordDynamicGlobalUses(p, mutated, escaped)
+	recordOpaqueDynamicVars(p, opaque, breaks)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}
 	sort.Strings(fact.Mutates)
+	for key := range escaped {
+		fact.Escapes = append(fact.Escapes, key)
+	}
+	sort.Strings(fact.Escapes)
+	for key := range opaque {
+		fact.Opaque = append(fact.Opaque, key)
+	}
+	sort.Strings(fact.Opaque)
+	for key := range breaks {
+		fact.OpacityBreaks = append(fact.OpacityBreaks, key)
+	}
+	sort.Strings(fact.OpacityBreaks)
 	if p.Types != nil && p.Module != nil {
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
@@ -100,9 +132,10 @@ type viewDynamicState struct {
 	// facts by type-checker package path; test-variant facts merge into the
 	// same key exactly as their compilations collapse there.
 	facts map[string][]dynamicStateFact
-	// downgraded marks the packages whose graphs carry mutated shared
-	// dynamic state: every subject of such a package is unverifiable.
-	downgraded map[string]bool
+	// downgraded maps each package whose graph carries mutated shared
+	// dynamic state — every subject of such a package is unverifiable —
+	// to one culprit description naming the owning package and variable.
+	downgraded map[string]string
 }
 
 // methodDirectives resolves a promoted method's purity and externality
@@ -142,7 +175,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if err != nil {
 		return nil, err
 	}
-	state := &viewDynamicState{facts: map[string][]dynamicStateFact{}, downgraded: map[string]bool{}}
+	state := &viewDynamicState{facts: map[string][]dynamicStateFact{}, downgraded: map[string]string{}}
 
 	// Mutable-local facts come from the pass's own typed load — content
 	// observed every pass, never cached (REQ-closure-mutable-local). The
@@ -160,7 +193,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
 		}
 		node, ok := nodesByListing[listing]
-		if !ok || node.Class != closure.MutableLocalPackage {
+		if !ok || node.Class != closure.MutableLocalPackage || node.TestMain {
+			// The toolchain-generated test-main package is startup
+			// scaffolding, not an analysis surface: its registration
+			// tables contribute neither declarations nor mutations
+			// (REQ-closure-shared-dynamic-state).
 			continue
 		}
 		matched[listing] = true
@@ -312,25 +349,71 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 	}
 
-	// Compose: the mutated union across the graph, then per-node
-	// declaration intersection, then reachability from each view package's
+	// Compose: the demonstrated-mutation and escape unions across the
+	// graph, the declaring package's opacity intersection, then per-node
+	// declaration matching and reachability from each view package's
 	// variants — exactly the whole-graph walk's semantics
 	// (REQ-closure-shared-dynamic-state), with standard-library subgraphs
-	// pruned as inert.
+	// pruned as inert. A key opens its declaring package on a
+	// demonstrated mutation anywhere, or on an escape anywhere unless
+	// every declaring fact judges the variable object-closed.
 	mutated := map[string]bool{}
+	escaped := map[string]bool{}
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
 				mutated[key] = true
 			}
+			for _, key := range fact.Escapes {
+				escaped[key] = true
+			}
 		}
 	}
-	openWorld := map[string]bool{}
-	for pkgPath, facts := range state.facts {
+	notOpaque := map[string]bool{}
+	for _, facts := range state.facts {
 		for _, fact := range facts {
+			opaque := make(map[string]bool, len(fact.Opaque))
+			for _, key := range fact.Opaque {
+				opaque[key] = true
+			}
 			for _, key := range fact.Declares {
+				if !opaque[key] {
+					notOpaque[key] = true
+				}
+			}
+			for _, key := range fact.OpacityBreaks {
+				notOpaque[key] = true
+			}
+		}
+	}
+	// openWorld maps each open package to one culprit description — the
+	// downgrade's refusal must name the owning package and variable.
+	openWorld := map[string]string{}
+	pkgPaths := make([]string, 0, len(state.facts))
+	for pkgPath := range state.facts {
+		pkgPaths = append(pkgPaths, pkgPath)
+	}
+	sort.Strings(pkgPaths)
+	for _, pkgPath := range pkgPaths {
+		// Mutations outrank escapes in the culprit text; within a rank
+		// the sorted key order makes the reason deterministic.
+		for _, fact := range state.facts[pkgPath] {
+			for _, key := range fact.Declares {
+				if _, ok := openWorld[pkgPath]; ok {
+					break
+				}
 				if mutated[key] {
-					openWorld[pkgPath] = true
+					openWorld[pkgPath] = key + " is mutated"
+				}
+			}
+		}
+		for _, fact := range state.facts[pkgPath] {
+			for _, key := range fact.Declares {
+				if _, ok := openWorld[pkgPath]; ok {
+					break
+				}
+				if escaped[key] && notOpaque[key] {
+					openWorld[pkgPath] = key + " escapes writable"
 				}
 			}
 		}
@@ -347,27 +430,27 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	for _, pkgPath := range viewPackages {
 		isView[pkgPath] = true
 	}
-	var walk func(listing string, seen map[string]bool) bool
-	walk = func(listing string, seen map[string]bool) bool {
+	var walk func(listing string, seen map[string]bool) string
+	walk = func(listing string, seen map[string]bool) string {
 		if seen[listing] {
-			return false
+			return ""
 		}
 		seen[listing] = true
 		if classes[listing] == closure.StandardPackage {
-			return false
+			return ""
 		}
-		if openWorld[pkgPathOf[listing]] {
-			return true
+		if culprit, ok := openWorld[pkgPathOf[listing]]; ok {
+			return pkgPathOf[listing] + ": " + culprit
 		}
 		for _, imported := range imports[listing] {
 			if _, ok := pkgPathOf[imported]; !ok {
 				continue
 			}
-			if walk(imported, seen) {
-				return true
+			if culprit := walk(imported, seen); culprit != "" {
+				return culprit
 			}
 		}
-		return false
+		return ""
 	}
 	for _, node := range meta {
 		root := node.PkgPath
@@ -376,11 +459,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		} else if node.TestMain {
 			continue
 		}
-		if !isView[root] || state.downgraded[root] {
+		if !isView[root] || state.downgraded[root] != "" {
 			continue
 		}
-		if walk(node.ImportPath, map[string]bool{}) {
-			state.downgraded[root] = true
+		if culprit := walk(node.ImportPath, map[string]bool{}); culprit != "" {
+			state.downgraded[root] = culprit
 		}
 	}
 	return state, nil
