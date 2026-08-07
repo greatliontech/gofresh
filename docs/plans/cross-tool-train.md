@@ -73,7 +73,7 @@ its root-cause class.
 - [x] 12. gomutant: kill-cache keying by killing-oracle content
       (gomutant docs/issues/kill-cache-keying-asymmetry.md — builds on
       the compartment ledger the preflight surfaces).
-- [ ] 13. gomutant: pipeline preparation with execution
+- [x] 13. gomutant: pipeline preparation with execution
       (gomutant docs/issues/pipeline-preparation-with-execution.md —
       includes the measured pre-baseline stall; before/after measured
       on a pinned copy of an available workload repo, its own baseline
