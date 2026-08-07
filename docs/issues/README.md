@@ -46,12 +46,6 @@ when its work lands (git holds history).
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
   *Lands: the next gofresh plan.*
-- **[memo-store-ownership](memo-store-ownership.md)** — the closure package's effect-scan
-  memos write `$XDG_CACHE_HOME/gofresh` unconditionally from any consumer process, with no
-  API to disable, redirect, or attribute; the view layer enables the observability memo
-  internally, so consumer control must cover both memo classes through one knob.
-  Cost/policy-only — entries are never trusted beyond their content key.
-  *Lands: cross-tool train chunk 20.*
 - **[unnamed-external-dependence-verdict](unnamed-external-dependence-verdict.md)** —
   effects added by the unaudited-standard-operation arm never feed the preferred-reason
   selection, so subjects they refuse serve a bare "external dependence" with no package

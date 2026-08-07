@@ -113,7 +113,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       the run, with mid-run mutation of bracketed trees still detected;
       mechanism home (gofresh per-process memo vs run-scoped reuse in
       the witness runner) decided at triage.
-- [ ] 20. gofresh: memo-store consumer control (gofresh
+- [x] 20. gofresh: memo-store consumer control (gofresh
       docs/issues/memo-store-ownership.md) — consumers gain
       disable/redirect control over the persistent memo store, one
       knob covering both memo classes (unconditional effect scans and
