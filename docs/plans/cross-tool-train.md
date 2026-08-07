@@ -142,7 +142,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       synchronization set (sync.Mutex/RWMutex lock operations are
       receiver-neutral by source audit - lock state cannot change
       dispatch) per the user's build-all-rungs decision.
-- [ ] 24. gofresh: returned-alias disposition (gofresh
+- [x] 24. gofresh: returned-alias disposition (gofresh
       docs/issues/returned-alias-disposition.md) - a value returned
       off receiver-reachable state is an alias handout; the discharge
       needs object-closure-style treatment of returned interface and

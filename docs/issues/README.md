@@ -52,10 +52,6 @@ when its work lands (git holds history).
   internally, so consumer control must cover both memo classes through one knob.
   Cost/policy-only — entries are never trusted beyond their content key.
   *Lands: cross-tool train chunk 20.*
-- **[returned-alias-disposition](returned-alias-disposition.md)** — a receiver-read-only
-  method returning alias-handing values (reflect.Type off registry internals) still hands
-  out mutable reach; returned-type immutability audits complete the discharge. *Lands:
-  cross-tool train chunk 24.*
 - **[unnamed-external-dependence-verdict](unnamed-external-dependence-verdict.md)** —
   effects added by the unaudited-standard-operation arm never feed the preferred-reason
   selection, so subjects they refuse serve a bare "external dependence" with no package
