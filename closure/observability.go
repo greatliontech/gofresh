@@ -352,7 +352,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
-	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) {
+	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}

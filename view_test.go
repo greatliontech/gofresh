@@ -3017,6 +3017,8 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"non-opaque sentinel comparison": "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
 		"slice capacity read":            "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
 		"read-only method call discharges": "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"rwmutex rlock read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.RWMutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.RLock()\n\tdefer r.mu.RUnlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+		"aliased sync import discharges":  "package view\n\nimport s \"sync\"\n\ntype reg struct {\n\tmu s.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
 		"mutex-guarded read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
 		"read-only chain discharges":      "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.raw() }\n\nfunc (r *reg) raw() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
 		"generic receiver read discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
@@ -3121,6 +3123,38 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		"go-statement callee races program code": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc init() { go declare(\"k\") }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 			culprit: "example.com/view.Hooks is mutated",
+		},
+		"slice-receiver range binding marks": {
+			source:  "package view\n\ntype entry struct {\n\tfn func()\n\tn  *int\n}\n\ntype reg []entry\n\nvar R = reg{{fn: func() {}, n: new(int)}}\n\nfunc (r reg) First() *int {\n\tfor _, e := range r {\n\t\treturn e.n\n\t}\n\treturn nil\n}\n\nfunc F() {\n\tp := R.First()\n\t*p = 1\n}\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"generic type-param read keeps the mark": {
+			source:  "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tv  A\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Value() A { return r.v }\n\nfunc F() string { return R.Value() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"local-alias write through method marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) Set() int {\n\tv := r.m\n\tv[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Set() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"returned mutable pointer marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\ts  []*int\n}\n\nvar R = &reg{s: []*int{new(int)}}\n\nfunc (r *reg) Get() *int { return r.s[0] }\n\nfunc F() { p := R.Get(); *p = 1 }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"interface-dispatched call keeps the mark": {
+			source:  "package view\n\ntype counter interface{ Count() int }\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nfunc (r *reg) Count() int { return r.n }\n\nvar R counter = &reg{}\n\nfunc F() int { return R.Count() }\n",
+			culprit: "example.com/view.R escapes writable",
+		},
+		"chain into writer sibling marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.bump() }\n\nfunc (r *reg) bump() int {\n\tr.n++\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"non-mutex sync field use marks": {
+			source:  "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tonce sync.Once\n\tfn   func()\n\tn    int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.once.Do(func() {})\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"assignment writer method call marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Set(v int) { r.n = v }\n\nfunc F() { R.Set(3) }\n",
+			culprit: "example.com/view.R is mutated",
 		},
 		"writer method call marks": {
 			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Bump() { r.n++ }\n\nfunc F() { R.Bump() }\n",

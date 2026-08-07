@@ -67,7 +67,7 @@ type Subject struct {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@3"
+const DynamicStateStrategy = "gofresh/dynamic-state@4"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or
@@ -119,8 +119,14 @@ const DynamicStateStrategy = "gofresh/dynamic-state@3"
 // subject's mask) and the subject analyzes closed — caller-passed
 // closures become analyzed view content whose effects and edits are the
 // subject's own; zero references, any non-call reference, any unclosed
-// argument, or harness-dispatched reach keeps the open world.
-const ObservationRTA = "gofresh/observation-rta@13"
+// argument, or harness-dispatched reach keeps the open world; @14
+// admits the audited synchronization set at the symbol tier - the
+// mutex types (sync.Mutex, sync.RWMutex) and their lock operations no
+// longer classify as unaudited standard operations, and lock state is
+// receiver-neutral in the shared-dynamic-state judgment - lock state
+// cannot change dispatch, and every other sync surface keeps its
+// classification.
+const ObservationRTA = "gofresh/observation-rta@14"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

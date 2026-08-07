@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@13" {
-		t.Fatalf("ObservationRTA = %q, want caller-enumeration closure semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@14" {
+		t.Fatalf("ObservationRTA = %q, want audited-synchronization admission semantics", ObservationRTA)
 	}
 }
 

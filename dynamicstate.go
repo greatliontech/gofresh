@@ -77,7 +77,7 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	recordOpaqueDynamicVars(p, opaque, breaks, initOnly)
 	for method := range receiverReadOnlyMethods(p) {
 		if p.Types != nil {
-			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"."+method)
+			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
 		}
 	}
 	sort.Strings(fact.ReceiverReadOnly)
@@ -409,11 +409,17 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range facts {
 			for _, use := range fact.MethodUses {
 				varKey, methodKey, ok := strings.Cut(use, "\x00")
-				if !ok || !readOnly[methodKey] {
-					if ok {
-						mutated[varKey] = true
+				if !ok {
+					// A malformed entry cannot attribute its use; the
+					// fact that carries it is not trusted - every key
+					// it declares marks mutated, fail-closed.
+					for _, key := range fact.Declares {
+						mutated[key] = true
 					}
 					continue
+				}
+				if !readOnly[methodKey] {
+					mutated[varKey] = true
 				}
 			}
 		}

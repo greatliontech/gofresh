@@ -60,3 +60,8 @@ when its work lands (git holds history).
   method returning alias-handing values (reflect.Type off registry internals) still hands
   out mutable reach; returned-type immutability audits complete the discharge. *Lands:
   cross-tool train chunk 24.*
+- **[unnamed-external-dependence-verdict](unnamed-external-dependence-verdict.md)** —
+  effects added by the unaudited-standard-operation arm never feed the preferred-reason
+  selection, so subjects they refuse serve a bare "external dependence" with no package
+  or symbol named. *Lands: when the reason selection next changes, or with the first
+  field diagnosis blocked on an unnamed verdict.*

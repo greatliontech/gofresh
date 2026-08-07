@@ -421,7 +421,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					if bodyReason == "" && pkgPath != "" {
 						bodyReason = effect.reason
 					}
-				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 				}
 			}
@@ -780,6 +780,24 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 		"path", "regexp", "regexp/syntax",
 		"slices", "sort", "strconv", "strings", "text/scanner",
 		"unicode", "unicode/utf16", "unicode/utf8":
+		return true
+	default:
+		return false
+	}
+}
+
+// auditedSyncSymbol reports whether a sync-package symbol is in the
+// audited synchronization set: the mutex types and their lock
+// operations, whose state cannot change dispatch and which acquire no
+// process-external state. sync exports no top-level functions by these
+// names, so the method names are unambiguous. Grows only by source
+// audit (REQ-closure-shared-dynamic-state).
+func auditedSyncSymbol(pkgPath, name string) bool {
+	if pkgPath != "sync" {
+		return false
+	}
+	switch name {
+	case "Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock":
 		return true
 	default:
 		return false

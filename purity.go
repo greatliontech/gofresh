@@ -598,7 +598,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// The discharge holds only when the produced element is
 				// not itself alias-handing - an indexed-out map or slice
 				// still writes through (REQ-closure-shared-dynamic-state).
-				if t := p.TypesInfo.TypeOf(n); t == nil || !typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+				if t := p.TypesInfo.TypeOf(n); t == nil || !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 					markRead(n.X)
 				}
 			case *ast.BinaryExpr:
@@ -1027,15 +1027,17 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					disqualified[key] = true
 				}
 			case *ast.RangeStmt:
-				// Ranging the receiver or a field chain reads; the
-				// bindings are locals. Receiver channels disqualify
-				// via the type check below.
+				// Ranging the receiver or a field chain reads only when
+				// the bindings hand out no mutable reach; a channel
+				// receiver receives, and either refusal disqualifies.
 				if recvRooted(n.X) {
-					consume(n.X)
-					if t := p.TypesInfo.TypeOf(n.X); t != nil {
-						if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
-							disqualified[key] = true
-						}
+					t := p.TypesInfo.TypeOf(n.X)
+					if t == nil || rangeBindsAlias(t) {
+						disqualified[key] = true
+					} else if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
+						disqualified[key] = true
+					} else {
+						consume(n.X)
 					}
 				}
 			case *ast.CallExpr:
@@ -1069,9 +1071,9 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				}
 			case *ast.IndexExpr:
 				if recvRooted(n.X) {
-					// An indexed-out alias value escaping is caught by
-					// the read-shape condition on the produced type.
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+					// An indexed-out value escaping is judged by mutable
+					// reach: any aliased part writable through it refuses.
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
@@ -1085,7 +1087,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 						break // judged at the enclosing CallExpr or disqualified below
 					}
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutDynamicAlias(t, make(map[types.Type]bool)) {
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
@@ -1110,10 +1112,6 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 			}
 			return true
 		})
-		// The allowed-set consumption above marks receiver idents only
-		// when the ident node itself is the allowed expression; a
-		// selector chain's root ident needs the same consumption.
-		_ = allowed
 	}
 	// Fixed point: chaining into a disqualified sibling disqualifies.
 	for changed := true; changed; {
@@ -1174,7 +1172,7 @@ func methodFactKey(fn *types.Func) string {
 	if fn.Pkg() != nil {
 		pkg = fn.Pkg().Path()
 	}
-	return pkg + "." + recvName + "." + fn.Name()
+	return pkg + "\x00" + recvName + "." + fn.Name()
 }
 
 // auditedSynchronization reports whether the method is in the audited
@@ -1393,19 +1391,58 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks, initOnly map[s
 	}
 }
 
+// typeHandsOutMutableReach reports whether holding a value of the type
+// hands out write access to the memory it aliases: pointers, maps,
+// slices, channels, unsafe pointers, and interfaces (concrete type
+// unknown) do; function values do not - calling one executes program
+// code whose own writes are judged where they are written, but the
+// value itself cannot be written through. The receiver-effect and
+// carrier read discharges gate on this, not on dynamic reach: a write
+// through any aliased part of a tracked carrier is mutation
+// (REQ-closure-shared-dynamic-state).
+func typeHandsOutMutableReach(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Basic:
+		return t.Kind() == types.UnsafePointer
+	case *types.Interface, *types.Pointer, *types.Map, *types.Slice, *types.Chan:
+		return true
+	case *types.Signature:
+		return false
+	case *types.Named:
+		return typeHandsOutMutableReach(t.Underlying(), seen)
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if typeHandsOutMutableReach(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	case *types.Array:
+		return typeHandsOutMutableReach(t.Elem(), seen)
+	case *types.TypeParam:
+		return true
+	default:
+		return true
+	}
+}
+
 // rangeBindsAlias reports whether ranging the type binds an
 // alias-handing value into the iteration variables.
 func rangeBindsAlias(t types.Type) bool {
 	switch t := types.Unalias(t).Underlying().(type) {
 	case *types.Map:
-		return typeHandsOutDynamicAlias(t.Key(), make(map[types.Type]bool)) || typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+		return typeHandsOutMutableReach(t.Key(), make(map[types.Type]bool)) || typeHandsOutMutableReach(t.Elem(), make(map[types.Type]bool))
 	case *types.Slice:
-		return typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+		return typeHandsOutMutableReach(t.Elem(), make(map[types.Type]bool))
 	case *types.Array:
-		return typeHandsOutDynamicAlias(t.Elem(), make(map[types.Type]bool))
+		return typeHandsOutMutableReach(t.Elem(), make(map[types.Type]bool))
 	case *types.Pointer:
 		if arr, ok := types.Unalias(t.Elem()).Underlying().(*types.Array); ok {
-			return typeHandsOutDynamicAlias(arr.Elem(), make(map[types.Type]bool))
+			return typeHandsOutMutableReach(arr.Elem(), make(map[types.Type]bool))
 		}
 		return true
 	default:

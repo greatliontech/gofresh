@@ -229,13 +229,27 @@ or slice reaching a dynamic carrier, or an unsafe pointer — hands shared mutab
 access through the value, so it is judged by use shape, still fail-closed: a read
 that provably cannot write — indexing or iterating the carrier, taking its length
 or capacity, or comparing it — is not mutation, and the indexing and iteration
-discharges hold only when the produced value is not itself alias-handing (an
-indexed-out map still writes through) and never for a channel (ranging a channel
+discharges hold only when the produced value hands out no mutable reach — a
+pointer, map, slice, channel, or interface anywhere in it refuses; a function
+value is program code judged where written, not write access (an indexed-out
+map still writes through) — and never for a channel (ranging a channel
 receives); a write through the carrier, growth or deletion, a send or receive, an
 address capture, or a rebinding is mutation; every other use — escaping the value
 into a call argument, a store, a return, a binding, a method call on it, or a
 type assertion — is mutation-equivalent, because the receiving code may write
-what it was handed. One narrowing applies to the escape class alone: an
+what it was handed. A direct method CALL on a statically-typed non-interface
+carrier is judged by the method's own receiver-effect proof instead: the
+declaring package proves a method unable to write receiver-reachable state —
+the receiver never stands in a write position, never escapes, reads off it
+hand out no mutable reach, and it chains only into sibling methods already
+proven or into the audited synchronization set — and a call to a proven method
+marks nothing, generic receivers included; a call to any unproven,
+unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
+the fail-closed mark. The audited synchronization set — sync.Mutex and
+sync.RWMutex with their lock operations, receiver-neutral and never
+process-external because lock state cannot change dispatch — is admitted
+identically at the effect classification tiers, and grows only by source
+audit. One narrowing applies to the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
 package — is a provably-immutable audited construction (`errors.New`; the nil
