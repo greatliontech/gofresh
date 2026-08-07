@@ -526,10 +526,12 @@ test-only bytes out of the core while the analyzed binary compiles both
 version pins, per REQ-closure-mutable-local and REQ-closure-pinned-dep). A memo hit is
 byte-equivalent to recomputation — including recorded unrooted-subject
 dispositions — and a full-group hit skips the program load entirely. The
-memo is a cache, never a record: it lives under the user cache directory,
-writes atomically, and a missing, unreadable, corrupt, or key-mismatched
-entry recomputes silently; no entry is trusted beyond its key — the key IS
-the freshness. Entries accumulate one per closure version and the cache is
+memo is a cache, never a record: it lives under the user cache directory by
+default — the consumer may redirect the store root or disable persistence
+process-wide through one knob covering every memo class, and no knob position
+changes a verdict, only what is recomputed — writes atomically, and a missing,
+unreadable, corrupt, or key-mismatched entry recomputes silently; no entry is
+trusted beyond its key — the key IS the freshness. Entries accumulate one per closure version and the cache is
 deletable wholesale at any time. Proofs persist as each attribution slice
 completes: an analysis deadline expiring mid-group forfeits only the
 interrupted slice's proofs, and a later pass serves every completed
@@ -577,9 +579,9 @@ packages, toolchain source cannot reach module variables (imports are
 acyclic), and toolchain source is not an authoring surface for gofresh
 directives. A memo hit is fact-equivalent to recomputation. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
-sibling user-cache directory, atomic writes, silent recomputation on any
-miss, corruption, or key mismatch, deletable wholesale at any time; changing
-fact semantics bumps the fact-strategy version.
+sibling directory under the consumer-controlled store, atomic writes, silent
+recomputation on any miss, corruption, or key mismatch, deletable wholesale
+at any time; changing fact semantics bumps the fact-strategy version.
 
 REQ-closure-dynamic-state-memo: enforced by
 `TestDynamicStateFactsServePinnedPackagesWithoutLoading`,
@@ -609,10 +611,10 @@ replacement does not attest that source — every pass re-reads them. A
 memo hit is byte-equivalent to recomputation — the
 effect set, its order, and the preferred diagnostic alike. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
-sibling user-cache directory, atomic writes, silent recomputation on any
-miss, corruption, or key mismatch, deletable wholesale at any time;
-changing scan semantics — classification tables included — bumps the
-scan-strategy version.
+sibling directory under the consumer-controlled store, atomic writes,
+silent recomputation on any miss, corruption, or key mismatch, deletable
+wholesale at any time; changing scan semantics — classification tables
+included — bumps the scan-strategy version.
 
 REQ-closure-effect-scan-memo: enforced by
 `TestEffectScanMemoServesPinnedPackagesWithoutReads`,

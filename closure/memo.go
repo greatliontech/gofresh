@@ -7,11 +7,30 @@ import "github.com/greatliontech/gofresh/closure/internal/cachefile"
 // the proof-strategy version and the code guards, and the memo key adds
 // the package test-binary closure hash, completing the pure function's
 // input identity (REQ-closure-observability-memo). An empty scope
-// disables memoization. The memo lives under the user cache directory;
+// disables memoization. The memo lives under the consumer-controlled
+// store root (the user cache by default; SetMemoRoot/DisableMemos);
 // a missing, unreadable, or corrupt entry recomputes silently - the key
 // IS the freshness, so no entry is ever trusted beyond it.
 func (h *Hasher) SetMemoScope(scope string) {
 	h.memoScope = scope
+}
+
+// SetMemoRoot redirects the persistent memo store - one knob covering
+// every memo class: effect scans, observability proofs, and
+// dynamic-state facts. The empty string restores the user cache
+// directory default and re-enables a disabled store. Set at process
+// start, before any analysis runs. The store is a cache, never a
+// record: no knob position changes a verdict, only what is recomputed
+// (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
+func SetMemoRoot(dir string) {
+	cachefile.SetRoot(dir)
+}
+
+// DisableMemos turns memo persistence off process-wide - loads miss
+// and stores drop, for hermetic environments that forbid user-cache
+// writes. Only recomputation cost changes.
+func DisableMemos() {
+	cachefile.Disable()
 }
 
 // observabilityDirName is the observability memo's sibling user-cache

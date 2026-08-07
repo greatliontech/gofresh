@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -2966,6 +2967,113 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	}
 	if observations != 0 {
 		t.Fatalf("cached proof analysis performed %d observations, want 0", observations)
+	}
+}
+
+// One knob redirects or disables every persistent memo class, and no
+// knob position changes a verdict - the store is a cache, never a
+// record (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
+func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
+	source := "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int { return len(Hooks) }\n"
+	verdictUnder := func(t *testing.T, configure func(t *testing.T)) Status {
+		t.Helper()
+		configure(t)
+		dir := writeViewModule(t, source)
+		engine, err := New(WithDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return verdict.Status
+	}
+	restore := func(t *testing.T) {
+		t.Cleanup(func() { SetMemoRoot("") })
+	}
+	base := verdictUnder(t, func(t *testing.T) { restore(t) })
+
+	redirected := t.TempDir()
+	got := verdictUnder(t, func(t *testing.T) {
+		restore(t)
+		SetMemoRoot(redirected)
+	})
+	if got != base {
+		t.Fatalf("redirected store changed the verdict: %v vs %v", got, base)
+	}
+
+	forbidden := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", forbidden)
+	got = verdictUnder(t, func(t *testing.T) {
+		restore(t)
+		DisableMemos()
+	})
+	if got != base {
+		t.Fatalf("disabled store changed the verdict: %v vs %v", got, base)
+	}
+	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
+		t.Fatalf("disabled store still wrote %d user-cache entries", len(entries))
+	}
+}
+
+// The redirect contains every persistent write - a pinned-dep fact scan
+// lands under the redirected root, never the user cache - and a
+// disabled store persists nothing while serving scan-equivalent
+// results (REQ-closure-dynamic-state-memo).
+func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
+	forbidden := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", forbidden)
+	t.Cleanup(func() { SetMemoRoot("") })
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	const scope = DynamicStateStrategy + "|knob-containment|cfg"
+
+	redirected := t.TempDir()
+	SetMemoRoot(redirected)
+	processFactCache = sync.Map{}
+	first := runScan(t, scope, dir, pkg)
+	if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
+		t.Fatal("scan lost the subject")
+	}
+	if entries, err := os.ReadDir(filepath.Join(redirected, "gofresh")); err != nil || len(entries) == 0 {
+		t.Fatalf("redirected store received no memo writes: %v %v", entries, err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
+		t.Fatalf("redirect leaked %d entries into the user cache", len(entries))
+	}
+
+	countFiles := func(root string) int {
+		n := 0
+		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	before := countFiles(redirected)
+	DisableMemos()
+	processFactCache = sync.Map{}
+	second := runScan(t, DynamicStateStrategy+"|knob-disabled|cfg", dir, pkg)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("disabled store is not scan-equivalent:\n first %+v\n second %+v", first, second)
+	}
+	if after := countFiles(redirected); after != before {
+		t.Fatalf("disabled store still wrote: %d files before, %d after", before, after)
+	}
+	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
+		t.Fatalf("disabled store wrote %d user-cache entries", len(entries))
 	}
 }
 
