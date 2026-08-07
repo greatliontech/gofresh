@@ -50,3 +50,8 @@ when its work lands (git holds history).
   whose closures capture the receiver read as reach-free, laundering receiver writes
   through proven-read-only bindings; pre-existing Signature-classification hole. *Lands: startup-effect-precision
   plan, per each doc.*
+- **[validation-manifest-evaluation-unshared](validation-manifest-evaluation-unshared.md)** —
+  producer validation evaluates each subject's manifest independently, twice, where the
+  check window now shares per phase; same amplification class, producer path, cost-only.
+  *Lands: when the producer validation path next changes, or a field measurement shows
+  validation-time digesting as a standing cost.*

@@ -713,6 +713,15 @@ func validPurityAssertion(assertion string) bool {
 }
 
 func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
+	// Each call is one endpoint phase - a fresh observation instant.
+	// The evaluation memo is call-local, so sharing across phases (the
+	// window's opening and closing observations are distinct instants,
+	// and movement between them must stay detected) or across
+	// concurrent check batches is unrepresentable: records carrying the
+	// identical encoded manifest - every record of one package -
+	// evaluate once per phase instead of re-digesting every entry per
+	// record.
+	shared := map[string]runtimeinput.State{}
 	if v.engine != nil && v.engine.progress != nil {
 		for _, fingerprint := range recorded {
 			if fingerprint.RuntimeInputs != "" {
@@ -723,7 +732,7 @@ func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fi
 	}
 	observed := make(map[Subject]runtimeinput.State, len(recorded))
 	for subject, fingerprint := range recorded {
-		state, err := v.currentRuntimeContext(ctx, fingerprint)
+		state, err := v.currentRuntimeContext(ctx, fingerprint, shared)
 		if err != nil {
 			return nil, err
 		}
@@ -747,7 +756,7 @@ func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subjec
 	return verdicts, nil
 }
 
-func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) (runtimeinput.State, error) {
+func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, shared map[string]runtimeinput.State) (runtimeinput.State, error) {
 	var rt runtimeinput.State
 	var err error
 	if recorded.RuntimeInputs != "" {
@@ -762,11 +771,16 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint) 
 				}
 			}
 		}
+		if cached, ok := shared[recorded.RuntimeInputs]; ok {
+			return cached, nil
+		}
 		if rt, err = current(ctx, recorded.RuntimeInputs, v.moduleDir); err != nil {
 			if contextErr := ctx.Err(); contextErr != nil {
 				return runtimeinput.State{}, contextErr
 			}
 			rt = runtimeinput.State{}
+		} else {
+			shared[recorded.RuntimeInputs] = rt
 		}
 	}
 	return rt, nil

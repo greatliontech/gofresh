@@ -3796,3 +3796,52 @@ func TestSortedUniqueUnionCanonicalizes(t *testing.T) {
 		t.Fatalf("sortedUniqueUnion = %v, want %v", got, want)
 	}
 }
+
+// Within one endpoint phase, records carrying the identical encoded
+// manifest evaluate once; the closing endpoint is a fresh instant, so
+// movement across the window stays detected
+// (REQ-inputs-guard's per-record evaluation collapsed per phase).
+func TestRuntimeInputManifestEvaluationSharedPerPhase(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n")
+	f := Subject{Package: "example.com/view", Symbol: "F"}
+	g := Subject{Package: "example.com/view", Symbol: "G"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fps, err := view.CaptureBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := map[Subject]Fingerprint{}
+	for s, fp := range fps {
+		fp.RuntimeInputs = "shared-manifest"
+		fp.RuntimeDigest = "recorded"
+		recorded[s] = fp
+	}
+	calls := 0
+	view.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
+		calls++
+		return runtimeinput.State{Digest: "recorded", OK: true}, nil
+	}
+	verdicts, err := view.CheckBatch(context.Background(), recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both records traverse the runtime window - the sharing claim is
+	// vacuous if either stales out of it beforehand.
+	for s, v := range verdicts {
+		if v.Status != Valid {
+			t.Fatalf("record %v did not traverse the runtime window: %+v", s, v)
+		}
+	}
+	// Two records, one manifest, two endpoint phases: exactly two
+	// evaluations - one per phase, shared across the records.
+	if calls != 2 {
+		t.Fatalf("shared manifest evaluated %d times across two records and two phases, want 2", calls)
+	}
+}
