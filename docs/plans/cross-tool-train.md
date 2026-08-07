@@ -98,7 +98,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       the spec-doc tree; closes stipulator
       docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
       8, and 9 fixes) and the two gofresh docs at their close-outs.
-- [ ] 17. gofresh: open the startup-effect-precision plan
+- [x] 17. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
       runtimeinput-producer-facade ride it per their Lands lines).

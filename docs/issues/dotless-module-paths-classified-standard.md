@@ -11,4 +11,4 @@ disposition between `module probe` and `module example.com/probe`).
 The classification should consult the module graph the Hasher already
 lists rather than a path-shape heuristic.
 
-Lands: the next gofresh plan.
+Lands: startup-effect-precision plan chunk 7.

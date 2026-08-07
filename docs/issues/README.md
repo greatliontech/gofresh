@@ -14,17 +14,12 @@ when its work lands (git holds history).
   treats any dotless first path element as standard-library, so a module named without a
   dot has its whole startup walk silently filtered out and every startup refusal
   (effects and the test-main dispatch widen alike) disabled.
-  *Lands: the next gofresh plan.*
+  *Lands: startup-effect-precision plan, per each doc.*
 - **[one-dispatch-site-classifier](one-dispatch-site-classifier.md)** — the observability
   walks grew five partial implementations of one call-site judgment (classification
   ladders, wrapper-receiver provenance, parameter eligibility, body cuts, diagnostic
   selection); sketch for collapsing them onto one site classifier.
-  *Lands: the next gofresh plan.*
-- **[startup-effect-precision](startup-effect-precision.md)** — with the subject-tier
-  walls down, 99.5% of cerebro's 2,119 subjects still refuse at STARTUP on
-  argument-insensitive classifications (fmt.Fprintf into local buffers, math/big and
-  fixed-argument time construction, std init closures); measured histogram inside.
-  *Lands: the next gofresh plan — this is its charter.*
+  *Lands: startup-effect-precision plan, per each doc.*
 - **[enumeration-targets-over-approximated](enumeration-targets-over-approximated.md)** — a
   subject-closed dispatch pins its value set exactly, but the recorded target set is RTA's
   whole-mask over-approximation; an init-flow closure of matching signature drags initializer
@@ -45,7 +40,7 @@ when its work lands (git holds history).
 - **[runtimeinput-producer-facade](runtimeinput-producer-facade.md)** — stipulator, gomutant,
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
-  *Lands: the next gofresh plan.*
+  *Lands: startup-effect-precision plan, per each doc.*
 - **[unnamed-external-dependence-verdict](unnamed-external-dependence-verdict.md)** —
   effects added by the unaudited-standard-operation arm never feed the preferred-reason
   selection, so subjects they refuse serve a bare "external dependence" with no package

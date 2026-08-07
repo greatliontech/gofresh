@@ -12,4 +12,4 @@ closure-capture awareness (a func value whose literal captures
 mutable-reach state is itself mutable reach) or a fail-closed
 Signature reclassification with an audited-pure-func carve-out.
 
-Lands: the next gofresh plan.
+Lands: startup-effect-precision plan chunk 6.

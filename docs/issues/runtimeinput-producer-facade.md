@@ -14,4 +14,4 @@ supplies identity, roots, and the process env; the facade owns the
 header check, option assembly, and fallback shape) would collapse the
 three copies and make the next producer correct by construction.
 
-Lands: the next gofresh plan.
+Lands: startup-effect-precision plan chunk 9.

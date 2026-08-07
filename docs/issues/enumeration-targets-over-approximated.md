@@ -13,6 +13,6 @@ subject), never a false valid. Restricting a subject-closed site's
 targets to the closed-value walk's pinned set would remove it; the walk
 already collects exactly that set for enumerated arguments.
 
-Lands: the next gofresh plan, with the startup-effect precision family
+Lands: startup-effect-precision plan chunk 10.
 — or earlier if a field corpus measurably loses enumeration closures to
 init-flow signature collisions.

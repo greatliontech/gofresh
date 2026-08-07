@@ -34,4 +34,4 @@ uniform blocking, the harness admission's target-set and provenance
 bounds, batch equivalence. Deletes: recordDirectCallEffect's cascade,
 testMainDispatchClosed, the duplicated eligibility checks.
 
-Lands: the next gofresh plan.
+Lands: startup-effect-precision plan chunk 8.
