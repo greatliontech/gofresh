@@ -245,8 +245,17 @@ non-audited value — breaks the closure from whichever package performs it. No 
 an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere. The
 audited-construction set grows only by source audit.
-Function bodies nested in package-level declarations or in `init` bodies are
-program code, not initialization; non-Go writes need no rule here — packages built with cgo or
+`init` flow is the initializer expressions, the `init` bodies, and the
+init-only-reachable helpers: unexported plain functions whose every in-package
+reference is a direct call from an initializer expression, an `init` body, or
+another such helper — transitively, with any value reference, any receiver, any
+export, any go-statement callee (the goroutine races program code even when
+launched from init; a deferred init call stays init flow), or any reference
+from ordinary program code — a nested function literal included, wherever it
+appears — refusing the class fail-closed, and a qualified helper's stores audited for object-closure exactly
+as an `init` body's are. Function bodies nested in package-level declarations,
+in `init` bodies, or in qualified helpers are program code, not initialization;
+non-Go writes need no rule here — packages built with cgo or
 assembly sources are already downgraded whole by the native-code and linkage
 blind-spot dispositions. The toolchain-generated test-main package is startup
 scaffolding, not an analysis surface: its registration tables contribute neither

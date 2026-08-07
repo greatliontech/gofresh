@@ -481,7 +481,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{})
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p))
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -491,9 +491,10 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 // alias-carrier values handed to code that may write them (call
 // arguments, stores, returns, bindings, method calls, type
 // assertions). Reads that provably cannot write — indexing, iteration,
-// length/capacity, comparison — mark neither
+// length/capacity, comparison — mark neither, and initOnly names the
+// init-only-reachable helpers whose bodies are init flow
 // (REQ-closure-shared-dynamic-state).
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped map[string]bool) {
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -653,6 +654,22 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped map[string]bo
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
+				if decl.Recv == nil && decl.Name != nil && initOnly[decl.Name.Name] {
+					// An init-only-reachable helper's body is init flow:
+					// its mutations are startup-deterministic. Literals
+					// nested in it stay program code, exactly as in an
+					// init body (REQ-closure-shared-dynamic-state).
+					if decl.Body != nil {
+						ast.Inspect(decl.Body, func(n ast.Node) bool {
+							if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
+								walkBody(lit.Body)
+								return false
+							}
+							return true
+						})
+					}
+					continue
+				}
 				if decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init" {
 					// init flow is exempt, but a function literal nested
 					// in an init body is callable program code exactly
@@ -688,6 +705,166 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped map[string]bo
 	}
 }
 
+// initOnlyReachableHelpers computes, by package-local fixed point, the
+// unexported plain functions whose every reference in the package is a
+// call from an initializer expression, an init body, or another
+// qualified helper - functions no non-init root can reach, so their
+// bodies are init flow (REQ-closure-shared-dynamic-state). Any value
+// reference, any receiver, any export, any generic reference shape the
+// scan does not recognize as a direct call, or any reference from
+// ordinary program code refuses the class - fail-closed.
+func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return nil
+	}
+	candidates := map[string]bool{}
+	bodies := map[string]*ast.FuncDecl{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name == "init" {
+				continue
+			}
+			if fd.Name.IsExported() {
+				continue
+			}
+			candidates[fd.Name.Name] = true
+			bodies[fd.Name.Name] = fd
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	isCandidateFunc := func(ident *ast.Ident) (string, bool) {
+		obj, ok := p.TypesInfo.Uses[ident]
+		if !ok {
+			return "", false
+		}
+		fn, ok := obj.(*types.Func)
+		if !ok || fn.Pkg() == nil || fn.Pkg() != p.Types || fn.Type().(*types.Signature).Recv() != nil {
+			return "", false
+		}
+		if !candidates[fn.Name()] {
+			return "", false
+		}
+		return fn.Name(), true
+	}
+	// references[caller] lists candidate names referenced from region
+	// caller; "" is the init region (initializer expressions and init
+	// bodies), "!" the ordinary-program region. A non-call reference
+	// anywhere disqualifies immediately.
+	disqualified := map[string]bool{}
+	references := map[string]map[string]bool{}
+	addRef := func(region, name string) {
+		if references[region] == nil {
+			references[region] = map[string]bool{}
+		}
+		references[region][name] = true
+	}
+	var scanRegion func(region string, root ast.Node)
+	scanRegion = func(region string, root ast.Node) {
+		calls := map[*ast.Ident]bool{}
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				// A nested literal is program code whatever encloses
+				// it - its references never count as init flow.
+				if n != root && n.Body != nil {
+					scanRegion("!", n.Body)
+					return false
+				}
+			case *ast.GoStmt:
+				// A go-statement callee runs concurrently with program
+				// code even when launched from init - never init flow.
+				scanRegion("!", n.Call)
+				return false
+			case *ast.CallExpr:
+				if ident, ok := n.Fun.(*ast.Ident); ok {
+					if _, is := isCandidateFunc(ident); is {
+						calls[ident] = true
+					}
+				}
+			case *ast.Ident:
+				if name, is := isCandidateFunc(n); is {
+					if calls[n] {
+						addRef(region, name)
+					} else {
+						disqualified[name] = true
+					}
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				switch {
+				case decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init":
+					if decl.Body != nil {
+						scanRegion("", decl.Body)
+					}
+				case decl.Recv == nil && decl.Name != nil && candidates[decl.Name.Name]:
+					if decl.Body != nil {
+						scanRegion(decl.Name.Name, decl.Body)
+					}
+				default:
+					if decl.Body != nil {
+						scanRegion("!", decl.Body)
+					}
+				}
+			default:
+				scanRegion("", decl)
+			}
+		}
+	}
+	for name := range references["!"] {
+		disqualified[name] = true
+	}
+	// Fixed point: a disqualified helper's body is ordinary program
+	// code, so its references disqualify in turn.
+	for changed := true; changed; {
+		changed = false
+		for caller, refs := range references {
+			if caller == "" || caller == "!" || !disqualified[caller] {
+				continue
+			}
+			for name := range refs {
+				if !disqualified[name] {
+					disqualified[name] = true
+					changed = true
+				}
+			}
+		}
+	}
+	qualified := map[string]bool{}
+	for name := range candidates {
+		if disqualified[name] {
+			continue
+		}
+		// Only helpers actually referenced from init flow (directly or
+		// through qualified helpers) matter; an unreferenced helper is
+		// dead code either way and stays program code fail-closed.
+		qualified[name] = true
+	}
+	// Keep only helpers reachable from the init region through
+	// qualified callers - an unexported helper called from nowhere
+	// stays ordinary program code.
+	reachable := map[string]bool{}
+	var mark func(region string)
+	mark = func(region string) {
+		for name := range references[region] {
+			if qualified[name] && !reachable[name] {
+				reachable[name] = true
+				mark(name)
+			}
+		}
+	}
+	mark("")
+	return reachable
+}
+
 // recordOpaqueDynamicVars judges, in the declaring package alone, which
 // interface-typed package-level variables are object-closed: the
 // initializer and every init-flow store are provably-immutable audited
@@ -697,7 +874,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped map[string]bo
 // demonstrated write in whatever package performs it, so opacity never
 // needs to audit those. The audited-construction set grows only by
 // source audit (REQ-closure-shared-dynamic-state).
-func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool) {
+func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks, initOnly map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
 	}
@@ -784,7 +961,13 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 					}
 				}
 			case *ast.FuncDecl:
-				if decl.Recv != nil || decl.Name == nil || decl.Name.Name != "init" || decl.Body == nil {
+				if decl.Recv != nil || decl.Name == nil || decl.Body == nil {
+					continue
+				}
+				// Init-only-reachable helpers are init flow: their
+				// stores are audited under the same rules as init
+				// bodies (REQ-closure-shared-dynamic-state).
+				if decl.Name.Name != "init" && !initOnly[decl.Name.Name] {
 					continue
 				}
 				ast.Inspect(decl.Body, func(n ast.Node) bool {

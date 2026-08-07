@@ -61,8 +61,9 @@ type dynamicStateFact struct {
 func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	var fact dynamicStateFact
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped)
-	recordOpaqueDynamicVars(p, opaque, breaks)
+	initOnly := initOnlyReachableHelpers(p)
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly)
+	recordOpaqueDynamicVars(p, opaque, breaks, initOnly)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}

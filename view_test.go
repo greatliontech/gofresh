@@ -3016,6 +3016,8 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"registry map read shapes":       "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
 		"non-opaque sentinel comparison": "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
 		"slice capacity read":            "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
+		"init-only helper registration":  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"helper chain registration":      "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeViewModule(t, source)
@@ -3075,6 +3077,50 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		"goroutine-in-init sentinel rebind": {
 			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc use(err error) {}\n\nfunc init() { go func() { ErrX = errors.New(\"later\") }() }\n\nfunc F() { use(ErrX) }\n",
 			culprit: "example.com/view.ErrX is mutated",
+		},
+		"helper also called from program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc Register(name string) { declare(name) }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"helper referenced as a value": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nvar Declare = declare\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"helper stores non-audited sentinel": {
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar _ = setup()\n\nfunc setup() bool {\n\tErrX = &impl{}\n\treturn true\n}\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			culprit: "example.com/view.ErrX escapes writable",
+		},
+		"initializer-literal reference is program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar F2 = func() { declare(\"x\") }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"init-body-literal reference is program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Run func()\n\nfunc init() { Run = func() { declare(\"k\") } }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"helper-body-literal reference is program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Run func()\n\nvar _ = declare()\n\nfunc declare() bool {\n\tRun = func() { install(\"k\") }\n\treturn true\n}\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"go-statement callee races program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc init() { go declare(\"k\") }\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"method helper never qualifies": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\ntype reg struct{}\n\nvar _ = reg{}.declare(\"k\")\n\nfunc (reg) declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"exported helper never qualifies": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = Declare(\"k\")\n\nfunc Declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"helper nested literal mutates as program code": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Run func()\n\nvar _ = declare()\n\nfunc declare() bool {\n\tRun = func() { Hooks[\"k\"] = nil }\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"helper reached through disqualified caller": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = inner(\"k\")\n\nfunc inner(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc outer(name string) { inner(name) }\n\nfunc Register(name string) { outer(name) }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
 		},
 		"range-bound init store breaks opacity": {
 			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar errs = []error{&impl{}}\n\nfunc init() { for _, ErrX = range errs {} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
