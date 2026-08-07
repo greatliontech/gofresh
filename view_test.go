@@ -1092,8 +1092,8 @@ func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "caller-supplied") {
-		t.Fatalf("mutable callback global verdict = %+v fingerprint=%+v, want caller-supplied downgrade", verdict, fingerprint)
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+		t.Fatalf("mutable callback global verdict = %+v fingerprint=%+v, want the shared-dynamic-state downgrade", verdict, fingerprint)
 	}
 }
 
@@ -1150,7 +1150,7 @@ func TestMutableCallbackGlobalFromDependencyPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "caller-supplied") {
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
 		t.Fatalf("dependency callback global verdict = %+v, want propagated maximal disposition", verdict)
 	}
 }
@@ -3075,6 +3075,10 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		"goroutine-in-init sentinel rebind": {
 			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc use(err error) {}\n\nfunc init() { go func() { ErrX = errors.New(\"later\") }() }\n\nfunc F() { use(ErrX) }\n",
 			culprit: "example.com/view.ErrX is mutated",
+		},
+		"range-bound init store breaks opacity": {
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar errs = []error{&impl{}}\n\nfunc init() { for _, ErrX = range errs {} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			culprit: "example.com/view.ErrX escapes writable",
 		},
 		"indirect init store breaks opacity": {
 			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nfunc init() { p := &ErrX; *p = &impl{} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",

@@ -237,10 +237,11 @@ into a call argument, a store, a return, a binding, a method call on it, or a
 type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. One narrowing applies to the escape class alone: an
 interface-typed variable is object-closed when its initializer and every
-`init`-flow store — in any package, the declaring one or an importer's — is a
-provably-immutable audited construction (`errors.New`; the nil zero value); an
-init store the audit cannot attribute (indirect, through an address capture, or
-non-audited) breaks the closure from whichever package performs it. No holder of
+`init`-flow store in its declaring package is a provably-immutable audited
+construction (`errors.New`; the nil zero value); any other init-flow appearance
+— a store from another package, an indirect or range-bound store, an address
+capture, or a non-audited value — breaks the closure from whichever package
+performs it. No holder of
 an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere. The
 audited-construction set grows only by source audit.

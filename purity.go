@@ -815,6 +815,15 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 							// unattributable stores - fail-close.
 							failTargets(n.X)
 						}
+					case *ast.RangeStmt:
+						// A range binding is an init store of a value that
+						// is never an audited construction - fail-close.
+						if n.Key != nil {
+							failTargets(n.Key)
+						}
+						if n.Value != nil {
+							failTargets(n.Value)
+						}
 					}
 					return true
 				})

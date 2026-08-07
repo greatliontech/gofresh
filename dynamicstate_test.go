@@ -49,6 +49,7 @@ func writePinnedDepModule(t *testing.T) string {
 type scanResult struct {
 	known, openWorld, external map[Subject]bool
 	pure                       map[Subject]bool
+	downgradeReason            map[Subject]string
 }
 
 func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
@@ -61,7 +62,7 @@ func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := scanResult{known: scan.known, openWorld: scan.openWorld, external: scan.external, pure: map[Subject]bool{}}
+	result := scanResult{known: scan.known, openWorld: scan.openWorld, external: scan.external, pure: map[Subject]bool{}, downgradeReason: scan.downgradeReason}
 	for subject := range scan.known {
 		if scan.directivePure(subject) {
 			result.pure[subject] = true
