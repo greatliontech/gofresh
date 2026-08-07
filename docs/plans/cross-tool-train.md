@@ -107,7 +107,7 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       run's drop-path decision moves to witness completion (or a staged
       install-then-confirm), so a dying check keeps every record it
       produced; the degraded path still publishes nothing.
-- [ ] 19. stipulator + gofresh: bracket digest sharing within a run
+- [x] 19. stipulator + gofresh: bracket digest sharing within a run
       (stipulator docs/issues/cold-check-bracket-digest-amplification.md)
       — one digest of an unchanged bracket tree serves every witness in
       the run, with mid-run mutation of bracketed trees still detected;
