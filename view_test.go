@@ -3021,6 +3021,12 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"aliased sync import discharges":  "package view\n\nimport s \"sync\"\n\ntype reg struct {\n\tmu s.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
 		"mutex-guarded read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
 		"read-only chain discharges":      "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.raw() }\n\nfunc (r *reg) raw() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"generic instantiated result discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tv  A\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Value() A { return r.v }\n\nfunc F() string { return R.Value() }\n",
+		"reflect-type result discharges":  "package view\n\nimport \"reflect\"\n\ntype reg struct {\n\tfn func()\n\tt  reflect.Type\n}\n\nvar R = &reg{t: reflect.TypeOf(0)}\n\nfunc (r *reg) Kind() reflect.Type { return r.t }\n\nfunc F() bool { return R.Kind() != nil }\n",
+		"value-typed binding stays untainted":  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{\"k\": 1}}\n\nfunc (r *reg) Pick() int {\n\tx := r.n\n\tif x > 0 {\n\t\treturn x\n\t}\n\tv, ok := r.m[\"k\"]\n\tif ok {\n\t\treturn v\n\t}\n\treturn 0\n}\n\nfunc F() int { return R.Pick() }\n",
+		"pairing discriminates positions":      "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc localMap() map[string]int { return map[string]int{} }\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm2, m := localMap(), r.inner()\n\tm2[\"k\"] = 1\n\treturn len(m) + len(m2)\n}\n\nfunc F() int { return R.Sum() }\n",
+		"governed sibling binding discharges": "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm := r.inner()\n\treturn len(m)\n}\n\nfunc F() int { return R.Sum() }\n",
+		"registry lookup shape discharges": "package view\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype entry struct {\n\tattr struct{}\n\ttyp  reflect.Type\n}\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tm  map[string]entry\n}\n\nvar R = &reg{m: map[string]entry{}}\n\nfunc (r *reg) Lookup(name string) (struct{}, reflect.Type, bool) {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\te, ok := r.m[name]\n\treturn e.attr, e.typ, ok\n}\n\nfunc F() bool {\n\t_, _, ok := R.Lookup(\"k\")\n\treturn ok\n}\n",
 		"generic receiver read discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
 		"init-only helper registration":  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 		"helper chain registration":      "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
@@ -3126,10 +3132,50 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		},
 		"slice-receiver range binding marks": {
 			source:  "package view\n\ntype entry struct {\n\tfn func()\n\tn  *int\n}\n\ntype reg []entry\n\nvar R = reg{{fn: func() {}, n: new(int)}}\n\nfunc (r reg) First() *int {\n\tfor _, e := range r {\n\t\treturn e.n\n\t}\n\treturn nil\n}\n\nfunc F() {\n\tp := R.First()\n\t*p = 1\n}\n",
+			culprit: "example.com/view.R escapes writable",
+		},
+		"direct field-store RHS keeps the mark": {
+			source:  "package view\n\ntype box struct{ f map[string]int }\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) Outer() int {\n\tvar s box\n\ts.f = r.m\n\ts.f[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Outer() }\n",
 			culprit: "example.com/view.R is mutated",
 		},
-		"generic type-param read keeps the mark": {
-			source:  "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tv  A\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Value() A { return r.v }\n\nfunc F() string { return R.Value() }\n",
+		"shadowed len keeps the mark": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc len(m map[string]int) int { return 0 }\n\nfunc (r *reg) Size() int { return len(r.m) }\n\nfunc F() int { return R.Size() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"mixed parallel assign keeps the mark": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Outer() int {\n\tm, x := r.inner(), 5\n\tm[\"k\"] = x\n\treturn 0\n}\n\nfunc F() int { return R.Outer() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"clean-plus-leaky parallel assign keeps the mark": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n\tn  int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) count() int { return r.n }\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Outer() int {\n\tn, m := r.count(), r.inner()\n\tm[\"k\"] = n\n\treturn 0\n}\n\nfunc F() int { return R.Outer() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"field-store binding keeps the mark": {
+			source:  "package view\n\ntype box struct{ f map[string]int }\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Outer() int {\n\tvar s box\n\ts.f = r.inner()\n\ts.f[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Outer() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"leaky sibling call in arg position marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc probe(m map[string]int) int { return len(m) }\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Outer() int { return probe(r.inner()) }\n\nfunc F() int { return R.Outer() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"sibling leaky return launders nothing": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Outer() int {\n\tm := r.inner()\n\tm[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Outer() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"loop-carried taint marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) Set() int {\n\tvar v map[string]int\n\tfor i := 0; i < 2; i++ {\n\t\tif v != nil {\n\t\t\tv[\"k\"] = 1\n\t\t}\n\t\tv = r.m\n\t}\n\treturn 0\n}\n\nfunc F() int { return R.Set() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"assign-form range binding taints": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\ts  []map[string]int\n}\n\nvar R = &reg{s: []map[string]int{{}}}\n\nfunc (r *reg) Set() int {\n\tvar v map[string]int\n\tfor _, v = range r.s {\n\t\t_ = v\n\t}\n\tv[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Set() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"tainted local write marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) Set() int {\n\te := r.m\n\te[\"k\"] = 1\n\treturn 0\n}\n\nfunc F() int { return R.Set() }\n",
+			culprit: "example.com/view.R is mutated",
+		},
+		"tainted arg escape marks": {
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc probe(m map[string]int) int { return len(m) }\n\nfunc (r *reg) Peek() int {\n\tv := r.m\n\treturn probe(v)\n}\n\nfunc F() int { return R.Peek() }\n",
 			culprit: "example.com/view.R is mutated",
 		},
 		"local-alias write through method marks": {

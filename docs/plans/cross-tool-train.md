@@ -88,7 +88,10 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       --profile captures per-arm cpu (and mem, where B/op is claimed)
       evidence stored under the recording's provenance conjunction;
       status gains the attribution verdict, stat the profile-diff view;
-      the consumer hand protocol stays as the derivation loop.
+      the consumer hand protocol stays as the derivation loop. A
+      further pew issue folds in here (user-flagged, content briefed at
+      chunk open); the chunk opens with a design discussion covering it
+      and any surface redesign it implies, before implementation.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and

@@ -421,7 +421,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					if bodyReason == "" && pkgPath != "" {
 						bodyReason = effect.reason
 					}
-				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 				}
 			}
@@ -780,6 +780,29 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 		"path", "regexp", "regexp/syntax",
 		"slices", "sort", "strconv", "strings", "text/scanner",
 		"unicode", "unicode/utf16", "unicode/utf8":
+		return true
+	default:
+		return false
+	}
+}
+
+// auditedRuntimeTypeSymbol reports whether a reflect-package symbol is
+// in the audited runtime-type set: reflect.Type values are
+// runtime-canonical and immutable, and reflect.TypeOf is
+// bit-deterministic pure computation over its operand's static type.
+// At the SSA tiers the bare-name match also admits methods named Type
+// - notably the deterministic-pure (reflect.Value).Type. Chained
+// selectors off admitted results are separate callees with their own
+// classifications at the declaration-RTA tier; this per-file scan
+// never sees them either way. reflect dispatch still defeats static
+// reachability everywhere else. Grows only by source audit
+// (REQ-closure-shared-dynamic-state).
+func auditedRuntimeTypeSymbol(pkgPath, name string) bool {
+	if pkgPath != "reflect" {
+		return false
+	}
+	switch name {
+	case "Type", "TypeOf":
 		return true
 	default:
 		return false

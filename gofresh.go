@@ -67,7 +67,7 @@ type Subject struct {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@4"
+const DynamicStateStrategy = "gofresh/dynamic-state@5"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or
@@ -125,8 +125,13 @@ const DynamicStateStrategy = "gofresh/dynamic-state@4"
 // longer classify as unaudited standard operations, and lock state is
 // receiver-neutral in the shared-dynamic-state judgment - lock state
 // cannot change dispatch, and every other sync surface keeps its
-// classification.
-const ObservationRTA = "gofresh/observation-rta@14"
+// classification; @15 admits the audited runtime-type set - reflect.Type
+// and reflect.TypeOf (and, at the SSA tiers, any reflect symbol the
+// bare-name match reaches, notably the deterministic-pure
+// (reflect.Value).Type) no longer classify as unaudited standard
+// operations, while chained reflect results keep their own
+// classifications.
+const ObservationRTA = "gofresh/observation-rta@15"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

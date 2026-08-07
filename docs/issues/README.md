@@ -61,3 +61,7 @@ when its work lands (git holds history).
   selection, so subjects they refuse serve a bare "external dependence" with no package
   or symbol named. *Lands: when the reason selection next changes, or with the first
   field diagnosis blocked on an unnamed verdict.*
+- **[func-value-self-capture](func-value-self-capture.md)** — receiver-stored func values
+  whose closures capture the receiver read as reach-free, laundering receiver writes
+  through proven-read-only bindings; pre-existing Signature-classification hole. *Lands:
+  the next gofresh plan.*

@@ -170,7 +170,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		pkgPath := aliases[ident.Name]
 		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
 			scan.add(effect)
-		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true

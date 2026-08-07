@@ -635,7 +635,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// (REQ-closure-shared-dynamic-state).
 				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 					if fn, ok := selection.Obj().(*types.Func); ok {
-						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) {
+						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
 							if ident, ok := n.X.(*ast.Ident); ok {
 								if obj, ok := resolve(ident); ok {
 									if variable, ok := dynamicPackageVar(obj); ok {
@@ -960,9 +960,19 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 			disqualified[key] = true
 			continue
 		}
+		// tainted tracks locals bound from receiver-reachable values:
+		// writes through them are receiver writes, escapes of them are
+		// receiver escapes, and only return position hands them out -
+		// where the call site judges the instantiated result types
+		// (REQ-closure-shared-dynamic-state).
+		tainted := map[types.Object]bool{}
 		isRecv := func(expr ast.Expr) bool {
 			ident, ok := expr.(*ast.Ident)
-			return ok && p.TypesInfo.Uses[ident] == recvObj
+			if !ok {
+				return false
+			}
+			obj := p.TypesInfo.Uses[ident]
+			return obj == recvObj || (obj != nil && tainted[obj])
 		}
 		// recvRooted reports whether the expression is the receiver or
 		// a field-selector chain rooted at it.
@@ -983,7 +993,100 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				return false
 			}
 		}
+		// Pass 1 - taint collection to a fixpoint, flow-insensitive:
+		// a loop-carried binding taints regardless of source order, an
+		// assign-form range binding resolves through Uses, and a
+		// sibling-chain call whose instantiated results hand out
+		// mutable reach taints what binds it
+		// (REQ-closure-shared-dynamic-state).
+		siblingLeaky := func(sel *ast.SelectorExpr) (bool, bool) {
+			selection, ok := p.TypesInfo.Selections[sel]
+			if !ok || selection.Kind() != types.MethodVal {
+				return false, false
+			}
+			fn, ok := selection.Obj().(*types.Func)
+			if !ok || fn.Pkg() != p.Types {
+				return false, false
+			}
+			if _, sibling := methods[recvTypeNameOf(p, sel)+"."+fn.Name()]; !sibling {
+				return false, false
+			}
+			return true, !instantiatedResultsHandOutNothing(selection.Type())
+		}
+		// rhsHandsReceiverValue reports whether the expression hands a
+		// receiver-reachable value to its binding: a receiver-rooted
+		// chain, or a leaky sibling call.
+		rhsHandsReceiverValue := func(rhs ast.Expr) bool {
+			if recvRooted(rhs) {
+				return true
+			}
+			if call, ok := rhs.(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
+					if _, leaky := siblingLeaky(sel); leaky {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		bindObj := func(ident *ast.Ident) types.Object {
+			if obj := p.TypesInfo.Defs[ident]; obj != nil {
+				return obj
+			}
+			return p.TypesInfo.Uses[ident]
+		}
+		for changed := true; changed; {
+			changed = false
+			taint := func(ident *ast.Ident) {
+				// A binding whose type hands out no mutable reach can
+				// never write receiver state - it stays untainted, so
+				// value reads flow freely (REQ-closure-shared-dynamic-state).
+				obj := bindObj(ident)
+				if obj == nil || obj == recvObj || tainted[obj] {
+					return
+				}
+				if !typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
+					return
+				}
+				tainted[obj] = true
+				changed = true
+			}
+			ast.Inspect(m.decl.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					// Per-position pairing: each receiver-reachable RHS
+					// taints exactly its own binding; a multi-value
+					// leaky sibling call taints every binding.
+					if len(n.Lhs) == len(n.Rhs) {
+						for i, rhs := range n.Rhs {
+							if !rhsHandsReceiverValue(rhs) {
+								continue
+							}
+							if ident, ok := n.Lhs[i].(*ast.Ident); ok {
+								taint(ident)
+							}
+						}
+					} else if len(n.Rhs) == 1 && rhsHandsReceiverValue(n.Rhs[0]) {
+						for _, lhs := range n.Lhs {
+							if ident, ok := lhs.(*ast.Ident); ok {
+								taint(ident)
+							}
+						}
+					}
+				case *ast.RangeStmt:
+					if recvRooted(n.X) {
+						for _, bind := range []ast.Expr{n.Key, n.Value} {
+							if ident, ok := bind.(*ast.Ident); ok {
+								taint(ident)
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
 		allowed := map[ast.Node]bool{}
+		governedCalls := map[*ast.CallExpr]bool{}
 		var rootIdent func(expr ast.Expr) *ast.Ident
 		rootIdent = func(expr ast.Expr) *ast.Ident {
 			switch expr := expr.(type) {
@@ -1009,11 +1112,77 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.AssignStmt:
+				// Taint was collected to a fixpoint in pass 1; here the
+				// tainting shapes only consume - the value stays
+				// tracked, so writes through it and escapes of it are
+				// still the receiver's (REQ-closure-shared-dynamic-state).
+				// A sibling call is governed only when its binding is
+				// an ident that pass 1 actually tainted (blank
+				// included - the value is discarded); any other LHS
+				// shape leaves the call ungoverned and the sibling
+				// arm's escape refusal fires.
+				governRHS := func(i int, rhs ast.Expr) {
+					call, ok := rhs.(*ast.CallExpr)
+					if !ok {
+						return
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok || !recvRooted(sel.X) {
+						return
+					}
+					if sibling, _ := siblingLeaky(sel); !sibling {
+						return
+					}
+					if i >= 0 {
+						if _, ok := n.Lhs[i].(*ast.Ident); !ok {
+							return
+						}
+					} else {
+						for _, lhs := range n.Lhs {
+							if _, ok := lhs.(*ast.Ident); !ok {
+								return
+							}
+						}
+					}
+					governedCalls[call] = true
+				}
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, rhs := range n.Rhs {
+						governRHS(i, rhs)
+						if recvRooted(rhs) {
+							if _, ok := n.Lhs[i].(*ast.Ident); ok {
+								consume(rhs)
+							}
+						}
+					}
+				} else if len(n.Rhs) == 1 {
+					governRHS(-1, n.Rhs[0])
+					if recvRooted(n.Rhs[0]) {
+						allIdent := true
+						for _, lhs := range n.Lhs {
+							if _, ok := lhs.(*ast.Ident); !ok {
+								allIdent = false
+							}
+						}
+						if allIdent {
+							consume(n.Rhs[0])
+						}
+					}
+				}
 				for _, lhs := range n.Lhs {
+					if ident, ok := lhs.(*ast.Ident); ok {
+						// Rebinding a local is not a receiver write.
+						if p.TypesInfo.Uses[ident] == recvObj || p.TypesInfo.Defs[ident] == recvObj {
+							disqualified[key] = true
+						}
+						consume(ident)
+						continue
+					}
 					if recvRooted(lhs) {
 						disqualified[key] = true
 					}
 				}
+
 			case *ast.IncDecStmt:
 				if recvRooted(n.X) {
 					disqualified[key] = true
@@ -1027,23 +1196,62 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					disqualified[key] = true
 				}
 			case *ast.RangeStmt:
-				// Ranging the receiver or a field chain reads only when
-				// the bindings hand out no mutable reach; a channel
-				// receiver receives, and either refusal disqualifies.
+				// Ranging the receiver or a field chain taints the
+				// bindings - tracked like any receiver-bound local; a
+				// channel receiver receives and disqualifies.
 				if recvRooted(n.X) {
 					t := p.TypesInfo.TypeOf(n.X)
-					if t == nil || rangeBindsAlias(t) {
+					if t == nil {
 						disqualified[key] = true
 					} else if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
 						disqualified[key] = true
 					} else {
+						for _, bind := range []ast.Expr{n.Key, n.Value} {
+							if ident, ok := bind.(*ast.Ident); ok && ident != nil {
+								if obj := p.TypesInfo.Defs[ident]; obj != nil {
+									tainted[obj] = true
+								}
+								consume(ident)
+							}
+						}
 						consume(n.X)
 					}
 				}
+			case *ast.ReturnStmt:
+				// A chain-shaped result hands its value to the caller,
+				// whose deferral judges the instantiated result types;
+				// a sibling call in return position is governed the
+				// same way; any other result shape keeps the normal
+				// escape rules for its inner uses (a call in return
+				// position still escapes its arguments).
+				for _, result := range n.Results {
+					if recvRooted(result) {
+						consume(result)
+					}
+					if call, ok := result.(*ast.CallExpr); ok {
+						if sel, ok := call.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
+							if sibling, _ := siblingLeaky(sel); sibling {
+								governedCalls[call] = true
+							}
+						}
+					}
+				}
 			case *ast.CallExpr:
-				// A sibling-method call on the receiver chain defers to
-				// that method's own proof; the receiver in call-ARG
-				// position is an escape, handled by the ident visit.
+				// len and cap of receiver-reachable values are writeless
+				// reads; a sibling-method call on the receiver chain
+				// defers to that method's own proof; the receiver in any
+				// other call-ARG position is an escape, handled by the
+				// ident visit.
+				if ident, ok := n.Fun.(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "len" || ident.Name == "cap") {
+						for _, arg := range n.Args {
+							if recvRooted(arg) {
+								consume(arg)
+							}
+						}
+						break
+					}
+				}
 				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
 					if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
 						if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(fn) {
@@ -1063,6 +1271,14 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 								}
 								chains[key][target] = true
 								consume(sel.X)
+								// A sibling call whose instantiated
+								// results hand out mutable reach is a
+								// call site under the spec's proviso:
+								// outside a tainting assignment or a
+								// return, the value escapes ungoverned.
+								if _, leaky := siblingLeaky(sel); leaky && !governedCalls[n] {
+									disqualified[key] = true
+								}
 								break
 							}
 						}
@@ -1070,9 +1286,10 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					disqualified[key] = true
 				}
 			case *ast.IndexExpr:
-				if recvRooted(n.X) {
-					// An indexed-out value escaping is judged by mutable
-					// reach: any aliased part writable through it refuses.
+				if recvRooted(n.X) && !allowed[rootIdent(n.X)] {
+					// Outside a tainting assignment or a return, an
+					// indexed-out value escapes: it is judged by mutable
+					// reach exactly as before the taint paths existed.
 					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 						disqualified[key] = true
 					} else {
@@ -1083,7 +1300,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				// A field read off the receiver is allowed only when
 				// the produced value is not alias-handing; a method
 				// VALUE bind is an escape.
-				if isRecv(n.X) {
+				if isRecv(n.X) && !allowed[rootIdent(n.X)] {
 					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 						break // judged at the enclosing CallExpr or disqualified below
 					}
@@ -1136,6 +1353,43 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 		}
 	}
 	return readOnly
+}
+
+// instantiatedResultsHandOutNothing reports whether every result of
+// the call site's instantiated signature hands out no mutable reach or
+// is an audited-immutable type - the caller-side half of the
+// receiver-effect discharge: the declaring proof allows returns, the
+// call site judges what actually comes back
+// (REQ-closure-shared-dynamic-state).
+func instantiatedResultsHandOutNothing(t types.Type) bool {
+	sig, ok := types.Unalias(t).(*types.Signature)
+	if !ok {
+		return false
+	}
+	results := sig.Results()
+	for i := 0; results != nil && i < results.Len(); i++ {
+		rt := results.At(i).Type()
+		if auditedImmutableType(rt) {
+			continue
+		}
+		if typeHandsOutMutableReach(rt, make(map[types.Type]bool)) {
+			return false
+		}
+	}
+	return true
+}
+
+// auditedImmutableType is the audited set of types whose values are
+// immutable by construction even though their kind hands out reach:
+// reflect.Type is runtime-canonical and never written after
+// construction. Grows only by source audit
+// (REQ-closure-shared-dynamic-state).
+func auditedImmutableType(t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	return named.Obj().Pkg().Path() == "reflect" && named.Obj().Name() == "Type"
 }
 
 // interfaceReceiver reports whether the method's receiver is an

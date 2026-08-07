@@ -240,10 +240,17 @@ type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. A direct method CALL on a statically-typed non-interface
 carrier is judged by the method's own receiver-effect proof instead: the
 declaring package proves a method unable to write receiver-reachable state —
-the receiver never stands in a write position, never escapes, reads off it
-hand out no mutable reach, and it chains only into sibling methods already
-proven or into the audited synchronization set — and a call to a proven method
-marks nothing, generic receivers included; a call to any unproven,
+the receiver never stands in a write position and never escapes, values read
+off it are tracked as the receiver's own — a binding whose type hands out
+mutable reach taints its local (a value copy that cannot write back flows
+freely), a write
+through or an escape of a tainted value refuses, and only return position
+hands one out — and it chains only into sibling methods already proven or into
+the audited synchronization set — and a call to a proven method marks nothing,
+generic receivers included, provided the call site's instantiated result types
+each hand out no mutable reach or are audited-immutable (reflect.Type,
+runtime-canonical and never written after construction; reflect.TypeOf, its
+pure constructor, admitted with it at the effect classification tiers); a call to any unproven,
 unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
 the fail-closed mark. The audited synchronization set — sync.Mutex and
 sync.RWMutex with their lock operations, receiver-neutral and never
