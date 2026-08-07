@@ -6,7 +6,7 @@ loop there; gofresh chunks release before consumer chunks bump. WIP = 1.
 Ordering for the gomutant tail follows the `Lands:` lines in that repo's
 issue docs; the two lead chunks are the field-blocking overlay defect and
 its root-cause class. Remaining chunks execute bottoms-up by layer:
-gofresh first (21, 22, 23, 20, 17), one gofresh release, then
+gofresh first (21, 22, 23, 24, 20, 17), one gofresh release, then
 stipulator (18, 19) and its bump, then the re-measure (16), then pew
 (15), then plan close-out.
 
@@ -135,4 +135,13 @@ stipulator (18, 19) and its bump, then the re-measure (16), then pew
       pointer-receiver method call on a package-level carrier marks
       mutation only when the method (or anything it hands the receiver
       to) demonstrably writes; unknown methods stay fail-closed
-      address captures.
+      address captures. Includes generic receivers and the audited
+      synchronization set (sync.Mutex/RWMutex lock operations are
+      receiver-neutral by source audit - lock state cannot change
+      dispatch) per the user's build-all-rungs decision.
+- [ ] 24. gofresh: returned-alias disposition (gofresh
+      docs/issues/returned-alias-disposition.md) - a value returned
+      off receiver-reachable state is an alias handout; the discharge
+      needs object-closure-style treatment of returned interface and
+      alias values (the field registry returns reflect.Type), else the
+      read stays fail-closed.
