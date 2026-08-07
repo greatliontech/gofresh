@@ -481,7 +481,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil)
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -494,7 +494,21 @@ func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) 
 // length/capacity, comparison — mark neither, and initOnly names the
 // init-only-reachable helpers whose bodies are init flow
 // (REQ-closure-shared-dynamic-state).
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses map[string]map[string]bool) {
+// attributedUse carries a mutation or escape recorded inside a plain
+// named function instead of marking immediately: composition
+// discharges it when the whole graph proves the function reachable
+// only from init flow, and promotes it otherwise
+// (REQ-closure-shared-dynamic-state's cross-package init-only class).
+type attributedUse struct {
+	fn, key string
+	escape  bool
+	// method carries a deferred method-use's fact key: composition
+	// skips it entirely when fn proves init-only, resolves it against
+	// the receiver-effect read-only union otherwise.
+	method string
+}
+
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -535,6 +549,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			return true
 		})
 	}
+	var skipInteriors map[ast.Node]bool
 	walkBody := func(body ast.Node) {
 		// readContext collects ident occurrences whose enclosing shape is
 		// a provably-writeless read: indexing, iteration source,
@@ -555,6 +570,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			}
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
+			if skipInteriors[n] {
+				return false
+			}
 			switch n := n.(type) {
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
@@ -678,6 +696,55 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
+				if decl.Recv == nil && decl.Name != nil && attributed != nil && !initOnly[decl.Name.Name] && decl.Name.Name != "init" && decl.Body != nil {
+					// A plain named function's carrier uses attribute to
+					// it: the cross-package fixed point decides at
+					// composition whether they are init flow. Literals
+					// and go statements inside stay program code.
+					fnKey := ""
+					if p.Types != nil {
+						fnKey = p.Types.Path() + "\x00" + decl.Name.Name
+					}
+					// Literals and go statements nested in the body are
+					// program code: they walk into the immediate maps
+					// first, and the attributed walk skips them.
+					interiors := map[ast.Node]bool{}
+					ast.Inspect(decl.Body, func(n ast.Node) bool {
+						switch n := n.(type) {
+						case *ast.FuncLit:
+							if n.Body != nil {
+								walkBody(n.Body)
+								interiors[n] = true
+							}
+							return false
+						case *ast.GoStmt:
+							walkBody(n)
+							interiors[n] = true
+							return false
+						}
+						return true
+					})
+					localMutated, localEscaped := map[string]bool{}, map[string]bool{}
+					localMethods := map[string]map[string]bool{}
+					saveM, saveE, saveMU := mutated, escaped, methodUses
+					mutated, escaped, methodUses = localMutated, localEscaped, localMethods
+					skipInteriors = interiors
+					walkBody(decl.Body)
+					skipInteriors = nil
+					mutated, escaped, methodUses = saveM, saveE, saveMU
+					for key := range localMutated {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key})
+					}
+					for key := range localEscaped {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, escape: true})
+					}
+					for key, methods := range localMethods {
+						for method := range methods {
+							*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, method: method})
+						}
+					}
+					continue
+				}
 				if decl.Recv == nil && decl.Name != nil && initOnly[decl.Name.Name] {
 					// An init-only-reachable helper's body is init flow:
 					// its mutations are startup-deterministic. Literals
@@ -1486,6 +1553,125 @@ func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
 		return ""
 	}
 	return named.Obj().Name()
+}
+
+// recordFunctionReferenceRegions records, for every plain named
+// function this package references - its own and foreign, exported
+// included - the strongest region class of those references:
+// "prog" when any reference is program code, a value reference, or a
+// go-statement callee; otherwise the reference edges from init flow
+// ("init") and from other plain named functions (the caller's own
+// function key), which composition resolves to a graph-wide init-only
+// fixed point (REQ-closure-shared-dynamic-state's cross-package
+// init-only class). Keys are pkgPath NUL name; edges are joined
+// caller NUL callee at composition via the fact schema.
+func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[string]map[string]bool) {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return
+	}
+	funcKeyOf := func(obj types.Object) (string, bool) {
+		fn, ok := obj.(*types.Func)
+		if !ok || fn.Pkg() == nil {
+			return "", false
+		}
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig.Recv() != nil {
+			return "", false
+		}
+		return fn.Pkg().Path() + "\x00" + fn.Name(), true
+	}
+	add := func(callee, region string) {
+		if refs[callee] == nil {
+			refs[callee] = map[string]bool{}
+		}
+		refs[callee][region] = true
+	}
+	var scan func(region string, root ast.Node)
+	scan = func(region string, root ast.Node) {
+		calls := map[*ast.Ident]bool{}
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				if n != root && n.Body != nil {
+					scan("prog", n.Body)
+					return false
+				}
+			case *ast.GoStmt:
+				scan("prog", n.Call)
+				return false
+			case *ast.CallExpr:
+				// An explicit generic instantiation wraps the callee in
+				// an index expression - still a direct call.
+				fun := n.Fun
+				for {
+					switch f := fun.(type) {
+					case *ast.ParenExpr:
+						fun = f.X
+						continue
+					case *ast.IndexExpr:
+						fun = f.X
+						continue
+					case *ast.IndexListExpr:
+						fun = f.X
+						continue
+					}
+					break
+				}
+				if ident, ok := fun.(*ast.Ident); ok {
+					if key, ok := funcKeyOf(p.TypesInfo.Uses[ident]); ok {
+						calls[ident] = true
+						add(key, region)
+					}
+				}
+				if sel, ok := fun.(*ast.SelectorExpr); ok {
+					if key, ok := funcKeyOf(p.TypesInfo.Uses[sel.Sel]); ok {
+						calls[sel.Sel] = true
+						add(key, region)
+					}
+				}
+			case *ast.Ident:
+				if calls[n] {
+					return true
+				}
+				if key, ok := funcKeyOf(p.TypesInfo.Uses[n]); ok {
+					// A non-call reference hands the function out as a
+					// value - poisoned everywhere.
+					add(key, "prog")
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				switch {
+				case decl.Recv != nil:
+					if decl.Body != nil {
+						scan("prog", decl.Body)
+					}
+				case decl.Name != nil && decl.Name.Name == "init":
+					if decl.Body != nil {
+						scan("init", decl.Body)
+					}
+				case decl.Name != nil && initOnly[decl.Name.Name]:
+					if decl.Body != nil {
+						scan("init", decl.Body)
+					}
+				case decl.Name != nil:
+					if decl.Body != nil && p.Types != nil {
+						scan(p.Types.Path()+"\x00"+decl.Name.Name, decl.Body)
+					}
+				}
+			default:
+				// Initializer expressions are init flow; the scan's
+				// literal arm classifies nested function bodies as
+				// program code itself.
+				scan("init", decl)
+			}
+		}
+	}
 }
 
 // recordOpaqueDynamicVars judges, in the declaring package alone, which

@@ -51,6 +51,16 @@ type dynamicStateFact struct {
 	// only when the method key is proven read-only by its declaring
 	// fact; otherwise the variable marks mutated - fail-closed.
 	MethodUses []string `json:"methodUses,omitempty"`
+	// AttributedUses holds carrier uses recorded inside plain named
+	// functions - function key, variable key, and use class joined by
+	// NUL - discharged at composition when the graph proves the
+	// function init-only, promoted to their immediate class otherwise.
+	AttributedUses []string `json:"attributedUses,omitempty"`
+	// FuncRefs holds reference-region edges for plain named functions -
+	// callee key and region joined by NUL, the region "init", "prog",
+	// or a caller's function key - composed to the graph-wide init-only
+	// fixed point.
+	FuncRefs []string `json:"funcRefs,omitempty"`
 	// OpacityBreaks holds interface variable keys - own or foreign -
 	// whose object-closure this package's init flow breaks: a
 	// non-audited, indirect, or address-capturing init store. Unioned at
@@ -73,8 +83,30 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	initOnly := initOnlyReachableHelpers(p)
 	methodUses := map[string]map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses)
+	var attributedUses []attributedUse
+	funcRefs := map[string]map[string]bool{}
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, &attributedUses)
+	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks, initOnly)
+	for _, use := range attributedUses {
+		class := "m"
+		if use.escape {
+			class = "e"
+		}
+		if use.method != "" {
+			class = "d\x00" + use.method
+		}
+		fact.AttributedUses = append(fact.AttributedUses, use.fn+"\x00"+use.key+"\x00"+class)
+	}
+	sort.Strings(fact.AttributedUses)
+	for callee, regions := range funcRefs {
+		for region := range regions {
+			// The callee key and a caller-key region each carry their
+			// own NUL, so the edge frames with a distinct separator.
+			fact.FuncRefs = append(fact.FuncRefs, callee+"\x01"+region)
+		}
+	}
+	sort.Strings(fact.FuncRefs)
 	for method := range receiverReadOnlyMethods(p) {
 		if p.Types != nil {
 			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
@@ -420,6 +452,92 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				}
 				if !readOnly[methodKey] {
 					mutated[varKey] = true
+				}
+			}
+		}
+	}
+	// The cross-package init-only fixed point: a plain named function is
+	// init flow when every reference to it, in every fact, is init flow
+	// or comes from a function itself proven init flow; "prog" poisons,
+	// absence of references fails closed. Attributed uses of proven
+	// functions discharge; the rest promote to their immediate class.
+	refRegions := map[string]map[string]bool{}
+	attributedFns := map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, edge := range fact.FuncRefs {
+				callee, region, ok := strings.Cut(edge, "\x01")
+				if !ok {
+					continue
+				}
+				if refRegions[callee] == nil {
+					refRegions[callee] = map[string]bool{}
+				}
+				refRegions[callee][region] = true
+			}
+			for _, use := range fact.AttributedUses {
+				if i := strings.LastIndexByte(use, 0); i >= 0 {
+					if j := strings.LastIndexByte(use[:i], 0); j >= 0 {
+						attributedFns[use[:j]] = true
+					}
+				}
+			}
+		}
+	}
+	initOnlyFn := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for fn, regions := range refRegions {
+			if initOnlyFn[fn] {
+				continue
+			}
+			// "prog" resolves like any region key: no function carries
+			// that name, so a program-code reference is permanently
+			// unresolvable and the class refuses - no special arm.
+			ok := true
+			for region := range regions {
+				if region == "init" {
+					continue
+				}
+				if !initOnlyFn[region] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				initOnlyFn[fn] = true
+				changed = true
+			}
+		}
+	}
+	_ = attributedFns
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, use := range fact.AttributedUses {
+				parts := strings.Split(use, "\x00")
+				if len(parts) < 4 {
+					// A malformed attribution cannot be judged - the
+					// fact carrying it is not trusted, fail-closed
+					// exactly as the malformed method-use arm.
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				fn := parts[0] + "\x00" + parts[1]
+				key, class := parts[2], parts[3]
+				if refRegions[fn] != nil && initOnlyFn[fn] {
+					continue
+				}
+				switch {
+				case class == "e":
+					escaped[key] = true
+				case class == "d" && len(parts) >= 6:
+					if !readOnly[parts[4]+"\x00"+parts[5]] {
+						mutated[key] = true
+					}
+				default:
+					mutated[key] = true
 				}
 			}
 		}

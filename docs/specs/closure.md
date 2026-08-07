@@ -267,15 +267,23 @@ an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere. The
 audited-construction set grows only by source audit.
 `init` flow is the initializer expressions, the `init` bodies, and the
-init-only-reachable helpers: unexported plain functions whose every in-package
-reference is a direct call from an initializer expression, an `init` body, or
-another such helper — transitively, with any value reference, any receiver, any
-export, or any reference from ordinary program code — a nested function
-literal wherever it appears, and a go statement launched from init flow in its
-entirety, callee and arguments alike, since the goroutine outlives
-initialization (a deferred init call stays init flow) — refusing the class
-fail-closed, and a qualified helper's stores audited for object-closure exactly
-as an `init` body's are. Function bodies nested in package-level declarations,
+init-only-reachable functions: plain named functions — exported included —
+whose every reference, in every package of the analyzed graph, is a direct
+call from an initializer expression, an `init` body, or another such function,
+resolved to a graph-wide least fixed point at composition from per-package
+reference-region facts (mutually recursive candidates refuse — deliberate
+conservatism, and a function no fact references refuses by absence); any value
+reference, any receiver, or any reference from ordinary program code — a
+nested function literal wherever it appears, and a go statement launched from
+init flow in its entirety, callee and arguments alike, since the goroutine
+outlives initialization (a deferred init call stays init flow) — refuses the
+class fail-closed anywhere in the graph. Carrier mutations and method uses in
+such a function's direct body attribute to it and are judged by the resolved
+class; literals and go statements nested inside it remain program code. A
+persisted attribution a consumer cannot parse marks every variable its fact
+declares — fail-closed like every malformed-fact arm. A qualified in-package
+helper's stores stay audited for object-closure exactly as an `init` body's
+are. Function bodies nested in package-level declarations,
 in `init` bodies, or in qualified helpers are program code, not initialization;
 non-Go writes need no rule here — packages built with cgo or
 assembly sources are already downgraded whole by the native-code and linkage

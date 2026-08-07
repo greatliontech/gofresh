@@ -3077,6 +3077,138 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 	}
 }
 
+// An exported registration constructor called only from package-level
+// initializers - its own package's and a sibling's - proves init-only
+// across the graph, and the registry mutation inside it is startup
+// flow; one program-code caller anywhere poisons the proof
+// (REQ-closure-shared-dynamic-state's cross-package init-only class).
+func TestCrossPackageInitOnlyRegistration(t *testing.T) {
+	files := map[string]string{
+		"go.mod":       "module example.com/xreg\n\ngo 1.26\n",
+		"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc NewKey(name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nvar _ = NewKey(\"own\")\n\nfunc Count() int { return len(Hooks) }\n",
+		"user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.NewKey(\"sibling\")\n\nfunc F() int { return reg.Count() }\n",
+	}
+	t.Run("initializer-only callers discharge", func(t *testing.T) {
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - initializer-only registration downgraded", verdict)
+		}
+	})
+	t.Run("explicit generic instantiation discharges", func(t *testing.T) {
+		generic := map[string]string{
+			"go.mod":       files["go.mod"],
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc NewKey[T any](name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nvar _ = NewKey[int](\"own\")\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.NewKey[string](\"sibling\")\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, generic)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - explicit instantiation read as a value reference", verdict)
+		}
+	})
+	t.Run("nested literal in attributed function stays program code", func(t *testing.T) {
+		lit := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nvar Run func()\n\nfunc Setup(name string) string {\n\tRun = func() { Hooks[name] = func() {} }\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Setup(\"sibling\")\n\nfunc Late() { reg.Run() }\n\nfunc F() int { return reg.Count() }\n"}
+		dir := writeModuleTree(t, lit)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a runtime-callable literal discharged with its function", verdict)
+		}
+	})
+	t.Run("go statement in attributed function stays program code", func(t *testing.T) {
+		gost := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc Setup(name string) string {\n\tgo func() { Hooks[name] = func() {} }()\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Setup(\"sibling\")\n\nfunc F() int { return reg.Count() }\n"}
+		dir := writeModuleTree(t, gost)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a goroutine discharged with its function", verdict)
+		}
+	})
+	t.Run("transitive chain discharges", func(t *testing.T) {
+		chain := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc Outer(name string) string { return inner(name) }\n\nfunc inner(name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Outer(\"sibling\")\n\nfunc F() int { return reg.Count() }\n"}
+		dir := writeModuleTree(t, chain)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the chain did not resolve", verdict)
+		}
+	})
+	t.Run("unproven attributed caller poisons", func(t *testing.T) {
+		unproven := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc Outer(name string) string { return inner(name) }\n\nfunc inner(name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Outer(\"sibling\")\n\nfunc Caller() string { return reg.Outer(\"late\") }\n\nfunc F() int { return reg.Count() }\n"}
+		dir := writeModuleTree(t, unproven)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - an unproven caller resolved", verdict)
+		}
+	})
+	t.Run("program-code caller poisons", func(t *testing.T) {
+		poisoned := map[string]string{}
+		for k, v := range files {
+			poisoned[k] = v
+		}
+		poisoned["user/user.go"] = "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.NewKey(\"sibling\")\n\nfunc Late() string { return reg.NewKey(\"late\") }\n\nfunc F() int { return reg.Count() }\n"
+		dir := writeModuleTree(t, poisoned)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks", verdict)
+		}
+	})
+	t.Run("value reference poisons", func(t *testing.T) {
+		poisoned := map[string]string{}
+		for k, v := range files {
+			poisoned[k] = v
+		}
+		poisoned["user/user.go"] = "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.NewKey(\"sibling\")\n\nvar Ctor = reg.NewKey\n\nfunc F() int { return reg.Count() }\n"
+		dir := writeModuleTree(t, poisoned)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks", verdict)
+		}
+	})
+}
+
+func writeModuleTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func captureCheck(t *testing.T, dir string, subject Subject) Verdict {
+	t.Helper()
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verdict
+}
+
 // The three fail-closed mutation shapes the carrier rules must catch
 // (REQ-closure-shared-dynamic-state): a package-level function-literal
 // mutator, a pointer-receiver method VALUE bind, and read-aliasing of
@@ -3119,25 +3251,26 @@ func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
 // (REQ-closure-shared-dynamic-state).
 func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 	for name, source := range map[string]string{
-		"sentinel escape into errors.Is": "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() bool { return errors.Is(nil, ErrX) }\n",
-		"sentinel comparison":            "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\nvar ErrY = errors.New(\"y\")\n\nfunc F() bool { return ErrX == ErrY }\n",
-		"registry map read shapes":       "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
-		"non-opaque sentinel comparison": "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
-		"slice capacity read":            "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
-		"read-only method call discharges": "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
-		"rwmutex rlock read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.RWMutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.RLock()\n\tdefer r.mu.RUnlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
-		"aliased sync import discharges":  "package view\n\nimport s \"sync\"\n\ntype reg struct {\n\tmu s.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
-		"mutex-guarded read discharges":   "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
-		"read-only chain discharges":      "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.raw() }\n\nfunc (r *reg) raw() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
-		"generic instantiated result discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tv  A\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Value() A { return r.v }\n\nfunc F() string { return R.Value() }\n",
-		"reflect-type result discharges":  "package view\n\nimport \"reflect\"\n\ntype reg struct {\n\tfn func()\n\tt  reflect.Type\n}\n\nvar R = &reg{t: reflect.TypeOf(0)}\n\nfunc (r *reg) Kind() reflect.Type { return r.t }\n\nfunc F() bool { return R.Kind() != nil }\n",
-		"value-typed binding stays untainted":  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{\"k\": 1}}\n\nfunc (r *reg) Pick() int {\n\tx := r.n\n\tif x > 0 {\n\t\treturn x\n\t}\n\tv, ok := r.m[\"k\"]\n\tif ok {\n\t\treturn v\n\t}\n\treturn 0\n}\n\nfunc F() int { return R.Pick() }\n",
-		"pairing discriminates positions":      "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc localMap() map[string]int { return map[string]int{} }\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm2, m := localMap(), r.inner()\n\tm2[\"k\"] = 1\n\treturn len(m) + len(m2)\n}\n\nfunc F() int { return R.Sum() }\n",
-		"governed sibling binding discharges": "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm := r.inner()\n\treturn len(m)\n}\n\nfunc F() int { return R.Sum() }\n",
-		"registry lookup shape discharges": "package view\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype entry struct {\n\tattr struct{}\n\ttyp  reflect.Type\n}\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tm  map[string]entry\n}\n\nvar R = &reg{m: map[string]entry{}}\n\nfunc (r *reg) Lookup(name string) (struct{}, reflect.Type, bool) {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\te, ok := r.m[name]\n\treturn e.attr, e.typ, ok\n}\n\nfunc F() bool {\n\t_, _, ok := R.Lookup(\"k\")\n\treturn ok\n}\n",
-		"generic receiver read discharges": "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
-		"init-only helper registration":  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
-		"helper chain registration":      "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"sentinel escape into errors.Is":              "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() bool { return errors.Is(nil, ErrX) }\n",
+		"sentinel comparison":                         "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\nvar ErrY = errors.New(\"y\")\n\nfunc F() bool { return ErrX == ErrY }\n",
+		"registry map read shapes":                    "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
+		"non-opaque sentinel comparison":              "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
+		"exported initializer-only helper discharges": "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = Declare(\"k\")\n\nfunc Declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"slice capacity read":                         "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
+		"read-only method call discharges":            "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"rwmutex rlock read discharges":               "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.RWMutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.RLock()\n\tdefer r.mu.RUnlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+		"aliased sync import discharges":              "package view\n\nimport s \"sync\"\n\ntype reg struct {\n\tmu s.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+		"mutex-guarded read discharges":               "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+		"read-only chain discharges":                  "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.raw() }\n\nfunc (r *reg) raw() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"generic instantiated result discharges":      "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tv  A\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Value() A { return r.v }\n\nfunc F() string { return R.Value() }\n",
+		"reflect-type result discharges":              "package view\n\nimport \"reflect\"\n\ntype reg struct {\n\tfn func()\n\tt  reflect.Type\n}\n\nvar R = &reg{t: reflect.TypeOf(0)}\n\nfunc (r *reg) Kind() reflect.Type { return r.t }\n\nfunc F() bool { return R.Kind() != nil }\n",
+		"value-typed binding stays untainted":         "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{\"k\": 1}}\n\nfunc (r *reg) Pick() int {\n\tx := r.n\n\tif x > 0 {\n\t\treturn x\n\t}\n\tv, ok := r.m[\"k\"]\n\tif ok {\n\t\treturn v\n\t}\n\treturn 0\n}\n\nfunc F() int { return R.Pick() }\n",
+		"pairing discriminates positions":             "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc localMap() map[string]int { return map[string]int{} }\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm2, m := localMap(), r.inner()\n\tm2[\"k\"] = 1\n\treturn len(m) + len(m2)\n}\n\nfunc F() int { return R.Sum() }\n",
+		"governed sibling binding discharges":         "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc (r *reg) inner() map[string]int { return r.m }\n\nfunc (r *reg) Sum() int {\n\tm := r.inner()\n\treturn len(m)\n}\n\nfunc F() int { return R.Sum() }\n",
+		"registry lookup shape discharges":            "package view\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype entry struct {\n\tattr struct{}\n\ttyp  reflect.Type\n}\n\ntype reg struct {\n\tmu sync.Mutex\n\tfn func()\n\tm  map[string]entry\n}\n\nvar R = &reg{m: map[string]entry{}}\n\nfunc (r *reg) Lookup(name string) (struct{}, reflect.Type, bool) {\n\tr.mu.Lock()\n\tdefer r.mu.Unlock()\n\te, ok := r.m[name]\n\treturn e.attr, e.typ, ok\n}\n\nfunc F() bool {\n\t_, _, ok := R.Lookup(\"k\")\n\treturn ok\n}\n",
+		"generic receiver read discharges":            "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
+		"init-only helper registration":               "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"helper chain registration":                   "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeViewModule(t, source)
@@ -3328,10 +3461,6 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		},
 		"method helper never qualifies": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\ntype reg struct{}\n\nvar _ = reg{}.declare(\"k\")\n\nfunc (reg) declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
-			culprit: "example.com/view.Hooks is mutated",
-		},
-		"exported helper never qualifies": {
-			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = Declare(\"k\")\n\nfunc Declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 			culprit: "example.com/view.Hooks is mutated",
 		},
 		"helper nested literal mutates as program code": {

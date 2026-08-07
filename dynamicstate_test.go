@@ -190,11 +190,17 @@ func (Widget) External() int { return 2 }
 		t.Fatalf("fact did not round-trip:\n before %+v\n after  %+v", fact, restored)
 	}
 	wantKey := "example.com/factsrc.Hook"
-	if !contains(restored.Mutates, wantKey) || !contains(restored.Declares, wantKey) {
-		t.Fatalf("fact lost mutation content: %+v", restored)
+	if !contains(restored.Declares, wantKey) {
+		t.Fatalf("fact lost declaration content: %+v", restored)
 	}
-	if !contains(restored.Escapes, "example.com/factsrc.Hooks") {
-		t.Fatalf("fact lost escape content - a dropped escape silently closes an open package: %+v", restored)
+	if !contains(restored.AttributedUses, "example.com/factsrc\x00Rebind\x00example.com/factsrc.Hook\x00m") {
+		t.Fatalf("fact lost the attributed mutation - a dropped attribution silently discharges a runtime rebind: %+v", restored)
+	}
+	if !contains(restored.FuncRefs, "example.com/factsrc\x00take\x01example.com/factsrc\x00Escape") {
+		t.Fatalf("fact lost the reference-region edge - a dropped edge starves the fixed point: %+v", restored.FuncRefs)
+	}
+	if !contains(restored.AttributedUses, "example.com/factsrc\x00Escape\x00example.com/factsrc.Hooks\x00e") {
+		t.Fatalf("fact lost the attributed escape - a dropped attribution silently closes an open package: %+v", restored)
 	}
 	if !contains(restored.Opaque, "example.com/factsrc.ErrSentinel") {
 		t.Fatalf("fact lost opacity content: %+v", restored)
