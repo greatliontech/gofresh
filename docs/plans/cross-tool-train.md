@@ -283,10 +283,14 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       (var K = generated()) audits the constructor's returned
       registrations instead of poisoning as an opaque call result -
       result expressions judged by the environment audit over the
-      constructor body, locals flowing into results audited like
-      carrier stores, nested in-package constructor calls chaining by
-      the package-local fixed point; every other shape keeps the
-      poison.
+      constructor body with parameters assumed environment-free (the
+      caller judges the arguments), locals flowing into results
+      audited like carrier stores; the proof persists as a per-package
+      return-env-free fact so foreign constructor chains
+      (threshold.MustRows over cite.Must arguments - cerebro's
+      generated shape) resolve at composition through a deferred
+      env-call channel, arguments judged recursively with deferrals
+      compounding, absence keeping the poison.
 - [ ] 53. gofresh: audited-pure standard-set additions the named
       verdicts justify - source-audit math/big value constructors,
       time.Date, reflect.DeepEqual, and interface-type references of
