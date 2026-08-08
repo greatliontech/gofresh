@@ -98,7 +98,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       mutation facts plus per-fact foreign-reference regions prove an
       exported constructor init-only across the graph; the field
       probe's last first-party blocker.
-- [ ] 26. gomutant: serve-path provenance re-stamp (gomutant
+- [x] 26. gomutant: serve-path provenance re-stamp (gomutant
       docs/issues/served-record-provenance-frozen.md) - a pure serve
       recomputes commit/dirty provenance like the growth and drift
       serves already do, so a record born dirty promotes to the repo
