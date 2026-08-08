@@ -329,7 +329,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       to the signature walk's fail-closed default) - every other
       derivation keeps the refusal, and writes through any judged
       binding break it exactly as today.
-- [ ] 61. gofresh: aggregate writes of judged values derive - the sixth
+- [x] 61. gofresh: aggregate writes of judged values derive - the sixth
       review's anchor trace: both field chains now die at their last
       link, a judged value written into the result aggregate under
       construction (temporal.NewRegistry's series[coord] = s,
@@ -339,17 +339,26 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       exactly when everything stored into it judges - while unjudged
       written values keep the break; completes the
       building-constructor derivation the anchors need.
-- [ ] 62. gofresh: call-result argument aliasing in the derivation
-      class - a bind whose source is a call of a judged plain named
-      callee records no alias with its arguments, so an
-      identity-shaped callee (func id(s []handler) []handler { return
-      s }) hands back its argument's backing and a write through the
-      result swaps the argument's element while the argument stays
-      judged (reproduces on HEAD through the constructor door); either
-      a call-source bind links the target to every reach-bearing
-      tracked argument - conservative pairing, breaks propagating only
-      when a write occurs - or the leak-free proof gains an
-      argument-flows-to-result bit deciding the link precisely.
+- [ ] 62. gofresh: unlinked-backing binds in the derivation class -
+      the alias-pair recorder links only whole-identifier binds and
+      append bases, so every other bind whose source shares mutable
+      backing defeats both the break propagation and the store union,
+      each shape probe-confirmed as a composed false Valid on HEAD
+      through the constructor door: a call of a judged plain named
+      callee returning its argument (func id(s []handler) []handler {
+      return s }; write through the result swaps the argument's
+      element), an element read of a reach-bearing element (x :=
+      s[0] with s []*catalog; x.current write mutates s's pointee; x
+      := m["d"] with map-of-slice elements alike), a conversion
+      (m2 := table(m); m2 write mutates m), and a composite-literal
+      source embedding a tracked value (h := holder{rows: rows};
+      h.rows[0] write mutates the parameter's storage, param and
+      local-only bases alike); either every such bind
+      links the target to the reach-bearing tracked names its source
+      expression reaches - conservative pairing, breaks and stores
+      propagating only when a write occurs - or the leak-free proof
+      gains an argument-flows-to-result bit deciding call-result
+      links precisely.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a

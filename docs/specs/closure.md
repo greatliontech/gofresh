@@ -402,10 +402,14 @@ new elements), a conversion of a judged value, an instantiated
 reference of a named function, and a call of a plain named callee with
 judged arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
-declaration binds the nil zero value, environment-free; while any
-other derivation, an element, field, or dereference write reaching the
-binding (the written base breaks; index operands and other
-subexpressions stay reads), an address capture of it — the implicit
+declaration binds the nil zero value, environment-free. An element,
+field, or dereference write of a present value is a store into the
+written base's storage: the base stays judged exactly when everything
+stored into it judges, the store set unioned across names sharing
+mutable backing (index operands and other subexpressions stay reads);
+a valueless write, and any write into a parameter's storage, break
+outright. While any
+other derivation, an address capture of the binding — the implicit
 address of a pointer-receiver method use included, exempting methods
 the declaring package proves receiver-read-only — a bind whose source
 shares mutable backing propagating breaks both ways, or any bind

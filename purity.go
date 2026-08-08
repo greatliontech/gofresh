@@ -2378,12 +2378,19 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 			}
 			// Signature-carrying locals: collect whole-identifier binding
-			// sources; any other bind shape (range, copy, indexed or
-			// field target) refuses the local outright. localBroken
-			// covers parameters too: a reassigned parameter no longer
-			// holds the value the caller judged, so the assumption
-			// breaks with it.
+			// sources; container ranges and element, field, and
+			// dereference writes have their own arms; copy refuses the
+			// target outright. localBroken covers parameters too: a
+			// reassigned parameter no longer holds the value the caller
+			// judged, so the assumption breaks with it.
 			localSources := map[types.Object][]ast.Expr{}
+			// writeSources holds values stored through element, field,
+			// or dereference writes into a tracked local's storage: the
+			// local stays judged exactly when everything stored into it
+			// judges. Keyed by the written chain's root; unioned across
+			// each alias component before judgment, because a store
+			// through any alias is a store into the same storage.
+			writeSources := map[types.Object][]ast.Expr{}
 			localBroken := map[types.Object]bool{}
 			// aliasPairs links bindings that share mutable backing (a
 			// whole-identifier bind of a reach-bearing tracked value):
@@ -2417,33 +2424,56 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					return true
 				})
 			}
-			// breakBase breaks the written target's base binding: an
-			// element, field, or dereference write reaches the base's
-			// storage, while index operands and other subexpressions
-			// are reads and stay judged.
-			breakBase := func(target ast.Expr) {
+			// chainRoot walks a written or addressed chain to its
+			// terminal expression: selector, index, and dereference
+			// steps reach the base's storage, while their operands are
+			// reads and stay judged.
+			chainRoot := func(target ast.Expr) ast.Expr {
 				base := unparen(target)
 				for {
 					switch b := base.(type) {
 					case *ast.SelectorExpr:
-						base = b.X
+						base = unparen(b.X)
 					case *ast.IndexExpr:
-						base = b.X
+						base = unparen(b.X)
 					case *ast.StarExpr:
-						base = b.X
-					case *ast.ParenExpr:
-						base = b.X
+						base = unparen(b.X)
 					default:
-						if ident, ok := base.(*ast.Ident); ok {
-							breakTargets(ident)
-						}
-						return
+						return base
 					}
+				}
+			}
+			// breakBase breaks the written target's base binding.
+			breakBase := func(target ast.Expr) {
+				if ident, ok := chainRoot(target).(*ast.Ident); ok {
+					breakTargets(ident)
 				}
 			}
 			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
 				ident, ok := unparen(target).(*ast.Ident)
 				if !ok {
+					// An element, field, or dereference write of a
+					// present value stores into the root's storage: the
+					// value joins the root's write sources instead of
+					// breaking it. A valueless or already-broken write
+					// keeps the break; parameter storage - reached
+					// directly or through any alias - breaks in the
+					// component pass after the walk, the one
+					// enforcement point for the parameter-write clause.
+					if source != nil && !broken {
+						if rootIdent, ok := chainRoot(target).(*ast.Ident); ok {
+							robj := p.TypesInfo.Uses[rootIdent]
+							if robj == nil {
+								robj = p.TypesInfo.Defs[rootIdent]
+							}
+							if robj != nil {
+								if _, tracked := trackedVar(robj); tracked {
+									writeSources[robj] = append(writeSources[robj], source)
+									return
+								}
+							}
+						}
+					}
 					breakBase(target)
 					return
 				}
@@ -2501,9 +2531,10 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							// The hunt may stop at a non-ident base (a
 							// slice expression, an index, a call) - any
 							// tracked name inside it may own the backing.
-							// Pairs only propagate breaks that occur, so
-							// linking every candidate is
-							// precision-preserving.
+							// Linking every candidate is fail-closed:
+							// pairs feed only break propagation and the
+							// parameter-component refusal - a spurious
+							// refusal at worst, never a false Valid.
 							ast.Inspect(baseExpr, func(m ast.Node) bool {
 								id, ok := m.(*ast.Ident)
 								if !ok {
@@ -2538,23 +2569,8 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					// breaks. A composite-literal operand addresses
 					// fresh storage and breaks nothing.
 					if n.Op == token.AND {
-						base := unparen(n.X)
-						for {
-							switch b := base.(type) {
-							case *ast.SelectorExpr:
-								base = b.X
-							case *ast.IndexExpr:
-								base = b.X
-							case *ast.StarExpr:
-								base = b.X
-							case *ast.ParenExpr:
-								base = b.X
-							default:
-								if ident, ok := base.(*ast.Ident); ok {
-									breakTargets(ident)
-								}
-								return true
-							}
+						if ident, ok := chainRoot(n.X).(*ast.Ident); ok {
+							breakTargets(ident)
 						}
 					}
 				case *ast.AssignStmt:
@@ -2649,6 +2665,75 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					}
 				}
 			}
+			// Stored values union across shared backing the same way: a
+			// store through any alias is a store into the same storage,
+			// so every member of an alias component answers for the
+			// component's whole store set.
+			aliasRoot := map[types.Object]types.Object{}
+			var aliasFind func(types.Object) types.Object
+			aliasFind = func(x types.Object) types.Object {
+				r, ok := aliasRoot[x]
+				if !ok || r == x {
+					return x
+				}
+				root := aliasFind(r)
+				aliasRoot[x] = root
+				return root
+			}
+			for _, pair := range aliasPairs {
+				a, b := aliasFind(pair[0]), aliasFind(pair[1])
+				if a != b {
+					aliasRoot[a] = b
+				}
+			}
+			sharedWrites := map[types.Object][]ast.Expr{}
+			for obj, stores := range writeSources {
+				root := aliasFind(obj)
+				sharedWrites[root] = append(sharedWrites[root], stores...)
+			}
+			// A store into a parameter's storage breaks outright - the
+			// caller's storage mutates under the caller's judgment - and
+			// the storage is reached through any alias of the parameter,
+			// not only its own name. A component that contains a
+			// parameter and received any store breaks whole; the
+			// parameter's own judgment reads localBroken, so every
+			// member is marked directly (components are maximal - no
+			// further propagation exists).
+			componentMembers := map[types.Object][]types.Object{}
+			memberSeen := map[types.Object]bool{}
+			collectMember := func(o types.Object) {
+				if !memberSeen[o] {
+					memberSeen[o] = true
+					componentMembers[aliasFind(o)] = append(componentMembers[aliasFind(o)], o)
+				}
+			}
+			for _, pair := range aliasPairs {
+				collectMember(pair[0])
+				collectMember(pair[1])
+			}
+			for obj := range writeSources {
+				collectMember(obj)
+			}
+			for obj := range params {
+				collectMember(obj)
+			}
+			for root, ms := range componentMembers {
+				if len(sharedWrites[root]) == 0 {
+					continue
+				}
+				hasParam := false
+				for _, m := range ms {
+					if params[m] {
+						hasParam = true
+						break
+					}
+				}
+				if hasParam {
+					for _, m := range ms {
+						localBroken[m] = true
+					}
+				}
+			}
 			fnDeps := map[string]bool{}
 			var free func(expr ast.Expr) bool
 			localFree := map[types.Object]int{} // 0 unknown, 1 proving, 2 free, 3 refused
@@ -2670,6 +2755,12 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				localFree[obj] = 1
 				for _, src := range localSources[obj] {
 					if !free(src) {
+						localFree[obj] = 3
+						return false
+					}
+				}
+				for _, stored := range sharedWrites[aliasFind(obj)] {
+					if !free(stored) {
 						localFree[obj] = 3
 						return false
 					}
