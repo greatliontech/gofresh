@@ -633,6 +633,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if len(keys) == 0 {
 				return false
 			}
+			for {
+				paren, ok := target.(*ast.ParenExpr)
+				if !ok {
+					break
+				}
+				target = paren.X
+			}
 			ident, ok := target.(*ast.Ident)
 			if !ok {
 				return false
@@ -680,6 +687,23 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							}
 						}
 					}
+				case *ast.ValueSpec:
+					// A declaration binding aliases exactly as an
+					// assignment binding does.
+					if len(n.Names) == len(n.Values) {
+						for i, name := range n.Names {
+							if bind(name, rhsKeys(n.Values[i])) {
+								changed = true
+							}
+						}
+					} else if len(n.Values) == 1 {
+						keys := rhsKeys(n.Values[0])
+						for _, name := range n.Names {
+							if bind(name, keys) {
+								changed = true
+							}
+						}
+					}
 				case *ast.RangeStmt:
 					keys := rhsKeys(n.X)
 					for _, target := range []ast.Expr{n.Key, n.Value} {
@@ -687,11 +711,163 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							changed = true
 						}
 					}
+				case *ast.CallExpr:
+					// A builtin copy aliases the destination's elements to
+					// the source's backing without a binding statement -
+					// the destination local is the carrier exactly as an
+					// assignment-bound alias is.
+					if ident, ok := n.Fun.(*ast.Ident); ok && len(n.Args) == 2 {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
+							if bind(n.Args[0], rhsKeys(n.Args[1])) {
+								changed = true
+							}
+						}
+					}
 				}
 				return true
 			})
 		}
 		return aliased
+	}
+	// carrierArgVar resolves a call argument to the alias-handing carrier
+	// it names directly - a bare or package-qualified identifier, parens
+	// unwrapped; anything else names no deferrable carrier.
+	carrierArgVar := func(arg ast.Expr) (*ast.Ident, *types.Var) {
+		for {
+			paren, ok := arg.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			arg = paren.X
+		}
+		var target *ast.Ident
+		switch a := arg.(type) {
+		case *ast.Ident:
+			target = a
+		case *ast.SelectorExpr:
+			if x, ok := a.X.(*ast.Ident); ok {
+				if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+					target = a.Sel
+				}
+			}
+		}
+		if target == nil {
+			return nil, nil
+		}
+		obj, ok := resolve(target)
+		if !ok {
+			return nil, nil
+		}
+		variable, ok := dynamicPackageVar(obj)
+		if !ok {
+			return nil, nil
+		}
+		if !typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+			// A non-alias-handing carrier (a func-typed hook, a by-value
+			// struct) cannot be rebound through the argument - the ident
+			// arm already classifies it without an escape, and no
+			// leak-free fact exists to resolve a deferral against.
+			return nil, nil
+		}
+		return target, variable
+	}
+	deferCarrierArgs := func(n *ast.CallExpr, onDeferred func(*ast.Ident)) {
+		fn, pkgPath := plainCalleeFunc(p, n.Fun)
+		if fn == nil {
+			return
+		}
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig.Recv() != nil || sig.Params().Len() == 0 {
+			return
+		}
+		for i, arg := range n.Args {
+			target, variable := carrierArgVar(arg)
+			if target == nil {
+				continue
+			}
+			idx := i
+			if sig.Variadic() && idx >= sig.Params().Len()-1 {
+				idx = sig.Params().Len() - 1
+			}
+			key := dynamicVarKey(variable)
+			if paramUses[key] == nil {
+				paramUses[key] = map[string]bool{}
+			}
+			paramUses[key][pkgPath+"\x00"+fn.Name()+"\x00"+strconv.Itoa(idx)] = true
+			if onDeferred != nil {
+				onDeferred(target)
+			}
+		}
+	}
+	// scanExemptCalls covers the call arguments of the init-exempt
+	// regions - init bodies, init-only helpers, initializer expressions -
+	// whose stores and calls the use walk exempts: a carrier argument to
+	// a plain named function defers to that parameter's leak-free fact
+	// exactly as in program code (the deferral applies to init flow, the
+	// alias outlives initialization), and a carrier argument to any other
+	// callee - a method, a func value, a builtin the shapes do not name -
+	// escapes fail-closed. Nested literals and go statements are program
+	// code, walked separately (REQ-closure-shared-dynamic-state).
+	// markExemptEscapes escapes every carrier an exempt-region call
+	// argument's subtree reaches - directly or through an init-local
+	// alias - the fail-closed twin of the program-code ident arm for the
+	// shapes no deferral can resolve.
+	markExemptEscapes := func(arg ast.Expr) {
+		ast.Inspect(arg, func(inner ast.Node) bool {
+			if ident, ok := inner.(*ast.Ident); ok {
+				if obj, ok := resolve(ident); ok {
+					if variable, ok := dynamicPackageVar(obj); ok {
+						if typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+							escaped[dynamicVarKey(variable)] = true
+						}
+					} else {
+						for key := range aliasedLocals[obj] {
+							escaped[key] = true
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	scanExemptCalls := func(body ast.Node) {
+		if paramUses == nil || body == nil {
+			return
+		}
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit, *ast.GoStmt:
+				return false
+			case *ast.CallExpr:
+				if ident, ok := n.Fun.(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+						switch ident.Name {
+						case "len", "cap", "delete", "clear", "append", "copy":
+							// Writeless reads, removals, and the two
+							// element-flow shapes judged elsewhere: stores
+							// by the registration audit, alias-creating
+							// destinations by the init-local alias scan.
+							return true
+						}
+					}
+				}
+				plain := false
+				if fn, _ := plainCalleeFunc(p, n.Fun); fn != nil {
+					plain = true
+					deferCarrierArgs(n, nil)
+				}
+				for _, arg := range n.Args {
+					if plain {
+						if _, variable := carrierArgVar(arg); variable != nil {
+							// Directly deferred above.
+							continue
+						}
+					}
+					markExemptEscapes(arg)
+				}
+			}
+			return true
+		})
 	}
 	var skipInteriors map[ast.Node]bool
 	walkBody := func(body ast.Node) {
@@ -822,60 +998,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// of the proof restores the escape there
 				// (REQ-closure-shared-dynamic-state).
 				if paramUses != nil && !goCalls[n] {
-					if fn, pkgPath := plainCalleeFunc(p, n.Fun); fn != nil {
-						if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() == nil && sig.Params().Len() > 0 {
-							for i, arg := range n.Args {
-								for {
-									paren, ok := arg.(*ast.ParenExpr)
-									if !ok {
-										break
-									}
-									arg = paren.X
-								}
-								var target *ast.Ident
-								switch a := arg.(type) {
-								case *ast.Ident:
-									target = a
-								case *ast.SelectorExpr:
-									if x, ok := a.X.(*ast.Ident); ok {
-										if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-											target = a.Sel
-										}
-									}
-								}
-								if target == nil {
-									continue
-								}
-								obj, ok := resolve(target)
-								if !ok {
-									continue
-								}
-								variable, ok := dynamicPackageVar(obj)
-								if !ok {
-									continue
-								}
-								if !typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
-									// A non-alias-handing carrier (a func-typed
-									// hook, a by-value struct) cannot be
-									// rebound through the argument - the ident
-									// arm already classifies it without an
-									// escape, and no leak-free fact exists to
-									// resolve a deferral against.
-									continue
-								}
-								idx := i
-								if sig.Variadic() && idx >= sig.Params().Len()-1 {
-									idx = sig.Params().Len() - 1
-								}
-								key := dynamicVarKey(variable)
-								if paramUses[key] == nil {
-									paramUses[key] = map[string]bool{}
-								}
-								paramUses[key][pkgPath+"\x00"+fn.Name()+"\x00"+strconv.Itoa(idx)] = true
-								readContext[target] = true
-							}
-						}
-					}
+					deferCarrierArgs(n, func(target *ast.Ident) {
+						readContext[target] = true
+					})
 				}
 			case *ast.SelectorExpr:
 				// A pointer-receiver method USE — bind or call alike —
@@ -1009,6 +1134,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							}
 							return true
 						})
+						scanExemptCalls(decl.Body)
 						aliasedLocals = nil
 					}
 					continue
@@ -1036,6 +1162,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							}
 							return true
 						})
+						scanExemptCalls(decl.Body)
 						aliasedLocals = nil
 					}
 					continue
@@ -1047,7 +1174,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// The declaration itself is initialization, but a
 				// function literal nested in it is callable program
 				// code — a package-level `var rebind = func() {...}`
-				// mutator must be walked.
+				// mutator must be walked — and a call in an initializer
+				// expression is an init-flow call whose carrier arguments
+				// earn the same deferral as an init body's.
 				ast.Inspect(decl, func(n ast.Node) bool {
 					if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
 						walkBody(lit.Body)
@@ -1055,6 +1184,631 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					}
 					return true
 				})
+				scanExemptCalls(decl)
+			}
+		}
+	}
+}
+
+// typeCarriesSignature reports whether a value of the type can hand out a
+// function value a holder could extract and call: a signature, or a
+// container reaching one through struct fields, array/slice/map elements,
+// pointers, or channels. Interfaces report false - a method call through a
+// carrier-held interface value refuses in the use-shape engine, and a type
+// assertion extracting a function is an unrecognized use there too, so the
+// environment audit owes interfaces nothing.
+func typeCarriesSignature(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Signature:
+		return true
+	case *types.Basic, *types.Interface:
+		return false
+	case *types.Named:
+		return typeCarriesSignature(t.Underlying(), seen)
+	case *types.Pointer:
+		return typeCarriesSignature(t.Elem(), seen)
+	case *types.Slice:
+		return typeCarriesSignature(t.Elem(), seen)
+	case *types.Array:
+		return typeCarriesSignature(t.Elem(), seen)
+	case *types.Chan:
+		return typeCarriesSignature(t.Elem(), seen)
+	case *types.Map:
+		return typeCarriesSignature(t.Elem(), seen)
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if typeCarriesSignature(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
+}
+
+// environmentFreeFuncLit reports whether a function literal registered into
+// a carrier is provably environment-free: every variable it references from
+// an enclosing function scope proves leak-free under the use-shape engine -
+// writeless, handing nothing of mutable reach to a caller or callee, every
+// unrecognized use refusing - over the literal's own body AND over every
+// sibling literal in the enclosing body that references the variable, since
+// a shared environment is one object however many carriers its closures
+// reach; a reference from a go statement's call outside any literal refuses
+// outright, because the goroutine outlives initialization. A read-only
+// capture of settled init state passes; a written captured scalar refuses
+// exactly as a written captured slice does. Package-level referents are not
+// captures: their uses attribute at this site like any program code
+// (REQ-closure-shared-dynamic-state).
+func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast.Node) bool {
+	if p == nil || p.TypesInfo == nil || lit == nil || lit.Body == nil {
+		return false
+	}
+	freeVars := func(body ast.Node, bound ast.Node) map[types.Object]bool {
+		roots := map[types.Object]bool{}
+		ast.Inspect(body, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			obj, ok := p.TypesInfo.Uses[ident]
+			if !ok {
+				return true
+			}
+			v, ok := obj.(*types.Var)
+			if !ok || v.IsField() || v.Pkg() == nil {
+				return true
+			}
+			if v.Parent() == v.Pkg().Scope() {
+				return true
+			}
+			if v.Pos() >= bound.Pos() && v.Pos() <= bound.End() {
+				return true
+			}
+			roots[v] = true
+			return true
+		})
+		return roots
+	}
+	roots := freeVars(lit.Body, lit)
+	if len(roots) == 0 {
+		return true
+	}
+	if enclosing != nil {
+		// Alias closure: an enclosing-body binding chained from a captured
+		// variable by assignment, range, address, or reslice shares its
+		// backing - the environment is one object under every name it
+		// carries, so the alias joins the root set before any judgment.
+		var edges [][2]types.Object
+		aliasEdges := func(target ast.Expr, sources ast.Expr) {
+			for {
+				paren, ok := target.(*ast.ParenExpr)
+				if !ok {
+					break
+				}
+				target = paren.X
+			}
+			ident, ok := target.(*ast.Ident)
+			if !ok {
+				return
+			}
+			obj := p.TypesInfo.Defs[ident]
+			if obj == nil {
+				obj = p.TypesInfo.Uses[ident]
+			}
+			v, ok := obj.(*types.Var)
+			if !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope() {
+				return
+			}
+			if !typeHandsOutMutableReach(v.Type(), make(map[types.Type]bool)) {
+				return
+			}
+			// Every mutable-reach source in the expression joins the
+			// target's alias set - a multi-source binding (an append of
+			// one slice onto another) shares each source's backing.
+			ast.Inspect(sources, func(n ast.Node) bool {
+				if src, ok := n.(*ast.Ident); ok {
+					if o, ok := p.TypesInfo.Uses[src].(*types.Var); ok && o.Pkg() != nil && o.Parent() != o.Pkg().Scope() && !o.IsField() {
+						if typeHandsOutMutableReach(o.Type(), make(map[types.Type]bool)) {
+							edges = append(edges, [2]types.Object{v, o})
+						}
+					}
+				}
+				return true
+			})
+		}
+		ast.Inspect(enclosing, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, lhs := range n.Lhs {
+						aliasEdges(lhs, n.Rhs[i])
+					}
+				} else if len(n.Rhs) == 1 {
+					for _, lhs := range n.Lhs {
+						aliasEdges(lhs, n.Rhs[0])
+					}
+				}
+			case *ast.ValueSpec:
+				// A declaration binding aliases exactly as an assignment
+				// binding does.
+				if len(n.Names) == len(n.Values) {
+					for i, name := range n.Names {
+						aliasEdges(name, n.Values[i])
+					}
+				} else if len(n.Values) == 1 {
+					for _, name := range n.Names {
+						aliasEdges(name, n.Values[0])
+					}
+				}
+			case *ast.RangeStmt:
+				for _, bind := range []ast.Expr{n.Key, n.Value} {
+					if bind != nil {
+						aliasEdges(bind, n.X)
+					}
+				}
+			case *ast.CallExpr:
+				// A builtin copy aliases the destination's elements to the
+				// source's backing without a binding statement.
+				if ident, ok := n.Fun.(*ast.Ident); ok && len(n.Args) == 2 {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
+						aliasEdges(n.Args[0], n.Args[1])
+					}
+				}
+			}
+			return true
+		})
+		for changed := true; changed; {
+			changed = false
+			for _, e := range edges {
+				if roots[e[0]] != roots[e[1]] {
+					roots[e[0]], roots[e[1]] = true, true
+					changed = true
+				}
+			}
+		}
+	}
+	if !boundValueLeakFree(p, roots, lit.Body) {
+		return false
+	}
+	if enclosing == nil {
+		return true
+	}
+	sound := true
+	ast.Inspect(enclosing, func(n ast.Node) bool {
+		if !sound {
+			return false
+		}
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			if n == lit {
+				return false
+			}
+			shared := false
+			for v := range freeVars(n.Body, n) {
+				if roots[v] {
+					shared = true
+					break
+				}
+			}
+			if shared && !boundValueLeakFree(p, roots, n.Body) {
+				sound = false
+			}
+			return false
+		case *ast.GoStmt:
+			ast.Inspect(n.Call, func(inner ast.Node) bool {
+				if _, isLit := inner.(*ast.FuncLit); isLit {
+					// Judged as a sibling literal by the enclosing walk.
+					return false
+				}
+				if ident, ok := inner.(*ast.Ident); ok {
+					if obj, ok := p.TypesInfo.Uses[ident]; ok && roots[obj] {
+						sound = false
+					}
+				}
+				return sound
+			})
+		}
+		return sound
+	})
+	return sound
+}
+
+// recordEnvCarryingRegistrations records, per dynamic-capable package
+// variable (own or foreign), whether this package's direct code stores a
+// function-carrying value into it that is not provably environment-free.
+// A plain named function or a method expression carries no environment; a
+// function literal is audited by environmentFreeFuncLit; nil carries
+// nothing. Every other function-carrying value shape - a bound method
+// value, a call result, a parameter, an opaque local or foreign variable -
+// is beyond the audit and marks the carrier, fail-closed
+// (REQ-closure-shared-dynamic-state). Stores inside nested literals and go
+// statements are program code whose mutation marks refuse independently,
+// so the audit walks only direct store sites; a store the mutation rules
+// refuse anyway may record here too - the mutation culprit outranks this
+// one at composition.
+func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]bool) {
+	if p == nil || p.TypesInfo == nil {
+		return
+	}
+	resolve := func(ident *ast.Ident) (types.Object, bool) {
+		if obj, ok := p.TypesInfo.Uses[ident]; ok {
+			return obj, true
+		}
+		if obj, ok := p.TypesInfo.Defs[ident]; ok && obj != nil {
+			return obj, true
+		}
+		return nil, false
+	}
+	carrierVar := func(obj types.Object) (*types.Var, bool) {
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, false
+		}
+		if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+			return nil, false
+		}
+		return variable, true
+	}
+	// localAliases maps, per walked body, each local binding chained from
+	// a carrier - by assignment, declaration, range, address, or builtin
+	// copy - to the carrier variables it may share backing with, so a
+	// store through the alias is a store into the carrier.
+	var localAliases map[types.Object][]*types.Var
+	// targetVars collects every dynamic-capable package variable a store
+	// target's subtree reaches - directly or through a local alias -
+	// over-approximate exactly as the mutation marking is; a spurious
+	// entry only keeps a carrier's conservative disposition.
+	targetVars := func(expr ast.Expr) []*types.Var {
+		var vars []*types.Var
+		ast.Inspect(expr, func(n ast.Node) bool {
+			if ident, ok := n.(*ast.Ident); ok {
+				if obj, ok := resolve(ident); ok {
+					if variable, ok := carrierVar(obj); ok {
+						vars = append(vars, variable)
+					} else {
+						vars = append(vars, localAliases[obj]...)
+					}
+				}
+			}
+			return true
+		})
+		return vars
+	}
+	unparen := func(expr ast.Expr) ast.Expr {
+		for {
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				return expr
+			}
+			expr = paren.X
+		}
+	}
+	computeLocalAliases := func(body ast.Node) map[types.Object][]*types.Var {
+		aliased := map[types.Object][]*types.Var{}
+		sourceVars := func(expr ast.Expr) []*types.Var {
+			var vars []*types.Var
+			ast.Inspect(expr, func(n ast.Node) bool {
+				if _, isLit := n.(*ast.FuncLit); isLit {
+					return false
+				}
+				if ident, ok := n.(*ast.Ident); ok {
+					if obj, ok := resolve(ident); ok {
+						if variable, ok := carrierVar(obj); ok {
+							vars = append(vars, variable)
+						} else {
+							vars = append(vars, aliased[obj]...)
+						}
+					}
+				}
+				return true
+			})
+			return vars
+		}
+		bind := func(target ast.Expr, sources []*types.Var) bool {
+			if len(sources) == 0 {
+				return false
+			}
+			ident, ok := unparen(target).(*ast.Ident)
+			if !ok {
+				return false
+			}
+			obj, ok := resolve(ident)
+			if !ok {
+				return false
+			}
+			if _, pkg := carrierVar(obj); pkg {
+				return false
+			}
+			if !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
+				return false
+			}
+			have := map[*types.Var]bool{}
+			for _, v := range aliased[obj] {
+				have[v] = true
+			}
+			changed := false
+			for _, v := range sources {
+				if !have[v] {
+					aliased[obj] = append(aliased[obj], v)
+					have[v] = true
+					changed = true
+				}
+			}
+			return changed
+		}
+		for changed := true; changed; {
+			changed = false
+			ast.Inspect(body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.FuncLit, *ast.GoStmt:
+					return false
+				case *ast.AssignStmt:
+					if len(n.Lhs) == len(n.Rhs) {
+						for i, lhs := range n.Lhs {
+							if bind(lhs, sourceVars(n.Rhs[i])) {
+								changed = true
+							}
+						}
+					} else if len(n.Rhs) == 1 {
+						sources := sourceVars(n.Rhs[0])
+						for _, lhs := range n.Lhs {
+							if bind(lhs, sources) {
+								changed = true
+							}
+						}
+					}
+				case *ast.ValueSpec:
+					if len(n.Names) == len(n.Values) {
+						for i, name := range n.Names {
+							if bind(name, sourceVars(n.Values[i])) {
+								changed = true
+							}
+						}
+					} else if len(n.Values) == 1 {
+						sources := sourceVars(n.Values[0])
+						for _, name := range n.Names {
+							if bind(name, sources) {
+								changed = true
+							}
+						}
+					}
+				case *ast.RangeStmt:
+					sources := sourceVars(n.X)
+					for _, target := range []ast.Expr{n.Key, n.Value} {
+						if target != nil && bind(target, sources) {
+							changed = true
+						}
+					}
+				case *ast.CallExpr:
+					if ident, ok := unparen(n.Fun).(*ast.Ident); ok && len(n.Args) == 2 {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
+							if bind(n.Args[0], sourceVars(n.Args[1])) {
+								changed = true
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+		return aliased
+	}
+	// enclosingBody is the function body whose direct stores are being
+	// walked - the sibling-literal scope for the environment audit; nil
+	// for package-level initializers, whose literals can capture nothing
+	// function-scoped.
+	var enclosingBody ast.Node
+	var carrying func(expr ast.Expr) bool
+	carrying = func(expr ast.Expr) bool {
+		switch e := unparen(expr).(type) {
+		case *ast.CompositeLit:
+			for _, elt := range e.Elts {
+				value := elt
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					// Map keys cannot be function-typed (not comparable);
+					// struct field keys are names, not values.
+					value = kv.Value
+				}
+				if carrying(value) {
+					return true
+				}
+			}
+			return false
+		case *ast.UnaryExpr:
+			if e.Op == token.AND {
+				return carrying(e.X)
+			}
+		case *ast.FuncLit:
+			return !environmentFreeFuncLit(p, e, enclosingBody)
+		case *ast.BasicLit:
+			return false
+		case *ast.CallExpr:
+			// Builtin make and new construct empty or zero values - no
+			// function value rides them; every other call result stays
+			// an opaque source.
+			if ident, ok := unparen(e.Fun).(*ast.Ident); ok {
+				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "make" || ident.Name == "new") {
+					return false
+				}
+			}
+		case *ast.Ident:
+			if obj, ok := resolve(e); ok {
+				switch obj.(type) {
+				case *types.Func:
+					return false
+				case *types.Nil:
+					return false
+				}
+			}
+		case *ast.SelectorExpr:
+			if selection, ok := p.TypesInfo.Selections[e]; ok {
+				switch selection.Kind() {
+				case types.MethodExpr:
+					return false
+				case types.MethodVal:
+					// The receiver rides the value - an environment by
+					// construction.
+					return true
+				}
+				break
+			}
+			// A qualified identifier: pkg.Func carries no environment.
+			if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
+				if _, isFunc := obj.(*types.Func); isFunc {
+					return false
+				}
+			}
+		}
+		// Everything else - a local, a parameter, a package variable, a
+		// call result, an index or field read, a conversion - is an opaque
+		// source: it carries exactly when its type can hand out a function
+		// value.
+		return typeCarriesSignature(p.TypesInfo.TypeOf(unparen(expr)), make(map[types.Type]bool))
+	}
+	handleStore := func(lhs, rhs ast.Expr, rebindable bool) {
+		// A bare local identifier on the left of an assignment or
+		// declaration is a rebinding of the local - the alias-creation
+		// shape, not a store through the alias; only writes THROUGH an
+		// alias (an index, field, or dereference whose base aliases a
+		// carrier, a send, a copy destination, an append base) store
+		// into it. Append and copy flows into the old binding's backing
+		// are judged by their own store arms, never through this
+		// exemption.
+		if rebindable {
+			if ident, ok := unparen(lhs).(*ast.Ident); ok {
+				if obj, ok := resolve(ident); ok {
+					if _, isCarrier := carrierVar(obj); !isCarrier {
+						return
+					}
+				}
+			}
+		}
+		targets := targetVars(lhs)
+		if len(targets) == 0 {
+			return
+		}
+		flows := []ast.Expr{rhs}
+		if call, ok := unparen(rhs).(*ast.CallExpr); ok && len(call.Args) > 0 {
+			if ident, ok := unparen(call.Fun).(*ast.Ident); ok {
+				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "append" {
+					// Appending a carrier onto itself - bare or
+					// package-qualified - flows only the new elements: the
+					// existing contents were judged at their own store
+					// sites. Appending anything else stays an opaque
+					// source.
+					var baseIdent *ast.Ident
+					switch base := unparen(call.Args[0]).(type) {
+					case *ast.Ident:
+						baseIdent = base
+					case *ast.SelectorExpr:
+						if x, ok := base.X.(*ast.Ident); ok {
+							if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+								baseIdent = base.Sel
+							}
+						}
+					}
+					if baseIdent != nil {
+						if obj, ok := resolve(baseIdent); ok {
+							if variable, ok := carrierVar(obj); ok && len(targets) == 1 && variable == targets[0] {
+								flows = call.Args[1:]
+							}
+						}
+					}
+				}
+			}
+		}
+		poison := false
+		for _, flow := range flows {
+			if carrying(flow) {
+				poison = true
+				break
+			}
+		}
+		if poison {
+			for _, variable := range targets {
+				envCarrying[dynamicVarKey(variable)] = true
+			}
+		}
+	}
+	walkStores := func(body ast.Node) {
+		localAliases = computeLocalAliases(body)
+		defer func() { localAliases = nil }()
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit, *ast.GoStmt:
+				return false
+			case *ast.CallExpr:
+				if ident, ok := unparen(n.Fun).(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+						// A builtin copy into a carrier stores the copied
+						// elements exactly as an assignment would; an
+						// append writes its new elements into the base's
+						// backing whenever capacity allows, whatever the
+						// result is bound to - both judged at the call,
+						// with the destination resolved through its
+						// aliases.
+						switch {
+						case ident.Name == "copy" && len(n.Args) == 2:
+							handleStore(n.Args[0], n.Args[1], false)
+						case ident.Name == "append" && len(n.Args) > 1:
+							for _, flow := range n.Args[1:] {
+								handleStore(n.Args[0], flow, false)
+							}
+						}
+					}
+				}
+			case *ast.AssignStmt:
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, lhs := range n.Lhs {
+						handleStore(lhs, n.Rhs[i], true)
+					}
+				} else if len(n.Rhs) == 1 {
+					for _, lhs := range n.Lhs {
+						handleStore(lhs, n.Rhs[0], true)
+					}
+				}
+			case *ast.RangeStmt:
+				for _, bind := range []ast.Expr{n.Key, n.Value} {
+					if bind != nil && n.Tok == token.ASSIGN {
+						handleStore(bind, n.X, true)
+					}
+				}
+			case *ast.SendStmt:
+				handleStore(n.Chan, n.Value, false)
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				if decl.Body != nil {
+					enclosingBody = decl.Body
+					walkStores(decl.Body)
+					enclosingBody = nil
+				}
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					if len(vs.Names) == len(vs.Values) {
+						for i, name := range vs.Names {
+							handleStore(name, vs.Values[i], true)
+						}
+					} else if len(vs.Values) == 1 {
+						for _, name := range vs.Names {
+							handleStore(name, vs.Values[0], true)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1466,13 +2220,25 @@ func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body a
 				}
 			}
 			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && rooted(sel.X) {
-				if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
+				selection, selOK := p.TypesInfo.Selections[sel]
+				if selOK && selection.Kind() == types.MethodVal {
 					if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(fn) {
 						consume(sel.X)
 						break
 					}
+					leaky = true
+				} else if selOK && selection.Kind() == types.FieldVal {
+					// A func-typed field invoked through the binding hands
+					// the callee only its arguments - judged by the
+					// argument loop below like any call; the target itself
+					// is a field read, judged by the selector arm on the
+					// child visit. The callee's own effects, including
+					// writes through its closure environment, are priced by
+					// the observation composition's callee enumeration, not
+					// by this binding proof.
+				} else {
+					leaky = true
 				}
-				leaky = true
 			}
 			// A rooted argument whose type hands out no mutable reach is
 			// a copied scalar - the callee cannot reach the carrier

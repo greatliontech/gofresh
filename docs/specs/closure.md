@@ -270,27 +270,69 @@ discharges by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
 rules; `init` bodies and qualified helpers are scanned exactly for
 alias-creating bindings — an init-flow local bound from a carrier by
-whole-identifier assignment or range binding, chained to a fixpoint,
+whole-identifier assignment or declaration, by range binding, or as a
+builtin copy destination, chained to a fixpoint,
 is the carrier inside nested program code; a binding the scan cannot
 attribute (a helper parameter bound at the init call site, a composite
 target such as a struct field) is a recorded residue of this clause —
-while init-flow stores and calls stay exempt. Two further narrowings
+while init-flow stores and calls stay exempt from the mutation marks;
+a carrier call-argument still earns its deferral or the fail-closed
+escape wherever it appears. Two further narrowings
 discharge specific escape shapes by proof: a carrier passed as a direct
 call argument to a plain named function — a deferred call included, a go
-statement's arguments never, since the goroutine runs concurrently —
+statement's arguments never, since the goroutine runs concurrently, and
+init flow like program code, since the alias outlives initialization —
 defers to that parameter's leak-free fact, recorded by the declaring
 package (the bound value provably never writes, escapes, or outlives
 the call, with every unrecognized use refusing) and resolved at
-composition, absence refusing; and a range binding over an alias-handing
+composition, absence refusing, a carrier argument to any other callee
+shape keeping the fail-closed escape (a callee that writes its parameter
+refuses the deferral even where the write itself would be init flow —
+deliberate conservatism of the single fact class); and a range binding over an alias-handing
 carrier discharges the iteration read when every alias-handing bound
 value is proven leak-free over the loop body by the same judgment,
-fail-closed on any other binding shape. Persisted parameter facts key
+fail-closed on any other binding shape — where the leak-free judgment
+recognizes the call of a func-typed field of a bound value: the target
+is the field read the read shapes already judge, and the callee receives
+only its arguments, judged like any call. Persisted parameter facts key
 package path, function name, and zero-based parameter index NUL-joined;
 deferred argument marks join the variable key to that parameter key —
 an entry a consumer cannot parse marks every variable its fact declares,
 fail-closed like every malformed-fact arm (a malformed deferral of a
 foreign variable keeps only the declaring fact's marks — the accepted
 residual every malformed-fact arm shares).
+Every admitted read path is sound only under the environment-free
+registration audit: a function-carrying value a package's direct code
+stores into a carrier — its own or a foreign one, initializer
+expressions and builtin copies included, a store through a local alias
+of the carrier resolved to it, stores inside nested literals
+and go statements excluded as program code the mutation rules refuse on
+their own — must be environment-free. A plain named function, a method
+expression, and nil carry no environment; a function literal is
+environment-free when every variable it references from an enclosing
+function scope proves leak-free under the use-shape judgment over the
+literal's body and over every sibling literal of the enclosing body
+referencing the variable's alias set — the set closed over every
+whole-identifier binding, range binding, and builtin copy of the
+enclosing body whose source expression reaches an enclosing-function
+variable of mutable reach, address, reslice, wrapping, and call-result
+chains included by the source walk, since a shared environment is one
+object under every name it carries and however many carriers its
+closures reach — with a
+reference to the alias set from a go statement's call outside any
+literal refusing outright. Every other value shape — a bound method
+value, a call result (builtin make and new excepted: they construct
+empty or zero values, and no function value rides them), a parameter,
+an opaque local or variable of
+function-carrying type — is beyond the audit; the one call-shaped
+admission is append of judged elements onto the stored-to carrier
+itself, whose result carries only what its operands did. A carrier that
+receives a value outside the audit refuses every observer, whatever the
+read shape, with a culprit naming the variable and this audit: a
+registered closure's environment can write state the settled verdict
+assumed stable. The audited carrier keys ride the per-package fact as a
+plain key list, unioned at composition; mutation and writable-escape
+culprits outrank this one.
 `init` flow is the initializer expressions, the `init` bodies, and the
 init-only-reachable functions: plain named functions — exported included —
 whose every reference, in every package of the analyzed graph, is a direct

@@ -144,6 +144,20 @@ var ErrSentinel = errors.New("sentinel")
 
 var Hooks = map[string]func(){}
 
+var Bound []func() int
+
+func seed() {
+	c := new(int)
+	Bound = []func() int{func() int { (*c)++; return *c }}
+}
+
+var _ = boot()
+
+func boot() bool {
+	seed()
+	return true
+}
+
 func take(map[string]func()) {}
 
 func Escape() { take(Hooks) }
@@ -212,6 +226,9 @@ func (Widget) External() int { return 2 }
 	}
 	if !contains(restored.Opaque, "example.com/factsrc.ErrSentinel") {
 		t.Fatalf("fact lost opacity content: %+v", restored)
+	}
+	if !contains(restored.EnvCarrying, "example.com/factsrc.Bound") {
+		t.Fatalf("fact lost the environment-audit mark - a dropped mark keeps a capturing registration settled: %+v", restored.EnvCarrying)
 	}
 	if restored.PureMethods["Widget.Pure"] == "" || restored.ExternalMethods["Widget.External"] == "" {
 		t.Fatalf("fact lost method directives: %+v", restored)

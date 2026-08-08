@@ -194,6 +194,13 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       unblocks the repo-root idiom, and producer-output provenance
       stops re-measures the evidence already covers; three docs delete
       at close.
+- [ ] 39a. gomutant: oracle-process CPU oversubscription - concurrent
+      mutant jobs each spawn full-width go toolchain children
+      (jobs x NumCPU runnable threads, quadratic in cores at the
+      default), starving the host; cap inner parallelism at the spawn
+      sites (GOMAXPROCS and -p at max(1, NumCPU/jobs) in the oracle
+      env) and run oracle processes at low scheduling priority; the
+      jobs default stands.
 - [ ] 39. gomutant: campaign robustness and cost (gomutant
       docs/issues: decision-build-locality,
       ephemeral-replacement-outside-oracle-closure,
@@ -236,6 +243,54 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       docs/issues/closure-edit-revert-inside-run-span) - the
       edit-revert-inside-span residual closes with the record
       redesign; doc deletes at close.
+- [x] 47. gofresh: func-field calls discharge under the
+      environment-free registration audit - the second re-measure's
+      unchanged 979 escapes-writable refusals: the leak-free engine
+      admits a call through a func-typed field of a bound entry (the
+      target is a field read, arguments keep the argument loop), and
+      the pre-existing Signature-classification hole this exposes -
+      a registered function value whose closure environment can write
+      state the settled verdict assumed stable - closes with a
+      composition-level audit: every direct store of a function-carrying
+      value into a carrier must be environment-free (plain named
+      functions, method expressions, audited literals); any other
+      value shape refuses the carrier with a named culprit, and the
+      init-exempt regions gain the carrier-argument deferral the spec
+      always owed them.
+- [ ] 48. gofresh: binding-argument deferral in the leak-free engine -
+      a bound entry's field passed as an argument to a plain named
+      function (the classifier's equalCols(header, class.columns)
+      shape) defers to that parameter's leak-free fact exactly as a
+      carrier argument does, resolved over the same persisted facts,
+      absence refusing.
+- [ ] 49. gofresh: returned-entry disposition - a helper returning a
+      carrier-bound entry (the registry's registeredClass shape) hands
+      the alias to its caller; the caller-side judgment prices the
+      returned entry like a binding, the returned-alias rung's plain
+      analogue.
+- [ ] 50. gofresh: audited-pure standard-set additions the named
+      verdicts justify - source-audit math/big value constructors,
+      time.Date, reflect.DeepEqual, and interface-type references of
+      the fmt.Stringer shape (the second re-measure's 131 named
+      refusals on value constructors and comparators).
+- [ ] 51. gofresh: subtest and fuzz drivers on the witness path -
+      testing.Run and testing.Fuzz reached by witnesses (176 named
+      refusals) are the standard subtest idiom; whether harness-internal
+      subtest execution joins the audited-harness admission for the
+      maximal scan needs its own design pass.
+- [ ] 52. gofresh: init-flow fill precision and cross-carrier aliasing -
+      a retention-only parameter fact class admits the synchronous
+      init-flow fill through a writing parameter that the leak-free
+      deferral conservatively refuses (the single-fact-class
+      conservatism the spec records), the same class extends the
+      receiver position (a method call on a carrier in an exempt
+      region marks nothing today - Registry.Keep() launching a
+      goroutine with its receiver composes Valid, while blanket
+      receiver deferral would refuse every legitimate init method
+      fill), and carrier-to-carrier aliasing (one carrier assigned or
+      copied from another in init flow) links the aliased keys so a
+      mutation of either refuses both - today the shared backing
+      splits across keys unlinked.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and

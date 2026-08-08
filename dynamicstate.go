@@ -79,6 +79,13 @@ type dynamicStateFact struct {
 	// composition so a cross-package init store fails the declaring
 	// package's opacity.
 	OpacityBreaks []string `json:"opacityBreaks,omitempty"`
+	// EnvCarrying holds the variable keys - own or foreign - into which
+	// this package's direct code stores a function-carrying value that is
+	// not provably environment-free. Unioned at composition: a carrier
+	// holding such a value refuses every observer with a named culprit -
+	// a registered closure's environment can write state the settled
+	// verdict assumed stable.
+	EnvCarrying []string `json:"envCarrying,omitempty"`
 	// PureMethods and ExternalMethods map "Recv.Method" to the declaration
 	// key of a method declaration carrying the respective directive, so a
 	// method promoted into a scanned type honors its directive without the
@@ -98,9 +105,15 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	paramUses := map[string]map[string]bool{}
 	var attributedUses []attributedUse
 	funcRefs := map[string]map[string]bool{}
+	envCarrying := map[string]bool{}
 	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
+	recordEnvCarryingRegistrations(p, envCarrying)
+	for key := range envCarrying {
+		fact.EnvCarrying = append(fact.EnvCarrying, key)
+	}
+	sort.Strings(fact.EnvCarrying)
 	for _, use := range attributedUses {
 		class := "m"
 		if use.escape {
@@ -440,6 +453,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// every declaring fact judges the variable object-closed.
 	mutated := map[string]bool{}
 	escaped := map[string]bool{}
+	envCarrying := map[string]bool{}
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
@@ -447,6 +461,9 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 			for _, key := range fact.Escapes {
 				escaped[key] = true
+			}
+			for _, key := range fact.EnvCarrying {
+				envCarrying[key] = true
 			}
 		}
 	}
@@ -639,6 +656,20 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				}
 				if escaped[key] && notOpaque[key] {
 					openWorld[pkgPath] = key + " escapes writable"
+				}
+			}
+		}
+		// A carrier holding a function value outside the environment-free
+		// audit refuses regardless of use shape: any admitted read path
+		// can extract and execute the value, and its environment can
+		// write state the settled verdict assumed stable.
+		for _, fact := range state.facts[pkgPath] {
+			for _, key := range fact.Declares {
+				if _, ok := openWorld[pkgPath]; ok {
+					break
+				}
+				if envCarrying[key] {
+					openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
 				}
 			}
 		}
