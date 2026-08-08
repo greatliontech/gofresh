@@ -92,12 +92,19 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       further pew issue folds in here (user-flagged, content briefed at
       chunk open); the chunk opens with a design discussion covering it
       and any surface redesign it implies, before implementation.
-- [ ] 25. gofresh: cross-package init-only registration (gofresh
+- [x] 25. gofresh: cross-package init-only registration (gofresh
       docs/issues/cross-package-init-only-registration.md) - the
       chunk-22 fixed point lifted to composition: function-attributed
       mutation facts plus per-fact foreign-reference regions prove an
       exported constructor init-only across the graph; the field
       probe's last first-party blocker.
+- [ ] 26. gomutant: serve-path provenance re-stamp (gomutant
+      docs/issues/served-record-provenance-frozen.md) - a pure serve
+      recomputes commit/dirty provenance like the growth and drift
+      serves already do, so a record born dirty promotes to the repo
+      findings document (attestations riding along) once its content
+      lands at a clean commit; without it, attest-before-commit
+      dispositions never reach teammates or CI.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and

@@ -3127,6 +3127,20 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade - a goroutine discharged with its function", verdict)
 		}
 	})
+	t.Run("go statement call argument stays program code", func(t *testing.T) {
+		// The carrier use sits in the go statement's ARGUMENT list, not
+		// nested in a function literal: only the go-statement half of the
+		// interiors walk keeps it program code. The goroutine outlives
+		// initialization and writes Hooks at runtime, so discharging the
+		// escape with the proven function would be unsound.
+		goarg := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc spill(m map[string]func()) { m[\"late\"] = func() {} }\n\nfunc Setup(name string) string {\n\tgo spill(Hooks)\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Setup(\"sibling\")\n\nfunc F() int { return reg.Count() }\n"}
+		dir := writeModuleTree(t, goarg)
+		subject := Subject{Package: "example.com/xreg/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks - a go-statement call argument discharged with its attributed function", verdict)
+		}
+	})
 	t.Run("transitive chain discharges", func(t *testing.T) {
 		chain := map[string]string{"go.mod": files["go.mod"], "reg/reg.go": "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc Outer(name string) string { return inner(name) }\n\nfunc inner(name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nfunc Count() int { return len(Hooks) }\n", "user/user.go": "package user\n\nimport \"example.com/xreg/reg\"\n\nvar K = reg.Outer(\"sibling\")\n\nfunc F() int { return reg.Count() }\n"}
 		dir := writeModuleTree(t, chain)
@@ -3169,6 +3183,42 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 		verdict := captureCheck(t, dir, subject)
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks is mutated") {
 			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks", verdict)
+		}
+	})
+}
+
+// A store the composition discharges as init flow must first pass the
+// object-closure audit, whichever package's function performs it: a
+// graph-proven function rebinding an interface variable to a non-audited
+// mutable construction breaks the closure (the discharge of the mutation
+// is correct - the ESCAPE must not also discharge), while an audited
+// construction through the same shape keeps it
+// (REQ-closure-shared-dynamic-state).
+func TestProvenInitFlowStoresAuditedForObjectClosure(t *testing.T) {
+	t.Run("non-audited store through a proven function breaks the closure", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Err error\n\nfunc SetErr(e error) { Err = e }\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\ntype impl struct{ N int }\n\nfunc (i *impl) Error() string { return \"boom\" }\n\nvar _ = seed()\n\nfunc seed() bool {\n\treg.SetErr(&impl{})\n\treturn true\n}\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Err escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Err - a non-audited store through a proven function kept the variable object-closed", verdict)
+		}
+	})
+	t.Run("audited construction through a proven function keeps the closure", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nimport \"errors\"\n\nvar Err error\n\nfunc Boot() { Err = errors.New(\"boot\") }\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\nvar _ = seed()\n\nfunc seed() bool {\n\treg.Boot()\n\treturn true\n}\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an audited construction through a proven function broke the closure", verdict)
 		}
 	})
 }

@@ -55,7 +55,18 @@ when its work lands (git holds history).
   check window now shares per phase; same amplification class, producer path, cost-only.
   *Lands: when the producer validation path next changes, or a field measurement shows
   validation-time digesting as a standing cost.*
-- **[cross-package-init-only-registration](cross-package-init-only-registration.md)** —
-  exported registration constructors called only from sibling packages' initializers are
-  init-only in fact but refused per-package; the chunk-22 fixed point lifts to composition.
-  *Lands: cross-tool train chunk 25.*
+- **[object-closure-initializer-address-capture](object-closure-initializer-address-capture.md)** —
+  an address capture of an interface variable inside a package-level initializer expression
+  escapes every audit arm, so a later init-body store through the captured pointer leaves the
+  variable object-closed: false Valid. *Lands: startup-effect-precision plan, per each doc.*
+- **[object-closure-selector-store-unaudited](object-closure-selector-store-unaudited.md)** —
+  selector-shaped cross-package stores (`reg.Err = errors.New(…)` in a sibling init) fail-close
+  without the value audit the spec's "from any package" clause requires; spurious refusal, with
+  a spec-amend fork. *Lands: startup-effect-precision plan, per each doc.*
+- **[object-closure-subtree-appearance-breaks](object-closure-subtree-appearance-breaks.md)** —
+  the audit's unattributable-store arm breaks closure over writeless appearances (an interface
+  var as a map key) in proven functions; fail-closed precision loss re-refusing the
+  registration shape, with a spec-amend fork. *Lands: startup-effect-precision plan, per each doc.*
+- **[deferred-init-flow-unpinned](deferred-init-flow-unpinned.md)** — "a deferred init call
+  stays init flow" holds only by non-interception of `DeferStmt` and no test pins it.
+  *Lands: startup-effect-precision plan, per each doc.*

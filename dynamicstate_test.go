@@ -231,6 +231,59 @@ func (Widget) External() int { return 2 }
 	}
 }
 
+// A persisted fact carrying an attribution the consumer cannot parse is
+// not trusted: every key the fact declares marks mutated — fail-closed
+// like every malformed-fact arm — and the downgrade names the declared
+// key (REQ-closure-shared-dynamic-state).
+func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|malformed-attribution-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	poison := func(mutate func(*dynamicStateFact)) {
+		var hit bool
+		processFactCache.Range(func(k, v any) bool {
+			if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+				fact := v.(dynamicStateFact)
+				mutate(&fact)
+				processFactCache.Store(k, fact)
+				hit = true
+			}
+			return true
+		})
+		if !hit {
+			t.Fatal("no errgroup fact in the process cache")
+		}
+	}
+
+	// Control: a crafted declaration alone must not downgrade anything.
+	poison(func(fact *dynamicStateFact) {
+		fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+	})
+	control := runScan(t, scope, dir, pkg)
+	if reason := control.downgradeReason[subject]; reason != "" {
+		t.Fatalf("declaration alone downgraded the subject: %q", reason)
+	}
+
+	// A 3-part attribution — its function key missing the NUL-joined
+	// name — cannot be judged and must not be dropped.
+	poison(func(fact *dynamicStateFact) {
+		fact.AttributedUses = append(fact.AttributedUses, "golang.org/x/sync/errgroup\x00Ghost\x00m")
+	})
+	poisoned := runScan(t, scope, dir, pkg)
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+		t.Fatalf("downgrade reason %q does not mark the declared key - a malformed attribution slipped through", reason)
+	}
+}
+
 // A pinned module's bucket moves when any pinned module reachable from it
 // changes version — the import-cone version signature completing the fact's
 // input identity (REQ-closure-dynamic-state-memo): a dependency bump that

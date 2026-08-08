@@ -87,7 +87,7 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	funcRefs := map[string]map[string]bool{}
 	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
-	recordOpaqueDynamicVars(p, opaque, breaks, initOnly)
+	recordOpaqueDynamicVars(p, opaque, breaks)
 	for _, use := range attributedUses {
 		class := "m"
 		if use.escape {
@@ -462,7 +462,6 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// absence of references fails closed. Attributed uses of proven
 	// functions discharge; the rest promote to their immediate class.
 	refRegions := map[string]map[string]bool{}
-	attributedFns := map[string]bool{}
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, edge := range fact.FuncRefs {
@@ -474,13 +473,6 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					refRegions[callee] = map[string]bool{}
 				}
 				refRegions[callee][region] = true
-			}
-			for _, use := range fact.AttributedUses {
-				if i := strings.LastIndexByte(use, 0); i >= 0 {
-					if j := strings.LastIndexByte(use[:i], 0); j >= 0 {
-						attributedFns[use[:j]] = true
-					}
-				}
 			}
 		}
 	}
@@ -510,7 +502,6 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
-	_ = attributedFns
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.AttributedUses {

@@ -1674,16 +1674,20 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 	}
 }
 
-// recordOpaqueDynamicVars judges, in the declaring package alone, which
-// interface-typed package-level variables are object-closed: the
-// initializer and every init-flow store are provably-immutable audited
-// constructions (errors.New; the nil zero value), so no holder of the
-// value can mutate the shared object and escapes of it are not
-// mutation. Rebinding stays mutation everywhere — a non-init store is a
-// demonstrated write in whatever package performs it, so opacity never
-// needs to audit those. The audited-construction set grows only by
-// source audit (REQ-closure-shared-dynamic-state).
-func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks, initOnly map[string]bool) {
+// recordOpaqueDynamicVars judges which interface-typed package-level
+// variables — own or foreign — are object-closed: the initializer and
+// every init-flow store are provably-immutable audited constructions
+// (errors.New; the nil zero value), so no holder of the value can
+// mutate the shared object and escapes of it are not mutation. Every
+// plain named function's direct body is audited, not just init bodies
+// and package-locally-proven helpers: whether a function is init flow
+// is settled only at composition (the graph-wide fixed point), and a
+// store the composition discharges as init flow must have passed this
+// audit — for a function that stays program code the store marks
+// mutation anyway, so the extra break is unobservable. The
+// audited-construction set grows only by source audit
+// (REQ-closure-shared-dynamic-state).
+func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
 	}
@@ -1773,17 +1777,11 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks, initOnly map[s
 				if decl.Recv != nil || decl.Name == nil || decl.Body == nil {
 					continue
 				}
-				// Init-only-reachable helpers are init flow: their
-				// stores are audited under the same rules as init
-				// bodies (REQ-closure-shared-dynamic-state).
-				if decl.Name.Name != "init" && !initOnly[decl.Name.Name] {
-					continue
-				}
 				ast.Inspect(decl.Body, func(n ast.Node) bool {
 					switch n := n.(type) {
 					case *ast.FuncLit:
-						// A literal nested in an init body is program
-						// code, not init flow - its stores are the
+						// A nested literal is program code wherever it
+						// appears, not init flow - its stores are the
 						// mutation walk's to judge, never audited here.
 						return false
 					case *ast.AssignStmt:
