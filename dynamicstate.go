@@ -133,7 +133,8 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 		}
 	}
 	sort.Strings(fact.FuncRefs)
-	for method := range receiverReadOnlyMethods(p) {
+	readOnly := receiverReadOnlyMethods(p)
+	for method := range readOnly {
 		if p.Types != nil {
 			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
 		}
@@ -146,7 +147,7 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
-		for paramKey := range paramLeakFreeFunctions(p) {
+		for paramKey := range paramLeakFreeFunctions(p, readOnly) {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
 		}
 	}

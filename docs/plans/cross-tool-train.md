@@ -268,7 +268,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       the alias to its caller; the caller-side judgment prices the
       returned entry like a binding, the returned-alias rung's plain
       analogue.
-- [ ] 50. gofresh: method calls through leak-free bindings defer to
+- [x] 50. gofresh: method calls through leak-free bindings defer to
       receiver-read-only facts - the third re-measure's standing
       factClassRegistry escape (757): a value-receiver read
       (class.admissionSpelling()) refuses the binding proof though the

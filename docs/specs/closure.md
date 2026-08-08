@@ -302,9 +302,17 @@ discharge carries them as the carrier's deferred argument marks resolved
 at composition, and a parameter's own fact-time proof chains only
 through same-package parameters to an intra-package fixed point, mutual
 recursion and cross-package chains unproven at fact time while the
-carried marks still resolve cross-package at composition; inside the
+carried marks still resolve cross-package at composition; and a method
+call on a bound value defers identically to the method's
+receiver-read-only fact — statically dispatched non-interface receivers
+only, the call's instantiated results handing out no mutable reach —
+carried as the carrier's deferred method-use marks in the existing
+encoding, an unproven method marking mutation fail-closed, with a
+fact-time parameter proof chaining only through same-package
+receiver-read-only methods; inside the
 judgment as at the discharge, no call within a go statement's subtree
-defers its arguments — a goroutine literal wrapping the call is the
+defers its arguments or its method receivers — a goroutine literal
+wrapping the call is the
 same concurrent execution as the direct spelling. A third narrowing
 admits return-position handouts: a range binding returned by an
 unexported plain named function discharges when every in-package use of

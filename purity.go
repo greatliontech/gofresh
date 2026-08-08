@@ -977,17 +977,20 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						// disposition judges its callers by package-local
 						// fixed point after the walk. A carrier the walk
 						// cannot key keeps the strict proof.
-						var wants map[string]bool
+						var wants, methodWants map[string]bool
 						var returned bool
 						var retPtr *bool
 						if paramUses != nil {
 							wants = map[string]bool{}
+							if methodUses != nil {
+								methodWants = map[string]bool{}
+							}
 							if currentFn != nil && currentFn.Recv == nil && currentFn.Name != nil && !currentFn.Name.IsExported() && currentFn.Name.Name != "init" {
 								retPtr = &returned
 							}
 						}
-						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr)) {
-							if len(wants) == 0 && !returned {
+						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr, methodWants)) {
+							if len(wants) == 0 && len(methodWants) == 0 && !returned {
 								markRead(n.X)
 							} else {
 								var keys []string
@@ -1012,6 +1015,12 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 										}
 										for want := range wants {
 											paramUses[key][want] = true
+										}
+										if len(methodWants) > 0 && methodUses[key] == nil {
+											methodUses[key] = map[string]bool{}
+										}
+										for want := range methodWants {
+											methodUses[key][want] = true
 										}
 									}
 									if returned {
@@ -1458,12 +1467,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							return true
 						}
 						siteWants := map[string]bool{}
+						var siteMethodWants map[string]bool
+						if methodUses != nil {
+							siteMethodWants = map[string]bool{}
+						}
 						var siteReturned bool
 						var siteRet *bool
 						if siteEligible {
 							siteRet = &siteReturned
 						}
-						if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet) {
+						if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet, siteMethodWants) {
 							bad[fnName] = true
 							return true
 						}
@@ -1473,6 +1486,14 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 									paramUses[key] = map[string]bool{}
 								}
 								paramUses[key][want] = true
+							}
+						}
+						for want := range siteMethodWants {
+							for key := range returnerKeys[fnName] {
+								if methodUses[key] == nil {
+									methodUses[key] = map[string]bool{}
+								}
+								methodUses[key][want] = true
 							}
 						}
 						if siteReturned {
@@ -2384,18 +2405,24 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 // defer, the goroutine runs concurrently
 // (REQ-closure-shared-dynamic-state).
 func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
-	return boundValueLeakFreeJudged(p, roots, body, nil, nil)
+	return boundValueLeakFreeJudged(p, roots, body, nil, nil, nil)
 }
 
 func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
-	return boundValueLeakFreeJudged(p, roots, body, wants, nil)
+	return boundValueLeakFreeJudged(p, roots, body, wants, nil, nil)
 }
 
 // boundValueLeakFreeJudged additionally tolerates return-position handouts
-// when the caller supplies a returns collector: a rooted alias-handing
+// when the caller supplies a returns collector - a rooted alias-handing
 // result consumes and sets the flag instead of refusing, for the
-// returned-binding disposition to judge the function's own callers.
-func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool) bool {
+// returned-binding disposition to judge the function's own callers - and,
+// when the caller supplies a methodWants collector, defers a method call
+// on a bound value to that method's receiver-read-only fact: non-interface
+// receivers only, the call's instantiated results handing out no mutable
+// reach, never from a go statement's subtree; the collected method keys
+// ride the carrier's deferred method-use marks, an unproven method marking
+// mutation fail-closed at composition.
+func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
@@ -2541,6 +2568,25 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			allowed[ident] = true
 		}
 	}
+	// methodValueBind reports a method-value selector: binding one captures
+	// its receiver inside a func value the reach classification cannot see
+	// (Signature hands out nothing), so every position except the immediate
+	// call refuses (REQ-closure-shared-dynamic-state).
+	methodValueBind := func(expr ast.Expr) bool {
+		for {
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			expr = paren.X
+		}
+		sel, ok := expr.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		selection, ok := p.TypesInfo.Selections[sel]
+		return ok && selection.Kind() == types.MethodVal
+	}
 	leaky := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		if leaky {
@@ -2551,20 +2597,26 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			if len(n.Lhs) == len(n.Rhs) {
 				for i, rhs := range n.Rhs {
 					if rooted(rhs) {
-						if _, ok := n.Lhs[i].(*ast.Ident); ok {
+						if methodValueBind(rhs) {
+							leaky = true
+						} else if _, ok := n.Lhs[i].(*ast.Ident); ok {
 							consume(rhs)
 						}
 					}
 				}
 			} else if len(n.Rhs) == 1 && rooted(n.Rhs[0]) {
-				allIdent := true
-				for _, lhs := range n.Lhs {
-					if _, ok := lhs.(*ast.Ident); !ok {
-						allIdent = false
+				if methodValueBind(n.Rhs[0]) {
+					leaky = true
+				} else {
+					allIdent := true
+					for _, lhs := range n.Lhs {
+						if _, ok := lhs.(*ast.Ident); !ok {
+							allIdent = false
+						}
 					}
-				}
-				if allIdent {
-					consume(n.Rhs[0])
+					if allIdent {
+						consume(n.Rhs[0])
+					}
 				}
 			}
 			for _, lhs := range n.Lhs {
@@ -2594,14 +2646,22 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			if len(n.Names) == len(n.Values) {
 				for i, rhs := range n.Values {
 					if rooted(rhs) {
+						if methodValueBind(rhs) {
+							leaky = true
+							continue
+						}
 						consume(rhs)
 						allowed[n.Names[i]] = true
 					}
 				}
 			} else if len(n.Values) == 1 && rooted(n.Values[0]) {
-				consume(n.Values[0])
-				for _, name := range n.Names {
-					allowed[name] = true
+				if methodValueBind(n.Values[0]) {
+					leaky = true
+				} else {
+					consume(n.Values[0])
+					for _, name := range n.Names {
+						allowed[name] = true
+					}
 				}
 			}
 		case *ast.IncDecStmt:
@@ -2642,12 +2702,14 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			for _, result := range n.Results {
 				if rooted(result) {
 					if t := p.TypesInfo.TypeOf(result); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
-						if returns != nil && t != nil && !litReturns[n] {
+						if returns != nil && t != nil && !litReturns[n] && !methodValueBind(result) {
 							*returns = true
 							consume(result)
 						} else {
 							leaky = true
 						}
+					} else if methodValueBind(result) {
+						leaky = true
 					} else {
 						consume(result)
 					}
@@ -2667,11 +2729,22 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && rooted(sel.X) {
 				selection, selOK := p.TypesInfo.Selections[sel]
 				if selOK && selection.Kind() == types.MethodVal {
-					if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(fn) {
+					fn, isFunc := selection.Obj().(*types.Func)
+					if isFunc && auditedSynchronization(fn) {
 						consume(sel.X)
 						break
 					}
-					leaky = true
+					// A method call on a bound value defers to the
+					// method's receiver-read-only fact: statically
+					// dispatched, results handing out no mutable reach,
+					// never concurrently - mirroring the carrier-receiver
+					// deferral, resolved through the same marks.
+					if isFunc && methodWants != nil && !goCalls[n] && fn.Pkg() != nil && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+						methodWants[methodFactKey(fn)] = true
+						consume(sel.X)
+					} else {
+						leaky = true
+					}
 				} else if selOK && selection.Kind() == types.FieldVal {
 					// A func-typed field invoked through the binding hands
 					// the callee only its arguments - judged by the
@@ -2711,6 +2784,8 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 						if !deferred {
 							leaky = true
 						}
+					} else if methodValueBind(arg) {
+						leaky = true
 					} else {
 						consume(arg)
 					}
@@ -2763,7 +2838,7 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 // unnamed parameters cannot be referenced and are leak-free by
 // construction; parameters whose type hands out no mutable reach are
 // omitted - no carrier can flow into them.
-func paramLeakFreeFunctions(p *packages.Package) map[string]bool {
+func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) map[string]bool {
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
@@ -2780,6 +2855,11 @@ func paramLeakFreeFunctions(p *packages.Package) map[string]bool {
 	if p.Types != nil {
 		ownPath = p.Types.Path()
 	}
+	// Method wants at fact time resolve against the package's own
+	// receiver-read-only fixed point, computed once by the fact assembly;
+	// a cross-package method want leaves the parameter unproven exactly
+	// as a cross-package parameter want does - the range discharge
+	// carries those as deferred marks instead.
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -2807,7 +2887,19 @@ func paramLeakFreeFunctions(p *packages.Package) map[string]bool {
 						continue
 					}
 					wants := map[string]bool{}
-					if !boundValueLeakFreeDeferred(p, map[types.Object]bool{obj: true}, fd.Body, wants) {
+					methodWants := map[string]bool{}
+					if !boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants) {
+						continue
+					}
+					methodsProven := true
+					for want := range methodWants {
+						pkgPath, rest, ok := strings.Cut(want, "\x00")
+						if !ok || pkgPath != ownPath || !readOnlyLocal[rest] {
+							methodsProven = false
+							break
+						}
+					}
+					if !methodsProven {
 						continue
 					}
 					key := fd.Name.Name + "\x00" + strconv.Itoa(idx)
@@ -3056,6 +3148,21 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				allowed[ident] = true
 			}
 		}
+		methodValueBind := func(expr ast.Expr) bool {
+			for {
+				paren, ok := expr.(*ast.ParenExpr)
+				if !ok {
+					break
+				}
+				expr = paren.X
+			}
+			sel, ok := expr.(*ast.SelectorExpr)
+			if !ok {
+				return false
+			}
+			selection, ok := p.TypesInfo.Selections[sel]
+			return ok && selection.Kind() == types.MethodVal
+		}
 		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.AssignStmt:
@@ -3097,7 +3204,12 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					for i, rhs := range n.Rhs {
 						governRHS(i, rhs)
 						if recvRooted(rhs) {
-							if _, ok := n.Lhs[i].(*ast.Ident); ok {
+							// A method-value bind captures the receiver
+							// inside a func value the reach classification
+							// cannot see - fail-closed.
+							if methodValueBind(rhs) {
+								disqualified[key] = true
+							} else if _, ok := n.Lhs[i].(*ast.Ident); ok {
 								consume(rhs)
 							}
 						}
@@ -3105,13 +3217,16 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				} else if len(n.Rhs) == 1 {
 					governRHS(-1, n.Rhs[0])
 					if recvRooted(n.Rhs[0]) {
+						if methodValueBind(n.Rhs[0]) {
+							disqualified[key] = true
+						}
 						allIdent := true
 						for _, lhs := range n.Lhs {
 							if _, ok := lhs.(*ast.Ident); !ok {
 								allIdent = false
 							}
 						}
-						if allIdent {
+						if allIdent && !methodValueBind(n.Rhs[0]) {
 							consume(n.Rhs[0])
 						}
 					}
@@ -3173,6 +3288,13 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				// position still escapes its arguments).
 				for _, result := range n.Results {
 					if recvRooted(result) {
+						// A method-value result captures the receiver
+						// inside a func value the caller's result check
+						// cannot see - fail-closed.
+						if methodValueBind(result) {
+							disqualified[key] = true
+							continue
+						}
 						consume(result)
 					}
 					if call, ok := result.(*ast.CallExpr); ok {
