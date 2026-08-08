@@ -111,7 +111,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       preferred-reason selection, so a subject refused for reaching fmt
       names the package and symbol; the field re-measure's 413 fmt
       verdicts are unjudgeable without it.
-- [ ] 28. gofresh: init-flow escape discharge for registry carriers -
+- [x] 28. gofresh: init-flow escape discharge for registry carriers -
       the field re-measure's 979 escapes-writable refusals: a carrier
       passed to a graph-proven init-flow callee whose parameter
       demonstrably leaks nothing discharges the escape
@@ -126,6 +126,116 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       fixed, and the unrefinable-class interaction is settled;
       display-only (verdicts unchanged), so it rides after the
       re-measure.
+- [ ] 30. gomutant: consumer-surface bounds and visibility (gomutant
+      docs/issues: findings-output-unbounded,
+      changed-mode-oracle-delta-routing, attest-and-promotion-visibility,
+      plan-and-progress-cosmetics) - bounded findings summary by
+      default with detail opt-in, capped reason lists, the residue
+      row's re-measure signpost, attest echoing disposition and layer,
+      the promotion-commit warning, and the two progress cosmetics;
+      the four docs delete at close.
+- [ ] 31. gomutant: record correctness and lifecycle (gomutant
+      docs/issues: detached-record-lifecycle, fresh-stamp-manifest-base,
+      growth-drift-promotion-untested) - prune and retarget verbs with
+      attestations carried by survivor identity, terminal labeling of
+      resolved-dead records, per-subject manifest bases for the fresh
+      stamp and Committable, and the growth/drift promotion-shape
+      pins; the three docs delete at close.
+- [ ] 32. gofresh: init-flow audit completion (gofresh docs/issues:
+      object-closure-initializer-address-capture,
+      object-closure-selector-store-unaudited,
+      object-closure-subtree-appearance-breaks,
+      deferred-init-flow-unpinned) - initializer-expression captures
+      audited (the remaining false Valid), selector-shaped
+      cross-package stores value-audited, writeless subtree
+      appearances discharged per the spec's precision sentence, and
+      the deferred-init-flow pin; also closes the alias-scan residue
+      the spec records: a qualified helper's parameter bound at the
+      init call site (init(){setup(Hooks)} with the literal writing
+      through setup's param) and a composite-target binding (s.m =
+      Hooks then the literal writes s.m) both currently stay invisible
+      to the init-alias fixpoint - both are reachable wrong-Valid
+      shapes with reviewer reproducers; the four docs delete at close.
+- [ ] 33. gofresh: open-world dynamic edges named and refined - the
+      field report's biggest cost (caller-supplied dynamic triggered
+      by dependency interface dispatch wipes caching for yaml-heavy
+      packages, ~25 minutes per run over 929 candidates) with no call
+      edge named in the reason; the naming half follows the chunk-27
+      pattern, the refinement half narrows the open-world rule over
+      proven dependency dispatch.
+- [ ] 34. gofresh: startup-walk soundness pair (gofresh docs/issues:
+      dotless-module-paths-classified-standard,
+      func-value-self-capture) - a dotless module path silently
+      disables the whole startup walk, and receiver-stored closures
+      launder receiver writes through read-only proofs; both docs
+      delete at close.
+- [ ] 35. gofresh: verdict precision and validation cost (gofresh
+      docs/issues: enumeration-targets-over-approximated,
+      validation-manifest-evaluation-unshared,
+      fresh-mutation-in-module-scratch) - dispatch target sets stop
+      dragging initializer content into siblings, producer validation
+      shares manifest evaluation, and disciplined in-module scratch
+      goes recordless; three docs delete at close.
+- [ ] 36. gofresh: analysis-surface structure (gofresh docs/issues:
+      one-dispatch-site-classifier, observation-facts-struct) - one
+      call-site judgment and one observation-facts shape, collapsing
+      the five partial classifier copies and the three hand-built View
+      literals; two docs delete at close.
+- [ ] 37. cross-tool: runtimeinput producer facade (gofresh
+      docs/issues/runtimeinput-producer-facade, gomutant
+      docs/issues/oracle-scratch-namespaces) - one facade for the
+      completed-observation conjunction across stipulator, gomutant,
+      and pew, carrying the scratch-namespace declaration surface that
+      stops union-equality churn; both docs delete at close.
+- [ ] 38. gomutant: hot-loop committable evidence (gomutant
+      docs/issues: staged-snapshot-run-mode, env-input-oracle-policy,
+      runtime-input-provenance) - staged-index measurement collapses
+      the attest-promote-commit trail, the reviewed exemption record
+      unblocks the repo-root idiom, and producer-output provenance
+      stops re-measures the evidence already covers; three docs delete
+      at close.
+- [ ] 39. gomutant: campaign robustness and cost (gomutant
+      docs/issues: decision-build-locality,
+      ephemeral-replacement-outside-oracle-closure,
+      post-completion-cpu-tail) - one broken target stops aborting the
+      campaign, out-of-closure overlays stop reading as survivors, and
+      the post-completion spin is profiled and closed; three docs
+      delete at close.
+- [ ] 40. gomutant: init bodies as measured subjects (gomutant
+      docs/issues/init-functions-as-subjects) - the classic
+      silent-fault carrier becomes measurable end-to-end; doc deletes
+      at close.
+- [ ] 41. cross-tool: the MCP surface contract (gomutant
+      docs/issues/mcp-long-running-runs, stipulator
+      docs/issues/mcp-progress-not-observed) - the standing principle
+      lands in both MCP specs: the MCP surface outranks the CLI and
+      serves an LLM in a harness - minimal output, maximal usefulness;
+      both surfaces audited against it, cancellation propagation and
+      live progress included; both docs delete at close.
+- [ ] 42. stipulator: correctness batch (stipulator docs/issues:
+      term-matcher-ascii-boundaries, partitions-uncapped-seam-unpinned,
+      scope-prefix-boundary-semantics, witness-store-gc,
+      gopter-property-recognition) - rune-boundary term matching, the
+      seam pin, boundary-aware scoping with the dropped-diagnostic
+      fix, store eviction for departed identities, and gopter witness
+      classification; five docs delete at close.
+- [ ] 43. stipulator: publication ladder collapse (stipulator
+      docs/issues/publication-ladder-collapse) - one publication
+      ladder, one closing validation; doc deletes at close.
+- [ ] 44. pew: trust, cost, and the derivation loop (pew docs/issues:
+      recorded-config-trust, per-benchmark-view-builds,
+      derivation-ab-mode) - read-side recording validation, per-package
+      view sharing, and pew ab replacing the hand stash cycle; three
+      docs delete at close.
+- [ ] 45. stipulator: slice frontier soundness (stipulator
+      docs/issues/slice-frontier-uncertainty) - typed frontiers gain
+      the closure model's sound floor and dispositions over
+      reflection, build tags, and init effects; doc deletes at close.
+- [ ] 46. stipulator: witness fingerprints bind closure content to the
+      consuming compile (stipulator
+      docs/issues/closure-edit-revert-inside-run-span) - the
+      edit-revert-inside-span residual closes with the record
+      redesign; doc deletes at close.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and

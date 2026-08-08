@@ -10,4 +10,4 @@ added for any other reason would likely poison it). Pin it: a fixture
 where an initializer-driven function defers the registering helper and
 the subject stays Valid.
 
-Lands: startup-effect-precision plan, per each doc.
+Lands: cross-tool train chunk 32.

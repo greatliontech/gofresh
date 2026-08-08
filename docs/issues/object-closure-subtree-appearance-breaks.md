@@ -22,4 +22,4 @@ Fork for the spec-amend channel (user decides; spec wins by default):
   appearance of an interface variable inside an unattributable store's
   target subtree breaks the closure, wherever it occurs".
 
-Lands: startup-effect-precision plan, per each doc.
+Lands: cross-tool train chunk 32.

@@ -31,4 +31,4 @@ Empirically demonstrated: a probe module of exactly this shape returns
 a Valid verdict with no downgrade reason. The reproducer above is
 complete — port it as the regression fixture when this lands.
 
-Lands: startup-effect-precision plan, per each doc.
+Lands: cross-tool train chunk 32.

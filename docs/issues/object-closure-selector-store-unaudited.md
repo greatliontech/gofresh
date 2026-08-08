@@ -20,4 +20,4 @@ Fork for the spec-amend channel (user decides; spec wins by default):
   "a direct store the auditing package resolves to the variable"
   becomes "an unqualified identifier store (dot-import included)".
 
-Lands: startup-effect-precision plan, per each doc.
+Lands: cross-tool train chunk 32.

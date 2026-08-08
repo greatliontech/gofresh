@@ -265,7 +265,32 @@ attribute — an indirect or range-bound store, an address capture, or a
 non-audited value — breaks the closure from whichever package performs it. No holder of
 an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere. The
-audited-construction set grows only by source audit.
+audited-construction set grows only by source audit. An escape never
+discharges by init flow — the alias outlives initialization. Proven
+init-only functions are scanned for escapes under the full use-shape
+rules; `init` bodies and qualified helpers are scanned exactly for
+alias-creating bindings — an init-flow local bound from a carrier by
+whole-identifier assignment or range binding, chained to a fixpoint,
+is the carrier inside nested program code; a binding the scan cannot
+attribute (a helper parameter bound at the init call site, a composite
+target such as a struct field) is a recorded residue of this clause —
+while init-flow stores and calls stay exempt. Two further narrowings
+discharge specific escape shapes by proof: a carrier passed as a direct
+call argument to a plain named function — a deferred call included, a go
+statement's arguments never, since the goroutine runs concurrently —
+defers to that parameter's leak-free fact, recorded by the declaring
+package (the bound value provably never writes, escapes, or outlives
+the call, with every unrecognized use refusing) and resolved at
+composition, absence refusing; and a range binding over an alias-handing
+carrier discharges the iteration read when every alias-handing bound
+value is proven leak-free over the loop body by the same judgment,
+fail-closed on any other binding shape. Persisted parameter facts key
+package path, function name, and zero-based parameter index NUL-joined;
+deferred argument marks join the variable key to that parameter key —
+an entry a consumer cannot parse marks every variable its fact declares,
+fail-closed like every malformed-fact arm (a malformed deferral of a
+foreign variable keeps only the declaring fact's marks — the accepted
+residual every malformed-fact arm shares).
 `init` flow is the initializer expressions, the `init` bodies, and the
 init-only-reachable functions: plain named functions — exported included —
 whose every reference, in every package of the analyzed graph, is a direct

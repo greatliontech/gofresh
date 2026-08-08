@@ -3187,6 +3187,242 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 	})
 }
 
+// A carrier escape discharges only by proof, never by init flow - an
+// alias outlives initialization in a proven function exactly as in an
+// init body. The two proofs: a leak-free callee parameter (deferred to
+// composition, cross-package included), and a leak-free range binding
+// over the loop body (REQ-closure-shared-dynamic-state).
+func TestCarrierEscapeDischarges(t *testing.T) {
+	goMod := "module example.com/xesc\n\ngo 1.26\n"
+	t.Run("escape through a proven function stays escaped", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nvar stash map[string]func()\n\nfunc Keep(m map[string]func()) { stash = m }\n\nfunc Seed() { Keep(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade - a retaining callee reached through a proven init-only chain aliased the registry into runtime-writable state", verdict)
+		}
+	})
+	t.Run("return escape through a proven function stays escaped", func(t *testing.T) {
+		// The carrier is returned, not argument-passed: no parameter
+		// proof applies, and the alias lands in the caller's package
+		// state - init flow must not launder it.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc Grab() map[string]func() { return Hooks }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar G = reg.Grab()\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade - a returned alias discharged with its proven function", verdict)
+		}
+	})
+	t.Run("leak-free consumer discharges the argument escape", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc check(m map[string]func()) {\n\tfor k := range m {\n\t\t_ = k\n\t}\n}\n\nfunc Seed() { check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a provably leak-free consumer refused the discharge", verdict)
+		}
+	})
+	t.Run("func-typed hook argument stays valid", func(t *testing.T) {
+		// A non-alias-handing carrier cannot be rebound through an
+		// argument - it must not enter the parameter deferral, whose
+		// facts deliberately omit no-reach parameters and would refuse
+		// the ubiquitous callback-passing shape.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hook = func() {}\n\nfunc use(f func()) {}\n\nfunc F() { use(Hook) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc G() { reg.F() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "G"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a func-typed hook argument entered the unresolvable deferral", verdict)
+		}
+	})
+	t.Run("bare range over a carrier discharges", func(t *testing.T) {
+		// A binding-free range aliases nothing.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Count() int {\n\tn := 0\n\tfor range Registry {\n\t\tn++\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a binding-free range refused", verdict)
+		}
+	})
+	t.Run("declared local alias read discharges", func(t *testing.T) {
+		// var-declared bindings track exactly like := bindings.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc peek(m map[string]func()) int {\n\tvar x = m\n\treturn len(x)\n}\n\nfunc Seed() { _ = peek(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a var-declared tracked binding refused the proof", verdict)
+		}
+	})
+	t.Run("declared local alias write refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc poke(m map[string]func()) {\n\tvar x = m\n\tx[\"k\"] = func() {}\n}\n\nfunc Seed() { poke(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks") {
+			t.Fatalf("verdict = %+v, want the downgrade - a write through a var-declared binding passed the proof", verdict)
+		}
+	})
+	t.Run("deferred call argument earns the discharge", func(t *testing.T) {
+		// A deferred call is synchronous at function exit - the
+		// parameter proof bounds the alias exactly as a plain call's.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc check(m map[string]func()) {\n\tfor k := range m {\n\t\t_ = k\n\t}\n}\n\nfunc Seed() { defer check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a deferred call's argument lost the parameter deferral", verdict)
+		}
+	})
+	t.Run("aliased local read discharges", func(t *testing.T) {
+		// The consumer binds the parameter to a local and reads through
+		// it - the tracked binding keeps every arm, so the proof holds.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc peek(m map[string]func()) int {\n\tx := m\n\treturn len(x)\n}\n\nfunc Seed() { _ = peek(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a tracked local binding refused the proof it stays inside", verdict)
+		}
+	})
+	t.Run("literal reading an init-local alias discharges", func(t *testing.T) {
+		// The nested literal only length-reads the aliased local - the
+		// read shapes apply to the alias exactly as to the carrier.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nvar Size func() int\n\nfunc init() {\n\tm := Hooks\n\tSize = func() int { return len(m) }\n}\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a length-read through the init-local alias refused", verdict)
+		}
+	})
+	t.Run("go statement argument keeps the escape", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc check(m map[string]func()) {\n\tfor k := range m {\n\t\t_ = k\n\t}\n}\n\nfunc Seed() { go check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks") {
+			t.Fatalf("verdict = %+v, want the downgrade - a goroutine's argument earned the synchronous deferral", verdict)
+		}
+	})
+	t.Run("unrecognized consumer use refuses", func(t *testing.T) {
+		// The parameter appears only inside a composite literal - a shape
+		// no enumerated arm classifies; the engine's catch-all ident
+		// visit must refuse it, fail-closed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc hold(m map[string]func()) {\n\tpair := []any{m}\n\t_ = pair\n}\n\nfunc Seed() { hold(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade - an unclassified parameter use passed the leak-free proof", verdict)
+		}
+	})
+	t.Run("cross-package retaining callee refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"val/val.go":   "package val\n\nvar held map[string]func()\n\nfunc Register(m map[string]func()) { held = m }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/val\"\n\nvar Hooks = map[string]func(){}\n\nfunc Seed() { val.Register(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade - a foreign retaining parameter discharged", verdict)
+		}
+	})
+	t.Run("cross-package leak-free callee discharges", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"val/val.go":   "package val\n\nfunc Check(m map[string]func()) int { return len(m) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/val\"\n\nvar Hooks = map[string]func(){}\n\nfunc Seed() { val.Check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nvar _ = boot()\n\nfunc boot() bool {\n\treg.Seed()\n\treturn true\n}\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a foreign leak-free parameter refused the discharge", verdict)
+		}
+	})
+	t.Run("leak-free range binding discharges the iteration", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Labels() []string {\n\tout := []string{}\n\tfor _, e := range Registry {\n\t\tout = append(out, e.Label)\n\t}\n\treturn out\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return len(reg.Labels()) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free alias-handing range binding refused the discharge", verdict)
+		}
+	})
+	t.Run("range binding retained beyond the loop refuses", func(t *testing.T) {
+		// The binding is copied into a local declared OUTSIDE the loop
+		// body - the alias survives where the loop-body arms cannot see
+		// its uses, so the proof must refuse.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Last() []string {\n\tvar save entry\n\tfor _, e := range Registry {\n\t\tsave = e\n\t}\n\treturn save.Cols\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return len(reg.Last()) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - an outside-body retention passed the loop proof", verdict)
+		}
+	})
+	t.Run("leaking range binding keeps the escape", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Columns() []string {\n\tout := []string{}\n\tfor _, e := range Registry {\n\t\tout = append(out, e.Cols...)\n\t}\n\treturn out\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return len(reg.Columns()) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - an alias-handing field flowed out of the loop unrefused", verdict)
+		}
+	})
+}
+
 // A store the composition discharges as init flow must first pass the
 // object-closure audit, whichever package's function performs it: a
 // graph-proven function rebinding an interface variable to a non-audited
@@ -3358,11 +3594,11 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.ErrX is mutated",
 		},
 		"mutable-object sentinel escape": {
-			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc use(err error) error { return err }\n\nfunc F() { _ = use(ErrX) }\n",
 			culprit: "example.com/view.ErrX escapes writable",
 		},
 		"registry map escape": {
-			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc take(m map[string]func()) {}\n\nfunc F() { take(Hooks) }\n",
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nfunc take(m map[string]func()) map[string]func() { return m }\n\nfunc F() { _ = take(Hooks) }\n",
 			culprit: "example.com/view.Hooks escapes writable",
 		},
 		"channel range receives": {
@@ -3390,7 +3626,7 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.Hooks is mutated",
 		},
 		"helper stores non-audited sentinel": {
-			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar _ = setup()\n\nfunc setup() bool {\n\tErrX = &impl{}\n\treturn true\n}\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar _ = setup()\n\nfunc setup() bool {\n\tErrX = &impl{}\n\treturn true\n}\n\nfunc use(err error) error { return err }\n\nfunc F() { _ = use(ErrX) }\n",
 			culprit: "example.com/view.ErrX escapes writable",
 		},
 		"initializer-literal reference is program code": {
@@ -3522,11 +3758,30 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.Hooks is mutated",
 		},
 		"range-bound init store breaks opacity": {
-			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar errs = []error{&impl{}}\n\nfunc init() { for _, ErrX = range errs {} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nvar errs = []error{&impl{}}\n\nfunc init() { for _, ErrX = range errs {} }\n\nfunc use(err error) error { return err }\n\nfunc F() { _ = use(ErrX) }\n",
 			culprit: "example.com/view.ErrX escapes writable",
 		},
+		"init-local alias captured by a literal marks the carrier": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Mut func()\n\nfunc init() {\n\tm := Hooks\n\tMut = func() { m[\"x\"] = func() {} }\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"init-local alias handed out by a literal escapes the carrier": {
+			// The argument is a local, so the parameter deferral never
+			// applies - the alias-carrier ident arm must mark the
+			// carrier the local aliases.
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Mut func()\n\nfunc keep(m map[string]func()) {}\n\nfunc init() {\n\tm := Hooks\n\tMut = func() { keep(m) }\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks escapes writable",
+		},
+		"chained init-local alias marks the carrier": {
+			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar Mut func()\n\nfunc init() {\n\ta := Hooks\n\tb := a\n\tMut = func() { b[\"x\"] = func() {} }\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
 		"indirect init store breaks opacity": {
-			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nfunc init() { p := &ErrX; *p = &impl{} }\n\nfunc use(err error) {}\n\nfunc F() { use(ErrX) }\n",
+			// The consumer retains its parameter, so the escape stands
+			// and the verdict turns on the opacity the indirect store
+			// broke; an empty consumer would discharge the escape by the
+			// leak-free parameter proof and never reach opacity at all.
+			source:  "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error\n\nfunc init() { p := &ErrX; *p = &impl{} }\n\nfunc use(err error) error { return err }\n\nfunc F() { _ = use(ErrX) }\n",
 			culprit: "example.com/view.ErrX escapes writable",
 		},
 	} {

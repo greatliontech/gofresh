@@ -79,7 +79,7 @@ func DisableMemos() { closure.DisableMemos() }
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@7"
+const DynamicStateStrategy = "gofresh/dynamic-state@8"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

@@ -51,6 +51,18 @@ type dynamicStateFact struct {
 	// only when the method key is proven read-only by its declaring
 	// fact; otherwise the variable marks mutated - fail-closed.
 	MethodUses []string `json:"methodUses,omitempty"`
+	// ParamLeakFree holds the parameter keys (package path, function
+	// name, zero-based parameter index joined by NUL) this package
+	// declares and proves unable to write, retain, or hand out the
+	// bound value.
+	ParamLeakFree []string `json:"paramLeakFree,omitempty"`
+	// ParamUses holds deferred call-argument marks: variable key and
+	// callee parameter key joined by NUL. At composition the use is
+	// discharged only when the parameter is proven leak-free by its
+	// declaring fact; otherwise the variable marks escaped -
+	// fail-closed, init flow included, because an alias outlives
+	// initialization.
+	ParamUses []string `json:"paramUses,omitempty"`
 	// AttributedUses holds carrier uses recorded inside plain named
 	// functions - function key, variable key, and use class joined by
 	// NUL - discharged at composition when the graph proves the
@@ -83,9 +95,10 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	initOnly := initOnlyReachableHelpers(p)
 	methodUses := map[string]map[string]bool{}
+	paramUses := map[string]map[string]bool{}
 	var attributedUses []attributedUse
 	funcRefs := map[string]map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, &attributedUses)
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
 	for _, use := range attributedUses {
@@ -119,6 +132,18 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 		}
 	}
 	sort.Strings(fact.MethodUses)
+	if p.Types != nil {
+		for paramKey := range paramLeakFreeFunctions(p) {
+			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
+		}
+	}
+	sort.Strings(fact.ParamLeakFree)
+	for varKey, paramKeys := range paramUses {
+		for paramKey := range paramKeys {
+			fact.ParamUses = append(fact.ParamUses, varKey+"\x00"+paramKey)
+		}
+	}
+	sort.Strings(fact.ParamUses)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}
@@ -456,6 +481,35 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
+	// Deferred call-argument uses resolve against the leak-free
+	// parameter union: a use whose callee parameter no fact proves
+	// leak-free marks the variable escaped - fail-closed, init flow
+	// included, because an alias outlives initialization
+	// (REQ-closure-shared-dynamic-state).
+	paramLeakFree := map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, key := range fact.ParamLeakFree {
+				paramLeakFree[key] = true
+			}
+		}
+	}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, use := range fact.ParamUses {
+				parts := strings.SplitN(use, "\x00", 2)
+				if len(parts) != 2 || strings.Count(parts[1], "\x00") != 2 {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if !paramLeakFree[parts[1]] {
+					escaped[parts[0]] = true
+				}
+			}
+		}
+	}
 	// The cross-package init-only fixed point: a plain named function is
 	// init flow when every reference to it, in every fact, is init flow
 	// or comes from a function itself proven init flow; "prog" poisons,
@@ -517,12 +571,19 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				}
 				fn := parts[0] + "\x00" + parts[1]
 				key, class := parts[2], parts[3]
+				if class == "e" {
+					// An escape never discharges by init flow: the alias
+					// outlives initialization, exactly as in an init body.
+					// Only a proven leak-free consumer discharges an
+					// escape, and those uses defer as ParamUses instead
+					// of attributing (REQ-closure-shared-dynamic-state).
+					escaped[key] = true
+					continue
+				}
 				if refRegions[fn] != nil && initOnlyFn[fn] {
 					continue
 				}
 				switch {
-				case class == "e":
-					escaped[key] = true
 				case class == "d" && len(parts) >= 6:
 					if !readOnly[parts[4]+"\x00"+parts[5]] {
 						mutated[key] = true

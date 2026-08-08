@@ -148,6 +148,8 @@ func take(map[string]func()) {}
 
 func Escape() { take(Hooks) }
 
+func Pass() map[string]func() { return Hooks }
+
 func Rebind() { Hook = nil }
 
 type Widget int
@@ -199,8 +201,14 @@ func (Widget) External() int { return 2 }
 	if !contains(restored.FuncRefs, "example.com/factsrc\x00take\x01example.com/factsrc\x00Escape") {
 		t.Fatalf("fact lost the reference-region edge - a dropped edge starves the fixed point: %+v", restored.FuncRefs)
 	}
-	if !contains(restored.AttributedUses, "example.com/factsrc\x00Escape\x00example.com/factsrc.Hooks\x00e") {
+	if !contains(restored.AttributedUses, "example.com/factsrc\x00Pass\x00example.com/factsrc.Hooks\x00e") {
 		t.Fatalf("fact lost the attributed escape - a dropped attribution silently closes an open package: %+v", restored)
+	}
+	if !contains(restored.ParamUses, "example.com/factsrc.Hooks\x00example.com/factsrc\x00take\x000") {
+		t.Fatalf("fact lost the deferred call-argument mark - a dropped deferral silently closes an open package: %+v", restored.ParamUses)
+	}
+	if !contains(restored.ParamLeakFree, "example.com/factsrc\x00take\x000") {
+		t.Fatalf("fact lost the leak-free parameter proof - a dropped proof refuses every deferred argument: %+v", restored.ParamLeakFree)
 	}
 	if !contains(restored.Opaque, "example.com/factsrc.ErrSentinel") {
 		t.Fatalf("fact lost opacity content: %+v", restored)
@@ -281,6 +289,43 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 	poisoned := runScan(t, scope, dir, pkg)
 	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
 		t.Fatalf("downgrade reason %q does not mark the declared key - a malformed attribution slipped through", reason)
+	}
+}
+
+// A persisted deferred call-argument mark the consumer cannot parse is
+// not trusted: every key the fact declares marks mutated — fail-closed
+// like every malformed-fact arm (REQ-closure-shared-dynamic-state).
+func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|malformed-param-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+			// One NUL only - the callee parameter key lost its frame.
+			fact.ParamUses = append(fact.ParamUses, "golang.org/x/sync/errgroup.Ghost\x00bad")
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+	poisoned := runScan(t, scope, dir, pkg)
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+		t.Fatalf("downgrade reason %q does not mark the declared key - a malformed deferral slipped through", reason)
 	}
 }
 
