@@ -2269,18 +2269,26 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 }
 
 // plainNamedCalleeFn resolves a call's callee to a plain named function -
-// a bare identifier or a package-qualified selector, receiverless - the
-// one callee shape whose returns a persisted proof can audit. Generic
-// instantiations (an index-expression callee) deliberately resolve to
-// nothing - conservative.
+// a bare identifier or a package-qualified selector, receiverless,
+// explicit generic instantiations included (the dependency key is
+// instantiation-independent: the proof judges the generic body, type
+// parameters falling to the signature walk's fail-closed default) - the
+// one callee shape whose returns a persisted proof can audit.
 func plainNamedCalleeFn(p *packages.Package, call *ast.CallExpr) *types.Func {
 	fun := call.Fun
 	for {
-		paren, ok := fun.(*ast.ParenExpr)
-		if !ok {
-			break
+		switch f := fun.(type) {
+		case *ast.ParenExpr:
+			fun = f.X
+			continue
+		case *ast.IndexExpr:
+			fun = f.X
+			continue
+		case *ast.IndexListExpr:
+			fun = f.X
+			continue
 		}
-		fun = paren.X
+		break
 	}
 	var obj types.Object
 	switch fun := fun.(type) {
@@ -2377,6 +2385,11 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			// breaks with it.
 			localSources := map[types.Object][]ast.Expr{}
 			localBroken := map[types.Object]bool{}
+			// aliasPairs links bindings that share mutable backing (a
+			// whole-identifier bind of a reach-bearing tracked value):
+			// a break through either name is a break of the storage, so
+			// breaks propagate across the pairs to a fixed point.
+			var aliasPairs [][2]types.Object
 			trackedVar := func(obj types.Object) (*types.Var, bool) {
 				v, ok := obj.(*types.Var)
 				if !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope() || !carries(v.Type()) {
@@ -2386,8 +2399,8 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			}
 			// breakTargets breaks every tracked local or parameter an
 			// expression subtree reaches - the fail-closed disposition
-			// for element, field, and dereference writes, whose storage
-			// is the base binding's however the write is spelled.
+			// for address captures, whose write path the binding walk
+			// cannot see.
 			breakTargets := func(expr ast.Expr) {
 				ast.Inspect(expr, func(n ast.Node) bool {
 					if ident, ok := n.(*ast.Ident); ok {
@@ -2404,10 +2417,34 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					return true
 				})
 			}
+			// breakBase breaks the written target's base binding: an
+			// element, field, or dereference write reaches the base's
+			// storage, while index operands and other subexpressions
+			// are reads and stay judged.
+			breakBase := func(target ast.Expr) {
+				base := unparen(target)
+				for {
+					switch b := base.(type) {
+					case *ast.SelectorExpr:
+						base = b.X
+					case *ast.IndexExpr:
+						base = b.X
+					case *ast.StarExpr:
+						base = b.X
+					case *ast.ParenExpr:
+						base = b.X
+					default:
+						if ident, ok := base.(*ast.Ident); ok {
+							breakTargets(ident)
+						}
+						return
+					}
+				}
+			}
 			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
 				ident, ok := unparen(target).(*ast.Ident)
 				if !ok {
-					breakTargets(target)
+					breakBase(target)
 					return
 				}
 				obj := p.TypesInfo.Defs[ident]
@@ -2426,6 +2463,70 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				if broken || source == nil {
 					localBroken[obj] = true
 					return
+				}
+				// Append onto the binding itself flows only the new
+				// elements: the existing contents were judged at their
+				// own bind sites - the self-reference must not feed the
+				// judgment cycle.
+				if call, ok := unparen(source).(*ast.CallExpr); ok {
+					if fnIdent, ok := unparen(call.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[fnIdent].(*types.Builtin); builtin && fnIdent.Name == "append" && len(call.Args) > 0 {
+							if base, ok := unparen(call.Args[0]).(*ast.Ident); ok {
+								if p.TypesInfo.Uses[base] == obj {
+									localSources[obj] = append(localSources[obj], call.Args[1:]...)
+									return
+								}
+							}
+							// A fresh-base append may share the base's
+							// backing whenever capacity suffices - the
+							// bound target aliases the base, so breaks
+							// propagate between them. The base may itself
+							// be an append chain; every level may share
+							// the innermost base's backing.
+							baseExpr := unparen(call.Args[0])
+							for {
+								inner, ok := baseExpr.(*ast.CallExpr)
+								if !ok {
+									break
+								}
+								innerFn, ok := unparen(inner.Fun).(*ast.Ident)
+								if !ok {
+									break
+								}
+								if _, b := p.TypesInfo.Uses[innerFn].(*types.Builtin); !b || innerFn.Name != "append" || len(inner.Args) == 0 {
+									break
+								}
+								baseExpr = unparen(inner.Args[0])
+							}
+							// The hunt may stop at a non-ident base (a
+							// slice expression, an index, a call) - any
+							// tracked name inside it may own the backing.
+							// Pairs only propagate breaks that occur, so
+							// linking every candidate is
+							// precision-preserving.
+							ast.Inspect(baseExpr, func(m ast.Node) bool {
+								id, ok := m.(*ast.Ident)
+								if !ok {
+									return true
+								}
+								if bobj := p.TypesInfo.Uses[id]; bobj != nil {
+									_, tracked := trackedVar(bobj)
+									if tracked || params[bobj] {
+										aliasPairs = append(aliasPairs, [2]types.Object{obj, bobj})
+									}
+								}
+								return true
+							})
+						}
+					}
+				}
+				if srcIdent, ok := unparen(source).(*ast.Ident); ok {
+					if sobj := p.TypesInfo.Uses[srcIdent]; sobj != nil {
+						_, tracked := trackedVar(sobj)
+						if (tracked || params[sobj]) && typeHandsOutMutableReach(sobj.Type(), make(map[types.Type]bool)) {
+							aliasPairs = append(aliasPairs, [2]types.Object{obj, sobj})
+						}
+					}
 				}
 				localSources[obj] = append(localSources[obj], source)
 			}
@@ -2461,6 +2562,12 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						for i, lhs := range n.Lhs {
 							bindLocal(lhs, n.Rhs[i], false)
 						}
+					} else if len(n.Rhs) == 1 {
+						// A multi-value bind shares the one source: a
+						// judged call's every result is judged.
+						for _, lhs := range n.Lhs {
+							bindLocal(lhs, n.Rhs[0], false)
+						}
 					} else {
 						for _, lhs := range n.Lhs {
 							bindLocal(lhs, nil, true)
@@ -2471,18 +2578,55 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						for i, name := range n.Names {
 							bindLocal(name, n.Values[i], false)
 						}
-					} else {
+					} else if len(n.Values) == 1 {
 						for _, name := range n.Names {
-							// A zero-valued declaration carries nothing.
-							if len(n.Values) != 0 {
-								bindLocal(name, nil, true)
+							bindLocal(name, n.Values[0], false)
+						}
+					}
+					// A zero-valued declaration carries nothing.
+				case *ast.RangeStmt:
+					// A range binding derives from the ranged value only
+					// for containers whose elements ARE the value -
+					// slices, arrays, maps, strings, integers. A channel
+					// receives sender-supplied values and a function
+					// range receives yield-supplied ones; neither is part
+					// of the judged operand, so those bindings break.
+					// Writes through the binding still break it.
+					container := false
+					if t := p.TypesInfo.TypeOf(n.X); t != nil {
+						switch u := types.Unalias(t).Underlying().(type) {
+						case *types.Slice, *types.Array, *types.Map, *types.Basic:
+							container = true
+						case *types.Pointer:
+							_, isArr := types.Unalias(u.Elem()).Underlying().(*types.Array)
+							container = isArr
+						}
+					}
+					for _, bind := range []ast.Expr{n.Key, n.Value} {
+						if bind != nil {
+							if container {
+								bindLocal(bind, n.X, false)
+							} else {
+								bindLocal(bind, nil, true)
 							}
 						}
 					}
-				case *ast.RangeStmt:
-					for _, bind := range []ast.Expr{n.Key, n.Value} {
-						if bind != nil {
-							bindLocal(bind, nil, true)
+				case *ast.SelectorExpr:
+					// A pointer-receiver method use addresses its
+					// receiver with no & in the syntax - a write path or
+					// capture the binding walk cannot see. An in-package
+					// receiver-read-only proof exempts it; everything
+					// else breaks the base.
+					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
+						if fn, ok := selection.Obj().(*types.Func); ok {
+							if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
+								if _, ptr := types.Unalias(sig.Recv().Type()).(*types.Pointer); ptr {
+									pkgPath, rest, ok := strings.Cut(methodFactKey(fn), "\x00")
+									if !ok || pkgPath != ownPath || !readOnly[rest] {
+										breakBase(n.X)
+									}
+								}
+							}
 						}
 					}
 				case *ast.CallExpr:
@@ -2494,6 +2638,17 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 				return true
 			})
+			// Breaks propagate across shared backing before any
+			// judgment reads the map.
+			for changed := true; changed; {
+				changed = false
+				for _, pair := range aliasPairs {
+					if localBroken[pair[0]] != localBroken[pair[1]] {
+						localBroken[pair[0]], localBroken[pair[1]] = true, true
+						changed = true
+					}
+				}
+			}
 			fnDeps := map[string]bool{}
 			var free func(expr ast.Expr) bool
 			localFree := map[types.Object]int{} // 0 unknown, 1 proving, 2 free, 3 refused
@@ -2583,7 +2738,10 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						case types.MethodVal:
 							return false
 						}
-						return false
+						// A field read of a judged value is judged: the
+						// field is part of what the caller or the source
+						// judgment already covered.
+						return free(e.X)
 					}
 					if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
 						if _, isFunc := obj.(*types.Func); isFunc {
@@ -2591,11 +2749,59 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						}
 					}
 					return false
-				case *ast.CallExpr:
-					if ident, ok := unparen(e.Fun).(*ast.Ident); ok {
-						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "make" || ident.Name == "new") {
+				case *ast.IndexExpr:
+					// An instantiated function reference (a generic named
+					// function used as a value) carries no environment;
+					// element reads are not a chartered derivation and
+					// keep the refusal.
+					switch x := unparen(e.X).(type) {
+					case *ast.Ident:
+						if _, isFunc := p.TypesInfo.Uses[x].(*types.Func); isFunc {
 							return true
 						}
+					case *ast.SelectorExpr:
+						if _, isFunc := p.TypesInfo.Uses[x.Sel].(*types.Func); isFunc {
+							return true
+						}
+					}
+					return false
+				case *ast.IndexListExpr:
+					// The multi-type-argument spelling of the same
+					// instantiated reference.
+					switch x := unparen(e.X).(type) {
+					case *ast.Ident:
+						if _, isFunc := p.TypesInfo.Uses[x].(*types.Func); isFunc {
+							return true
+						}
+					case *ast.SelectorExpr:
+						if _, isFunc := p.TypesInfo.Uses[x.Sel].(*types.Func); isFunc {
+							return true
+						}
+					}
+					return false
+				case *ast.CallExpr:
+					if ident, ok := unparen(e.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+							switch ident.Name {
+							case "make", "new":
+								return true
+							case "append":
+								// Judged elements onto a judged base stay
+								// judged.
+								for _, arg := range e.Args {
+									if !free(arg) {
+										return false
+									}
+								}
+								return true
+							}
+							return false
+						}
+					}
+					if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.IsType() {
+						// A conversion of a judged value is judged: the
+						// value is the same, under a different name.
+						return len(e.Args) == 1 && free(e.Args[0])
 					}
 					if fn := plainNamedCalleeFn(p, e); fn != nil {
 						for _, arg := range e.Args {

@@ -316,7 +316,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       carrier (the dispatch-table shape legs[token](inv)) admits with
       arguments judged like the func-field call's; extraction that
       binds or hands out the element keeps the escape.
-- [ ] 60. gofresh: constructor bodies derive - the fifth probe grounds
+- [x] 60. gofresh: constructor bodies derive - the fifth probe grounds
       the generated-threshold chain in building constructors
       (threshold.MustRegistry, money.mustCurrencyCatalog): the
       return-environment-free judgment gains a caller-judged derivation
@@ -329,6 +329,27 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       to the signature walk's fail-closed default) - every other
       derivation keeps the refusal, and writes through any judged
       binding break it exactly as today.
+- [ ] 61. gofresh: aggregate writes of judged values derive - the sixth
+      review's anchor trace: both field chains now die at their last
+      link, a judged value written into the result aggregate under
+      construction (temporal.NewRegistry's series[coord] = s,
+      mustCurrencyCatalog's c.current = current); an element, field, or
+      dereference write whose WRITTEN VALUE judges becomes a source of
+      the written base instead of a break - the base stays judged
+      exactly when everything stored into it judges - while unjudged
+      written values keep the break; completes the
+      building-constructor derivation the anchors need.
+- [ ] 62. gofresh: call-result argument aliasing in the derivation
+      class - a bind whose source is a call of a judged plain named
+      callee records no alias with its arguments, so an
+      identity-shaped callee (func id(s []handler) []handler { return
+      s }) hands back its argument's backing and a write through the
+      result swaps the argument's element while the argument stays
+      judged (reproduces on HEAD through the constructor door); either
+      a call-source bind links the target to every reach-bearing
+      tracked argument - conservative pairing, breaks propagating only
+      when a write occurs - or the leak-free proof gains an
+      argument-flows-to-result bit deciding the link precisely.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a

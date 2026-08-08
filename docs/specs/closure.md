@@ -371,7 +371,9 @@ closures reach — with a
 reference to the alias set from a go statement's call outside any
 literal refusing outright. A call result whose callee is a plain named
 function — a bare identifier or package-qualified selector,
-receiverless — defers to that callee's return-environment-free proof:
+receiverless, explicit generic instantiation included with the
+dependency key instantiation-independent — defers to that callee's
+return-environment-free proof:
 the store records the callee against the carrier, the call's arguments
 judged recursively by this audit (a carrying argument poisons the
 store), and composition admits the store exactly when the proof
@@ -381,11 +383,33 @@ audit with parameters assumed environment-free — the caller's
 obligation, discharged at each call site by the recursive argument
 judgment, and an argument that is itself a plain-named-callee call
 defers identically, its callee joining the recorded set; a
-signature-carrying local judges by every whole-identifier
-binding source that reaches it, to a fixed point — a zero-valued
-declaration binds the nil zero value, environment-free — while any
-other bind shape, an element, field, or dereference write reaching the
-binding, an address capture of it, or any bind position or address
+signature-carrying local judges by every binding source that reaches
+it, to a fixed point, where a source judges through the caller-judged
+derivations — a whole-identifier bind of a judged value, a multi-value
+bind sharing one judged call, a range binding over a judged container
+whose elements are the value itself — slices, arrays, pointers to
+arrays, maps, strings,
+integers; a channel's elements are sender-supplied and a function
+range's yield-supplied, so those bindings break — a field read of a
+judged value, an append
+onto a distinct base aliasing the two names (spare capacity shares the
+backing, so breaks propagate between them; a nested append chain
+aliases the target to the chain's innermost base, and a base that is
+not a plain name aliases the target to every judged name within
+it), an append
+of judged elements (an append onto the binding itself flowing only the
+new elements), a conversion of a judged value, an instantiated
+reference of a named function, and a call of a plain named callee with
+judged arguments, explicit generic instantiation included with the
+dependency key instantiation-independent — and a zero-valued
+declaration binds the nil zero value, environment-free; while any
+other derivation, an element, field, or dereference write reaching the
+binding (the written base breaks; index operands and other
+subexpressions stay reads), an address capture of it — the implicit
+address of a pointer-receiver method use included, exempting methods
+the declaring package proves receiver-read-only — a bind whose source
+shares mutable backing propagating breaks both ways, or any bind
+position or address
 capture of a parameter, breaks the binding or the parameter's
 caller-judged assumption outright; a returned literal is audited exactly as a registered
 literal with the constructor body as its enclosing scope, its
