@@ -268,12 +268,31 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       the alias to its caller; the caller-side judgment prices the
       returned entry like a binding, the returned-alias rung's plain
       analogue.
-- [ ] 50. gofresh: audited-pure standard-set additions the named
+- [ ] 50. gofresh: method calls through leak-free bindings defer to
+      receiver-read-only facts - the third re-measure's standing
+      factClassRegistry escape (757): a value-receiver read
+      (class.admissionSpelling()) refuses the binding proof though the
+      receiver-read-only fact already proves it; the MethodVal arm
+      collects wanted method keys exactly as the argument deferral
+      collects parameter keys, carried through the existing MethodUses
+      channel, absence refusing.
+- [ ] 51. gofresh: constructor-result registration audit - the third
+      re-measure's registers-function-values family (normativeThresholds
+      across four duties packages, officialCurrencyCatalog): a carrier
+      initialized from a plain named in-package constructor
+      (var K = generated()) audits the constructor's returned
+      registrations instead of poisoning as an opaque call result -
+      result expressions judged by the environment audit over the
+      constructor body, locals flowing into results audited like
+      carrier stores, nested in-package constructor calls chaining by
+      the package-local fixed point; every other shape keeps the
+      poison.
+- [ ] 53. gofresh: audited-pure standard-set additions the named
       verdicts justify - source-audit math/big value constructors,
       time.Date, reflect.DeepEqual, and interface-type references of
       the fmt.Stringer shape (the second re-measure's 131 named
       refusals on value constructors and comparators).
-- [ ] 51. gofresh: subtest and fuzz drivers on the witness path -
+- [ ] 54. gofresh: subtest and fuzz drivers on the witness path -
       testing.Run and testing.Fuzz reached by witnesses (176 named
       refusals) are the standard subtest idiom; whether harness-internal
       subtest execution joins the audited-harness admission for the
