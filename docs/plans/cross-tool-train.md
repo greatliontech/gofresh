@@ -257,7 +257,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       value shape refuses the carrier with a named culprit, and the
       init-exempt regions gain the carrier-argument deferral the spec
       always owed them.
-- [ ] 48. gofresh: binding-argument deferral in the leak-free engine -
+- [x] 48. gofresh: binding-argument deferral in the leak-free engine -
       a bound entry's field passed as an argument to a plain named
       function (the classifier's equalCols(header, class.columns)
       shape) defers to that parameter's leak-free fact exactly as a

@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -945,8 +946,47 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								roots[obj] = true
 							}
 						}
-						if sound && (len(roots) == 0 || boundValueLeakFree(p, roots, n.Body)) {
-							markRead(n.X)
+						// The binding proof may defer rooted arguments to
+						// plain named parameters: the wants ride the
+						// carrier as deferred argument marks, resolved at
+						// composition exactly like a direct carrier
+						// argument's - a carrier the walk cannot key keeps
+						// the strict proof.
+						var wants map[string]bool
+						if paramUses != nil {
+							wants = map[string]bool{}
+						}
+						if sound && (len(roots) == 0 || boundValueLeakFreeDeferred(p, roots, n.Body, wants)) {
+							if len(wants) == 0 {
+								markRead(n.X)
+							} else {
+								var keys []string
+								ast.Inspect(n.X, func(inner ast.Node) bool {
+									if ident, ok := inner.(*ast.Ident); ok {
+										if obj, ok := resolve(ident); ok {
+											if variable, ok := dynamicPackageVar(obj); ok {
+												keys = append(keys, dynamicVarKey(variable))
+											} else {
+												for key := range aliasedLocals[obj] {
+													keys = append(keys, key)
+												}
+											}
+										}
+									}
+									return true
+								})
+								if len(keys) > 0 {
+									for _, key := range keys {
+										if paramUses[key] == nil {
+											paramUses[key] = map[string]bool{}
+										}
+										for want := range wants {
+											paramUses[key][want] = true
+										}
+									}
+									markRead(n.X)
+								}
+							}
 						}
 					}
 				}
@@ -969,10 +1009,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					markRead(n.Y)
 				}
 			case *ast.GoStmt:
-				// A goroutine's call runs concurrently with everything
-				// after it - its arguments never earn the parameter
-				// deferral (REQ-closure-shared-dynamic-state).
-				goCalls[n.Call] = true
+				// A goroutine's calls - the direct call and any call
+				// nested in its subtree - run concurrently with
+				// everything after it: none of their arguments earn the
+				// parameter deferral (REQ-closure-shared-dynamic-state).
+				ast.Inspect(n, func(inner ast.Node) bool {
+					if call, ok := inner.(*ast.CallExpr); ok {
+						goCalls[call] = true
+					}
+					return true
+				})
 			case *ast.CallExpr:
 				if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
 					calledSelectors[sel] = true
@@ -1983,12 +2029,39 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 // consumed, so an unrecognized use fails closed rather than open.
 // Field and index reads are allowed when the produced type hands out no
 // mutable reach, or in a tainting assignment where the binding stays
-// tracked; len, cap, and comparison are writeless reads
+// tracked; len, cap, and comparison are writeless reads.
+// boundValueLeakFree proves with every unproven shape refusing outright;
+// boundValueLeakFreeDeferred additionally lets a rooted argument to a
+// plain named function defer to that parameter's leak-free fact - the
+// wants set collects the parameter keys (package path, function name,
+// zero-based index NUL-joined) the proof relies on, for the caller to
+// resolve or carry as deferred marks; a go statement's arguments never
+// defer, the goroutine runs concurrently
 // (REQ-closure-shared-dynamic-state).
 func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
+	return boundValueLeakFreeDeferred(p, roots, body, nil)
+}
+
+func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
+	// Every call within a go statement's subtree runs concurrently with
+	// the walked body - a call wrapped in a goroutine literal exactly as
+	// the direct spelling - so none of them defers.
+	goCalls := map[*ast.CallExpr]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if g, ok := n.(*ast.GoStmt); ok {
+			ast.Inspect(g, func(inner ast.Node) bool {
+				if call, ok := inner.(*ast.CallExpr); ok {
+					goCalls[call] = true
+				}
+				return true
+			})
+			return false
+		}
+		return true
+	})
 	tainted := map[types.Object]bool{}
 	isRoot := func(expr ast.Expr) bool {
 		ident, ok := expr.(*ast.Ident)
@@ -2242,11 +2315,30 @@ func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body a
 			}
 			// A rooted argument whose type hands out no mutable reach is
 			// a copied scalar - the callee cannot reach the carrier
-			// through it.
-			for _, arg := range n.Args {
+			// through it; an alias-handing rooted argument to a plain
+			// named function defers to that parameter's leak-free fact
+			// when the caller collects wants - never from a go
+			// statement's call, the goroutine runs concurrently.
+			for i, arg := range n.Args {
 				if rooted(arg) {
 					if t := p.TypesInfo.TypeOf(arg); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
-						leaky = true
+						deferred := false
+						if wants != nil && !goCalls[n] {
+							if fn, pkgPath := plainCalleeFunc(p, n.Fun); fn != nil {
+								if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() == nil && sig.Params().Len() > 0 {
+									idx := i
+									if sig.Variadic() && idx >= sig.Params().Len()-1 {
+										idx = sig.Params().Len() - 1
+									}
+									wants[pkgPath+"\x00"+fn.Name()+"\x00"+strconv.Itoa(idx)] = true
+									consume(arg)
+									deferred = true
+								}
+							}
+						}
+						if !deferred {
+							leaky = true
+						}
 					} else {
 						consume(arg)
 					}
@@ -2304,6 +2396,18 @@ func paramLeakFreeFunctions(p *packages.Package) map[string]bool {
 		return nil
 	}
 	proven := map[string]bool{}
+	// A parameter's proof may rely on sibling parameters: a rooted
+	// argument handed to another plain named function in the same
+	// package chains when that parameter proves leak-free - an
+	// intra-package fixed point, mutual recursion refusing, any
+	// cross-package want unproven at fact time (the range discharge
+	// carries those as deferred marks instead; a fact-side chain stays
+	// package-local, fail-closed).
+	conditional := map[string]map[string]bool{}
+	ownPath := ""
+	if p.Types != nil {
+		ownPath = p.Types.Path()
+	}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -2330,10 +2434,48 @@ func paramLeakFreeFunctions(p *packages.Package) map[string]bool {
 					if !typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
 						continue
 					}
-					if boundValueLeakFree(p, map[types.Object]bool{obj: true}, fd.Body) {
-						proven[fd.Name.Name+"\x00"+strconv.Itoa(idx)] = true
+					wants := map[string]bool{}
+					if !boundValueLeakFreeDeferred(p, map[types.Object]bool{obj: true}, fd.Body, wants) {
+						continue
+					}
+					key := fd.Name.Name + "\x00" + strconv.Itoa(idx)
+					if len(wants) == 0 {
+						proven[key] = true
+						continue
+					}
+					local := map[string]bool{}
+					crossPackage := false
+					for want := range wants {
+						pkgPath, rest, ok := strings.Cut(want, "\x00")
+						if !ok || pkgPath != ownPath {
+							crossPackage = true
+							break
+						}
+						local[rest] = true
+					}
+					if !crossPackage {
+						conditional[key] = local
 					}
 				}
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for key, needs := range conditional {
+			if proven[key] {
+				continue
+			}
+			ok := true
+			for need := range needs {
+				if !proven[need] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				proven[key] = true
+				changed = true
 			}
 		}
 	}

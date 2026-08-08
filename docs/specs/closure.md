@@ -294,8 +294,21 @@ value is proven leak-free over the loop body by the same judgment,
 fail-closed on any other binding shape — where the leak-free judgment
 recognizes the call of a func-typed field of a bound value: the target
 is the field read the read shapes already judge, and the callee receives
-only its arguments, judged like any call. Persisted parameter facts key
-package path, function name, and zero-based parameter index NUL-joined;
+only its arguments, judged like any call; and where a rooted
+alias-handing argument to a plain named function defers to that
+parameter's leak-free fact exactly as a carrier argument does — the
+binding proof records the parameter keys it relies on, the range
+discharge carries them as the carrier's deferred argument marks resolved
+at composition, and a parameter's own fact-time proof chains only
+through same-package parameters to an intra-package fixed point, mutual
+recursion and cross-package chains unproven at fact time while the
+carried marks still resolve cross-package at composition; inside the
+judgment as at the discharge, no call within a go statement's subtree
+defers its arguments — a goroutine literal wrapping the call is the
+same concurrent execution as the direct spelling. Persisted parameter facts key
+package path, function name, and zero-based parameter index NUL-joined
+— a variadic call's trailing arguments key the final declared
+parameter's index;
 deferred argument marks join the variable key to that parameter key —
 an entry a consumer cannot parse marks every variable its fact declares,
 fail-closed like every malformed-fact arm (a malformed deferral of a
