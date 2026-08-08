@@ -392,6 +392,8 @@ set. Every reachable call and effect is classified to the walk's end; the prefer
 human diagnostic is derived afterward and can never select which facts
 participate: a refusal names the highest-ranked blocking effect under one
 cause-preference order shared with the legacy single-reason projection —
+the maximal tier's package diagnostic is an instance of that projection
+and owes the same order —
 structural findings, mutations, and every classification not expressly
 down-ranked (standard input, network, plugin, native, linkage included)
 rank top; then the generic file read; then ambient formatting and

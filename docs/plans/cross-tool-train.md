@@ -105,6 +105,27 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       findings document (attestations riding along) once its content
       lands at a clean commit; without it, attest-before-commit
       dispositions never reach teammates or CI.
+- [x] 27. gofresh: external-dependence refusals name their sink (gofresh
+      docs/issues/unnamed-external-dependence-verdict.md) - effects
+      added by the unaudited-standard-operation arm feed the
+      preferred-reason selection, so a subject refused for reaching fmt
+      names the package and symbol; the field re-measure's 413 fmt
+      verdicts are unjudgeable without it.
+- [ ] 28. gofresh: init-flow escape discharge for registry carriers -
+      the field re-measure's 979 escapes-writable refusals: a carrier
+      passed to a graph-proven init-flow callee whose parameter
+      demonstrably leaks nothing discharges the escape
+      (parameter-effect facts, the plain-call analogue of the
+      receiver-effect rung), and a range-value binding over a carrier
+      whose element type hands out mutable reach discharges when the
+      binding is demonstrably read-only; fail-closed everywhere else.
+- [ ] 29. gofresh: maximal-tier reason ranking conforms to the shared
+      order (gofresh docs/issues/maximal-tier-reason-ranking.md) - rank
+      plumbing replaces the per-file stratum switch and the two-class
+      package fold, the shared rank table's packagePath branch is
+      fixed, and the unrefinable-class interaction is settled;
+      display-only (verdicts unchanged), so it rides after the
+      re-measure.
 - [ ] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and

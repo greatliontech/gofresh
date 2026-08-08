@@ -34,6 +34,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	}
 	aliases := make(map[string]string, len(file.Imports))
 	potentialExternal := ""
+	unauditedReason := ""
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -47,6 +48,9 @@ func referenceMaximalFileReason(filename string) (string, error) {
 		if pkgPath == "testing" {
 			if alias == "." {
 				potentialExternal = pkgPath
+				if unauditedReason == "" {
+					unauditedReason = "reaches testing (potential external dependence)"
+				}
 			}
 			continue
 		}
@@ -58,6 +62,9 @@ func referenceMaximalFileReason(filename string) (string, error) {
 		}
 		if potentialExternal == "" && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
 			potentialExternal = pkgPath
+		}
+		if (alias == "." || alias == "_") && (packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) && unauditedReason == "" {
+			unauditedReason = "reaches " + pkgPath + " (potential external dependence)"
 		}
 	}
 
@@ -78,6 +85,9 @@ func referenceMaximalFileReason(filename string) (string, error) {
 					if classified := classBReason(pkgPath, sel.Sel.Name); classified != "" {
 						reason = classified
 						return false
+					}
+					if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) && unauditedReason == "" {
+						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
 			}
@@ -101,6 +111,9 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	})
 	if reason == "" {
 		reason = referenceTestingMethodReason(file, aliases)
+	}
+	if reason == "" {
+		reason = unauditedReason
 	}
 	if reason != "" {
 		return reason, nil

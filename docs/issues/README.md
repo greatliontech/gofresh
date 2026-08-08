@@ -41,11 +41,13 @@ when its work lands (git holds history).
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
   *Lands: startup-effect-precision plan, per each doc.*
-- **[unnamed-external-dependence-verdict](unnamed-external-dependence-verdict.md)** —
-  effects added by the unaudited-standard-operation arm never feed the preferred-reason
-  selection, so subjects they refuse serve a bare "external dependence" with no package
-  or symbol named. *Lands: when the reason selection next changes, or with the first
-  field diagnosis blocked on an unnamed verdict.*
+- **[maximal-tier-reason-ranking](maximal-tier-reason-ranking.md)** — every effect-adding
+  arm now names its reason and effect-backed reasons outrank effectless fallbacks, but the
+  maximal tier's precedence remains its own stratum-switch-plus-lexicographic scheme with
+  demonstrated rank inversions; the spec now settles that the tier owes the shared
+  cause-preference order (legacy lexicographic ties), so the rank plumbing, the
+  effectCauseRank packagePath fix, the unrefinable-class interaction, and the property pin
+  land together. *Lands: cross-tool train chunk 29.*
 - **[func-value-self-capture](func-value-self-capture.md)** — receiver-stored func values
   whose closures capture the receiver read as reach-free, laundering receiver writes
   through proven-read-only bindings; pre-existing Signature-classification hole. *Lands: startup-effect-precision

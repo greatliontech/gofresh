@@ -130,17 +130,12 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 	}
 	var effects []externalEffect
 	var selected string
+	var selectedBacked bool
 	record := func(scan maximalEffectScan) {
 		for _, effect := range scan.effects {
 			effects = appendExternalEffect(effects, effect)
 		}
-		reason := scan.preferred
-		if reason == "" {
-			return
-		}
-		if selected == "" || preferMaximalReason(reason, selected) {
-			selected = reason
-		}
+		selected, selectedBacked = foldMaximalPreferred(selected, selectedBacked, scan)
 	}
 	testingEffects, err := h.maximalTestingTypeEffects(pkgPath)
 	if err != nil {
@@ -198,6 +193,31 @@ func preferMaximalReason(candidate, current string) bool {
 		return candidateOpaque
 	}
 	return candidate < current
+}
+
+// foldMaximalPreferred folds one scan's preferred diagnostic into the
+// package-level selection. An effect-backed reason names a real blocker;
+// a scan with no effects offers only the import fallback, which must
+// never displace — or outrank — the cause of an actual refusal, so
+// backed reasons form a strictly stronger class and preferMaximalReason
+// orders only within a class
+// (REQ-closure-observability-analysis's cause-preference order).
+func foldMaximalPreferred(selected string, selectedBacked bool, scan maximalEffectScan) (string, bool) {
+	reason := scan.preferred
+	if reason == "" {
+		return selected, selectedBacked
+	}
+	backed := len(scan.effects) != 0
+	if backed != selectedBacked {
+		if backed {
+			return reason, true
+		}
+		return selected, selectedBacked
+	}
+	if selected == "" || preferMaximalReason(reason, selected) {
+		return reason, selectedBacked
+	}
+	return selected, selectedBacked
 }
 
 func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
@@ -375,9 +395,19 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 	// The preferred diagnostic's precedence over the same single walk:
 	// directives, then the first always-external import, then the first
 	// classified selector or call, then the testing-method scan, then the
-	// potential-external import fallback.
+	// first unaudited-standard effect, then the potential-external import
+	// fallback. Every effect-adding arm feeds a reason, so a subject
+	// refused solely by an unaudited operation names its symbol instead
+	// of serving the name-free fallback. This fixed stratum order
+	// predates the shared cause-preference order the spec requires of
+	// this diagnostic: within it a lower-ranked reason can be named over
+	// a higher-ranked sibling (a testing-method mutation vs an unaudited
+	// import and the reverse both occur) - deterministic and
+	// display-only, the verdict itself is unaffected
+	// (REQ-closure-observability-analysis).
 	importReason := ""
 	potentialExternal := ""
+	unauditedReason := ""
 	if hasWasmImport {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
 		effect.unrefinable = true
@@ -391,6 +421,9 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 			if imp.alias == "." {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
 				potentialExternal = imp.pkgPath
+				if unauditedReason == "" {
+					unauditedReason = "reaches testing (potential external dependence)"
+				}
 			}
 			continue
 		}
@@ -408,6 +441,9 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 				scan.add(trueExternalEffect(imp.pkgPath))
 			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
+				if unauditedReason == "" {
+					unauditedReason = "reaches " + imp.pkgPath + " (potential external dependence)"
+				}
 			}
 		}
 	}
@@ -423,6 +459,9 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					}
 				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+					if unauditedReason == "" {
+						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
+					}
 				}
 			}
 		}
@@ -443,6 +482,8 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		scan.preferred = bodyReason
 	case testingReason != "":
 		scan.preferred = testingReason
+	case unauditedReason != "":
+		scan.preferred = unauditedReason
 	case potentialExternal != "":
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
