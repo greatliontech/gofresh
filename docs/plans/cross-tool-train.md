@@ -316,6 +316,19 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       carrier (the dispatch-table shape legs[token](inv)) admits with
       arguments judged like the func-field call's; extraction that
       binds or hands out the element keeps the escape.
+- [ ] 60. gofresh: constructor bodies derive - the fifth probe grounds
+      the generated-threshold chain in building constructors
+      (threshold.MustRegistry, money.mustCurrencyCatalog): the
+      return-environment-free judgment gains a caller-judged derivation
+      class - a range binding over a parameter or judged value is
+      judged, a field read of a judged value is judged, an append of
+      judged elements onto a judged local stays judged, a conversion
+      of a judged value is judged, and a generic plain-named
+      constructor call records a dependency edge exactly as a plain
+      one (the proof judges the generic body, type parameters falling
+      to the signature walk's fail-closed default) - every other
+      derivation keeps the refusal, and writes through any judged
+      binding break it exactly as today.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
