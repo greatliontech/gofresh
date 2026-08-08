@@ -86,6 +86,22 @@ type dynamicStateFact struct {
 	// a registered closure's environment can write state the settled
 	// verdict assumed stable.
 	EnvCarrying []string `json:"envCarrying,omitempty"`
+	// EnvCallUses holds deferred constructor-registration marks:
+	// variable key and callee function key (package path, function name
+	// NUL-joined) joined by \x01. At composition the store is admitted
+	// only when the callee's return-environment-free proof resolves;
+	// otherwise the variable joins the environment-audit refusals -
+	// fail-closed.
+	EnvCallUses []string `json:"envCallUses,omitempty"`
+	// ReturnEnvFree holds the function keys (package path, function
+	// name NUL-joined) this package declares and proves to return only
+	// environment-free values given environment-free arguments.
+	ReturnEnvFree []string `json:"returnEnvFree,omitempty"`
+	// ReturnEnvDeps holds conditional edges of those proofs: function
+	// key and callee function key joined by \x01 - the proof resolves
+	// only when every edge target resolves, cycles and absence failing
+	// closed.
+	ReturnEnvDeps []string `json:"returnEnvDeps,omitempty"`
 	// PureMethods and ExternalMethods map "Recv.Method" to the declaration
 	// key of a method declaration carrying the respective directive, so a
 	// method promoted into a scanned type honors its directive without the
@@ -109,11 +125,18 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
-	recordEnvCarryingRegistrations(p, envCarrying)
+	envCalls := map[string]map[string]bool{}
+	recordEnvCarryingRegistrations(p, envCarrying, envCalls)
 	for key := range envCarrying {
 		fact.EnvCarrying = append(fact.EnvCarrying, key)
 	}
 	sort.Strings(fact.EnvCarrying)
+	for varKey, callees := range envCalls {
+		for callee := range callees {
+			fact.EnvCallUses = append(fact.EnvCallUses, varKey+"\x01"+callee)
+		}
+	}
+	sort.Strings(fact.EnvCallUses)
 	for _, use := range attributedUses {
 		class := "m"
 		if use.escape {
@@ -147,9 +170,20 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
-		for paramKey := range paramLeakFreeFunctions(p, readOnly) {
+		paramLeakFree := paramLeakFreeFunctions(p, readOnly)
+		for paramKey := range paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
 		}
+		envFree, envDeps := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
+		for fnName := range envFree {
+			fnKey := p.Types.Path() + "\x00" + fnName
+			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
+			for callee := range envDeps[fnName] {
+				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, fnKey+"\x01"+callee)
+			}
+		}
+		sort.Strings(fact.ReturnEnvFree)
+		sort.Strings(fact.ReturnEnvDeps)
 	}
 	sort.Strings(fact.ParamLeakFree)
 	for varKey, paramKeys := range paramUses {
@@ -465,6 +499,70 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 			for _, key := range fact.EnvCarrying {
 				envCarrying[key] = true
+			}
+		}
+	}
+	// Deferred constructor registrations resolve against the
+	// return-environment-free union to a least fixed point over the
+	// proofs' dependency edges - a conditional proof resolves only when
+	// every callee it depends on resolves, so cycles and absent foreign
+	// proofs fail closed; an unresolved callee keeps the store's poison
+	// (REQ-closure-shared-dynamic-state).
+	envFreeDeclared := map[string]bool{}
+	envFreeDeps := map[string]map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, key := range fact.ReturnEnvFree {
+				envFreeDeclared[key] = true
+			}
+			for _, edge := range fact.ReturnEnvDeps {
+				fnKey, callee, ok := strings.Cut(edge, "\x01")
+				if !ok {
+					continue
+				}
+				if envFreeDeps[fnKey] == nil {
+					envFreeDeps[fnKey] = map[string]bool{}
+				}
+				envFreeDeps[fnKey][callee] = true
+			}
+		}
+	}
+	envFreeResolved := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for fnKey := range envFreeDeclared {
+			if envFreeResolved[fnKey] {
+				continue
+			}
+			ok := true
+			for callee := range envFreeDeps[fnKey] {
+				if !envFreeResolved[callee] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				envFreeResolved[fnKey] = true
+				changed = true
+			}
+		}
+	}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, use := range fact.EnvCallUses {
+				varKey, callee, ok := strings.Cut(use, "\x01")
+				if !ok {
+					// A malformed entry cannot attribute its store - the
+					// fact carrying it is not trusted, fail-closed like
+					// every malformed-fact arm.
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					continue
+				}
+				if !envFreeResolved[callee] {
+					envCarrying[varKey] = true
+				}
 			}
 		}
 	}

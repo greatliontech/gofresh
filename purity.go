@@ -1657,6 +1657,15 @@ func typeCarriesSignature(t types.Type, seen map[types.Type]bool) bool {
 // captures: their uses attribute at this site like any program code
 // (REQ-closure-shared-dynamic-state).
 func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast.Node) bool {
+	return environmentFreeFuncLitJudged(p, lit, enclosing, nil, nil)
+}
+
+// environmentFreeFuncLitJudged additionally collects parameter and
+// method wants when the caller supplies sinks, instead of refusing the
+// deferrable shapes outright - the constructor-result proof resolves the
+// collected wants against its own package's facts
+// (REQ-closure-shared-dynamic-state).
+func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosing ast.Node, wants, methodWants map[string]bool) bool {
 	if p == nil || p.TypesInfo == nil || lit == nil || lit.Body == nil {
 		return false
 	}
@@ -1784,7 +1793,7 @@ func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast
 			}
 		}
 	}
-	if !boundValueLeakFree(p, roots, lit.Body) {
+	if !boundValueLeakFreeJudged(p, roots, lit.Body, wants, nil, methodWants) {
 		return false
 	}
 	if enclosing == nil {
@@ -1807,7 +1816,7 @@ func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast
 					break
 				}
 			}
-			if shared && !boundValueLeakFree(p, roots, n.Body) {
+			if shared && !boundValueLeakFreeJudged(p, roots, n.Body, wants, nil, methodWants) {
 				sound = false
 			}
 			return false
@@ -1842,8 +1851,12 @@ func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast
 // statements are program code whose mutation marks refuse independently,
 // so the audit walks only direct store sites; a store the mutation rules
 // refuse anyway may record here too - the mutation culprit outranks this
-// one at composition.
-func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]bool) {
+// one at composition. One call shape defers instead of poisoning: a call
+// of a plain named function records the callee against every store
+// target in envCalls, its arguments judged recursively, for composition
+// to resolve against the callee's return-environment-free proof -
+// absence keeping the poison (REQ-closure-shared-dynamic-state).
+func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]bool, envCalls map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -2015,6 +2028,9 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 	// for package-level initializers, whose literals can capture nothing
 	// function-scoped.
 	var enclosingBody ast.Node
+	// pendingEnvCalls collects, per store judgment, the plain named
+	// callees whose return-environment-free proofs the store defers to.
+	var pendingEnvCalls map[string]bool
 	var carrying func(expr ast.Expr) bool
 	carrying = func(expr ast.Expr) bool {
 		switch e := unparen(expr).(type) {
@@ -2041,10 +2057,24 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			return false
 		case *ast.CallExpr:
 			// Builtin make and new construct empty or zero values - no
-			// function value rides them; every other call result stays
-			// an opaque source.
+			// function value rides them; a plain named callee whose
+			// result type carries a signature defers to the callee's
+			// return-environment-free proof, its arguments judged
+			// recursively (a carrying argument poisons the store); every
+			// other call result stays an opaque source.
 			if ident, ok := unparen(e.Fun).(*ast.Ident); ok {
 				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "make" || ident.Name == "new") {
+					return false
+				}
+			}
+			if pendingEnvCalls != nil && typeCarriesSignature(p.TypesInfo.TypeOf(unparen(expr)), make(map[types.Type]bool)) {
+				if fn := plainNamedCalleeFn(p, e); fn != nil {
+					for _, arg := range e.Args {
+						if carrying(arg) {
+							return true
+						}
+					}
+					pendingEnvCalls[fn.Pkg().Path()+"\x00"+fn.Name()] = true
 					return false
 				}
 			}
@@ -2135,6 +2165,7 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			}
 		}
 		poison := false
+		pendingEnvCalls = map[string]bool{}
 		for _, flow := range flows {
 			if carrying(flow) {
 				poison = true
@@ -2145,7 +2176,18 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			for _, variable := range targets {
 				envCarrying[dynamicVarKey(variable)] = true
 			}
+		} else if envCalls != nil {
+			for callee := range pendingEnvCalls {
+				for _, variable := range targets {
+					key := dynamicVarKey(variable)
+					if envCalls[key] == nil {
+						envCalls[key] = map[string]bool{}
+					}
+					envCalls[key][callee] = true
+				}
+			}
 		}
+		pendingEnvCalls = nil
 	}
 	walkStores := func(body ast.Node) {
 		localAliases = computeLocalAliases(body)
@@ -2224,6 +2266,390 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			}
 		}
 	}
+}
+
+// plainNamedCalleeFn resolves a call's callee to a plain named function -
+// a bare identifier or a package-qualified selector, receiverless - the
+// one callee shape whose returns a persisted proof can audit. Generic
+// instantiations (an index-expression callee) deliberately resolve to
+// nothing - conservative.
+func plainNamedCalleeFn(p *packages.Package, call *ast.CallExpr) *types.Func {
+	fun := call.Fun
+	for {
+		paren, ok := fun.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		fun = paren.X
+	}
+	var obj types.Object
+	switch fun := fun.(type) {
+	case *ast.Ident:
+		obj = p.TypesInfo.Uses[fun]
+	case *ast.SelectorExpr:
+		if x, ok := fun.X.(*ast.Ident); ok {
+			if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+				obj = p.TypesInfo.Uses[fun.Sel]
+			}
+		}
+	}
+	fn, ok := obj.(*types.Func)
+	if !ok || fn.Pkg() == nil {
+		return nil
+	}
+	if sig, ok := fn.Type().(*types.Signature); !ok || sig.Recv() != nil {
+		return nil
+	}
+	return fn
+}
+
+// returnEnvFreeFunctions proves, per plain named function of the
+// package, that every value its return expressions can carry into a
+// carrier is environment-free provided the call's arguments are - the
+// constructor-result admission of the environment-free registration
+// audit. Parameters judge free (the caller's obligation); a
+// signature-carrying local judges by every source that binds it, to a
+// fixed point over the body's whole-identifier bindings, any other bind
+// shape refusing it; a returned literal is audited exactly as a
+// registered literal with the constructor body as its enclosing scope,
+// its collected parameter and method wants resolving against this
+// package's own facts only; a call of a plain named callee records a
+// dependency edge resolved at composition, its arguments judged
+// recursively. Naked returns and every unrecognized signature-carrying
+// shape refuse the proof - absence keeps the poison
+// (REQ-closure-shared-dynamic-state).
+func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[string]bool) (map[string]bool, map[string]map[string]bool) {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return nil, nil
+	}
+	ownPath := p.Types.Path()
+	carries := func(t types.Type) bool {
+		return typeCarriesSignature(t, make(map[types.Type]bool))
+	}
+	unparen := func(expr ast.Expr) ast.Expr {
+		for {
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				return expr
+			}
+			expr = paren.X
+		}
+	}
+	wantsResolve := func(wants, methodWants map[string]bool) bool {
+		for want := range wants {
+			pkgPath, rest, ok := strings.Cut(want, "\x00")
+			if !ok || pkgPath != ownPath || !paramLeakFree[rest] {
+				return false
+			}
+		}
+		for want := range methodWants {
+			pkgPath, rest, ok := strings.Cut(want, "\x00")
+			if !ok || pkgPath != ownPath || !readOnly[rest] {
+				return false
+			}
+		}
+		return true
+	}
+	proven := map[string]bool{}
+	deps := map[string]map[string]bool{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Body == nil || fd.Name.Name == "init" {
+				continue
+			}
+			fnKey := fd.Name.Name
+			params := map[types.Object]bool{}
+			if fd.Type.Params != nil {
+				for _, field := range fd.Type.Params.List {
+					for _, name := range field.Names {
+						if obj := p.TypesInfo.Defs[name]; obj != nil {
+							params[obj] = true
+						}
+					}
+				}
+			}
+			// Signature-carrying locals: collect whole-identifier binding
+			// sources; any other bind shape (range, copy, indexed or
+			// field target) refuses the local outright. localBroken
+			// covers parameters too: a reassigned parameter no longer
+			// holds the value the caller judged, so the assumption
+			// breaks with it.
+			localSources := map[types.Object][]ast.Expr{}
+			localBroken := map[types.Object]bool{}
+			trackedVar := func(obj types.Object) (*types.Var, bool) {
+				v, ok := obj.(*types.Var)
+				if !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope() || !carries(v.Type()) {
+					return nil, false
+				}
+				return v, true
+			}
+			// breakTargets breaks every tracked local or parameter an
+			// expression subtree reaches - the fail-closed disposition
+			// for element, field, and dereference writes, whose storage
+			// is the base binding's however the write is spelled.
+			breakTargets := func(expr ast.Expr) {
+				ast.Inspect(expr, func(n ast.Node) bool {
+					if ident, ok := n.(*ast.Ident); ok {
+						obj := p.TypesInfo.Uses[ident]
+						if obj == nil {
+							obj = p.TypesInfo.Defs[ident]
+						}
+						if obj != nil {
+							if _, ok := trackedVar(obj); ok || params[obj] {
+								localBroken[obj] = true
+							}
+						}
+					}
+					return true
+				})
+			}
+			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
+				ident, ok := unparen(target).(*ast.Ident)
+				if !ok {
+					breakTargets(target)
+					return
+				}
+				obj := p.TypesInfo.Defs[ident]
+				if obj == nil {
+					obj = p.TypesInfo.Uses[ident]
+				}
+				if obj != nil && params[obj] {
+					// A parameter standing in any bind position no
+					// longer holds the caller-judged value.
+					localBroken[obj] = true
+					return
+				}
+				if _, ok := trackedVar(obj); !ok {
+					return
+				}
+				if broken || source == nil {
+					localBroken[obj] = true
+					return
+				}
+				localSources[obj] = append(localSources[obj], source)
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.UnaryExpr:
+					// An address capture opens a write path the binding
+					// walk cannot see - the operand's base binding
+					// breaks. A composite-literal operand addresses
+					// fresh storage and breaks nothing.
+					if n.Op == token.AND {
+						base := unparen(n.X)
+						for {
+							switch b := base.(type) {
+							case *ast.SelectorExpr:
+								base = b.X
+							case *ast.IndexExpr:
+								base = b.X
+							case *ast.StarExpr:
+								base = b.X
+							case *ast.ParenExpr:
+								base = b.X
+							default:
+								if ident, ok := base.(*ast.Ident); ok {
+									breakTargets(ident)
+								}
+								return true
+							}
+						}
+					}
+				case *ast.AssignStmt:
+					if len(n.Lhs) == len(n.Rhs) {
+						for i, lhs := range n.Lhs {
+							bindLocal(lhs, n.Rhs[i], false)
+						}
+					} else {
+						for _, lhs := range n.Lhs {
+							bindLocal(lhs, nil, true)
+						}
+					}
+				case *ast.ValueSpec:
+					if len(n.Names) == len(n.Values) {
+						for i, name := range n.Names {
+							bindLocal(name, n.Values[i], false)
+						}
+					} else {
+						for _, name := range n.Names {
+							// A zero-valued declaration carries nothing.
+							if len(n.Values) != 0 {
+								bindLocal(name, nil, true)
+							}
+						}
+					}
+				case *ast.RangeStmt:
+					for _, bind := range []ast.Expr{n.Key, n.Value} {
+						if bind != nil {
+							bindLocal(bind, nil, true)
+						}
+					}
+				case *ast.CallExpr:
+					if ident, ok := unparen(n.Fun).(*ast.Ident); ok && len(n.Args) == 2 {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
+							bindLocal(n.Args[0], nil, true)
+						}
+					}
+				}
+				return true
+			})
+			fnDeps := map[string]bool{}
+			var free func(expr ast.Expr) bool
+			localFree := map[types.Object]int{} // 0 unknown, 1 proving, 2 free, 3 refused
+			var judgeLocal func(obj types.Object) bool
+			judgeLocal = func(obj types.Object) bool {
+				switch localFree[obj] {
+				case 2:
+					return true
+				case 3:
+					return false
+				case 1:
+					// A cyclic binding cannot ground - fail-closed.
+					return false
+				}
+				if localBroken[obj] {
+					localFree[obj] = 3
+					return false
+				}
+				localFree[obj] = 1
+				for _, src := range localSources[obj] {
+					if !free(src) {
+						localFree[obj] = 3
+						return false
+					}
+				}
+				localFree[obj] = 2
+				return true
+			}
+			free = func(expr ast.Expr) bool {
+				e := unparen(expr)
+				// A signature-free value carries nothing; the signature
+				// walk is fail-closed on unfamiliar kinds (a multi-value
+				// call's tuple included), which keeps those falling
+				// through to the shape arms below.
+				if t := p.TypesInfo.TypeOf(e); t != nil && !carries(t) {
+					return true
+				}
+				switch e := e.(type) {
+				case *ast.BasicLit:
+					return true
+				case *ast.CompositeLit:
+					for _, elt := range e.Elts {
+						value := elt
+						if kv, ok := elt.(*ast.KeyValueExpr); ok {
+							value = kv.Value
+						}
+						if !free(value) {
+							return false
+						}
+					}
+					return true
+				case *ast.UnaryExpr:
+					if e.Op == token.AND {
+						return free(e.X)
+					}
+				case *ast.FuncLit:
+					wants := map[string]bool{}
+					methodWants := map[string]bool{}
+					if !environmentFreeFuncLitJudged(p, e, fd.Body, wants, methodWants) {
+						return false
+					}
+					return wantsResolve(wants, methodWants)
+				case *ast.Ident:
+					obj := p.TypesInfo.Uses[e]
+					switch obj := obj.(type) {
+					case *types.Func:
+						return true
+					case *types.Nil:
+						return true
+					case *types.Var:
+						if params[obj] {
+							// The caller judged the entry value; a broken
+							// parameter (reassigned, address-captured)
+							// no longer holds it.
+							return !localBroken[obj]
+						}
+						if obj.Parent() != nil && obj.Pkg() != nil && obj.Parent() != obj.Pkg().Scope() && !obj.IsField() {
+							return judgeLocal(obj)
+						}
+					}
+					return false
+				case *ast.SelectorExpr:
+					if selection, ok := p.TypesInfo.Selections[e]; ok {
+						switch selection.Kind() {
+						case types.MethodExpr:
+							return true
+						case types.MethodVal:
+							return false
+						}
+						return false
+					}
+					if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
+						if _, isFunc := obj.(*types.Func); isFunc {
+							return true
+						}
+					}
+					return false
+				case *ast.CallExpr:
+					if ident, ok := unparen(e.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "make" || ident.Name == "new") {
+							return true
+						}
+					}
+					if fn := plainNamedCalleeFn(p, e); fn != nil {
+						for _, arg := range e.Args {
+							if !free(arg) {
+								return false
+							}
+						}
+						fnDeps[fn.Pkg().Path()+"\x00"+fn.Name()] = true
+						return true
+					}
+					return false
+				}
+				return false
+			}
+			ok = true
+			results := 0
+			if fd.Type.Results != nil {
+				results = fd.Type.Results.NumFields()
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if !ok {
+					return false
+				}
+				if _, isLit := n.(*ast.FuncLit); isLit {
+					return false
+				}
+				ret, isRet := n.(*ast.ReturnStmt)
+				if !isRet {
+					return true
+				}
+				if len(ret.Results) == 0 && results > 0 {
+					// A naked return hands out the named result variables
+					// past this judgment's flow - refuse.
+					ok = false
+					return false
+				}
+				for _, result := range ret.Results {
+					if !free(result) {
+						ok = false
+						return false
+					}
+				}
+				return true
+			})
+			if !ok {
+				continue
+			}
+			proven[fnKey] = true
+			if len(fnDeps) > 0 {
+				deps[fnKey] = fnDeps
+			}
+		}
+	}
+	return proven, deps
 }
 
 // initOnlyReachableHelpers computes, by package-local fixed point, the

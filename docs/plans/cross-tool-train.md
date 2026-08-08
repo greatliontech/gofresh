@@ -276,7 +276,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       collects wanted method keys exactly as the argument deferral
       collects parameter keys, carried through the existing MethodUses
       channel, absence refusing.
-- [ ] 51. gofresh: constructor-result registration audit - the third
+- [x] 51. gofresh: constructor-result registration audit - the third
       re-measure's registers-function-values family (normativeThresholds
       across four duties packages, officialCurrencyCatalog): a carrier
       initialized from a plain named in-package constructor
@@ -316,6 +316,18 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       carrier (the dispatch-table shape legs[token](inv)) admits with
       arguments judged like the func-field call's; extraction that
       binds or hands out the element keeps the escape.
+- [ ] 59. gofresh: signature-typed handouts judged on the value plane -
+      the leak-free judgment consumes a rooted signature-typed result
+      as a scalar copy (the reach walk admits no signature), so a
+      registered or returned literal handing out a captured method
+      value proves environment-free while the value carries a mutable
+      receiver (reachable through the init-body registered-literal
+      door on HEAD and the constructor door alike); a rooted
+      signature-typed handout refuses unless the held value provably
+      derives from environment-free sources, and the audit clause's
+      capture-leak-freedom definition gains the value plane; overlaps
+      the tracked func-value-self-capture family where receiver fields
+      hold the closure.
 - [ ] 58. gofresh: parameter-forwarding chains across packages - a
       function forwarding its parameter to a foreign callee's
       parameter (NewRETALawRegistry's rows to proposition.New) records

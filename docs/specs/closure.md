@@ -369,11 +369,38 @@ chains included by the source walk, since a shared environment is one
 object under every name it carries and however many carriers its
 closures reach — with a
 reference to the alias set from a go statement's call outside any
-literal refusing outright. Every other value shape — a bound method
-value, a call result (builtin make and new excepted: they construct
-empty or zero values, and no function value rides them), a parameter,
-an opaque local or variable of
-function-carrying type — is beyond the audit; the one call-shaped
+literal refusing outright. A call result whose callee is a plain named
+function — a bare identifier or package-qualified selector,
+receiverless — defers to that callee's return-environment-free proof:
+the store records the callee against the carrier, the call's arguments
+judged recursively by this audit (a carrying argument poisons the
+store), and composition admits the store exactly when the proof
+resolves. The declaring package proves a function
+return-environment-free by judging every return expression under this
+audit with parameters assumed environment-free — the caller's
+obligation, discharged at each call site by the recursive argument
+judgment, and an argument that is itself a plain-named-callee call
+defers identically, its callee joining the recorded set; a
+signature-carrying local judges by every whole-identifier
+binding source that reaches it, to a fixed point — a zero-valued
+declaration binds the nil zero value, environment-free — while any
+other bind shape, an element, field, or dereference write reaching the
+binding, an address capture of it, or any bind position or address
+capture of a parameter, breaks the binding or the parameter's
+caller-judged assumption outright; a returned literal is audited exactly as a registered
+literal with the constructor body as its enclosing scope, its
+collected parameter and method wants resolving against the declaring
+package's own facts only; a plain-named-callee result inside a return
+expression records a dependency edge, the proofs resolving at
+composition to a least fixed point over the edges; naked returns and
+every unrecognized signature-carrying shape refuse the proof. Cycles
+and absent proofs keep the store's poison — fail-closed. Every other
+value shape — a bound method value, a call through anything but a
+plain name (builtin make and new excepted: they construct empty or
+zero values, and no function value rides them), a parameter, an opaque
+local or variable of
+function-carrying type — is beyond the audit; the one further
+call-shaped
 admission is append of judged elements onto the stored-to carrier
 itself, whose result carries only what its operands did. A carrier that
 receives a value outside the audit refuses every observer, whatever the
