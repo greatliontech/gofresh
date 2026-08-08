@@ -291,7 +291,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       generated shape) resolve at composition through a deferred
       env-call channel, arguments judged recursively with deferrals
       compounding, absence keeping the poison.
-- [ ] 55. gofresh: receiver-read-only return shapes widen to writeless
+- [x] 55. gofresh: receiver-read-only return shapes widen to writeless
       constructions - a value-receiver method returning a composite
       literal whose element values are receiver reads of
       non-alias-handing types (threshold's Rule() RuleID{value:

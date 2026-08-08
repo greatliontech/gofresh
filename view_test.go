@@ -4137,6 +4137,206 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want Valid - a proven read-only method call refused the binding proof", verdict)
 		}
 	})
+	t.Run("composite-literal return through a reach-bearing step defers", func(t *testing.T) {
+		// The threshold Rule() shape: the returned literal wraps a
+		// string read whose intermediate field type carries a pointer -
+		// the read produces only the leaf copy, so the receiver proof
+		// holds and the method use defers.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype id struct{ v string }\n\ntype inner struct {\n\trule string\n\tp    *int\n}\n\ntype entry struct {\n\tCols  []string\n\tIn    inner\n\tBuild func(n int) int\n}\n\nfunc (e entry) Rule() id { return id{v: e.In.rule} }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, In: inner{rule: \"r\"}}}\n}\n\nfunc Rules() string {\n\tout := \"\"\n\tfor _, e := range Registry {\n\t\tout += e.Rule().v\n\t}\n\treturn out\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Rules() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a composite-literal return over a reach-bearing step refused the receiver proof", verdict)
+		}
+	})
+	t.Run("chain method call converting its receiver defers", func(t *testing.T) {
+		// The proposition String() shape: a defined-string field's
+		// method converts its whole receiver to a reach-free type - a
+		// value copy that cannot write back.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype name string\n\nfunc (n name) Spelling() string { return string(n) }\n\ntype entry struct {\n\tCols  []string\n\tN     name\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, N: \"x\"}}\n}\n\nfunc Spellings() string {\n\tout := \"\"\n\tfor _, e := range Registry {\n\t\tout += e.N.Spelling()\n\t}\n\treturn out\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Spellings() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a reach-free receiver conversion refused the receiver proof", verdict)
+		}
+	})
+	t.Run("aliasing conversion of receiver state keeps the refusal", func(t *testing.T) {
+		// The conversion admission is result-type-judged: converting a
+		// receiver slice to a named slice type aliases the backing, so
+		// the method never proves and the want refuses fail-closed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype colsT []string\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) AliasConvert() int {\n\tc := colsT(e.Cols)\n\treturn len(c)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Convert() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.AliasConvert()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Convert() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Convert"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - an aliasing conversion proved read-only", verdict)
+		}
+	})
+	t.Run("method value conversion keeps the refusal", func(t *testing.T) {
+		// A bound method value converted to a func type has a
+		// reach-free result type yet carries the captured receiver -
+		// invoking it executes receiver writes. The conversion
+		// admission must gate on the operand shape, not the result
+		// type alone.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype fn func()\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Mut() { e.Cols[0] = \"x\" }\n\nfunc (e entry) Sneak() int {\n\tf := fn(e.Mut)\n\tf()\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Sneaks() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Sneak()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Sneaks() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Sneaks"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a converted method value proved read-only", verdict)
+		}
+	})
+	t.Run("returned method value conversion keeps the refusal", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype fn func()\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Mut() { e.Cols[0] = \"x\" }\n\nfunc (e entry) Handout() fn { return fn(e.Mut) }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Sneaks() int {\n\tfor _, e := range Registry {\n\t\te.Handout()()\n\t}\n\treturn len(Registry)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Sneaks() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Sneaks"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a returned converted method value proved read-only", verdict)
+		}
+	})
+	t.Run("chain method value argument keeps the refusal", func(t *testing.T) {
+		// A method value on a chain step must refuse at the selector
+		// arm itself: with the reach-free inner step consumed first,
+		// the ident backstop never fires, so a deferred refusal would
+		// launder the capture.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype name string\n\nfunc (n name) Spelling() string { return string(n) }\n\ntype entry struct {\n\tCols  []string\n\tN     name\n\tBuild func(n int) int\n}\n\nfunc sink(f func() string) string { return f() }\n\nfunc (e entry) Hand() string { return sink(e.N.Spelling) }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, N: \"x\"}}\n}\n\nfunc Hands() string {\n\tout := \"\"\n\tfor _, e := range Registry {\n\t\tout += e.Hand()\n\t}\n\treturn out\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Hands() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Hands"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a chain method value argument proved read-only", verdict)
+		}
+	})
+	t.Run("package-level alias sink keeps the refusal", func(t *testing.T) {
+		// The tracked-binding discipline covers only sinks that die
+		// with the body: a reach-bearing bind to a package variable
+		// outlives the proof, and the sink variable itself may fall
+		// outside the priced carrier universe - the alias write then
+		// mutates the carrier's backing unpriced.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar stash []string\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Alias() int {\n\tstash = e.Cols\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Reads() string {\n\ts := \"\"\n\tfor _, e := range Registry {\n\t\t_ = e.Alias()\n\t\ts += e.Cols[0]\n\t}\n\treturn s\n}\n\nfunc Write() { stash[0] = \"w\" }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Reads() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a package-level alias sink proved read-only", verdict)
+		}
+	})
+	t.Run("range-assigned package variable sink keeps the refusal", func(t *testing.T) {
+		// The assign-form range bind is the same outliving sink as an
+		// assignment: the bound element aliases receiver state past
+		// the body when the target is a reach-bearing package
+		// variable.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar row []string\n\ntype entry struct {\n\tRows  [][]string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Scan() int {\n\tn := 0\n\tfor _, row = range e.Rows {\n\t\tn += len(row)\n\t}\n\treturn n\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Rows: [][]string{{\"a\"}}}}\n}\n\nfunc Scans() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Scan()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Scans() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Scans"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a range-assigned package sink proved read-only", verdict)
+		}
+	})
+	t.Run("sibling-fed package sink keeps the refusal", func(t *testing.T) {
+		// A leaky sibling call bound to an outliving target must not
+		// be governed into a consume: the alias arrives through the
+		// sibling's results and outlives the body all the same.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar stash []string\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Sib() []string { return e.Cols }\n\nfunc (e entry) Alias() int {\n\tstash = e.Sib()\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Reads() string {\n\ts := \"\"\n\tfor _, e := range Registry {\n\t\t_ = e.Alias()\n\t\ts += e.Cols[0]\n\t}\n\treturn s\n}\n\nfunc Write() { stash[0] = \"w\" }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Reads() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a sibling-fed package sink proved read-only", verdict)
+		}
+	})
+	t.Run("dot-imported package sink keeps the refusal", func(t *testing.T) {
+		// A dot-imported variable is the same outliving sink under a
+		// bare name; the scope test must follow the object's own
+		// package.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"hold/hold.go": "package hold\n\nvar Stash []string\n",
+			"reg/reg.go":   "package reg\n\nimport . \"example.com/xesc/hold\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Alias() int {\n\tStash = e.Cols\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Reads() string {\n\ts := \"\"\n\tfor _, e := range Registry {\n\t\t_ = e.Alias()\n\t\ts += e.Cols[0]\n\t}\n\treturn s\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() string { return reg.Reads() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a dot-imported sink proved read-only", verdict)
+		}
+	})
+	t.Run("closure handout of a tainted local keeps the refusal", func(t *testing.T) {
+		// A return inside a nested literal is an escape position: the
+		// literal outlives the body carrying the captured alias, and
+		// the caller's result judgment sees only a signature.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Handout() func() []string {\n\ts := e.Cols\n\treturn func() []string { return s }\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Hands() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += len(e.Handout()())\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Hands() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Hands"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a closure handout of a tainted local proved read-only", verdict)
+		}
+	})
+	t.Run("reach-free store to a package variable stays proven", func(t *testing.T) {
+		// The outliving-sink refusal is reach-judged: a string copy
+		// stored to a package variable cannot write back into the
+		// receiver, so the proof holds.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar seen string\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Note() int {\n\tseen = e.Label\n\treturn len(e.Label)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Notes() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Note()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Notes() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a reach-free store to a package variable refused the receiver proof", verdict)
+		}
+	})
+	t.Run("reach-bearing chain leaf keeps the refusal", func(t *testing.T) {
+		// The outermost-node judgment still refuses when the produced
+		// value itself hands out reach: a pointer leaf handed to a
+		// callee is an escape however deep the chain.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\trule string\n\tp    *int\n}\n\ntype entry struct {\n\tCols  []string\n\tIn    inner\n\tBuild func(n int) int\n}\n\nfunc sink(p *int) int { return *p }\n\nfunc (e entry) Leaf() int { return sink(e.In.p) }\n\nvar Registry []entry\n\nfunc init() {\n\tn := 1\n\tRegistry = []entry{{Cols: []string{\"a\"}, In: inner{rule: \"r\", p: &n}}}\n}\n\nfunc Leaves() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Leaf()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Leaves() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Leaves"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a reach-bearing chain leaf proved read-only", verdict)
+		}
+	})
 	t.Run("writing method call through the binding refuses", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,

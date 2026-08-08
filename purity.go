@@ -3163,6 +3163,42 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 			selection, ok := p.TypesInfo.Selections[sel]
 			return ok && selection.Kind() == types.MethodVal
 		}
+		// escapingSink reports whether a bind target outlives the body
+		// with mutable reach: a package-level variable retains its value
+		// past the proof's horizon, so a reach-bearing bind there is an
+		// escape however the value arrived - the tracked-binding
+		// discipline covers only sinks that die with the body. A
+		// reach-free sink keeps a copy that cannot write back and flows
+		// freely.
+		escapingSink := func(ident *ast.Ident) bool {
+			if p.Types == nil {
+				return true
+			}
+			obj := bindObj(ident)
+			// Any package's scope, not just the loading package's: a
+			// dot-imported variable is the same outliving sink under a
+			// bare name.
+			return obj != nil && obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() && typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool))
+		}
+		// A return inside a nested function literal is not the method's
+		// return position: the literal value outlives the body carrying
+		// what it captured, and the call-site result judgment cannot see
+		// through a signature, so a receiver-reachable result there is
+		// an escape (REQ-closure-shared-dynamic-state).
+		innerReturns := map[*ast.ReturnStmt]bool{}
+		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
+			lit, ok := n.(*ast.FuncLit)
+			if !ok {
+				return true
+			}
+			ast.Inspect(lit.Body, func(inner ast.Node) bool {
+				if r, ok := inner.(*ast.ReturnStmt); ok {
+					innerReturns[r] = true
+				}
+				return true
+			})
+			return false
+		})
 		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.AssignStmt:
@@ -3187,13 +3223,19 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					if sibling, _ := siblingLeaky(sel); !sibling {
 						return
 					}
+					// A sink target must not be governed into a consume: an
+					// ungoverned leaky sibling call keeps the escape
+					// refusal, which is exactly what a reach-bearing bind
+					// to an outliving target is.
 					if i >= 0 {
-						if _, ok := n.Lhs[i].(*ast.Ident); !ok {
+						ident, ok := n.Lhs[i].(*ast.Ident)
+						if !ok || escapingSink(ident) {
 							return
 						}
 					} else {
 						for _, lhs := range n.Lhs {
-							if _, ok := lhs.(*ast.Ident); !ok {
+							ident, ok := lhs.(*ast.Ident)
+							if !ok || escapingSink(ident) {
 								return
 							}
 						}
@@ -3209,8 +3251,12 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 							// cannot see - fail-closed.
 							if methodValueBind(rhs) {
 								disqualified[key] = true
-							} else if _, ok := n.Lhs[i].(*ast.Ident); ok {
-								consume(rhs)
+							} else if ident, ok := n.Lhs[i].(*ast.Ident); ok {
+								if escapingSink(ident) {
+									disqualified[key] = true
+								} else {
+									consume(rhs)
+								}
 							}
 						}
 					}
@@ -3221,13 +3267,21 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 							disqualified[key] = true
 						}
 						allIdent := true
+						sink := false
 						for _, lhs := range n.Lhs {
-							if _, ok := lhs.(*ast.Ident); !ok {
+							ident, ok := lhs.(*ast.Ident)
+							if !ok {
 								allIdent = false
+							} else if escapingSink(ident) {
+								sink = true
 							}
 						}
 						if allIdent && !methodValueBind(n.Rhs[0]) {
-							consume(n.Rhs[0])
+							if sink {
+								disqualified[key] = true
+							} else {
+								consume(n.Rhs[0])
+							}
 						}
 					}
 				}
@@ -3270,6 +3324,10 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					} else {
 						for _, bind := range []ast.Expr{n.Key, n.Value} {
 							if ident, ok := bind.(*ast.Ident); ok && ident != nil {
+								if escapingSink(ident) {
+									disqualified[key] = true
+									continue
+								}
 								if obj := p.TypesInfo.Defs[ident]; obj != nil {
 									tainted[obj] = true
 								}
@@ -3285,7 +3343,18 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				// a sibling call in return position is governed the
 				// same way; any other result shape keeps the normal
 				// escape rules for its inner uses (a call in return
-				// position still escapes its arguments).
+				// position still escapes its arguments). A return inside
+				// a nested literal is an escape position instead: the
+				// literal outlives the body and the caller's result
+				// judgment never sees what it hands out.
+				if innerReturns[n] {
+					for _, result := range n.Results {
+						if recvRooted(result) {
+							disqualified[key] = true
+						}
+					}
+					break
+				}
 				for _, result := range n.Results {
 					if recvRooted(result) {
 						// A method-value result captures the receiver
@@ -3320,6 +3389,25 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 						}
 						break
 					}
+				}
+				if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
+					// A conversion of a receiver-reachable value is a
+					// value read judged by its result type: a reach-free
+					// result is a fresh copy that cannot write back; a
+					// result handing out mutable reach may alias the
+					// operand (slice-to-named, slice-to-array-pointer)
+					// and keeps the escape (REQ-closure-shared-dynamic-state).
+					// A method-value operand carries its receiver whatever
+					// the result type says - a func-typed conversion result
+					// hands out no reach yet executes receiver writes when
+					// invoked - so it never consumes and the selector arm
+					// refuses it.
+					if len(n.Args) == 1 && recvRooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
+						if t := p.TypesInfo.TypeOf(n); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+							consume(n.Args[0])
+						}
+					}
+					break
 				}
 				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
 					if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
@@ -3366,12 +3454,24 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					}
 				}
 			case *ast.SelectorExpr:
-				// A field read off the receiver is allowed only when
-				// the produced value is not alias-handing; a method
-				// VALUE bind is an escape.
-				if isRecv(n.X) && !allowed[rootIdent(n.X)] {
+				// A field read off the receiver is judged at the
+				// outermost node of the receiver-rooted chain by the
+				// value it produces: an intermediate step is
+				// evaluation, not a handout, so a reach-free leaf read
+				// through a reach-bearing field is a value copy that
+				// cannot write back. An alias-handing produced value
+				// refuses; a method VALUE bind is an escape.
+				if recvRooted(n.X) && !allowed[rootIdent(n.X)] {
 					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
-						break // judged at the enclosing CallExpr or disqualified below
+						// A method value reaching this arm was not consumed
+						// by a governing call: the value carries its
+						// receiver - an address for pointer-receiver
+						// methods - whatever position it flows to, and an
+						// inner chain step must not launder it, so the
+						// refusal is immediate rather than deferred to the
+						// ident backstop.
+						disqualified[key] = true
+						break
 					}
 					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 						disqualified[key] = true

@@ -243,9 +243,20 @@ declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, values read
 off it are tracked as the receiver's own — a binding whose type hands out
 mutable reach taints its local (a value copy that cannot write back flows
-freely), a write
-through or an escape of a tainted value refuses, and only return position
-hands one out — and it chains only into sibling methods already proven or into
+freely), a receiver-rooted read is judged at its outermost selector or index
+step by the value it produces — an intermediate reach-bearing step is
+evaluation, not a handout — a conversion of a receiver-reachable value admits
+exactly when its result type hands out no mutable reach and the operand is
+not a method value (a method value carries its receiver whatever the result
+type says; an aliasing conversion keeps the escape), a bind whose target
+outlives the body — a package-level variable — refuses whenever the target's
+type hands out mutable reach (a reach-free copy flows; the proof's tracked
+bindings die with the body, and an outliving alias escapes it — a sibling
+call's results bound to such a target refuse identically), a write
+through or an escape of a tainted value refuses, and only the method's own
+return position hands one out — a return inside a nested function literal is
+an escape position, since the literal outlives the body carrying what it
+captured and no call-site result judgment sees through a signature — and it chains only into sibling methods already proven or into
 the audited synchronization set — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
 each hand out no mutable reach or are audited-immutable (reflect.Type,
