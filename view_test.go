@@ -4025,6 +4025,222 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a goroutine's binding argument earned the deferral", verdict)
 		}
 	})
+	t.Run("returned binding discharges when every caller contains it", func(t *testing.T) {
+		// The lookup shape: an unexported function ranges the registry
+		// and returns the matching entry; the caller binds it, reads a
+		// no-reach field, and calls the func field - all contained.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc double(n int) int { return n * 2 }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\", Build: double}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Describe(label string) int {\n\tclass, ok := lookup(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn class.Build(len(class.Label))\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Describe(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a contained returned binding refused the disposition", verdict)
+		}
+	})
+	t.Run("returned binding retained by a caller refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar stash []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Keep(label string) {\n\tclass, _ := lookup(label)\n\tstash = class.Cols\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() { reg.Keep(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a retained returned binding passed the disposition", verdict)
+		}
+	})
+	t.Run("exported returner refuses the disposition", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []Entry\n\nfunc init() {\n\tRegistry = []Entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Lookup(label string) (Entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn Entry{}, false\n}\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - an exported returner earned the package-local disposition", verdict)
+		}
+	})
+	t.Run("value reference of the returner refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Finder() func(string) (entry, bool) {\n\treturn lookup\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() bool {\n\t_, ok := reg.Finder()(\"x\")\n\treturn ok\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a value reference of the returner passed the disposition", verdict)
+		}
+	})
+	t.Run("argument-position returner result refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"val/val.go":   "package val\n\nfunc Note(v any) {}\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/val\"\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc first() entry {\n\tfor _, e := range Registry {\n\t\treturn e\n\t}\n\treturn entry{}\n}\n\nfunc Report() { val.Note(first()) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() { reg.Report() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - an argument-position result passed the disposition", verdict)
+		}
+	})
+	t.Run("returned binding propagates through a contained chain", func(t *testing.T) {
+		// find re-returns lookup's binding; find's own caller contains -
+		// the disposition chains through the package-local fixed point.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc double(n int) int { return n * 2 }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\", Build: double}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc find(label string) (entry, bool) {\n\tclass, ok := lookup(label)\n\treturn class, ok\n}\n\nfunc Describe(label string) int {\n\tclass, ok := find(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn class.Build(1)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Describe(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a contained propagation chain refused the disposition", verdict)
+		}
+	})
+	t.Run("propagation through an exported function refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []Entry\n\nfunc init() {\n\tRegistry = []Entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (Entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn Entry{}, false\n}\n\nfunc Find(label string) (Entry, bool) {\n\tclass, ok := lookup(label)\n\treturn class, ok\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() bool {\n\t_, ok := reg.Find(\"x\")\n\treturn ok\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - propagation through an exported function passed", verdict)
+		}
+	})
+	t.Run("package-level literal caller is a use site", func(t *testing.T) {
+		// The containment scan covers literals stored at package level -
+		// a writing use inside one refuses exactly as a function body's
+		// would.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nvar Grab = func() {\n\tclass, _ := lookup(\"x\")\n\tclass.Cols[0] = \"z\"\n}\n\nfunc Describe(label string) int {\n\tclass, ok := lookup(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn len(class.Cols)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int {\n\treg.Grab()\n\treturn reg.Describe(\"x\")\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a package-level literal's writing use escaped the containment scan", verdict)
+		}
+	})
+	t.Run("initializer-position returner binding refuses", func(t *testing.T) {
+		// A direct initializer-position call binds package variables -
+		// an alias-handing result landing anywhere but a blank refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc firstCols() ([]string, bool) {\n\tfor _, e := range Registry {\n\t\treturn e.Cols, true\n\t}\n\treturn nil, false\n}\n\nvar cached, _ = firstCols()\n\nfunc Look() int {\n\tcols, _ := firstCols()\n\treturn len(cols)\n}\n\nfunc Cached() int { return len(cached) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Cached() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Cached"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - an initializer-position alias binding passed containment", verdict)
+		}
+	})
+	t.Run("discarded returner result is contained", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Touch(label string) int {\n\tlookup(label)\n\treturn len(Registry)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Touch(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a discarded returner result refused containment", verdict)
+		}
+	})
+	t.Run("caller-site literal re-return refuses", func(t *testing.T) {
+		// The re-return sits inside a nested literal at the caller site:
+		// it chains to the literal's unknowable caller, never to the
+		// enclosing function's disposition - and the retained reach
+		// through the untracked literal binding must keep the escape.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar stash []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc middle() {\n\tget := func() (entry, bool) { return lookup(\"x\") }\n\tclass, _ := get()\n\tstash = class.Cols\n}\n\nfunc Run() { middle() }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() { reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a literal's re-return chained the disposition to the wrong caller", verdict)
+		}
+	})
+	t.Run("method re-return refuses the disposition", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\ntype finder struct{ prefix string }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc (f finder) find(label string) (entry, bool) {\n\treturn lookup(f.prefix + label)\n}\n\nfunc Probe(label string) bool {\n\t_, ok := finder{}.find(label)\n\treturn ok\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() bool { return reg.Probe(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Probe"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a method's re-return earned the disposition", verdict)
+		}
+	})
+	t.Run("bad containment propagates back through the chain", func(t *testing.T) {
+		// find re-returns lookup's binding and find's own caller
+		// retains - the failure walks back through the dependency edge
+		// and lookup's discharge retracts.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar stash []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc find(label string) (entry, bool) {\n\tclass, ok := lookup(label)\n\treturn class, ok\n}\n\nfunc Keep(label string) {\n\tclass, _ := find(label)\n\tstash = class.Cols\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() { reg.Keep(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a bad second hop left the first discharged", verdict)
+		}
+	})
+	t.Run("literal return inside the loop never joins the disposition", func(t *testing.T) {
+		// An immediately invoked literal returning the binding exits the
+		// literal, not the function - its handout is an unknown caller's
+		// and the range keeps the strict refusal.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc sneak() []string {\n\tfor _, e := range Registry {\n\t\tgot := func() entry { return e }()\n\t\treturn got.Cols\n\t}\n\treturn nil\n}\n\nfunc Sneak() int {\n\tcols := sneak()\n\treturn len(cols)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return len(reg.Sneak()) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Sneak"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a literal's return joined the disposition", verdict)
+		}
+	})
+	t.Run("returned binding argument defers through the caller", func(t *testing.T) {
+		// The caller hands the returned binding's field to a leak-free
+		// named function - the caller-site judgment carries the want to
+		// the carrier exactly as a range binding's would.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Measure(label string) int {\n\tclass, ok := lookup(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn width(class.Cols)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Measure(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a deferred caller-site argument refused the disposition", verdict)
+		}
+	})
+	t.Run("returned binding argument to a retaining callee refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar held [][]string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc keep(cols []string) int {\n\theld = append(held, cols)\n\treturn len(held)\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Measure(label string) int {\n\tclass, ok := lookup(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn keep(class.Cols)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Measure(\"x\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a retaining callee resolved the caller-site deferral", verdict)
+		}
+	})
 	t.Run("cross-package func-field caller proves leak-free", func(t *testing.T) {
 		// The fact side of the same arm: a foreign function ranging its
 		// parameter and invoking a func field of each binding records the

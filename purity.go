@@ -553,6 +553,17 @@ func plainCalleeFunc(p *packages.Package, fun ast.Expr) (*types.Func, string) {
 	return fn, fn.Pkg().Path()
 }
 
+// pendingReturnDisposition is one conditionally discharged range whose
+// enclosing function returned the binding: the fn's callers decide, and
+// an uncontained handout restores the escape - to the attributed record
+// when the range sat in an attributed body, to the immediate marks
+// otherwise (REQ-closure-shared-dynamic-state).
+type pendingReturnDisposition struct {
+	fn     string
+	keys   []string
+	attrFn string
+}
+
 func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
@@ -580,6 +591,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 	// interiors: init-locals bound from carriers, mapped to the carrier
 	// keys they alias.
 	var aliasedLocals map[types.Object]map[string]bool
+	// currentFn is the FuncDecl whose direct body walkBody is walking
+	// (nil inside interiors and package-level literals); currentAttrFn
+	// its attribution key when the walk records into the attributed
+	// maps. pendingReturns collects conditionally discharged ranges
+	// whose enclosing function returned the binding - resolved against
+	// the function's callers by package-local fixed point after the
+	// walk, an uncontained handout restoring the escape.
+	var currentFn *ast.FuncDecl
+	var currentAttrFn string
+	var pendingReturns []pendingReturnDisposition
 	// markTargets marks every dynamic-capable package variable an
 	// expression subtree reaches — deliberately over-approximate: a
 	// spurious mark only keeps a variable's current conservative
@@ -947,17 +968,26 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							}
 						}
 						// The binding proof may defer rooted arguments to
-						// plain named parameters: the wants ride the
+						// plain named parameters (the wants ride the
 						// carrier as deferred argument marks, resolved at
 						// composition exactly like a direct carrier
-						// argument's - a carrier the walk cannot key keeps
-						// the strict proof.
+						// argument's) and may tolerate return-position
+						// handouts when the enclosing function is an
+						// eligible returner - the returned-binding
+						// disposition judges its callers by package-local
+						// fixed point after the walk. A carrier the walk
+						// cannot key keeps the strict proof.
 						var wants map[string]bool
+						var returned bool
+						var retPtr *bool
 						if paramUses != nil {
 							wants = map[string]bool{}
+							if currentFn != nil && currentFn.Recv == nil && currentFn.Name != nil && !currentFn.Name.IsExported() && currentFn.Name.Name != "init" {
+								retPtr = &returned
+							}
 						}
-						if sound && (len(roots) == 0 || boundValueLeakFreeDeferred(p, roots, n.Body, wants)) {
-							if len(wants) == 0 {
+						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr)) {
+							if len(wants) == 0 && !returned {
 								markRead(n.X)
 							} else {
 								var keys []string
@@ -983,6 +1013,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 										for want := range wants {
 											paramUses[key][want] = true
 										}
+									}
+									if returned {
+										pendingReturns = append(pendingReturns, pendingReturnDisposition{
+											fn:     currentFn.Name.Name,
+											keys:   keys,
+											attrFn: currentAttrFn,
+										})
 									}
 									markRead(n.X)
 								}
@@ -1140,7 +1177,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					saveM, saveE, saveMU := mutated, escaped, methodUses
 					mutated, escaped, methodUses = localMutated, localEscaped, localMethods
 					skipInteriors = interiors
+					currentFn, currentAttrFn = decl, fnKey
 					walkBody(decl.Body)
+					currentFn, currentAttrFn = nil, ""
 					skipInteriors = nil
 					mutated, escaped, methodUses = saveM, saveE, saveMU
 					for key := range localMutated {
@@ -1214,7 +1253,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					continue
 				}
 				if decl.Body != nil {
+					currentFn = decl
 					walkBody(decl.Body)
+					currentFn = nil
 				}
 			default:
 				// The declaration itself is initialization, but a
@@ -1231,6 +1272,310 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					return true
 				})
 				scanExemptCalls(decl)
+			}
+		}
+	}
+	if len(pendingReturns) > 0 {
+		// The returned-binding disposition: every in-package use of a
+		// returner must contain the handed-out alias - a call result
+		// bound to identifiers proven leak-free over the using body by
+		// the same judgment (deferrals included), a discarded result, or
+		// return-position propagation chaining the disposition to the
+		// propagating function's own callers, resolved to a
+		// package-local fixed point; a value reference, an argument- or
+		// composite-position result, a binding the walk cannot judge, or
+		// propagation through an ineligible function refuses, restoring
+		// the recorded escape (REQ-closure-shared-dynamic-state).
+		returnerKeys := map[string]map[string]bool{}
+		mergeKeys := func(fn string, keys map[string]bool) bool {
+			if returnerKeys[fn] == nil {
+				returnerKeys[fn] = map[string]bool{}
+			}
+			changed := false
+			for key := range keys {
+				if !returnerKeys[fn][key] {
+					returnerKeys[fn][key] = true
+					changed = true
+				}
+			}
+			return changed
+		}
+		for _, pending := range pendingReturns {
+			set := map[string]bool{}
+			for _, key := range pending.keys {
+				set[key] = true
+			}
+			mergeKeys(pending.fn, set)
+		}
+		bad := map[string]bool{}
+		deps := map[string]map[string]bool{}
+		scanned := map[string]bool{}
+		for {
+			var frontier []string
+			for fn := range returnerKeys {
+				if !scanned[fn] {
+					frontier = append(frontier, fn)
+					scanned[fn] = true
+				}
+			}
+			if len(frontier) == 0 {
+				break
+			}
+			returnerObjs := map[types.Object]string{}
+			for _, file := range p.Syntax {
+				for _, decl := range file.Decls {
+					if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil && fd.Name != nil {
+						if _, tracked := returnerKeys[fd.Name.Name]; tracked {
+							if obj := p.TypesInfo.Defs[fd.Name]; obj != nil {
+								returnerObjs[obj] = fd.Name.Name
+							}
+						}
+					}
+				}
+			}
+			frontierSet := map[string]bool{}
+			for _, fn := range frontier {
+				frontierSet[fn] = true
+			}
+			depend := func(from, to string) {
+				if deps[from] == nil {
+					deps[from] = map[string]bool{}
+				}
+				deps[from][to] = true
+			}
+			// scanSites judges every returner use within one body: the
+			// site name and eligibility describe the enclosing plain
+			// function when there is one; a package-level literal has
+			// neither - its re-returns and unknowable callers refuse.
+			scanSites := func(body ast.Node, siteName string, siteEligible bool) {
+					var stack []ast.Node
+					ast.Inspect(body, func(n ast.Node) bool {
+						if n == nil {
+							stack = stack[:len(stack)-1]
+							return true
+						}
+						defer func() { stack = append(stack, n) }()
+						ident, ok := n.(*ast.Ident)
+						if !ok {
+							return true
+						}
+						obj := p.TypesInfo.Uses[ident]
+						if obj == nil {
+							return true
+						}
+						fnName, tracked := returnerObjs[obj]
+						if !tracked || !frontierSet[fnName] {
+							return true
+						}
+						if len(stack) == 0 {
+							bad[fnName] = true
+							return true
+						}
+						call, ok := stack[len(stack)-1].(*ast.CallExpr)
+						if !ok || call.Fun != ast.Expr(ident) {
+							// A value reference - or an argument position.
+							bad[fnName] = true
+							return true
+						}
+						var grand ast.Node
+						if len(stack) >= 2 {
+							grand = stack[len(stack)-2]
+						}
+						fnObj, isFunc := obj.(*types.Func)
+						if !isFunc {
+							bad[fnName] = true
+							return true
+						}
+						sig, ok := fnObj.Type().(*types.Signature)
+						if !ok {
+							bad[fnName] = true
+							return true
+						}
+						var targets []ast.Expr
+						switch g := grand.(type) {
+						case *ast.ExprStmt, *ast.GoStmt, *ast.DeferStmt:
+							return true
+						case *ast.ReturnStmt:
+							// A return inside a nested literal exits the
+							// literal - its caller is unknowable, never
+							// the enclosing function's disposition.
+							inLit := false
+							for _, frame := range stack {
+								if _, isLit := frame.(*ast.FuncLit); isLit {
+									inLit = true
+									break
+								}
+							}
+							if siteEligible && !inLit {
+								if mergeKeys(siteName, returnerKeys[fnName]) {
+									scanned[siteName] = false
+								}
+								depend(fnName, siteName)
+							} else {
+								bad[fnName] = true
+							}
+							return true
+						case *ast.AssignStmt:
+							if len(g.Rhs) != 1 || g.Rhs[0] != ast.Expr(call) {
+								bad[fnName] = true
+								return true
+							}
+							targets = g.Lhs
+						case *ast.ValueSpec:
+							if len(g.Values) != 1 || g.Values[0] != ast.Expr(call) {
+								bad[fnName] = true
+								return true
+							}
+							for _, name := range g.Names {
+								targets = append(targets, name)
+							}
+						default:
+							bad[fnName] = true
+							return true
+						}
+						results := sig.Results()
+						if results.Len() != len(targets) {
+							bad[fnName] = true
+							return true
+						}
+						roots := map[types.Object]bool{}
+						for i, target := range targets {
+							tIdent, ok := target.(*ast.Ident)
+							if !ok {
+								bad[fnName] = true
+								return true
+							}
+							if !typeHandsOutMutableReach(results.At(i).Type(), make(map[types.Type]bool)) {
+								continue
+							}
+							if tObj := p.TypesInfo.Defs[tIdent]; tObj != nil {
+								roots[tObj] = true
+							} else if tObj := p.TypesInfo.Uses[tIdent]; tObj != nil {
+								roots[tObj] = true
+							}
+						}
+						if len(roots) == 0 {
+							return true
+						}
+						siteWants := map[string]bool{}
+						var siteReturned bool
+						var siteRet *bool
+						if siteEligible {
+							siteRet = &siteReturned
+						}
+						if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet) {
+							bad[fnName] = true
+							return true
+						}
+						for want := range siteWants {
+							for key := range returnerKeys[fnName] {
+								if paramUses[key] == nil {
+									paramUses[key] = map[string]bool{}
+								}
+								paramUses[key][want] = true
+							}
+						}
+						if siteReturned {
+							if mergeKeys(siteName, returnerKeys[fnName]) {
+								scanned[siteName] = false
+							}
+							depend(fnName, siteName)
+						}
+						return true
+					})
+			}
+			for _, file := range p.Syntax {
+				for _, decl := range file.Decls {
+					switch decl := decl.(type) {
+					case *ast.FuncDecl:
+						if decl.Body == nil {
+							continue
+						}
+						name := ""
+						if decl.Name != nil {
+							name = decl.Name.Name
+						}
+						eligible := decl.Recv == nil && decl.Name != nil && !decl.Name.IsExported() && name != "init"
+						scanSites(decl.Body, name, eligible)
+					case *ast.GenDecl:
+						// Package-level literals hold uses too - each is a
+						// site body with no enclosing plain function; a
+						// direct initializer-position call binds package
+						// variables, contained only when every
+						// alias-handing result lands in a blank.
+						for _, spec := range decl.Specs {
+							vs, ok := spec.(*ast.ValueSpec)
+							if !ok {
+								continue
+							}
+							for _, value := range vs.Values {
+								ast.Inspect(value, func(n ast.Node) bool {
+									if lit, ok := n.(*ast.FuncLit); ok {
+										if lit.Body != nil {
+											scanSites(lit.Body, "", false)
+										}
+										return false
+									}
+									if ident, ok := n.(*ast.Ident); ok {
+										if obj := p.TypesInfo.Uses[ident]; obj != nil {
+											if fnName, tracked := returnerObjs[obj]; tracked && frontierSet[fnName] {
+												contained := false
+												if call, isCall := value.(*ast.CallExpr); isCall && call.Fun == ast.Expr(ident) {
+													if fnObj, isFunc := obj.(*types.Func); isFunc {
+														if sig, isSig := fnObj.Type().(*types.Signature); isSig && sig.Results().Len() == len(vs.Names) {
+															contained = true
+															for i, nameIdent := range vs.Names {
+																if nameIdent.Name != "_" && typeHandsOutMutableReach(sig.Results().At(i).Type(), make(map[types.Type]bool)) {
+																	contained = false
+																	break
+																}
+															}
+														}
+													}
+												}
+												if !contained {
+													bad[fnName] = true
+												}
+											}
+										}
+									}
+									return true
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+		for changed := true; changed; {
+			changed = false
+			for from, tos := range deps {
+				if bad[from] {
+					continue
+				}
+				for to := range tos {
+					if bad[to] {
+						bad[from] = true
+						changed = true
+						break
+					}
+				}
+			}
+		}
+		restored := map[string]bool{}
+		for _, pending := range pendingReturns {
+			if !bad[pending.fn] {
+				continue
+			}
+			for _, key := range pending.keys {
+				if pending.attrFn != "" {
+					if !restored[pending.attrFn+"\x00"+key] {
+						restored[pending.attrFn+"\x00"+key] = true
+						*attributed = append(*attributed, attributedUse{fn: pending.attrFn, key: key, escape: true})
+					}
+				} else {
+					escaped[key] = true
+				}
 			}
 		}
 	}
@@ -2039,10 +2384,18 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 // defer, the goroutine runs concurrently
 // (REQ-closure-shared-dynamic-state).
 func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
-	return boundValueLeakFreeDeferred(p, roots, body, nil)
+	return boundValueLeakFreeJudged(p, roots, body, nil, nil)
 }
 
 func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
+	return boundValueLeakFreeJudged(p, roots, body, wants, nil)
+}
+
+// boundValueLeakFreeJudged additionally tolerates return-position handouts
+// when the caller supplies a returns collector: a rooted alias-handing
+// result consumes and sets the flag instead of refusing, for the
+// returned-binding disposition to judge the function's own callers.
+func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
@@ -2050,11 +2403,23 @@ func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool
 	// the walked body - a call wrapped in a goroutine literal exactly as
 	// the direct spelling - so none of them defers.
 	goCalls := map[*ast.CallExpr]bool{}
+	litReturns := map[*ast.ReturnStmt]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
-		if g, ok := n.(*ast.GoStmt); ok {
-			ast.Inspect(g, func(inner ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.GoStmt:
+			ast.Inspect(n, func(inner ast.Node) bool {
 				if call, ok := inner.(*ast.CallExpr); ok {
 					goCalls[call] = true
+				}
+				return true
+			})
+		case *ast.FuncLit:
+			// A return inside a nested literal exits the literal, not
+			// the judged function - its handout goes to whoever calls
+			// the literal, never to the returned-binding disposition.
+			ast.Inspect(n, func(inner ast.Node) bool {
+				if ret, ok := inner.(*ast.ReturnStmt); ok {
+					litReturns[ret] = true
 				}
 				return true
 			})
@@ -2271,11 +2636,18 @@ func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool
 		case *ast.ReturnStmt:
 			// A rooted result whose type hands out no mutable reach is a
 			// copied scalar - it cannot alias the carrier; anything else
-			// hands the alias to the caller.
+			// hands the alias to the caller - refused outright, or
+			// collected for the returned-binding disposition when the
+			// caller judges the handout's own consumers.
 			for _, result := range n.Results {
 				if rooted(result) {
 					if t := p.TypesInfo.TypeOf(result); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
-						leaky = true
+						if returns != nil && t != nil && !litReturns[n] {
+							*returns = true
+							consume(result)
+						} else {
+							leaky = true
+						}
 					} else {
 						consume(result)
 					}

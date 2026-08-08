@@ -305,7 +305,24 @@ recursion and cross-package chains unproven at fact time while the
 carried marks still resolve cross-package at composition; inside the
 judgment as at the discharge, no call within a go statement's subtree
 defers its arguments — a goroutine literal wrapping the call is the
-same concurrent execution as the direct spelling. Persisted parameter facts key
+same concurrent execution as the direct spelling. A third narrowing
+admits return-position handouts: a range binding returned by an
+unexported plain named function discharges when every in-package use of
+that function contains the handed-out alias — a call result bound to
+identifiers proven leak-free over the using body by the same judgment,
+deferrals included, a discarded result, or return-position propagation
+chaining the disposition to the propagating function's own callers,
+resolved to a package-local fixed point; a value reference, an
+argument- or composite-position result, a binding the walk cannot
+judge, propagation through an exported function, a method, or a
+package-level literal, and a return inside a nested literal refuse,
+restoring the escape — deferred marks collected en route remain, the
+escape dominating at composition. Package-level literals and
+initializer expressions are use sites like any body — a direct
+initializer-position call is contained only when every alias-handing
+result lands in a blank. The disposition is package-local and adds no
+persisted encoding — deferrals it collects ride the existing
+parameter-fact marks. Persisted parameter facts key
 package path, function name, and zero-based parameter index NUL-joined
 — a variadic call's trailing arguments key the final declared
 parameter's index;

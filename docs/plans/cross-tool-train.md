@@ -263,7 +263,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       shape) defers to that parameter's leak-free fact exactly as a
       carrier argument does, resolved over the same persisted facts,
       absence refusing.
-- [ ] 49. gofresh: returned-entry disposition - a helper returning a
+- [x] 49. gofresh: returned-entry disposition - a helper returning a
       carrier-bound entry (the registry's registeredClass shape) hands
       the alias to its caller; the caller-side judgment prices the
       returned entry like a binding, the returned-alias rung's plain
