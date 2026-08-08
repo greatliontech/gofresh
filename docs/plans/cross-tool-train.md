@@ -291,6 +291,37 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       generated shape) resolve at composition through a deferred
       env-call channel, arguments judged recursively with deferrals
       compounding, absence keeping the poison.
+- [ ] 55. gofresh: receiver-read-only return shapes widen to writeless
+      constructions - a value-receiver method returning a composite
+      literal whose element values are receiver reads of
+      non-alias-handing types (threshold's Rule() RuleID{value:
+      t.entry.rule}) or a conversion of the receiver to a
+      non-alias-handing type (foral's String() string(p)) proves
+      read-only; alias-handing element types and conversions keep the
+      refusal.
+- [ ] 56. gofresh: registered-population parameter proof for func-field
+      calls - a carrier field passed as an argument to a call through
+      a func-valued field of the same leak-free binding (the
+      near-match loop's class.near(header, class.columns)) defers to
+      the field position's registered population: every value the
+      environment audit admits into that field must prove the
+      parameter leak-free (named functions by their persisted
+      parameter facts, audited literals judged at registration,
+      constructor results through the return-env-free channel), any
+      unproven registrant keeping the escape.
+- [ ] 57. gofresh: carrier index extraction admissions - a comma-ok
+      existence read discarding the extracted element (the
+      membership-validation shape) is writeless on any carrier, and a
+      call whose callee is an index read of an env-free-audited
+      carrier (the dispatch-table shape legs[token](inv)) admits with
+      arguments judged like the func-field call's; extraction that
+      binds or hands out the element keeps the escape.
+- [ ] 58. gofresh: parameter-forwarding chains across packages - a
+      function forwarding its parameter to a foreign callee's
+      parameter (NewRETALawRegistry's rows to proposition.New) records
+      a conditional leak-free fact naming the foreign parameter it
+      depends on, resolved at composition to a fixed point exactly as
+      the env-call channel resolves, cycles and absence refusing.
 - [ ] 53. gofresh: audited-pure standard-set additions the named
       verdicts justify - source-audit math/big value constructors,
       time.Date, reflect.DeepEqual, and interface-type references of
