@@ -359,6 +359,26 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       propagating only when a write occurs - or the leak-free proof
       gains an argument-flows-to-result bit deciding call-result
       links precisely.
+- [ ] 63. gofresh: element reads of judged containers derive - the
+      seventh probe isolates the field registries' next links: v :=
+      m[k], v := s[i], and the comma-ok map read all refuse today, and
+      every temporal registry constructor binds through them; a read
+      of a judged container's element is judged (the container's
+      store-set invariant already guarantees element judgment), the
+      bind recording the alias link chunk 62 introduces so writes
+      through the read binding keep propagating - the admission is
+      sound only on top of those links, which is why 62 lands first;
+      the comma-ok second result is boolean and free.
+- [ ] 64. gofresh: audited-pure standard callees join the derivation
+      class - slices.Clone(rows) in the keyed-registry constructor
+      refuses as an unproven foreign callee (probe-confirmed; the
+      error-path returns are already free - error values carry no
+      signature); a small audited set of value-plane standard helpers
+      (slices.Clone and the clone/sort/collect family) derives its
+      result from its carrier arguments, alias-linked like any other
+      backing-sharing bind; distinct from chunk 53's
+      unaudited-standard-operation named verdicts, which live on a
+      different refusal arm.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
