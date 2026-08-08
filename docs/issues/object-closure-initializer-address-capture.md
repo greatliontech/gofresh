@@ -27,7 +27,8 @@ function bodies — a `failTargets`-style walk of each ValueSpec value
 for `&x` captures reaching interface package variables (nested
 function literals excluded as program code, as everywhere).
 
-A reviewer probe module demonstrating the shape sits ready under the
-review scratchpad; port it as the regression fixture when this lands.
+Empirically demonstrated: a probe module of exactly this shape returns
+a Valid verdict with no downgrade reason. The reproducer above is
+complete — port it as the regression fixture when this lands.
 
 Lands: startup-effect-precision plan, per each doc.
