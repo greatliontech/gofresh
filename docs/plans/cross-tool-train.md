@@ -449,6 +449,30 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       fail-closes into the break (the held copy's interior may reach
       the caller's backing); opens with the spec read and the
       two-relation design settled before code.
+- [ ] 70. gofresh + stipulator: verdict explanation as a supported
+      surface - every refusal this train chased needed the same three
+      artifacts, rebuilt twice as throwaway harnesses: the per-package
+      fact dump, the composition trace naming the dependency edge that
+      failed to resolve, and the per-function refusal trace naming the
+      innermost refusing expression with its position; gofresh grows
+      an explain entry point (given a package and symbol, the full
+      derivation chain from verdict to refusing expression), and
+      stipulator passes it through as an MCP verb so "why is this
+      witness uncacheable" is one call in the dev hot loop instead of
+      a scratch test file; MCP-first per the standing surface
+      priority, minimal output, the chain not the prose; opens with a
+      design discussion (verb shape, output form, how much of the
+      fact vocabulary becomes public surface) before implementation.
+- [ ] 71. gomutant: explain for survival and promotion - the same
+      capability for the mutation plane: why a mutant survived (which
+      oracle, which execution bucket, what the candidate evidence
+      was), why a record has not promoted to the repo layer (the
+      field report's empty findings.json took a session to diagnose
+      from outside); one explain verb over the findings document.
+- [ ] 72. pew: explain for attribution - why an attribution verdict
+      failed and what changed between recordings, over the recorded
+      provenance conjunction; closes the explain family so every
+      tool's verdict answers "why" without instrumentation.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
