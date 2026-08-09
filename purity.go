@@ -564,6 +564,15 @@ type pendingReturnDisposition struct {
 	attrFn string
 }
 
+// explainMark observes a mutation or escape decision for the explain
+// surface; nil outside an explain re-derivation
+// (REQ-explain-passive).
+func explainMark(p *packages.Package, kind, key string, at token.Pos) {
+	if h := explainHooks.Load(); h != nil && h.site != nil {
+		h.site(p, kind, key, at)
+	}
+}
+
 func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
@@ -613,9 +622,11 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			}
 			if obj, ok := resolve(ident); ok {
 				if variable, ok := dynamicPackageVar(obj); ok {
+					explainMark(p, "mutation", dynamicVarKey(variable), ident.Pos())
 					mutated[dynamicVarKey(variable)] = true
 				} else {
 					for key := range aliasedLocals[obj] {
+						explainMark(p, "mutation", key, ident.Pos())
 						mutated[key] = true
 					}
 				}
@@ -840,10 +851,12 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				if obj, ok := resolve(ident); ok {
 					if variable, ok := dynamicPackageVar(obj); ok {
 						if typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+							explainMark(p, "escape", dynamicVarKey(variable), ident.Pos())
 							escaped[dynamicVarKey(variable)] = true
 						}
 					} else {
 						for key := range aliasedLocals[obj] {
+							explainMark(p, "escape", key, ident.Pos())
 							escaped[key] = true
 						}
 					}
@@ -1136,11 +1149,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				}
 				if obj, ok := resolve(n); ok {
 					if variable, ok := dynamicPackageVar(obj); ok && typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+						explainMark(p, "escape", dynamicVarKey(variable), n.Pos())
 						escaped[dynamicVarKey(variable)] = true
 					} else {
 						// An init-flow local aliasing a carrier is the
 						// carrier inside program code.
 						for key := range aliasedLocals[obj] {
+							explainMark(p, "escape", key, n.Pos())
 							escaped[key] = true
 						}
 					}
@@ -1595,6 +1610,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						*attributed = append(*attributed, attributedUse{fn: pending.attrFn, key: key, escape: true})
 					}
 				} else {
+					explainMark(p, "escape", key, token.NoPos)
 					escaped[key] = true
 				}
 			}
@@ -2166,14 +2182,19 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 		}
 		poison := false
 		pendingEnvCalls = map[string]bool{}
+		var poisonAt token.Pos
 		for _, flow := range flows {
 			if carrying(flow) {
 				poison = true
+				poisonAt = flow.Pos()
 				break
 			}
 		}
 		if poison {
 			for _, variable := range targets {
+				if h := explainHooks.Load(); h != nil && h.store != nil {
+					h.store(p, dynamicVarKey(variable), poisonAt)
+				}
 				envCarrying[dynamicVarKey(variable)] = true
 			}
 		} else if envCalls != nil {
@@ -3199,6 +3220,38 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					return false
 				}
 				return false
+			}
+			if h := explainHooks.Load(); h != nil && h.refusal != nil {
+				inner := free
+				free = func(e ast.Expr) bool {
+					r := inner(e)
+					if !r {
+						clause := "an unrecognized return shape"
+						switch e := unparen(e).(type) {
+						case *ast.Ident:
+							obj := p.TypesInfo.Uses[e]
+							if obj == nil {
+								obj = p.TypesInfo.Defs[e]
+							}
+							switch {
+							case obj != nil && localBroken[obj]:
+								clause = "write or capture broke the binding"
+							case obj != nil && len(sharedWrites[aliasFind(obj)]) > 0:
+								clause = "a stored value refused"
+							default:
+								clause = "a binding source refused"
+							}
+						case *ast.CallExpr:
+							clause = "callee outside the audited set and dependency channel"
+						case *ast.CompositeLit:
+							clause = "a literal element refused"
+						case *ast.SelectorExpr, *ast.IndexExpr, *ast.SliceExpr:
+							clause = "an unadmitted derivation shape"
+						}
+						h.refusal(p, fd.Name.Name, e, clause)
+					}
+					return r
+				}
 			}
 			ok = true
 			results := 0
