@@ -4554,6 +4554,94 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a call-rooted write chain was invisible", verdict)
 		}
 	})
+	t.Run("element read of a judged map derives", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"a\": h}\n\tv := m[\"a\"]\n\treturn map[string]handler{\"d\": v}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an element read of a judged map refused the derivation", verdict)
+		}
+	})
+	t.Run("index read of a judged slice derives in return position", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ts := []handler{h}\n\treturn map[string]handler{\"d\": s[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a return-position slice read refused the derivation", verdict)
+		}
+	})
+	t.Run("comma-ok map read derives", func(t *testing.T) {
+		// The registry-constructor group shape: comma-ok read of a
+		// pointer element, zero-miss fill, field write, field read.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype box struct{ f handler }\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]*box{}\n\tb, ok := m[\"k\"]\n\tif !ok {\n\t\tb = &box{}\n\t\tm[\"k\"] = b\n\t}\n\tb.f = h\n\treturn map[string]handler{\"d\": b.f}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the comma-ok read chain refused the derivation", verdict)
+		}
+	})
+	t.Run("index read of a judged array derives", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ta := [1]handler{h}\n\treturn map[string]handler{\"d\": a[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an array index read refused the derivation", verdict)
+		}
+	})
+	t.Run("index read through a judged array pointer derives", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ta := &[1]handler{h}\n\treturn map[string]handler{\"d\": a[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an array-pointer index read refused the derivation", verdict)
+		}
+	})
+	t.Run("poisoned store into a cyclic chain keeps the poison", func(t *testing.T) {
+		// The cycle admits only recirculation; the external poison
+		// entering through the store refuses every member.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype box struct{ f handler }\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]*box{}\n\tb, ok := m[\"k\"]\n\tif !ok {\n\t\tb = &box{}\n\t\tm[\"k\"] = b\n\t}\n\tc := &counter{}\n\tb.f = c.Next\n\treturn map[string]handler{\"d\": b.f}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - the cycle admitted an external poison", verdict)
+		}
+	})
+	t.Run("element read of an unjudged container keeps the poison", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\tc := &counter{}\n\tm := map[string]handler{\"a\": c.Next}\n\tv := m[\"a\"]\n\treturn map[string]handler{\"d\": v}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - an unjudged container's element read judged", verdict)
+		}
+	})
 	t.Run("converted method value in return keeps the poison", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,

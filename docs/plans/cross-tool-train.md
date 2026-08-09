@@ -359,7 +359,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       propagating only when a write occurs - or the leak-free proof
       gains an argument-flows-to-result bit deciding call-result
       links precisely.
-- [ ] 63. gofresh: element reads of judged containers derive - the
+- [x] 63. gofresh: element reads of judged containers derive - the
       seventh probe isolates the field registries' next links: v :=
       m[k], v := s[i], and the comma-ok map read all refuse today, and
       every temporal registry constructor binds through them; a read

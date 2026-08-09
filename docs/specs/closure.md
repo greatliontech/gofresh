@@ -391,7 +391,11 @@ whose elements are the value itself — slices, arrays, pointers to
 arrays, maps, strings,
 integers; a channel's elements are sender-supplied and a function
 range's yield-supplied, so those bindings break — a field read of a
-judged value, an append
+judged value, an element read of a judged container (the same
+containers the range clause admits; the comma-ok form's second
+result is boolean and free), a cyclic binding chain among the
+derivation edges judging by its external sources and stores alone —
+recirculation contributes no new values — an append
 of judged elements (an append onto the binding itself flowing only the
 new elements), a conversion of a judged value, an instantiated
 reference of a named function, and a call of a plain named callee with

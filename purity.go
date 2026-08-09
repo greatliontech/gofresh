@@ -2746,8 +2746,13 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				case 3:
 					return false
 				case 1:
-					// A cyclic binding cannot ground - fail-closed.
-					return false
+					// A cyclic binding chain recirculates existing
+					// values - no new value enters through the cycle
+					// edge itself - so the edge holds and the judgment
+					// rests on the chain's external sources alone. A
+					// poisoned external source or store still refuses
+					// every member.
+					return true
 				}
 				if localBroken[obj] {
 					localFree[obj] = 3
@@ -2843,9 +2848,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					return false
 				case *ast.IndexExpr:
 					// An instantiated function reference (a generic named
-					// function used as a value) carries no environment;
-					// element reads are not a chartered derivation and
-					// keep the refusal.
+					// function used as a value) carries no environment.
 					switch x := unparen(e.X).(type) {
 					case *ast.Ident:
 						if _, isFunc := p.TypesInfo.Uses[x].(*types.Func); isFunc {
@@ -2854,6 +2857,21 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					case *ast.SelectorExpr:
 						if _, isFunc := p.TypesInfo.Uses[x.Sel].(*types.Func); isFunc {
 							return true
+						}
+					}
+					// An element read of a judged container is judged:
+					// the store-set invariant guarantees every element
+					// stored judges. Gated on the same containers the
+					// range clause admits; anything else - type
+					// parameters included - keeps the refusal.
+					if t := p.TypesInfo.TypeOf(e.X); t != nil {
+						switch u := types.Unalias(t).Underlying().(type) {
+						case *types.Map, *types.Slice, *types.Array, *types.Basic:
+							return free(e.X)
+						case *types.Pointer:
+							if _, isArr := types.Unalias(u.Elem()).Underlying().(*types.Array); isArr {
+								return free(e.X)
+							}
 						}
 					}
 					return false
