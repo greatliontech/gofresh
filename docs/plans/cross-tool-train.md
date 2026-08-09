@@ -415,7 +415,7 @@ its activation decision.
       reroute of the capture arm through the fail-closed break helper
       would spuriously refuse every return &T{field: param}
       constructor.
-- [ ] 66. gofresh + consumers: vouched third-party dynamic state -
+- [x] 66. gofresh + consumers: vouched third-party dynamic state -
       field report: any graph carrying go-openapi/strfmt.Default
       (every sigstore/rekor consumer) trips the shared-dynamic-state
       downgrade with no discharge path - the tools cannot prove a
