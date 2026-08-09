@@ -3,12 +3,22 @@
 The active roadmap across gofresh, gomutant, stipulator, and pew. Each
 chunk is one commit in its named repo, run through the full adversarial
 loop there; gofresh chunks release before consumer chunks bump. WIP = 1.
-Ordering for the gomutant tail follows the `Lands:` lines in that repo's
-issue docs; the two lead chunks are the field-blocking overlay defect and
-its root-cause class. Remaining chunks execute bottoms-up by layer:
-gofresh first (21, 22, 23, 24, 20, 17), one gofresh release, then
-stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
-(15), then plan close-out.
+
+Chunk numbers are stable identifiers, never order. Execution order
+lives in the list below and only there; chartering a new chunk appends
+its checkbox but never inserts into the order - insertion is a
+deliberate edit of this list, stated in the chartering commit. Incoming
+field reports triage into three bands: blocking-a-user (defects
+stopping another agent's loop now), current-arc (serves the measured
+floor), and tail (ergonomics, refactors).
+
+Execution order (user-confirmed 2026-08-09): 69, 73, 70, 66, then the
+discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
+74, 75, 76, 77, 78, then 79, 67, 68, 71, 72, 65, then the
+startup-effect-precision plan activation decision with 29-46, then 16
+(floor re-measure and close-outs), then 15 (pew, opens with a user
+design discussion). The startup-effect-precision plan is dormant until
+its activation decision.
 
 - [x] 1. gomutant: overlay commit cost + quarantine
       (gomutant docs/issues/store-update-reparses-whole-overlay.md) —
