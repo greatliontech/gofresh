@@ -196,7 +196,9 @@ func (d TestVariantDelta) Inert() bool {
 }
 
 // DiffTestVariantLedgers classifies the delta from a recorded ledger to a
-// current one. Declarations are matched by (File, Kind, Receiver, Name);
+// current one. Declarations are matched by (File, Package, Kind, Receiver,
+// Name) — the package clause is diff identity, so an entry recorded without
+// one (a pre-clause ledger) matches nothing and classifies removed;
 // entries sharing that identity (several init functions in one file) pair by
 // sorted hash, surplus recorded entries reporting as removed and surplus
 // current ones as added. The result is deterministic for any two ledgers.
