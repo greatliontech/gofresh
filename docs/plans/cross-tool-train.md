@@ -485,7 +485,7 @@ its activation decision.
       was), why a record has not promoted to the repo layer (the
       field report's empty findings.json took a session to diagnose
       from outside); one explain verb over the findings document.
-- [ ] 72. pew: explain for attribution - why an attribution verdict
+- [x] 72. pew: explain for attribution - why an attribution verdict
       failed and what changed between recordings, over the recorded
       provenance conjunction; closes the explain family so every
       tool's verdict answers "why" without instrumentation.
