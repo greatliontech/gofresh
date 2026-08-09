@@ -2404,11 +2404,16 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			// through any alias is a store into the same storage.
 			writeSources := map[types.Object][]ast.Expr{}
 			localBroken := map[types.Object]bool{}
-			// aliasPairs links bindings that share mutable backing (a
-			// whole-identifier bind of a reach-bearing tracked value):
-			// a break through either name is a break of the storage, so
-			// breaks propagate across the pairs to a fixed point.
+			// aliasPairs links bindings whose bound value shares its
+			// backing header: the two names are one storage, so breaks,
+			// the store union, and the parameter refusal all cross the
+			// pair. heldPairs links a holder to the origin of a struct
+			// or array value copied out of it: the copy's interior may
+			// reach the origin's backing, so breaks cross the pair
+			// fail-closed, but the holder's own storage stays its own -
+			// slot writes never count as writes into the origin's.
 			var aliasPairs [][2]types.Object
+			var heldPairs [][2]types.Object
 			trackedVar := func(obj types.Object) (*types.Var, bool) {
 				v, ok := obj.(*types.Var)
 				if !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope() || !carries(v.Type()) {
@@ -2464,51 +2469,151 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			breakBase := func(target ast.Expr) {
 				breakTargets(chainRoot(target))
 			}
+			// sharesHeader reports whether a value of the type shares
+			// its backing when bound - a header or reference copy -
+			// rather than copying its content. Struct and array values
+			// copy; everything else (pointers, slices, maps, channels,
+			// interfaces, type parameters, unknowns) is fail-closed
+			// header-sharing.
+			sharesHeader := func(t types.Type) bool {
+				if t == nil {
+					return true
+				}
+				switch types.Unalias(t).Underlying().(type) {
+				case *types.Struct, *types.Array, *types.Basic:
+					return false
+				}
+				return true
+			}
 			// linkBacking links a bound or written name to each
-			// reach-bearing tracked name its source expression reaches -
-			// whole identifiers, element reads, conversions, call
-			// results, appends, and literals embedding a tracked value
-			// alike. Conservative pairing is fail-closed: links feed
-			// only break propagation, the store union, and the
-			// parameter-component refusal - a spurious refusal at worst,
-			// never a false Valid. Reach-free sources (a struct value's
-			// scalar copy) stay unlinked as independent storage.
-			linkBacking := func(obj types.Object, source ast.Expr) {
-				ast.Inspect(source, func(m ast.Node) bool {
-					id, ok := m.(*ast.Ident)
-					if !ok {
-						return true
-					}
-					sobj := p.TypesInfo.Uses[id]
+			// reach-bearing tracked name its source expression reaches.
+			// The link kind follows the value that flows: a
+			// header-sharing value makes the two names one storage - a
+			// symmetric alias carrying breaks, the store union, and the
+			// parameter refusal - while a struct or array value is a
+			// copy whose interior may still reach the origin's backing:
+			// a directional held link carrying breaks only, so slot
+			// writes into the holder's own storage never count as
+			// writes into the origin's. Both kinds are fail-closed
+			// relative to their claim; reach-free values stay unlinked
+			// as independent storage.
+			pairLink := func(obj, sobj types.Object, shares bool) {
+				if v, ok := sobj.(*types.Var); ok && v.IsField() {
+					return
+				}
+				// Carrying parameters are themselves tracked, so
+				// tracked alone covers every reach-relevant name.
+				_, tracked := trackedVar(sobj)
+				if !tracked || !typeHandsOutMutableReach(sobj.Type(), make(map[types.Type]bool)) {
+					return
+				}
+				if shares {
+					aliasPairs = append(aliasPairs, [2]types.Object{obj, sobj})
+				} else {
+					heldPairs = append(heldPairs, [2]types.Object{obj, sobj})
+				}
+			}
+			var linkBacking func(obj types.Object, source ast.Expr)
+			linkValue := func(obj types.Object, e ast.Expr, shares bool) {
+				if ident, ok := chainRoot(e).(*ast.Ident); ok {
+					sobj := p.TypesInfo.Uses[ident]
 					if sobj == nil {
-						return true
+						sobj = p.TypesInfo.Defs[ident]
 					}
-					// A selector's or literal key's field object denotes
-					// no runtime value - linking it would conflate every
-					// user of the field's struct type into one component.
-					if v, ok := sobj.(*types.Var); ok && v.IsField() {
-						return true
+					if sobj != nil {
+						pairLink(obj, sobj, shares)
+						return
 					}
-					// Carrying parameters are themselves tracked, so
-					// tracked alone covers every reach-relevant name.
-					_, tracked := trackedVar(sobj)
-					if tracked && typeHandsOutMutableReach(sobj.Type(), make(map[types.Type]bool)) {
-						aliasPairs = append(aliasPairs, [2]types.Object{obj, sobj})
+				}
+				// No plain chain root - fall back to the blind walk,
+				// every reached name linked as sharing: the value
+				// relationship is unknown, and sharing is the
+				// fail-closed kind.
+				ast.Inspect(e, func(m ast.Node) bool {
+					if id, ok := m.(*ast.Ident); ok {
+						if sobj := p.TypesInfo.Uses[id]; sobj != nil {
+							pairLink(obj, sobj, true)
+						}
 					}
 					return true
 				})
 			}
+			// linkBacking classifies a bound or stored source expression
+			// by the value that flows out of each shape and links the
+			// reached names accordingly.
+			linkBacking = func(obj types.Object, source ast.Expr) {
+				e := unparen(source)
+				switch v := e.(type) {
+				case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.StarExpr, *ast.SliceExpr:
+					linkValue(obj, e, sharesHeader(p.TypesInfo.TypeOf(e)))
+				case *ast.CompositeLit:
+					for _, elt := range v.Elts {
+						value := elt
+						if kv, ok := elt.(*ast.KeyValueExpr); ok {
+							value = kv.Value
+						}
+						linkBacking(obj, value)
+					}
+				case *ast.UnaryExpr:
+					if v.Op == token.AND {
+						linkBacking(obj, v.X)
+						return
+					}
+					linkValue(obj, e, true)
+				case *ast.CallExpr:
+					if fnIdent, ok := unparen(v.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[fnIdent].(*types.Builtin); builtin {
+							switch fnIdent.Name {
+							case "make", "new":
+								return
+							case "append":
+								if len(v.Args) > 0 {
+									linkValue(obj, v.Args[0], true)
+									for _, arg := range v.Args[1:] {
+										linkBacking(obj, arg)
+									}
+								}
+								return
+							}
+						}
+					}
+					if tv, ok := p.TypesInfo.Types[v.Fun]; ok && tv.IsType() && len(v.Args) == 1 {
+						linkBacking(obj, v.Args[0])
+						return
+					}
+					for _, arg := range v.Args {
+						linkBacking(obj, arg)
+					}
+				case *ast.BasicLit, *ast.FuncLit:
+					// A literal carries no prior backing; a func literal's
+					// captures are the escape walk's business, not
+					// storage aliasing.
+				default:
+					linkValue(obj, e, true)
+				}
+			}
+			// pendingStores defers element, field, and dereference
+			// writes of present values until the walk completes: the
+			// slot-versus-deep judgment needs every binding source
+			// collected first.
+			type pendingStore struct {
+				robj   types.Object
+				root   *ast.Ident
+				target ast.Expr
+				source ast.Expr
+			}
+			var pendingStores []pendingStore
 			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
 				ident, ok := unparen(target).(*ast.Ident)
 				if !ok {
 					// An element, field, or dereference write of a
-					// present value stores into the root's storage: the
-					// value joins the root's write sources instead of
-					// breaking it. A valueless or already-broken write
-					// keeps the break; parameter storage - reached
-					// directly or through any alias - breaks in the
-					// component pass after the walk, the one
-					// enforcement point for the parameter-write clause.
+					// present value stores into the root's storage; the
+					// post-walk pass decides slot versus deep. A
+					// valueless or already-broken write keeps the
+					// break; parameter storage - reached directly or
+					// through any alias - breaks in the component pass,
+					// the one enforcement point for the parameter-write
+					// clause.
 					if source != nil && !broken {
 						if rootIdent, ok := chainRoot(target).(*ast.Ident); ok {
 							robj := p.TypesInfo.Uses[rootIdent]
@@ -2517,12 +2622,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							}
 							if robj != nil {
 								if _, tracked := trackedVar(robj); tracked {
-									writeSources[robj] = append(writeSources[robj], source)
-									// The store also makes the base's
-									// storage reach the stored value's
-									// backing - a later write through the
-									// base's elements lands there.
-									linkBacking(robj, source)
+									pendingStores = append(pendingStores, pendingStore{robj, rootIdent, target, source})
 									return
 								}
 							}
@@ -2665,14 +2765,149 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 				return true
 			})
-			// Breaks propagate across shared backing before any
-			// judgment reads the map.
+			// freshObj marks bindings whose every source is body-owned
+			// storage: a fresh allocation, an append or conversion over
+			// one, or a value read back out of a fresh container. A
+			// pessimistic ascending fixpoint - ungrounded cycles stay
+			// non-fresh, fail-closed.
+			freshObj := map[types.Object]bool{}
+			var srcFresh func(e ast.Expr) bool
+			srcFresh = func(e ast.Expr) bool {
+				e = unparen(e)
+				switch v := e.(type) {
+				case *ast.CompositeLit:
+					return true
+				case *ast.UnaryExpr:
+					return v.Op == token.AND && srcFresh(v.X)
+				case *ast.CallExpr:
+					if fnIdent, ok := unparen(v.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[fnIdent].(*types.Builtin); builtin {
+							switch fnIdent.Name {
+							case "make", "new":
+								return true
+							case "append":
+								return len(v.Args) > 0 && srcFresh(v.Args[0])
+							}
+							return false
+						}
+					}
+					if tv, ok := p.TypesInfo.Types[v.Fun]; ok && tv.IsType() && len(v.Args) == 1 {
+						return srcFresh(v.Args[0])
+					}
+					return false
+				case *ast.Ident, *ast.IndexExpr, *ast.SliceExpr, *ast.StarExpr, *ast.SelectorExpr:
+					if ident, ok := chainRoot(e).(*ast.Ident); ok {
+						obj := p.TypesInfo.Uses[ident]
+						if obj == nil {
+							obj = p.TypesInfo.Defs[ident]
+						}
+						return obj != nil && freshObj[obj]
+					}
+				}
+				return false
+			}
 			for changed := true; changed; {
 				changed = false
-				for _, pair := range aliasPairs {
-					if localBroken[pair[0]] != localBroken[pair[1]] {
-						localBroken[pair[0]], localBroken[pair[1]] = true, true
+				for obj, srcs := range localSources {
+					if freshObj[obj] || len(srcs) == 0 {
+						continue
+					}
+					all := true
+					for _, s := range srcs {
+						if !srcFresh(s) {
+							all = false
+							break
+						}
+					}
+					if all {
+						freshObj[obj] = true
 						changed = true
+					}
+				}
+			}
+			// A deferred store is a slot write - landing in the root's
+			// own storage - when the chain stays on the root's owned
+			// spine: for a fresh root, an initial dereference of the
+			// root's own pointer, selector steps over struct values,
+			// and at most one index as the final step; for any root,
+			// selector steps over struct values alone. Every other
+			// step - a dereference or pointer-crossing selector below
+			// the root, an index on a non-fresh root or in non-final
+			// position - may write storage the root does not own:
+			// fail-closed deep, breaking the root and, through the
+			// links, every origin its held values may reach.
+			deepWrite := func(target ast.Expr, fresh bool) bool {
+				var steps []ast.Expr
+				e := unparen(target)
+			flatten:
+				for {
+					switch s := e.(type) {
+					case *ast.SelectorExpr:
+						steps = append(steps, s)
+						e = unparen(s.X)
+					case *ast.IndexExpr:
+						steps = append(steps, s)
+						e = unparen(s.X)
+					case *ast.SliceExpr:
+						steps = append(steps, s)
+						e = unparen(s.X)
+					case *ast.StarExpr:
+						steps = append(steps, s)
+						e = unparen(s.X)
+					default:
+						break flatten
+					}
+				}
+				for i := len(steps) - 1; i >= 0; i-- {
+					atRoot := i == len(steps)-1
+					final := i == 0
+					switch st := steps[i].(type) {
+					case *ast.StarExpr:
+						if !atRoot || !fresh {
+							return true
+						}
+					case *ast.SelectorExpr:
+						if t := p.TypesInfo.TypeOf(st.X); t != nil {
+							if _, ptr := types.Unalias(t).Underlying().(*types.Pointer); ptr {
+								if !atRoot || !fresh {
+									return true
+								}
+							}
+						}
+					case *ast.IndexExpr:
+						if !final || !fresh {
+							return true
+						}
+					case *ast.SliceExpr:
+						if !fresh {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			for _, ps := range pendingStores {
+				if deepWrite(ps.target, freshObj[ps.robj]) {
+					breakTargets(ps.root)
+					continue
+				}
+				writeSources[ps.robj] = append(writeSources[ps.robj], ps.source)
+				// The store also makes the base's storage reach the
+				// stored value's backing - a later write through the
+				// base's elements lands there.
+				linkBacking(ps.robj, ps.source)
+			}
+			// Breaks propagate across shared backing and held reach
+			// alike before any judgment reads the map - a break on
+			// either side of either link kind is fail-closed shared.
+			for changed := true; changed; {
+				changed = false
+				for _, pairs := range [][][2]types.Object{aliasPairs, heldPairs} {
+					for _, pair := range pairs {
+						if localBroken[pair[0]] != localBroken[pair[1]] {
+							localBroken[pair[0]], localBroken[pair[1]] = true, true
+							changed = true
+						}
 					}
 				}
 			}
