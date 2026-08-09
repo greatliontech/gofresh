@@ -18,7 +18,9 @@ consecutive family - the explain capability is diagnosis
 infrastructure for the working loop across all four repos, shared
 chain machinery in gofresh, each tool integrating it over its own
 verdict domain, every refusal carrying a handle to its derivation
-through the surfaces agents already use - then 66, then the
+through the surfaces agents already use - then 66, then 81
+(blocking-a-user: an oracle OOM burst pins the reporting user's host
+during campaigns), then the
 discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
 74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
 startup-effect-precision plan activation decision with 29-46 (80
@@ -542,6 +544,24 @@ its activation decision.
       the spawn sites (-parallel / GOMAXPROCS in the child env at
       max(1, NumCPU/units)) so units x per-child width stays at most
       the processor count; the unit bound's semantics stand.
+- [ ] 81. gomutant: oracle memory ceiling - field report (user; the
+      host pinned): a runaway-allocation mutant (statement-delete of a
+      loop advance in a tree walk that appends per iteration)
+      allocates freely inside the oracle's 60s window - the kernel OOM
+      killer fired on two mutated test processes at ~30GB anon RSS
+      each (journalctl: anon-rss:29303072kB); the verdict records
+      correctly as a kill ("panicked before observation finalization"
+      evidence), but each event drains RAM, pushes the host into swap,
+      and can take down other tooling - the most plausible cause of an
+      earlier harness crash. Run each oracle under a resource ceiling:
+      GOMEMLIMIT to keep the runtime honest plus a hard cap (cgroup
+      memory.max or rlimit), defaulting near RAM/(2 x jobs) and
+      configurable; classify a cap-kill exactly as the OOM-kill
+      classifies today (kill, runaway-allocation cause) - a host-wide
+      pressure event becomes a contained per-mutant verdict. Measured
+      non-causes stated in the report and honored at triage: gomutant's
+      own process is stable (310-430MB), linker bursts are inherent,
+      /tmp build dirs clean promptly, orphaned MCP servers are small.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
