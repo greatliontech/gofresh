@@ -479,7 +479,7 @@ its activation decision.
       priority, minimal output, the chain not the prose; opens with a
       design discussion (verb shape, output form, how much of the
       fact vocabulary becomes public surface) before implementation.
-- [ ] 71. gomutant: explain for survival and promotion - the same
+- [x] 71. gomutant: explain for survival and promotion - the same
       capability for the mutation plane: why a mutant survived (which
       oracle, which execution bucket, what the candidate evidence
       was), why a record has not promoted to the repo layer (the
