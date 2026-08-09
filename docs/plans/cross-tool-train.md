@@ -21,7 +21,9 @@ verdict domain, every refusal carrying a handle to its derivation
 through the surfaces agents already use - then 66, then the
 discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
 74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
-startup-effect-precision plan activation decision with 29-46, then 16
+startup-effect-precision plan activation decision with 29-46 (80
+rides beside 39a - the same oversubscription mechanism, one repo
+each), then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
 design discussion). The startup-effect-precision plan is dormant until
 its activation decision.
@@ -531,6 +533,15 @@ its activation decision.
       split deterministic kills from draw luck - the distinction
       caught a real defect in the field), and name oracle_timeout_sec
       in the timeout error.
+- [ ] 80. stipulator: witness-process CPU oversubscription - field
+      report (user, interactive check): the witness spawn bound caps
+      package units (witness_concurrency, else GOMAXPROCS/2) but each
+      unit is a full-width process tree (go test internal t.Parallel
+      at GOMAXPROCS plus build workers), so the product overcommits
+      the host exactly like gomutant's 39a; cap inner parallelism at
+      the spawn sites (-parallel / GOMAXPROCS in the child env at
+      max(1, NumCPU/units)) so units x per-child width stays at most
+      the processor count; the unit bound's semantics stand.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
