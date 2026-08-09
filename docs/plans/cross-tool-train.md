@@ -483,7 +483,7 @@ its activation decision.
       failed and what changed between recordings, over the recorded
       provenance conjunction; closes the explain family so every
       tool's verdict answers "why" without instrumentation.
-- [ ] 73. stipulator: read_spec delivers content over MCP - field
+- [x] 73. stipulator: read_spec delivers content over MCP - field
       report (cerebro coverage program): the tool result carries only
       {"bytes": N} through the Claude Code MCP client on every call,
       so the loop that is supposed to orient from requirement text
