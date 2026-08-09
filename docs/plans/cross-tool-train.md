@@ -473,6 +473,48 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       failed and what changed between recordings, over the recorded
       provenance conjunction; closes the explain family so every
       tool's verdict answers "why" without instrumentation.
+- [ ] 73. stipulator: read_spec delivers content over MCP - field
+      report (cerebro coverage program): the tool result carries only
+      {"bytes": N} through the Claude Code MCP client on every call,
+      so the loop that is supposed to orient from requirement text
+      falls back to grepping spec files; the no-resource-support
+      mirror path must deliver the bundle body in the tool result.
+- [ ] 74. stipulator: witness-classification verdicts name their
+      reason - a bound property test classified as an executed
+      example (rapid.Check invoked in a helper, not the bound body)
+      reads the generic "needs a property witness or analyzer proof";
+      the row names the classification verdict per bound witness -
+      "bound witness X classified executed-example: rapid.Check not
+      invoked in the bound body" - the field session lost two full
+      fix rounds to the trial-and-error discovery.
+- [ ] 75. stipulator: check ids scopes execution, not just display -
+      ids=... still executes the full witness set (2-5 minutes,
+      always past the 120s MCP window); a genuinely scoped fast mode
+      compiles and covers the named ids only, the verdict flagged
+      partial; transforms the bind-check inner loop.
+- [ ] 76. stipulator: prune does deletion work only - deleting nine
+      resolved gap files runs what appears to be a full
+      compile/witness pass (>120s); resolved-record deletion should
+      be near-instant, and whatever work genuinely must run must be
+      named in the phase report.
+- [ ] 77. stipulator: gap triage gains a read surface - gapsDue
+      counts appear in check output but nothing names which gaps are
+      due; gap list (id, reason, condition, fired, due) plus
+      documenting re-declare as the only edit path.
+- [ ] 78. stipulator: check summary output diet - view=summary still
+      carries the full reds list and the whole uncacheableReasonCounts
+      histogram every call; cap reds harder, make the histogram
+      opt-in, and add the actionable form - top blockers by witness
+      count, one exemplar test each.
+- [ ] 79. gomutant: ephemeral kill evidence - the verdict returns
+      killer name but no test output, forcing a parallel go test
+      -overlay re-run per review round (which also litters rapid
+      .fail reproduction files agents must clean); return the killing
+      test's first ~20 output lines, add runs:N with per-run verdicts
+      (property-test killers need "killed N consecutive runs" to
+      split deterministic kills from draw luck - the distinction
+      caught a real defect in the field), and name oracle_timeout_sec
+      in the timeout error.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
