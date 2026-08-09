@@ -4362,6 +4362,198 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a copy target stayed judged", verdict)
 		}
 	})
+	t.Run("write through an element-read binding keeps the poison", func(t *testing.T) {
+		// x aliases s[0]'s pointee; the write through x lands in the
+		// returned slice's element.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype catalog struct{ current handler }\n\nfunc gen(h handler) []*catalog {\n\ts := []*catalog{{current: h}}\n\tx := s[0]\n\tc := &counter{}\n\tx.current = c.Next\n\treturn s\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - an element-read alias write left the container judged", verdict)
+		}
+	})
+	t.Run("write through a map-element-read binding keeps the poison", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string][]handler {\n\tm := map[string][]handler{\"a\": {h}}\n\tx := m[\"a\"]\n\tc := &counter{}\n\tx[0] = c.Next\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a map-element alias write left the container judged", verdict)
+		}
+	})
+	t.Run("write through a conversion binding keeps the poison", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype table map[string]handler\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"d\": h}\n\tm2 := table(m)\n\tc := &counter{}\n\tm2[\"k\"] = c.Next\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a conversion alias write left the original judged", verdict)
+		}
+	})
+	t.Run("write through a literal-embedded parameter keeps the poison", func(t *testing.T) {
+		// The composite literal embeds the parameter's backing; the
+		// store through the literal's field reaches the caller's
+		// storage.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc gen(rows []handler) []handler {\n\th := holder{rows: rows}\n\tc := &counter{}\n\th.rows[0] = c.Next\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a literal-embedded parameter store left the assumption standing", verdict)
+		}
+	})
+	t.Run("write through an argument-returning callee result keeps the poison", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc id(s []handler) []handler { return s }\n\nfunc gen(h handler) []handler {\n\tbase := []handler{h}\n\tout := id(base)\n\tc := &counter{}\n\tout[0] = c.Next\n\treturn base\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a callee-result alias write left the argument judged", verdict)
+		}
+	})
+	t.Run("self-append accumulation stays judged", func(t *testing.T) {
+		// The accumulation-loop core: appends onto the binding itself
+		// flow only the new elements, never the self-reference.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(hs ...handler) []handler {\n\tvar out []handler\n\tfor _, h := range hs {\n\t\tout = append(out, h)\n\t}\n\treturn out\n}\n\nvar Registry = gen(double, double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the self-append accumulation refused", verdict)
+		}
+	})
+	t.Run("judged store through a conversion binding stays judged", func(t *testing.T) {
+		// The link feeds the store union, not a hard break: the
+		// conversion alias with a judged store keeps both names valid.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype table map[string]handler\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"d\": h}\n\tm2 := table(m)\n\tm2[\"k\"] = h\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a judged store through a conversion alias refused the original", verdict)
+		}
+	})
+	t.Run("struct value copy stays independent storage", func(t *testing.T) {
+		// A struct value bind copies its scalar fields; the copy's
+		// unjudged store must not poison the original.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype catalog struct{ current handler }\n\nfunc gen(h handler) map[string]handler {\n\tc := catalog{current: h}\n\td := c\n\tk := &counter{}\n\td.current = k.Next\n\treturn map[string]handler{\"d\": c.current}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the copy's store poisoned the independent original", verdict)
+		}
+	})
+	t.Run("keyed literals of one struct type stay independent", func(t *testing.T) {
+		// A field name denotes no runtime value: two locals built
+		// from keyed literals of the same struct type must not share
+		// a component through the field object.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc gen(h handler) []handler {\n\ta := holder{rows: []handler{h}}\n\tb := holder{rows: []handler{h}}\n\tk := &counter{}\n\tb.rows[0] = k.Next\n\treturn a.rows\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the sibling literal's store poisoned an independent local through the field object", verdict)
+		}
+	})
+	t.Run("write through a stored value's container keeps the poison", func(t *testing.T) {
+		// Storing base into m makes m's storage reach base's backing;
+		// the write through m's element lands in base.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\tbase := []handler{h}\n\tm := map[string][]handler{}\n\tm[\"a\"] = base\n\tc := &counter{}\n\tm[\"a\"][0] = c.Next\n\treturn base\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a store never linked the container to the stored value", verdict)
+		}
+	})
+	t.Run("write through a self-appended element keeps the poison", func(t *testing.T) {
+		// The appended element's backing joins the accumulating
+		// binding; a write through the binding's element lands in the
+		// element's original container.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype catalog struct{ current handler }\n\nfunc gen(h handler) []*catalog {\n\ts := []*catalog{{current: h}}\n\tvar out []*catalog\n\tout = append(out, s[0])\n\tc := &counter{}\n\tout[0].current = c.Next\n\treturn s\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a self-appended element's aliasing was dropped", verdict)
+		}
+	})
+	t.Run("slice-step write keeps the poison", func(t *testing.T) {
+		// s[0:1][0] writes s's backing through a slice step.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\ts := []handler{h}\n\tc := &counter{}\n\ts[0:1][0] = c.Next\n\treturn s\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a slice-step write was invisible to the chain walk", verdict)
+		}
+	})
+	t.Run("address capture of a conversion alias keeps the poison", func(t *testing.T) {
+		// The break through the alias propagates across the new link
+		// shapes exactly as across whole-identifier pairs.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype table map[string]handler\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"d\": h}\n\tm2 := table(m)\n\tq := &m2\n\t_ = q\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - the address-capture break failed to cross the conversion link", verdict)
+		}
+	})
+	t.Run("write through a call-rooted chain keeps the poison", func(t *testing.T) {
+		// id(s)[0] writes s's backing through the call result; the
+		// non-ident root breaks every tracked name it reaches.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc id(s []handler) []handler { return s }\n\nfunc gen(h handler) []handler {\n\ts := []handler{h}\n\tc := &counter{}\n\tid(s)[0] = c.Next\n\treturn s\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a call-rooted write chain was invisible", verdict)
+		}
+	})
 	t.Run("converted method value in return keeps the poison", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,

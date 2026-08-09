@@ -339,7 +339,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       exactly when everything stored into it judges - while unjudged
       written values keep the break; completes the
       building-constructor derivation the anchors need.
-- [ ] 62. gofresh: unlinked-backing binds in the derivation class -
+- [x] 62. gofresh: unlinked-backing binds in the derivation class -
       the alias-pair recorder links only whole-identifier binds and
       append bases, so every other bind whose source shares mutable
       backing defeats both the break propagation and the store union,
@@ -379,6 +379,22 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       backing-sharing bind; distinct from chunk 53's
       unaudited-standard-operation named verdicts, which live on a
       different refusal arm.
+- [ ] 65. gofresh: argument-position address captures share backing -
+      the chunk-62 review's fifth and sixth clause-family members,
+      probe-confirmed reproducing before that chunk: an address
+      capture rooted at a call (sink(&id(s)[0]) with sink writing
+      through the pointer) fires nothing because the capture arm is
+      ident-root-only, and a composite literal embedding a tracked
+      value hands out reach in argument position (sink(&holder{rows:
+      rows}) writing p.rows[0]; return rows composed Valid) where the
+      literal exemption is only sound for bind- and return-position
+      captures; the fail-closed extension must be position- and
+      root-kind-aware - call roots break their reached names, literal
+      roots stay fresh where the bind link and returned-literal audit
+      cover them but link or break in argument position - a blind
+      reroute of the capture arm through the fail-closed break helper
+      would spuriously refuse every return &T{field: param}
+      constructor.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a

@@ -392,27 +392,28 @@ arrays, maps, strings,
 integers; a channel's elements are sender-supplied and a function
 range's yield-supplied, so those bindings break — a field read of a
 judged value, an append
-onto a distinct base aliasing the two names (spare capacity shares the
-backing, so breaks propagate between them; a nested append chain
-aliases the target to the chain's innermost base, and a base that is
-not a plain name aliases the target to every judged name within
-it), an append
 of judged elements (an append onto the binding itself flowing only the
 new elements), a conversion of a judged value, an instantiated
 reference of a named function, and a call of a plain named callee with
 judged arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
-field, or dereference write of a present value is a store into the
-written base's storage: the base stays judged exactly when everything
-stored into it judges, the store set unioned across names sharing
-mutable backing (index operands and other subexpressions stay reads);
-a valueless write, and any write into a parameter's storage, break
-outright. While any
+field, slice-step, or dereference write of a present value is a store
+into the written base's storage: the base stays judged exactly when
+everything stored into it judges, the store set unioned across names
+sharing mutable backing (index operands and other subexpressions stay
+reads); a valueless write, and any write into a parameter's storage,
+break outright. Every bind — and every store of a present value into
+a tracked base, appended elements included — aliases its target (for
+a store, the written base) to each reach-bearing tracked name its
+source expression reaches — whole identifiers, element reads,
+conversions, call results, appends and their nested or non-plain
+bases, and literals embedding a tracked value alike; breaks and
+stores propagate across the links, while reach-free scalar copies
+stay independent storage. While any
 other derivation, an address capture of the binding — the implicit
 address of a pointer-receiver method use included, exempting methods
-the declaring package proves receiver-read-only — a bind whose source
-shares mutable backing propagating breaks both ways, or any bind
+the declaring package proves receiver-read-only — or any bind
 position or address
 capture of a parameter, breaks the binding or the parameter's
 caller-judged assumption outright; a returned literal is audited exactly as a registered

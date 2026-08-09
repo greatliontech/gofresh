@@ -2316,9 +2316,11 @@ func plainNamedCalleeFn(p *packages.Package, call *ast.CallExpr) *types.Func {
 // carrier is environment-free provided the call's arguments are - the
 // constructor-result admission of the environment-free registration
 // audit. Parameters judge free (the caller's obligation); a
-// signature-carrying local judges by every source that binds it, to a
-// fixed point over the body's whole-identifier bindings, any other bind
-// shape refusing it; a returned literal is audited exactly as a
+// signature-carrying local judges by every source that binds it and
+// every value stored into it, the derivation class admitting range
+// bindings, field reads, appends, conversions, and multi-value binds,
+// with names sharing mutable backing linked so breaks and stores
+// propagate across them; a returned literal is audited exactly as a
 // registered literal with the constructor body as its enclosing scope,
 // its collected parameter and method wants resolving against this
 // package's own facts only; a call of a plain named callee records a
@@ -2425,9 +2427,9 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				})
 			}
 			// chainRoot walks a written or addressed chain to its
-			// terminal expression: selector, index, and dereference
-			// steps reach the base's storage, while their operands are
-			// reads and stay judged.
+			// terminal expression: selector, index, slice, and
+			// dereference steps reach the base's storage, while their
+			// operands are reads and stay judged.
 			chainRoot := func(target ast.Expr) ast.Expr {
 				base := unparen(target)
 				for {
@@ -2436,6 +2438,8 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						base = unparen(b.X)
 					case *ast.IndexExpr:
 						base = unparen(b.X)
+					case *ast.SliceExpr:
+						base = unparen(b.X)
 					case *ast.StarExpr:
 						base = unparen(b.X)
 					default:
@@ -2443,11 +2447,46 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					}
 				}
 			}
-			// breakBase breaks the written target's base binding.
+			// breakBase breaks the written target's base binding. A
+			// chain rooted at a non-ident (a call result, a composite)
+			// still writes storage the root expression may reach -
+			// fail-closed: every tracked name within the root breaks.
 			breakBase := func(target ast.Expr) {
-				if ident, ok := chainRoot(target).(*ast.Ident); ok {
-					breakTargets(ident)
-				}
+				breakTargets(chainRoot(target))
+			}
+			// linkBacking links a bound or written name to each
+			// reach-bearing tracked name its source expression reaches -
+			// whole identifiers, element reads, conversions, call
+			// results, appends, and literals embedding a tracked value
+			// alike. Conservative pairing is fail-closed: links feed
+			// only break propagation, the store union, and the
+			// parameter-component refusal - a spurious refusal at worst,
+			// never a false Valid. Reach-free sources (a struct value's
+			// scalar copy) stay unlinked as independent storage.
+			linkBacking := func(obj types.Object, source ast.Expr) {
+				ast.Inspect(source, func(m ast.Node) bool {
+					id, ok := m.(*ast.Ident)
+					if !ok {
+						return true
+					}
+					sobj := p.TypesInfo.Uses[id]
+					if sobj == nil {
+						return true
+					}
+					// A selector's or literal key's field object denotes
+					// no runtime value - linking it would conflate every
+					// user of the field's struct type into one component.
+					if v, ok := sobj.(*types.Var); ok && v.IsField() {
+						return true
+					}
+					// Carrying parameters are themselves tracked, so
+					// tracked alone covers every reach-relevant name.
+					_, tracked := trackedVar(sobj)
+					if tracked && typeHandsOutMutableReach(sobj.Type(), make(map[types.Type]bool)) {
+						aliasPairs = append(aliasPairs, [2]types.Object{obj, sobj})
+					}
+					return true
+				})
 			}
 			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
 				ident, ok := unparen(target).(*ast.Ident)
@@ -2469,6 +2508,11 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							if robj != nil {
 								if _, tracked := trackedVar(robj); tracked {
 									writeSources[robj] = append(writeSources[robj], source)
+									// The store also makes the base's
+									// storage reach the stored value's
+									// backing - a later write through the
+									// base's elements lands there.
+									linkBacking(robj, source)
 									return
 								}
 							}
@@ -2503,62 +2547,19 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						if _, builtin := p.TypesInfo.Uses[fnIdent].(*types.Builtin); builtin && fnIdent.Name == "append" && len(call.Args) > 0 {
 							if base, ok := unparen(call.Args[0]).(*ast.Ident); ok {
 								if p.TypesInfo.Uses[base] == obj {
+									// The appended elements' backing joins
+									// the binding's storage exactly as any
+									// bind source; only the self-reference
+									// stays out of the judgment cycle.
+									linkBacking(obj, source)
 									localSources[obj] = append(localSources[obj], call.Args[1:]...)
 									return
 								}
 							}
-							// A fresh-base append may share the base's
-							// backing whenever capacity suffices - the
-							// bound target aliases the base, so breaks
-							// propagate between them. The base may itself
-							// be an append chain; every level may share
-							// the innermost base's backing.
-							baseExpr := unparen(call.Args[0])
-							for {
-								inner, ok := baseExpr.(*ast.CallExpr)
-								if !ok {
-									break
-								}
-								innerFn, ok := unparen(inner.Fun).(*ast.Ident)
-								if !ok {
-									break
-								}
-								if _, b := p.TypesInfo.Uses[innerFn].(*types.Builtin); !b || innerFn.Name != "append" || len(inner.Args) == 0 {
-									break
-								}
-								baseExpr = unparen(inner.Args[0])
-							}
-							// The hunt may stop at a non-ident base (a
-							// slice expression, an index, a call) - any
-							// tracked name inside it may own the backing.
-							// Linking every candidate is fail-closed:
-							// pairs feed only break propagation and the
-							// parameter-component refusal - a spurious
-							// refusal at worst, never a false Valid.
-							ast.Inspect(baseExpr, func(m ast.Node) bool {
-								id, ok := m.(*ast.Ident)
-								if !ok {
-									return true
-								}
-								if bobj := p.TypesInfo.Uses[id]; bobj != nil {
-									_, tracked := trackedVar(bobj)
-									if tracked || params[bobj] {
-										aliasPairs = append(aliasPairs, [2]types.Object{obj, bobj})
-									}
-								}
-								return true
-							})
 						}
 					}
 				}
-				if srcIdent, ok := unparen(source).(*ast.Ident); ok {
-					if sobj := p.TypesInfo.Uses[srcIdent]; sobj != nil {
-						_, tracked := trackedVar(sobj)
-						if (tracked || params[sobj]) && typeHandsOutMutableReach(sobj.Type(), make(map[types.Type]bool)) {
-							aliasPairs = append(aliasPairs, [2]types.Object{obj, sobj})
-						}
-					}
-				}
+				linkBacking(obj, source)
 				localSources[obj] = append(localSources[obj], source)
 			}
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
