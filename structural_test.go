@@ -60,6 +60,7 @@ func TestFingerprintIsExportedData(t *testing.T) {
 		structural.FieldOf[ObservationProof]("ObservationProof"),
 		structural.FieldOf[guard.Guards]("Guards"),
 		structural.FieldOf[string]("PurityAssertion"),
+		structural.FieldOf[string]("DynamicStateVouches"),
 		structural.FieldOf[string]("RuntimeInputs"),
 		structural.FieldOf[string]("RuntimeDigest"),
 		structural.FieldOf[Kind]("ResultKind"),

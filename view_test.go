@@ -1098,6 +1098,46 @@ func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
 	}
 }
 
+// A vouch naming a mutable-local variable confers nothing: code the
+// caller can edit is fixed, not vouched — the downgrade stands and no
+// discharge is recorded (REQ-vouch-discharge).
+func TestVouchConfersNothingOnMutableLocalState(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n\nfunc Rebind(f func()) { Callback = f }\n")
+	engine, err := New(WithDir(dir), WithDynamicStateVouches("", "example.com/view.Callback"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+		t.Fatalf("mutable-local vouch lifted the downgrade: %+v", verdict)
+	}
+	if fingerprint.DynamicStateVouches != "" {
+		t.Fatalf("mutable-local vouch recorded a discharge: %q", fingerprint.DynamicStateVouches)
+	}
+	// The vouch suppresses the verdict's downgrade, never the explain
+	// derivation: a vouched variable's chain still derives on request
+	// (REQ-vouch-recorded, REQ-explain-chain).
+	chain, err := view.ExplainDynamicState(context.Background(), "example.com/view", "Callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chain.Arm == "" || len(chain.Links) == 0 {
+		t.Fatalf("vouched variable's explain chain suppressed: %+v", chain)
+	}
+}
+
 // A dynamic-capable global the program never mutates after
 // initialization is ordinary source: the closure hashes its
 // initializer, and the subject checks valid instead of downgrading

@@ -57,12 +57,19 @@ func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []
 	return scanSubjectsInWithBuildFlagsEnv(ctx, dir, os.Environ(), buildFlags, pkgPaths...)
 }
 
+// sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
+// reason. It is the one discriminator between the downgrade family and
+// ordinary unverifiable dependence on the verdict path: observation
+// evidence may substitute for the latter, never the former, and the
+// prefix is set here alone so the two sites cannot drift.
+const sharedDynamicStatePrefix = "package graph shares mutated dynamic state: "
+
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
 	hasher, err := closure.NewAtContextEnv(ctx, dir, env, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, pkgPaths...)
 	return scan, err
 }
 
@@ -73,7 +80,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
 		return nil, nil, err
@@ -105,7 +112,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		return nil, nil, err
 	}
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths, vouches)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -125,6 +132,10 @@ type subjectScan struct {
 	// downgraded package to the refusal reason naming the owning package
 	// and variable (REQ-closure-shared-dynamic-state).
 	downgradeReason map[Subject]string
+	// vouchDischarges maps each subject to the canonical sorted
+	// comma-joined caller-vouch identities that discharged would-be
+	// culprits reachable from its package (REQ-vouch-recorded).
+	vouchDischarges map[Subject]string
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -147,6 +158,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		openWorld:       map[Subject]bool{},
 		external:        map[Subject]bool{},
 		downgradeReason: map[Subject]string{},
+		vouchDischarges: map[Subject]string{},
 		ambiguous:       map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
@@ -286,7 +298,10 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 	// dynamism.
 	for subject := range known {
 		if reason := state.downgraded[subject.Package]; reason != "" {
-			scan.downgradeReason[subject] = "package graph shares mutated dynamic state: " + reason
+			scan.downgradeReason[subject] = sharedDynamicStatePrefix + reason
+		}
+		if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
+			scan.vouchDischarges[subject] = discharges
 		}
 	}
 	return scan, nil

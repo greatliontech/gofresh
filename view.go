@@ -57,6 +57,7 @@ type View struct {
 	observable           map[Subject]closure.Observability
 	guards               guard.Guards
 	purity               map[Subject]string
+	vouchDischarges      map[Subject]string
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	// fileDigests: construction-time content digest per source identity,
@@ -154,6 +155,12 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: purity for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
+		if first.vouchDischarges[subject] != second.vouchDischarges[subject] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+		}
 		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -185,6 +192,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		observable:           make(map[Subject]closure.Observability, len(unique)),
 		guards:               first.guards,
 		purity:               first.purity,
+		vouchDischarges:      first.vouchDischarges,
 		sourceFiles:          first.sourceFiles,
 		sourceFilesBySubject: first.sourceFilesBySubject,
 		fileDigests:          first.fileDigests,
@@ -200,6 +208,7 @@ type viewObservation struct {
 	maximal              map[Subject]closure.Closure
 	guards               guard.Guards
 	purity               map[Subject]string
+	vouchDischarges      map[Subject]string
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
@@ -248,7 +257,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
-	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, packages...)
+	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, packages...)
 	if err != nil {
 		return viewObservation{}, err
 	}
@@ -262,6 +271,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		maximal:              make(map[Subject]closure.Closure, len(subjects)),
 		guards:               guards,
 		purity:               make(map[Subject]string, len(subjects)),
+		vouchDischarges:      make(map[Subject]string, len(subjects)),
 		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
 		testVariantLedgers:   make(map[string]closure.TestVariantLedger, len(packages)),
 	}
@@ -306,6 +316,9 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if reason := scan.downgradeReason[subject]; reason != "" {
 			maximal.Unverifiable = true
 			maximal.Reason = reason
+		}
+		if discharges := scan.vouchDischarges[subject]; discharges != "" {
+			observation.vouchDischarges[subject] = discharges
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
@@ -366,7 +379,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], DynamicStateVouches: v.vouchDischarges[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -423,7 +436,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], DynamicStateVouches: v.vouchDischarges[subject], ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -488,6 +501,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		ObservationProof:     proof,
 		Guards:               v.guards,
 		PurityAssertion:      v.purity[subject],
+		DynamicStateVouches:  v.vouchDischarges[subject],
 		ResultKind:           v.kind,
 	}
 }
@@ -913,6 +927,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	maximal := make(map[Subject]closure.Closure, len(unique))
 	observable := make(map[Subject]closure.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
+	vouchDischarges := make(map[Subject]string, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
@@ -927,6 +942,9 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		}
 		if assertion, ok := v.purity[subject]; ok {
 			purity[subject] = assertion
+		}
+		if discharges, ok := v.vouchDischarges[subject]; ok {
+			vouchDischarges[subject] = discharges
 		}
 		if v.capturedObserved[subject] {
 			capturedObserved[subject] = true
@@ -950,6 +968,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		observable:           observable,
 		guards:               v.guards,
 		purity:               purity,
+		vouchDischarges:      vouchDischarges,
 		sourceFiles:          sourceFiles,
 		sourceFilesBySubject: sourceFilesBySubject,
 		fileDigests:          v.fileDigests,
@@ -992,6 +1011,7 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
 		guards:               v.guards,
 		purity:               v.purity,
+		vouchDischarges:      v.vouchDischarges,
 		sourceFiles:          v.sourceFiles,
 		sourceFilesBySubject: v.sourceFilesBySubject,
 		fileDigests:          v.fileDigests,
@@ -1251,6 +1271,13 @@ func (v *View) compareObservationContext(ctx context.Context, observation viewOb
 	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests)
 }
 
+// compareFactsContext deliberately omits the vouch-discharge map: the
+// discharges derive from version-pinned packages' facts under the
+// engine's fixed vouch set, and pinned source cannot move without the
+// guard and closure movement the other comparisons already refuse, so
+// a discharge delta cannot occur while every compared input holds
+// (construction's paired observations still compare discharges
+// directly, where no such immutability argument is available).
 func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")

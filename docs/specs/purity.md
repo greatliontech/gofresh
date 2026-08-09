@@ -90,3 +90,43 @@ harness completed its observations, while the engine's separate observability pr
 establishes which reachable effects that stream can cover. It does not suppress
 runtime-manifest unverifiability or a closure effect outside the admitted observation
 set.
+
+**dynamic-state vouch** (term): a caller's declaration that a named package-level
+variable in a version-pinned dependency, though mutable in the analyzed program's
+terms, is accepted as stable after initialization — at the declarer's
+responsibility. The third assertion kind beside purity and externality: purity
+suppresses a subject's own inferred unverifiability, a vouch discharges one named
+foreign variable's shared-dynamic-state downgrade for every subject reaching it.
+
+**REQ-vouch-input** (structural): gofresh MUST accept a dynamic-state vouch set as
+an input to freshness evaluation — canonical `<import path>.<Variable>` identities —
+so a consumer's committed configuration and a per-run flag reduce to the same engine
+input and gofresh itself never infers a vouch. A vouch names exactly one variable,
+never a package or a pattern.
+
+**REQ-vouch-discharge** (behavior): A vouched variable MUST be exempt from the
+shared-dynamic-state downgrade
+(REQ-closure-shared-dynamic-state in [closure.md](closure.md)) — judged as if
+proven init-only — while every unvouched culprit keeps its downgrade, and a vouch
+naming a variable in mutable-local source MUST confer nothing: code the caller can
+edit is fixed, not vouched, so the trust boundary a vouch crosses is exactly the
+version-pinned dependency line.
+
+**REQ-vouch-recorded** (behavior): The vouches that discharged would-be culprits
+reachable from a subject MUST be recorded on that subject's evidence, canonically
+(sorted identities), so acceptance is auditable in the record and never silent — an
+inert vouch (naming no would-be culprit the subject reaches) records nothing.
+Validity needs no comparison over the record: a withdrawn vouch resurfaces the
+culprit in the current derivation and the verdict refuses on its own, while the
+explain surface still derives a vouched variable's chain on request — the vouch
+suppresses the verdict's downgrade, never the derivation a caller audits.
+
+REQ-vouch-input, REQ-vouch-discharge, REQ-vouch-recorded: enforced by
+`TestVouchDischargesPinnedCulprit`, `TestVouchedFingerprintRecordsDischarge`,
+`TestVouchConfersNothingOnMutableLocalState`,
+`TestObservedEvidenceNeverSuppressesSharedDynamicState`, and
+`TestVouchWithdrawalRefusesObservedServe`.
+
+REQ-purity-observation-separation (shared-dynamic-state arm — completed
+observation evidence never substitutes for the downgrade): enforced by
+`TestObservedEvidenceNeverSuppressesSharedDynamicState`.

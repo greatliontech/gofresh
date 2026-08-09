@@ -219,7 +219,10 @@ or an unsafe pointer anywhere in its type — that the analyzed program can muta
 after initialization is
 process-shared dynamic state no per-subject closure can attribute, because a prior
 subject's execution in the same process can have changed it: every subject whose
-package graph links the owning package MUST be unverifiable. Mutation is judged
+package graph links the owning package MUST be unverifiable — unless the caller
+vouches for the specific variable (REQ-vouch-discharge in
+[purity.md](purity.md); version-pinned dependencies only, the acceptance recorded
+on the evidence). Mutation is judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
 array, or tuple of by-value carriers) is mutated exactly by a write, an address
 capture, or a pointer-receiver method use outside `init` flow anywhere in the

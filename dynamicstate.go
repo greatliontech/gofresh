@@ -265,6 +265,11 @@ type viewDynamicState struct {
 	// dynamic state — every subject of such a package is unverifiable —
 	// to one culprit description naming the owning package and variable.
 	downgraded map[string]string
+	// vouchDischarges maps each view package to the canonical sorted
+	// comma-joined caller-vouch identities that discharged would-be
+	// culprits reachable from it (REQ-vouch-recorded); absent when no
+	// vouch was load-bearing for the package.
+	vouchDischarges map[string]string
 }
 
 // methodDirectives resolves a promoted method's purity and externality
@@ -299,7 +304,7 @@ func (s *viewDynamicState) methodDirectives(m *types.Func) (pureKey, externalKey
 	return pureKey, externalKey
 }
 
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, load *closure.ViewLoad, viewPackages []string) (*viewDynamicState, error) {
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool) (*viewDynamicState, error) {
 	meta, err := hasher.GraphMetadata(viewPackages...)
 	if err != nil {
 		return nil, err
@@ -727,6 +732,35 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
+	// A caller vouch discharges a would-be culprit in a version-pinned
+	// dependency (REQ-vouch-discharge): the variable is judged as if
+	// proven init-only, and the discharge is recorded per owning package
+	// so subjects reaching it carry the acceptance in their evidence
+	// (REQ-vouch-recorded). A vouch naming mutable-local source confers
+	// nothing — code the caller can edit is fixed, not vouched.
+	pinnedPkg := map[string]bool{}
+	for _, node := range meta {
+		if node.Class == closure.PinnedPackage {
+			pinnedPkg[node.PkgPath] = true
+		}
+	}
+	vouchDischarged := map[string][]string{}
+	// dischargedSeen keys by owning package AND identity: a fact
+	// declaring a foreign key (the persisted-fact channel, fail-closed
+	// elsewhere) must not steal another package's discharge record - a
+	// subject reaching only the second declarer still carries the
+	// acceptance (REQ-vouch-recorded).
+	dischargedSeen := map[string]bool{}
+	vouchedOut := func(pkgPath, key string) bool {
+		if !vouches[key] || !pinnedPkg[pkgPath] {
+			return false
+		}
+		if seen := pkgPath + "\x00" + key; !dischargedSeen[seen] {
+			dischargedSeen[seen] = true
+			vouchDischarged[pkgPath] = append(vouchDischarged[pkgPath], key)
+		}
+		return true
+	}
 	// openWorld maps each open package to one culprit description — the
 	// downgrade's refusal must name the owning package and variable.
 	openWorld := map[string]string{}
@@ -738,23 +772,26 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	for _, pkgPath := range pkgPaths {
 		// Mutations outrank escapes in the culprit text; within a rank
 		// the sorted key order makes the reason deterministic.
+		// Every declared key is consulted in every rank even after a
+		// culprit opens the package: the vouch-discharge record must
+		// name every load-bearing vouch, not the ones lexical order
+		// happened to reach first (REQ-vouch-recorded); the first
+		// unvouched hit per rank order still names the culprit.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if _, ok := openWorld[pkgPath]; ok {
-					break
-				}
-				if mutated[key] {
-					openWorld[pkgPath] = key + " is mutated"
+				if mutated[key] && !vouchedOut(pkgPath, key) {
+					if _, ok := openWorld[pkgPath]; !ok {
+						openWorld[pkgPath] = key + " is mutated"
+					}
 				}
 			}
 		}
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if _, ok := openWorld[pkgPath]; ok {
-					break
-				}
-				if escaped[key] && notOpaque[key] {
-					openWorld[pkgPath] = key + " escapes writable"
+				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) {
+					if _, ok := openWorld[pkgPath]; !ok {
+						openWorld[pkgPath] = key + " escapes writable"
+					}
 				}
 			}
 		}
@@ -764,11 +801,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// write state the settled verdict assumed stable.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if _, ok := openWorld[pkgPath]; ok {
-					break
-				}
-				if envCarrying[key] {
-					openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
+				if envCarrying[key] && !vouchedOut(pkgPath, key) {
+					if _, ok := openWorld[pkgPath]; !ok {
+						openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
+					}
 				}
 			}
 		}
@@ -819,6 +855,62 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		if culprit := walk(node.ImportPath, map[string]bool{}); culprit != "" {
 			state.downgraded[root] = culprit
+		}
+	}
+	if len(vouchDischarged) > 0 {
+		// The discharge record is per view package: every vouch that
+		// suppressed a culprit in a package the subject's graph reaches
+		// rides its evidence, so acceptance is auditable and never silent
+		// (REQ-vouch-recorded). Unlike the culprit walk this one never
+		// short-circuits — the record carries every load-bearing vouch.
+		state.vouchDischarges = map[string]string{}
+		perRoot := map[string]map[string]bool{}
+		var collect func(listing string, seen, acc map[string]bool)
+		collect = func(listing string, seen, acc map[string]bool) {
+			if seen[listing] {
+				return
+			}
+			seen[listing] = true
+			if classes[listing] == closure.StandardPackage {
+				return
+			}
+			for _, key := range vouchDischarged[pkgPathOf[listing]] {
+				acc[key] = true
+			}
+			for _, imported := range imports[listing] {
+				if _, ok := pkgPathOf[imported]; !ok {
+					continue
+				}
+				collect(imported, seen, acc)
+			}
+		}
+		for _, node := range meta {
+			root := node.PkgPath
+			if node.ForTest != "" {
+				root = node.ForTest
+			} else if node.TestMain {
+				continue
+			}
+			if !isView[root] {
+				continue
+			}
+			acc := perRoot[root]
+			if acc == nil {
+				acc = map[string]bool{}
+				perRoot[root] = acc
+			}
+			collect(node.ImportPath, map[string]bool{}, acc)
+		}
+		for root, acc := range perRoot {
+			if len(acc) == 0 {
+				continue
+			}
+			keys := make([]string, 0, len(acc))
+			for key := range acc {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			state.vouchDischarges[root] = strings.Join(keys, ",")
 		}
 	}
 	return state, nil

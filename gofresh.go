@@ -178,9 +178,18 @@ type Fingerprint struct {
 	ObservationProof     ObservationProof
 	Guards               guard.Guards
 	PurityAssertion      string // attributable assertion used to override unverifiability; empty means none
-	RuntimeInputs        string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest        string // digest of the manifest at capture
-	ResultKind           Kind   // guard policy captured with this recording; zero is invalid
+	// DynamicStateVouches names the caller vouches that discharged
+	// shared-dynamic-state culprits reachable from this subject at capture:
+	// sorted canonical "<import path>.<Variable>" identities, comma-joined.
+	// Empty means no vouch was load-bearing. Recorded for audit — the
+	// acceptance is visible in the evidence, never silent (REQ-vouch-recorded);
+	// validity needs no comparison over it, because a withdrawn vouch
+	// resurfaces the culprit in the current derivation and the verdict
+	// refuses on its own.
+	DynamicStateVouches string
+	RuntimeInputs       string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest       string // digest of the manifest at capture
+	ResultKind          Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -213,6 +222,11 @@ type Engine struct {
 	analysisBudget     time.Duration
 	progress           func(Progress)
 	deferredCheckClose bool
+	// dynamicStateVouches is the caller's vouch set: canonical
+	// "<import path>.<Variable>" identities of version-pinned dependency
+	// variables the caller accepts as stable after initialization
+	// (REQ-vouch-input). Empty means no vouches.
+	dynamicStateVouches map[string]bool
 }
 
 // viewTestHooks is the package's one test-observation surface: each field
@@ -292,6 +306,32 @@ func WithAssumePure(pred func(Subject) bool) Option {
 	return func(e *Engine) {
 		if pred != nil {
 			e.assumePure = pred
+		}
+	}
+}
+
+// WithDynamicStateVouches supplies the caller's dynamic-state vouch set:
+// each identity is the canonical "<import path>.<Variable>" of a
+// package-level variable in a version-pinned dependency that the caller
+// accepts as stable after initialization, at the caller's responsibility
+// (REQ-vouch-input). A vouched variable is exempt from the
+// shared-dynamic-state downgrade (REQ-vouch-discharge); the vouches that
+// actually discharged culprits reachable from a subject are recorded on
+// its fingerprint (REQ-vouch-recorded). A vouch naming a variable in
+// mutable-local source confers nothing — code the caller can edit is
+// fixed, not vouched.
+func WithDynamicStateVouches(identities ...string) Option {
+	return func(e *Engine) {
+		if len(identities) == 0 {
+			return
+		}
+		if e.dynamicStateVouches == nil {
+			e.dynamicStateVouches = make(map[string]bool, len(identities))
+		}
+		for _, identity := range identities {
+			if identity != "" {
+				e.dynamicStateVouches[identity] = true
+			}
 		}
 	}
 }
@@ -556,7 +596,14 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 			return Verdict{Unverifiable, reasonOr(rt.Reason, "runtime inputs")}
 		}
 		if cl.Unverifiable {
-			if observed && rec.RuntimeInputs != "" {
+			// Completed observation evidence substitutes for
+			// unverifiable I/O dependence, never for the
+			// shared-dynamic-state downgrade: process-shared state
+			// sits outside every observation bracket — a prior
+			// subject's in-process write is not an input the bracket
+			// can see (REQ-purity-observation-separation,
+			// REQ-closure-shared-dynamic-state).
+			if observed && rec.RuntimeInputs != "" && !strings.HasPrefix(cl.Reason, sharedDynamicStatePrefix) {
 				return Verdict{Valid, ""}
 			}
 			return Verdict{Unverifiable, reasonOr(cl.Reason, "external dependence")}

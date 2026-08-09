@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // writePinnedDepModule writes a module depending on golang.org/x/sync at the
@@ -50,19 +51,25 @@ type scanResult struct {
 	known, openWorld, external map[Subject]bool
 	pure                       map[Subject]bool
 	downgradeReason            map[Subject]string
+	vouchDischarges            map[Subject]string
 }
 
 func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
+	t.Helper()
+	return runScanVouched(t, scope, dir, nil, pkgPaths...)
+}
+
+func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pkgPaths ...string) scanResult {
 	t.Helper()
 	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, vouches, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := scanResult{known: scan.known, openWorld: scan.openWorld, external: scan.external, pure: map[Subject]bool{}, downgradeReason: scan.downgradeReason}
+	result := scanResult{known: scan.known, openWorld: scan.openWorld, external: scan.external, pure: map[Subject]bool{}, downgradeReason: scan.downgradeReason, vouchDischarges: scan.vouchDischarges}
 	for subject := range scan.known {
 		if scan.directivePure(subject) {
 			result.pure[subject] = true
@@ -253,6 +260,493 @@ func (Widget) External() int { return 2 }
 	}
 	if pureKey == "" || externalKey == "" {
 		t.Fatalf("promoted-method directive lookup failed: pure=%q external=%q", pureKey, externalKey)
+	}
+}
+
+// A caller vouch discharges a would-be culprit in a version-pinned
+// dependency: the downgrade lifts and the discharge is recorded on
+// every subject reaching the owning package, while a vouch naming a
+// different variable confers nothing (REQ-vouch-discharge,
+// REQ-vouch-recorded).
+func TestVouchDischargesPinnedCulprit(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	const ghost = "golang.org/x/sync/errgroup.Ghost"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|vouch-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, ghost)
+			fact.Mutates = append(fact.Mutates, ghost)
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+
+	poisoned := runScan(t, scope, dir, pkg)
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, ghost+" is mutated") {
+		t.Fatalf("poisoned downgrade = %q, want the culprit named", reason)
+	}
+	if discharges := poisoned.vouchDischarges[subject]; discharges != "" {
+		t.Fatalf("unvouched scan recorded a discharge: %q", discharges)
+	}
+
+	vouched := runScanVouched(t, scope, dir, map[string]bool{ghost: true}, pkg)
+	if reason := vouched.downgradeReason[subject]; reason != "" {
+		t.Fatalf("vouched culprit still downgrades: %q", reason)
+	}
+	if discharges := vouched.vouchDischarges[subject]; discharges != ghost {
+		t.Fatalf("discharge record = %q, want %q", discharges, ghost)
+	}
+
+	other := runScanVouched(t, scope, dir, map[string]bool{"golang.org/x/sync/errgroup.Other": true}, pkg)
+	if reason := other.downgradeReason[subject]; !strings.Contains(reason, ghost+" is mutated") {
+		t.Fatalf("a vouch for a different variable lifted the downgrade: %q", reason)
+	}
+	if discharges := other.vouchDischarges[subject]; discharges != "" {
+		t.Fatalf("an inert vouch recorded a discharge: %q", discharges)
+	}
+
+	// All three culprit ranks discharge - the escape and env-carrying
+	// families (the field report's registration shape) exactly like the
+	// mutation rank - and the record carries every load-bearing vouch,
+	// sorted.
+	const shade = "golang.org/x/sync/errgroup.Shade"
+	const wraith = "golang.org/x/sync/errgroup.Wraith"
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, shade, wraith)
+			fact.Escapes = append(fact.Escapes, shade)
+			fact.EnvCarrying = append(fact.EnvCarrying, wraith)
+			processFactCache.Store(k, fact)
+		}
+		return true
+	})
+	all := map[string]bool{ghost: true, shade: true, wraith: true}
+	lifted := runScanVouched(t, scope, dir, all, pkg)
+	if reason := lifted.downgradeReason[subject]; reason != "" {
+		t.Fatalf("three-rank vouch left a downgrade: %q", reason)
+	}
+	if discharges := lifted.vouchDischarges[subject]; discharges != ghost+","+shade+","+wraith {
+		t.Fatalf("three-rank discharge record = %q", discharges)
+	}
+
+	// A vouch names exactly one variable: a bare package identity
+	// confers nothing.
+	bare := runScanVouched(t, scope, dir, map[string]bool{"golang.org/x/sync/errgroup": true}, pkg)
+	if reason := bare.downgradeReason[subject]; !strings.Contains(reason, ghost) {
+		t.Fatalf("bare-package vouch lifted the downgrade: %q", reason)
+	}
+	if discharges := bare.vouchDischarges[subject]; discharges != "" {
+		t.Fatalf("bare-package vouch recorded a discharge: %q", discharges)
+	}
+
+	// A vouched and an unvouched culprit sharing the package: the
+	// unvouched one opens it whatever the declaration order, and the
+	// discharge record still names every load-bearing vouch — the
+	// vouched key declared AFTER the opener included.
+	const alpha = "golang.org/x/sync/errgroup.Alpha"
+	const zeta = "golang.org/x/sync/errgroup.Zeta"
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, alpha, zeta)
+			fact.Mutates = append(fact.Mutates, alpha, zeta)
+			processFactCache.Store(k, fact)
+		}
+		return true
+	})
+	withZeta := map[string]bool{ghost: true, shade: true, wraith: true, zeta: true}
+	mixed := runScanVouched(t, scope, dir, withZeta, pkg)
+	if reason := mixed.downgradeReason[subject]; !strings.Contains(reason, alpha+" is mutated") {
+		t.Fatalf("mixed-package downgrade = %q, want the unvouched culprit named", reason)
+	}
+	if discharges := mixed.vouchDischarges[subject]; discharges != ghost+","+shade+","+wraith+","+zeta {
+		t.Fatalf("mixed-package discharge record = %q", discharges)
+	}
+}
+
+// The engine option threads the vouch to capture: a vouched pinned
+// culprit's subject records the discharge on its fingerprint, its
+// verdict is no longer downgraded, and without the vouch the same
+// poisoned graph refuses naming the culprit (REQ-vouch-input,
+// REQ-vouch-recorded).
+func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const ghost = "golang.org/x/sync/errgroup.Ghost"
+	subject := Subject{Package: "example.com/pinned", Symbol: "Run"}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+
+	warm, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+		t.Fatal(err)
+	}
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, ghost)
+			fact.Mutates = append(fact.Mutates, ghost)
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+
+	control, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlView, err := control.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFP, err := controlView.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlVerdict.Status != Unverifiable || !strings.Contains(controlVerdict.Reason, ghost) {
+		t.Fatalf("poisoned control verdict = %+v, want the downgrade naming %s", controlVerdict, ghost)
+	}
+
+	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := vouched.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.DynamicStateVouches != ghost {
+		t.Fatalf("fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+	}
+	verdict, err := view.Check(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+		t.Fatalf("vouched verdict still downgraded: %+v", verdict)
+	}
+}
+
+// writeSemverDepModule mirrors writePinnedDepModule over
+// golang.org/x/mod/semver: a pinned dependency whose real source is
+// benign enough to pass the observability scan, so observed-surface
+// tests exercise the completed-observation path rather than refusing
+// at the proof.
+func writeSemverDepModule(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}", "golang.org/x/mod").Output()
+	if err != nil {
+		t.Fatalf("resolve parent x/mod version: %v", err)
+	}
+	version := strings.TrimSpace(string(out))
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":      "module example.com/semverdep\n\ngo 1.26\n\nrequire golang.org/x/mod " + version + "\n",
+		"lib.go":      "package semverdep\n\nimport \"golang.org/x/mod/semver\"\n\nfunc Valid(v string) bool {\n\treturn semver.IsValid(v)\n}\n",
+		"lib_test.go": "package semverdep\n\nimport \"testing\"\n\nfunc TestValid(t *testing.T) {\n\tif !Valid(\"v1.2.3\") {\n\t\tt.Fatal(\"valid\")\n\t}\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// A completed observation never substitutes for the shared-dynamic-state
+// downgrade: process-shared state sits outside every observation
+// bracket, so an OBSERVABLE downgraded subject still refuses on the
+// observed check surface - unvouched on the current tree, and equally
+// for a record captured vouched-valid once the vouch is withdrawn
+// (REQ-purity-observation-separation, REQ-closure-shared-dynamic-state,
+// REQ-vouch-recorded).
+func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeSemverDepModule(t)
+	const ghost = "golang.org/x/mod/semver.Ghost"
+	subject := Subject{Package: "example.com/semverdep", Symbol: "TestValid"}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+
+	warm, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+		t.Fatal(err)
+	}
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/mod/semver") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, ghost)
+			fact.Mutates = append(fact.Mutates, ghost)
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no semver fact in the process cache")
+	}
+
+	observe := func(e *Engine) (*View, Fingerprint) {
+		t.Helper()
+		producer, err := e.NewView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := producer.CaptureObserved(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The fixture must be genuinely observable, or the test refuses
+		// through the ordinary path and never exercises the bypass.
+		if !fingerprint.ObservationProof.Observable {
+			t.Fatalf("fixture not observable: %+v", fingerprint.ObservationProof)
+		}
+		observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("semver test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return producer, fingerprint
+	}
+
+	// Unvouched: the downgraded subject refuses on the observed surface
+	// of the same tree that captured it.
+	plain, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainView, plainFP := observe(plain)
+	verdict, err := plainView.CheckObserved(ctx, plainFP, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+		t.Fatalf("unvouched observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
+	}
+
+	// Vouched capture serves observed; the withdrawn vouch resurfaces
+	// the culprit on the observed surface too.
+	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vouchedView, fingerprint := observe(vouched)
+	if fingerprint.DynamicStateVouches != ghost {
+		t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+	}
+	served, err := vouchedView.CheckObserved(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if served.Status != Valid {
+		t.Fatalf("vouched observed verdict = %+v, want valid", served)
+	}
+	withdrawn, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := withdrawn.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err = current.CheckObserved(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+		t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
+	}
+}
+
+// Two pinned packages whose facts declare the same vouched key (the
+// persisted-fact channel) each record their own discharge: a subject
+// reaching only the later-walked package still carries the acceptance
+// (REQ-vouch-recorded).
+func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}", "golang.org/x/mod").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	modVersion := strings.TrimSpace(string(out))
+	out, err = exec.Command("go", "list", "-m", "-f", "{{.Version}}", "golang.org/x/sync").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncVersion := strings.TrimSpace(string(out))
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":      "module example.com/twodeps\n\ngo 1.26\n\nrequire (\n\tgolang.org/x/mod " + modVersion + "\n\tgolang.org/x/sync " + syncVersion + "\n)\n",
+		"a/a.go":      "package a\n\nimport \"golang.org/x/mod/semver\"\n\nfunc Valid(v string) bool { return semver.IsValid(v) }\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestValid(t *testing.T) { if !Valid(\"v1.0.0\") { t.Fatal(\"valid\") } }\n",
+		"b/b.go":      "package b\n\nimport \"golang.org/x/sync/errgroup\"\n\nfunc Run() error {\n\tvar g errgroup.Group\n\tg.Go(func() error { return nil })\n\treturn g.Wait()\n}\n",
+		"b/b_test.go": "package b\n\nimport \"testing\"\n\nfunc TestRun(t *testing.T) { if Run() != nil { t.Fatal(\"run\") } }\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	const shared = "example.com/shared.Ghost"
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|two-deps-toolchain|cfg"
+	pkgs := []string{"example.com/twodeps/a", "example.com/twodeps/b"}
+	subjectA := Subject{Package: pkgs[0], Symbol: "Valid"}
+	subjectB := Subject{Package: pkgs[1], Symbol: "Run"}
+
+	clean := runScan(t, scope, dir, pkgs...)
+	if r := clean.downgradeReason[subjectA] + clean.downgradeReason[subjectB]; r != "" {
+		t.Fatalf("baseline downgraded: %q", r)
+	}
+	var poisoned int
+	processFactCache.Range(func(k, v any) bool {
+		key := k.(string)
+		if strings.HasSuffix(key, "\x00golang.org/x/mod/semver") || strings.HasSuffix(key, "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, shared)
+			fact.Mutates = append(fact.Mutates, shared)
+			processFactCache.Store(k, fact)
+			poisoned++
+		}
+		return true
+	})
+	if poisoned != 2 {
+		t.Fatalf("poisoned %d facts, want both deps", poisoned)
+	}
+	vouchedScan := runScanVouched(t, scope, dir, map[string]bool{shared: true}, pkgs...)
+	if r := vouchedScan.downgradeReason[subjectA] + vouchedScan.downgradeReason[subjectB]; r != "" {
+		t.Fatalf("vouched culprits still downgrade: %q", r)
+	}
+	if a, b := vouchedScan.vouchDischarges[subjectA], vouchedScan.vouchDischarges[subjectB]; a != shared || b != shared {
+		t.Fatalf("per-package discharge records = a:%q b:%q, want both %q", a, b, shared)
+	}
+}
+
+// A record captured vouched-valid refuses once the vouch is withdrawn,
+// here on an UNOBSERVABLE subject (errgroup's real source trips the
+// observability scan), so the refusal runs the ordinary closure path;
+// the observed capture still records the discharge like the plain one
+// (REQ-vouch-recorded).
+func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const ghost = "golang.org/x/sync/errgroup.Ghost"
+	subject := Subject{Package: "example.com/pinned", Symbol: "TestRun"}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+
+	warm, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+		t.Fatal(err)
+	}
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, ghost)
+			fact.Mutates = append(fact.Mutates, ghost)
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+
+	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := vouched.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := producer.CaptureObserved(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("pinned test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.DynamicStateVouches != ghost {
+		t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+	}
+
+	withdrawn, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := withdrawn.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := current.CheckObserved(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+		t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
 	}
 }
 
