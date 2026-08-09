@@ -395,6 +395,38 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       reroute of the capture arm through the fail-closed break helper
       would spuriously refuse every return &T{field: param}
       constructor.
+- [ ] 66. gofresh + consumers: vouched third-party dynamic state -
+      field report: any graph carrying go-openapi/strfmt.Default
+      (every sigstore/rekor consumer) trips the shared-dynamic-state
+      downgrade with no discharge path - the tools cannot prove a
+      third-party global init-only, so runtime evidence is
+      permanently unverifiable and records never promote to the repo
+      layer (a committed findings document stays empty by design);
+      the fix direction is a caller-declared vouch - the consumer
+      accepts a named third-party package-scope variable as stable,
+      the declaration riding config like bracket paths do, the
+      verdict recording the vouch so acceptance is auditable, not
+      silent; opens with a design discussion (trust boundary: who
+      may vouch, where it is declared, how it surfaces in verdicts)
+      before implementation.
+- [ ] 67. gomutant: attestation anchors on position shift - field
+      report: attestations recorded before a later edit shed on
+      position shift as designed, but some re-anchored onto
+      same-shaped NEIGHBORING mutants (each audited correct in the
+      field instance, but the permissiveness is unaudited); an
+      attestation's equivalence reasoning is site-specific, so the
+      anchor should key enough site content that a same-shaped
+      mutant at a different site never inherits it; measure the
+      re-anchor rate, tighten the key, and pin the
+      no-cross-site-inheritance property.
+- [ ] 68. gomutant: property-suite oracle prerequisites - field
+      report: rapid-based suites need a pinned seed plus a
+      no-failfile setting to be usable oracles at all (unpinned
+      property suites are nondeterministic oracles - verdicts
+      unreproducible); preflight detects a property-runtime
+      dependency in the oracle's graph and states the prerequisite
+      (or refuses the oracle as nondeterministic) instead of leaving
+      the discovery to the user mid-campaign.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
