@@ -2311,6 +2311,16 @@ func plainNamedCalleeFn(p *packages.Package, call *ast.CallExpr) *types.Func {
 	return fn
 }
 
+// auditedValuePlane names the standard value-plane helpers whose
+// results carry exactly their arguments' values - clone and
+// concatenation shapes with no environment of their own. A closed
+// set: absence keeps the refusal.
+var auditedValuePlane = map[string]bool{
+	"slices\x00Clone":  true,
+	"slices\x00Concat": true,
+	"maps\x00Clone":    true,
+}
+
 // returnEnvFreeFunctions proves, per plain named function of the
 // package, that every value its return expressions can carry into a
 // carrier is environment-free provided the call's arguments are - the
@@ -2918,6 +2928,16 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							if !free(arg) {
 								return false
 							}
+						}
+						// An audited value-plane standard helper carries
+						// exactly its arguments' values into its result -
+						// judged when every argument judges, every
+						// spelling the callee resolution admits. A
+						// closed set; every other standard callee falls
+						// to the dependency channel, whose fail-closed
+						// composition refuses absent proofs.
+						if auditedValuePlane[fn.Pkg().Path()+"\x00"+fn.Name()] {
+							return true
 						}
 						fnDeps[fn.Pkg().Path()+"\x00"+fn.Name()] = true
 						return true

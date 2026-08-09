@@ -369,7 +369,7 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       through the read binding keep propagating - the admission is
       sound only on top of those links, which is why 62 lands first;
       the comma-ok second result is boolean and free.
-- [ ] 64. gofresh: audited-pure standard callees join the derivation
+- [x] 64. gofresh: audited-pure standard callees join the derivation
       class - slices.Clone(rows) in the keyed-registry constructor
       refuses as an unproven foreign callee (probe-confirmed; the
       error-path returns are already free - error values carry no

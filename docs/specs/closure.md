@@ -398,7 +398,10 @@ derivation edges judging by its external sources and stores alone —
 recirculation contributes no new values — an append
 of judged elements (an append onto the binding itself flowing only the
 new elements), a conversion of a judged value, an instantiated
-reference of a named function, and a call of a plain named callee with
+reference of a named function, a call of an audited value-plane
+standard helper with judged arguments — slices.Clone, slices.Concat,
+and maps.Clone, a closed set whose results carry exactly their
+arguments' values — and a call of a plain named callee with
 judged arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
