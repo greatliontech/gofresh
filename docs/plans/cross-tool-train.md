@@ -12,9 +12,15 @@ field reports triage into three bands: blocking-a-user (defects
 stopping another agent's loop now), current-arc (serves the measured
 floor), and tail (ergonomics, refactors).
 
-Execution order (user-confirmed 2026-08-09): 69, 73, 70, 66, then the
+Execution order (user-confirmed 2026-08-09; explain family pulled
+together per user direction same day): 69, 73, then 70, 71, 72 as one
+consecutive family - the explain capability is diagnosis
+infrastructure for the working loop across all four repos, shared
+chain machinery in gofresh, each tool integrating it over its own
+verdict domain, every refusal carrying a handle to its derivation
+through the surfaces agents already use - then 66, then the
 discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
-74, 75, 76, 77, 78, then 79, 67, 68, 71, 72, 65, then the
+74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
 startup-effect-precision plan activation decision with 29-46, then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
 design discussion). The startup-effect-precision plan is dormant until
