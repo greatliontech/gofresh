@@ -427,6 +427,28 @@ stipulator (18, 19) and its bump, then 25, then the re-measure (16), then pew
       dependency in the oracle's graph and states the prerequisite
       (or refuses the oracle as nondeterministic) instead of leaving
       the discovery to the user mid-campaign.
+- [ ] 69. gofresh: the parameter break distinguishes shared storage
+      from held values - the ninth probe's instrumented trace:
+      temporal.NewRegistry is the field chains' sole dead link, and
+      it refuses because the fresh containers it builds (groups, g,
+      series) join the parameter's alias component through value
+      flow (r := range rows; g.versions = append(.., r.Version);
+      series[coord] = s), so the parameter-component break treats
+      every store into fresh storage as a write into the caller's -
+      the accumulate-into-fresh-containers pattern every registry
+      constructor uses; the linking gains direction: header-sharing
+      binds (whole identifiers, conversions, append target and base,
+      slice steps, call results, reach-bearing element reads - the
+      landed refusal families, all preserved) stay symmetric storage
+      aliases firing the parameter break, while a struct-value copy
+      read out of a parameter (range value, field read, element read
+      of a value element) records a directional held-reach link -
+      top-level slot writes into the holder's own storage join the
+      store set without breaking the caller's assumption, and any
+      write whose chain crosses a dereference below the root
+      fail-closes into the break (the held copy's interior may reach
+      the caller's backing); opens with the spec read and the
+      two-relation design settled before code.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
