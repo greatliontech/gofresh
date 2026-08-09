@@ -465,7 +465,7 @@ its activation decision.
       fail-closes into the break (the held copy's interior may reach
       the caller's backing); opens with the spec read and the
       two-relation design settled before code.
-- [ ] 70. gofresh + stipulator: verdict explanation as a supported
+- [x] 70. gofresh + stipulator: verdict explanation as a supported
       surface - every refusal this train chased needed the same three
       artifacts, rebuilt twice as throwaway harnesses: the per-package
       fact dump, the composition trace naming the dependency edge that
