@@ -405,19 +405,37 @@ arguments' values — and a call of a plain named callee with
 judged arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
-field, slice-step, or dereference write of a present value is a store
-into the written base's storage: the base stays judged exactly when
-everything stored into it judges, the store set unioned across names
-sharing mutable backing (index operands and other subexpressions stay
-reads); a valueless write, and any write into a parameter's storage,
-break outright. Every bind — and every store of a present value into
-a tracked base, appended elements included — aliases its target (for
-a store, the written base) to each reach-bearing tracked name its
-source expression reaches — whole identifiers, element reads,
-conversions, call results, appends and their nested or non-plain
-bases, and literals embedding a tracked value alike; breaks and
-stores propagate across the links, while reach-free scalar copies
-stay independent storage. While any
+field, slice-step, or dereference write of a present value is a
+store. A slot write — one whose chain stays on the root's owned
+spine: for a root bound only from body-owned storage (fresh
+allocations, appends and conversions over them, and values read back
+out of such containers, transitively), an initial dereference of the
+root's own pointer, selector steps over struct values, and at most
+one index in final position taken on the root's own header, past its
+own dereference and slice steps over that same header at most — a
+header reached through a selector may have
+arrived inside a held copy, invisible to body-ownership; for any
+other root, selector steps over
+struct values alone — lands in the root's own storage, and the base
+stays judged exactly when everything stored into it judges, the
+store set unioned across names sharing one storage (index operands
+and other subexpressions stay reads). Any other chain may write
+storage the root does not own and breaks the root outright —
+fail-closed. A valueless write, and any store into a parameter's
+storage or a name sharing it, break the caller's assumption
+outright. Every bind and store links its target (for a store, the
+written base) to each reach-bearing tracked name its source
+expression reaches, the link kind following the value that flows: a
+header-sharing value — pointers, slices, maps, and every non-copy
+shape, appends and their nested or non-plain bases, conversions,
+call results, and literals embedding a tracked value included —
+makes the two names one storage, breaks, stores, and the parameter
+refusal all crossing the pair; a struct or array value is a copy
+holding reach into its origin — breaks cross the pair fail-closed,
+while the holder's own storage stays its own. Range bindings link at
+the container's kind: a value-array range copies its elements and
+links held; every other container links as sharing — fail-closed.
+Reach-free values stay unlinked as independent storage. While any
 other derivation, an address capture of the binding — the implicit
 address of a pointer-receiver method use included, exempting methods
 the declaring package proves receiver-read-only — or any bind

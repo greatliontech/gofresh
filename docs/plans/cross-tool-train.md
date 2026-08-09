@@ -437,7 +437,7 @@ its activation decision.
       dependency in the oracle's graph and states the prerequisite
       (or refuses the oracle as nondeterministic) instead of leaving
       the discovery to the user mid-campaign.
-- [ ] 69. gofresh: the parameter break distinguishes shared storage
+- [x] 69. gofresh: the parameter break distinguishes shared storage
       from held values - the ninth probe's instrumented trace:
       temporal.NewRegistry is the field chains' sole dead link, and
       it refuses because the fresh containers it builds (groups, g,
