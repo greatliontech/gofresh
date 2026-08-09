@@ -20,7 +20,7 @@ chain machinery in gofresh, each tool integrating it over its own
 verdict domain, every refusal carrying a handle to its derivation
 through the surfaces agents already use - then 66, then 81
 (blocking-a-user: an oracle OOM burst pins the reporting user's host
-during campaigns), then the
+during campaigns; 82 rides the tail with 80), then the
 discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
 74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
 startup-effect-precision plan activation decision with 29-46 (80
@@ -562,6 +562,17 @@ its activation decision.
       non-causes stated in the report and honored at triage: gomutant's
       own process is stable (310-430MB), linker bursts are inherent,
       /tmp build dirs clean promptly, orphaned MCP servers are small.
+- [ ] 82. stipulator: capture-group key joiner hardening - review
+      finding (adjacent, pre-existing): the group key joins tags, env,
+      exclusions, and now vouches with control-byte separators
+      (\x00-\x05), and a legal env VALUE containing a separator byte
+      can collide two differently-configured invocations into one
+      capture group (vouch and exclusion entries now refuse control
+      bytes at acceptance; env values legitimately may contain them, so
+      refusal is not available there); replace the concatenation with a
+      collision-free encoding (length-prefixed or escaped components)
+      without changing any collision-free key's identity semantics -
+      existing evidence keyed by test identity is unaffected.
 - [ ] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
