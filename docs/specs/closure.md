@@ -235,7 +235,15 @@ or capacity, or comparing it — is not mutation, and the indexing and iteration
 discharges hold only when the produced value hands out no mutable reach — a
 pointer, map, slice, channel, or interface anywhere in it refuses; a function
 value is program code judged where written, not write access (an indexed-out
-map still writes through), and a comma-ok existence read whose extracted
+map still writes through) — but a signature-carrying value IS its
+environment: a rooted signature-carrying read handed out — returned,
+bound, or passed — refuses on the value plane whatever the reach walk
+says of its type, only its call staying tolerated with the call's own
+pricing — a pricing that extends to the call's results: a call through a
+rooted callee refuses, in every consumption position, when any of its
+results hands out mutable reach or carries a signature, exactly as an
+indexed-out value is priced; a void or all-scalar result set hands out
+nothing — and a comma-ok existence read whose extracted
 element lands in a blank is writeless on any carrier — no value is
 produced to hand out — and never for a channel (ranging a channel
 receives); a write through the carrier, growth or deletion, a send or receive, an

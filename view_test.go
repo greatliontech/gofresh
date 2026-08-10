@@ -4258,6 +4258,250 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want Valid - a conditionally proven registrant parameter refused the field discharge", verdict)
 		}
 	})
+	t.Run("registered literal handing out a captured field closure refuses", func(t *testing.T) {
+		// The wrapper literal returns w.handler - a signature-carrying
+		// read of its capture. The value IS its environment (the shared
+		// closure over n); the value-plane refusal keeps the escape.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\tRegistry[\"h\"] = func() func() int { return w.handler }\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a captured field closure handed out env-free", verdict)
+		}
+	})
+	t.Run("constructor handing out a captured field closure refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nfunc mk() map[string]func() func() int {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\treturn map[string]func() func() int{\"h\": func() func() int { return w.handler }}\n}\n\nvar Registry = mk()\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a constructor handed out a captured closure env-free", verdict)
+		}
+	})
+	t.Run("registered literal handing out a captured method value refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Tick() int {\n\tc.n++\n\treturn c.n\n}\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tc := &counter{}\n\tw := widget{handler: c.Tick}\n\tRegistry[\"h\"] = func() func() int { return w.handler }\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a captured method value handed out env-free", verdict)
+		}
+	})
+	t.Run("rooted map-field dispatch with scalar arguments discharges", func(t *testing.T) {
+		// The callee read is an invocation, not a handout - the
+		// value-plane refusal skips call positions.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols     []string\n\tHandlers map[string]func(n int) int\n}\n\nfunc double(n int) int { return 2 * n }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Handlers: map[string]func(n int) int{\"x\": double}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Handlers[\"x\"](1)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a rooted map-field invocation refused on the value plane", verdict)
+		}
+	})
+	t.Run("locally bound handout refuses on the value plane", func(t *testing.T) {
+		// The bind tracks - the signature-carrying value carries its
+		// environment through the local exactly as through the read.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\tRegistry[\"h\"] = func() func() int {\n\t\tx := w.handler\n\t\treturn x\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a locally bound handout escaped the value plane", verdict)
+		}
+	})
+	t.Run("range-bound handout refuses on the value plane", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tlist []func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{list: []func() int{func() int {\n\t\tn++\n\t\treturn n\n\t}}}\n\tRegistry[\"h\"] = func() func() int {\n\t\tfor _, f := range w.list {\n\t\t\treturn f\n\t\t}\n\t\treturn nil\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a range-bound handout escaped the value plane", verdict)
+		}
+	})
+	t.Run("struct-copy bound handout refuses on the value plane", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\tRegistry[\"h\"] = func() func() int {\n\t\tx := w\n\t\treturn x.handler\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a struct-copy handout escaped the value plane", verdict)
+		}
+	})
+	t.Run("method-result handout refuses through the constructor door", func(t *testing.T) {
+		// The read-only method returns a signature-carrying value - the
+		// deferral's result gate refuses on the value plane.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nfunc (w widget) Get() func() int { return w.handler }\n\nfunc mk() map[string]func() func() int {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\treturn map[string]func() func() int{\"h\": func() func() int { return w.Get() }}\n}\n\nvar Registry = mk()\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a method-result handout escaped the deferral gate", verdict)
+		}
+	})
+	t.Run("package-var getter returning a callback refuses", func(t *testing.T) {
+		// The method call itself is the tolerated position, but its
+		// signature-carrying result denies the read-only deferral: the
+		// receiver stays fail-closed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype R struct {\n\thook func() int\n}\n\nvar V = &R{hook: func() int { return 1 }}\n\nfunc (r *R) Get() func() int { return r.hook }\n\nfunc Run() int {\n\tf := V.Get()\n\treturn f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.V") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.V - a callback-returning getter must not earn the read-only deferral", verdict)
+		}
+	})
+	t.Run("field-callee call result handout refuses", func(t *testing.T) {
+		// return w.get() - the callee read is tolerated, but its
+		// signature-carrying result is a value-plane handout.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tget func() func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\thandler := func() int {\n\t\tn++\n\t\treturn n\n\t}\n\tw := widget{get: func() func() int { return handler }}\n\tRegistry[\"h\"] = func() func() int { return w.get() }\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a field-callee result handout escaped", verdict)
+		}
+	})
+	t.Run("bound-callee call result handout refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tget func() func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\thandler := func() int {\n\t\tn++\n\t\treturn n\n\t}\n\tw := widget{get: func() func() int { return handler }}\n\tRegistry[\"h\"] = func() func() int {\n\t\tfn := w.get\n\t\treturn fn()\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a bound-callee result handout escaped", verdict)
+		}
+	})
+	t.Run("void method call on a rooted element stays valid", func(t *testing.T) {
+		// A void call hands out nothing - the read-only method deferral
+		// resolves it; the result gate must not misread the empty result
+		// tuple as a handout.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Ping() {}\n\nfunc double(n int) int { return 2 * n }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: double}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\te.Ping()\n\t\ttotal += e.Build(1)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a void method call hands out nothing", verdict)
+		}
+	})
+	t.Run("two-result dispatch on a rooted element stays valid", func(t *testing.T) {
+		// Every element of the result tuple is a copied scalar - the
+		// multi-result shape alone is not a handout.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols   []string\n\tLookup func(s string) (int, bool)\n}\n\nfunc look(s string) (int, bool) { return len(s), true }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Lookup: look}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tif v, ok := e.Lookup(\"ab\"); ok {\n\t\t\ttotal += v\n\t\t}\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an all-scalar result tuple hands out nothing", verdict)
+		}
+	})
+	t.Run("map-returning field callee refuses", func(t *testing.T) {
+		// The call is tolerated but its result hands the caller shared
+		// mutable reach - a mutation-equivalent escape.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tget func() map[string]int\n}\n\nvar Registry = map[string]func() map[string]int{}\n\nfunc init() {\n\tm := map[string]int{\"a\": 1}\n\tw := widget{get: func() map[string]int { return m }}\n\tRegistry[\"h\"] = func() map[string]int { return w.get() }\n}\n\nfunc Run() int {\n\td := Registry[\"h\"]()\n\treturn d[\"a\"]\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a map-returning callee handed out shared reach", verdict)
+		}
+	})
+	t.Run("two-result handout with a signature element refuses", func(t *testing.T) {
+		// One tuple element is a signature - the comma-discarded shape
+		// must not launder it past the result gate.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tboth func() (func() int, bool)\n}\n\nvar Registry = map[string]func() int{}\n\nfunc init() {\n\tn := 0\n\thandler := func() int {\n\t\tn++\n\t\treturn n\n\t}\n\tw := widget{both: func() (func() int, bool) { return handler, true }}\n\tRegistry[\"h\"] = func() int {\n\t\tf, _ := w.both()\n\t\treturn f()\n\t}\n}\n\nfunc Run() int {\n\treturn Registry[\"h\"]() + Registry[\"h\"]()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a signature element rode a result tuple out", verdict)
+		}
+	})
+	t.Run("two-result handout with a map element refuses", func(t *testing.T) {
+		// The shared-reach element rides the tuple beside a scalar.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tboth func() (map[string]int, bool)\n}\n\nvar Registry = map[string]func() int{}\n\nfunc init() {\n\tm := map[string]int{\"a\": 1}\n\tw := widget{both: func() (map[string]int, bool) { return m, true }}\n\tRegistry[\"h\"] = func() int {\n\t\td, _ := w.both()\n\t\treturn d[\"a\"]\n\t}\n}\n\nfunc Run() int {\n\treturn Registry[\"h\"]()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a map element rode a result tuple out", verdict)
+		}
+	})
+	t.Run("bound field callee invocation stays valid", func(t *testing.T) {
+		// The bind-then-call idiom: the tracked local is only ever
+		// invoked - a call position, never a handout.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc double(n int) int { return 2 * n }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: double}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tfn := e.Build\n\t\ttotal += fn(1)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the bind-then-call idiom refused", verdict)
+		}
+	})
+	t.Run("stateless handout through a registered literal stays valid", func(t *testing.T) {
+		// The benign twin: the returned literal captures nothing - the
+		// value-plane refusal must not reach it.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tRegistry[\"h\"] = func() func() int {\n\t\treturn func() int { return 7 }\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a stateless handout refused on the value plane", verdict)
+		}
+	})
 	t.Run("plain-data builder effects stay per-process", func(t *testing.T) {
 		// A registered named builder mutating a plain package variable is
 		// per-process-deterministic content the whole-graph hash already
@@ -6289,8 +6533,8 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 		dir := writeModuleTree(t, files)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Hands"})
-		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
-			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a closure handout of a tainted local proved read-only", verdict)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a closure handout of a tainted local slipped every gate", verdict)
 		}
 	})
 	t.Run("reach-free store to a package variable stays proven", func(t *testing.T) {

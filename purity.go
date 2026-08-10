@@ -1793,6 +1793,27 @@ func typeCarriesSignature(t types.Type, seen map[types.Type]bool) bool {
 	}
 }
 
+// callResultHandsOut reports whether a call's result set can hand its
+// consumer carrier-derived state: any result - the single result type, or
+// any element of a multi-result tuple - that hands out mutable reach or
+// carries a signature refuses. A void call hands out nothing. Missing
+// type information refuses, fail-closed like every judged value position.
+func callResultHandsOut(t types.Type) bool {
+	if t == nil {
+		return true
+	}
+	if tuple, ok := t.(*types.Tuple); ok {
+		for i := 0; i < tuple.Len(); i++ {
+			rt := tuple.At(i).Type()
+			if typeHandsOutMutableReach(rt, make(map[types.Type]bool)) || typeCarriesSignature(rt, make(map[types.Type]bool)) {
+				return true
+			}
+		}
+		return false
+	}
+	return typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool))
+}
+
 // environmentFreeFuncLit reports whether a function literal registered into
 // a carrier is provably environment-free: every variable it references from
 // an enclosing function scope proves leak-free under the use-shape engine -
@@ -4174,6 +4195,22 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 	// the direct spelling - so none of them defers.
 	goCalls := map[*ast.CallExpr]bool{}
 	litReturns := map[*ast.ReturnStmt]bool{}
+	// calleeReads marks call-Fun selector and index nodes: invoking a
+	// signature-carrying read is not a handout - the call arms price the
+	// arguments and the callee enumeration prices the effects - so the
+	// value-plane refusal skips exactly these nodes.
+	calleeReads := map[ast.Node]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			switch fun := call.Fun.(type) {
+			case *ast.SelectorExpr, *ast.IndexExpr, *ast.Ident:
+				calleeReads[fun] = true
+			case *ast.ParenExpr:
+				calleeReads[unparenExpr(fun)] = true
+			}
+		}
+		return true
+	})
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.GoStmt:
@@ -4239,7 +4276,11 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			if obj == nil || roots[obj] || tainted[obj] {
 				return
 			}
-			if !typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
+			// A signature-carrying binding is tracked on the value
+			// plane - the bound value carries its environment even
+			// where its type hands out no writable reach
+			// (REQ-closure-shared-dynamic-state).
+			if !typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) && !typeCarriesSignature(obj.Type(), make(map[types.Type]bool)) {
 				return
 			}
 			tainted[obj] = true
@@ -4485,7 +4526,11 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 						} else {
 							leaky = true
 						}
-					} else if methodValueBind(result) {
+					} else if methodValueBind(result) || typeCarriesSignature(p.TypesInfo.TypeOf(result), make(map[types.Type]bool)) {
+						// A signature-carrying value IS its environment -
+						// handing it out is a value-plane leak whatever
+						// the reach walk says about its type
+						// (REQ-closure-shared-dynamic-state).
 						leaky = true
 					} else {
 						consume(result)
@@ -4530,8 +4575,21 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 					// child visit. The callee's own effects, including
 					// writes through its closure environment, are priced by
 					// the observation composition's callee enumeration, not
-					// by this binding proof.
+					// by this binding proof. The call's RESULT is judged by
+					// the rooted-callee result gate below.
 				} else {
+					leaky = true
+				}
+			}
+			// A rooted callee - a func-typed field, a bound local, an
+			// indexed element - tolerates its READ at the call, but the
+			// call's RESULT is the carrier handing its consumer a value
+			// no channel prices: any result handing out mutable reach or
+			// carrying a signature refuses in every consumption position,
+			// fail-closed; a void or all-scalar result set hands out
+			// nothing (REQ-closure-shared-dynamic-state).
+			if fun := unparenExpr(n.Fun); rooted(fun) {
+				if callResultHandsOut(p.TypesInfo.TypeOf(n)) {
 					leaky = true
 				}
 			}
@@ -4543,7 +4601,7 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			// statement's call, the goroutine runs concurrently.
 			for i, arg := range n.Args {
 				if rooted(arg) {
-					if t := p.TypesInfo.TypeOf(arg); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+					if t := p.TypesInfo.TypeOf(arg); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool)) {
 						deferred := false
 						if wants != nil && !goCalls[n] {
 							if fn, pkgPath := plainCalleeFunc(p, n.Fun); fn != nil {
@@ -4603,7 +4661,7 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			}
 		case *ast.IndexExpr:
 			if rooted(n.X) && !allowed[rootIdent(n.X)] {
-				if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+				if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || (!calleeReads[n] && typeCarriesSignature(t, make(map[types.Type]bool))) {
 					leaky = true
 				} else {
 					consume(n.X)
@@ -4614,7 +4672,10 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 					break
 				}
-				if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+				// A signature-carrying read refuses on the value plane -
+				// the produced value carries its environment; only its
+				// call is tolerated, by the call arms.
+				if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || (!calleeReads[n] && typeCarriesSignature(t, make(map[types.Type]bool))) {
 					leaky = true
 				} else {
 					consume(n.X)
@@ -4631,8 +4692,10 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			}
 		case *ast.Ident:
 			// The catch-all: any tracked appearance no allowed shape
-			// consumed is an unrecognized use - fail-closed.
-			if !allowed[n] && isRoot(n) {
+			// consumed is an unrecognized use - fail-closed. A call
+			// position is an invocation, not a handout - the call's own
+			// arms price it.
+			if !allowed[n] && isRoot(n) && !calleeReads[n] {
 				leaky = true
 			}
 		}
@@ -5383,7 +5446,10 @@ func instantiatedResultsHandOutNothing(t types.Type) bool {
 		if auditedImmutableType(rt) {
 			continue
 		}
-		if typeHandsOutMutableReach(rt, make(map[types.Type]bool)) {
+		// A signature-carrying result IS its environment - the method
+		// can hand back receiver-reaching state on the value plane
+		// whatever the reach walk says (REQ-closure-shared-dynamic-state).
+		if typeHandsOutMutableReach(rt, make(map[types.Type]bool)) || typeCarriesSignature(rt, make(map[types.Type]bool)) {
 			return false
 		}
 	}
