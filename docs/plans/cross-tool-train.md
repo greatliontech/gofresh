@@ -339,7 +339,7 @@ its activation decision.
       Surface the deferral's use site and the unproven resolvent
       (parameter key, method key, or registrant) as chain links across
       all three deferral channels, within the explain vocabulary.
-- [ ] 56b. gofresh: explain chain arm parity with the verdict ranking -
+- [x] 56b. gofresh: explain chain arm parity with the verdict ranking -
       a variable with direct escape sites plus an unproven method
       deferral chains as escape while the verdict reason says mutated
       (the verdict ranks mutation first); merge sites and unresolved
