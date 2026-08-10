@@ -349,7 +349,7 @@ its activation decision.
       suppresses the verdict's downgrade, never the derivation a
       caller audits) - the originally chartered no-chain gate
       contradicted that sentence and was reversed in review.
-- [ ] 57. gofresh: carrier index extraction admissions - a comma-ok
+- [x] 57. gofresh: carrier index extraction admissions - a comma-ok
       existence read discarding the extracted element (the
       membership-validation shape) is writeless on any carrier, and a
       call whose callee is an index read of an env-free-audited
