@@ -616,7 +616,7 @@ its activation decision.
       time.Date, reflect.DeepEqual, and interface-type references of
       the fmt.Stringer shape (the second re-measure's 131 named
       refusals on value constructors and comparators).
-- [ ] 54. gofresh: subtest and fuzz drivers on the witness path -
+- [x] 54. gofresh: subtest and fuzz drivers on the witness path -
       testing.Run and testing.Fuzz reached by witnesses (176 named
       refusals) are the standard subtest idiom; whether harness-internal
       subtest execution joins the audited-harness admission for the
