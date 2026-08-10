@@ -532,7 +532,7 @@ its activation decision.
       always past the 120s MCP window); a genuinely scoped fast mode
       compiles and covers the named ids only, the verdict flagged
       partial; transforms the bind-check inner loop.
-- [ ] 76. stipulator: prune does deletion work only - deleting nine
+- [x] 76. stipulator: prune does deletion work only - deleting nine
       resolved gap files runs what appears to be a full
       compile/witness pass (>120s); resolved-record deletion should
       be near-instant, and whatever work genuinely must run must be
