@@ -449,7 +449,7 @@ its activation decision.
       silent; opens with a design discussion (trust boundary: who
       may vouch, where it is declared, how it surfaces in verdicts)
       before implementation.
-- [ ] 67. gomutant: attestation anchors on position shift - field
+- [x] 67. gomutant: attestation anchors on position shift - field
       report: attestations recorded before a later edit shed on
       position shift as designed, but some re-anchored onto
       same-shaped NEIGHBORING mutants (each audited correct in the
