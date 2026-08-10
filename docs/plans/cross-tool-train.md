@@ -319,7 +319,7 @@ its activation decision.
       non-alias-handing type (foral's String() string(p)) proves
       read-only; alias-handing element types and conversions keep the
       refusal.
-- [ ] 56. gofresh: registered-population parameter proof for func-field
+- [x] 56. gofresh: registered-population parameter proof for func-field
       calls - a carrier field passed as an argument to a call through
       a func-valued field of the same leak-free binding (the
       near-match loop's class.near(header, class.columns)) defers to
