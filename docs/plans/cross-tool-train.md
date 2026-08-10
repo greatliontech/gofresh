@@ -544,7 +544,7 @@ its activation decision.
       the spawn sites (-parallel / GOMAXPROCS in the child env at
       max(1, NumCPU/units)) so units x per-child width stays at most
       the processor count; the unit bound's semantics stand.
-- [ ] 81. gomutant: oracle memory ceiling - field report (user; the
+- [x] 81. gomutant: oracle memory ceiling - field report (user; the
       host pinned): a runaway-allocation mutant (statement-delete of a
       loop advance in a tree walk that appends per iteration)
       allocates freely inside the oracle's 60s window - the kernel OOM
