@@ -315,6 +315,119 @@ func TestExplainChains(t *testing.T) {
 }
 
 //gofresh:pure
+func TestExplainDeferralChains(t *testing.T) {
+	goMod := "module example.com/explain\n\ngo 1.26\n"
+
+	t.Run("unproven argument deferral names the callee parameter", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar sink []entry\n\nfunc grab(es []entry) int {\n\tsink = es\n\treturn len(es)\n}\n\nfunc Count() int { return grab(Registry) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "escape" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want an escape deferral chain", chain)
+		}
+		link := chain.Links[0]
+		if link.Clause != "a deferred argument's parameter unproven" {
+			t.Fatalf("clause = %q - the deferral family is missing", link.Clause)
+		}
+		if !strings.Contains(link.Callee, "example.com/explain/reg.grab parameter 0") {
+			t.Fatalf("callee = %q, want the unproven parameter named", link.Callee)
+		}
+		if link.Pos == "" || !strings.Contains(link.Pos, "reg.go") {
+			t.Fatalf("pos = %q, want the deferring use site", link.Pos)
+		}
+	})
+	t.Run("unproven method deferral is a mutation chain", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype counter struct {\n\tn     int\n\thooks []func()\n}\n\nfunc (c *counter) Bump() int {\n\tc.n++\n\treturn c.n\n}\n\nvar Registry = &counter{}\n\nfunc Count() int { return Registry.Bump() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "mutation" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want a mutation deferral chain", chain)
+		}
+		link := chain.Links[0]
+		if link.Clause != "a deferred method use unproven" {
+			t.Fatalf("clause = %q - the deferral family is missing", link.Clause)
+		}
+		if !strings.Contains(link.Callee, "counter.Bump") {
+			t.Fatalf("callee = %q, want the unproven method named", link.Callee)
+		}
+	})
+	t.Run("refused field position names the failing registrant", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: grab}}\n}\n\nfunc Count() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "escape" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want an escape deferral chain", chain)
+		}
+		link := chain.Links[0]
+		if link.Clause != "the registered population refused the field position" {
+			t.Fatalf("clause = %q - the field deferral family is missing", link.Clause)
+		}
+		if !strings.Contains(link.Callee, "Build parameter 0") || !strings.Contains(link.Callee, "example.com/explain/reg.grab parameter 0") {
+			t.Fatalf("callee = %q, want the field position and failing registrant named", link.Callee)
+		}
+	})
+	t.Run("object-closed sentinel yields no chain despite unproven deferrals", func(t *testing.T) {
+		// The verdict discharges escapes of an opaque interface variable
+		// (audited immutable construction); the chain must apply the
+		// same proof state - a Valid verdict has no chain.
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"boom\")\n\nvar sink error\n\nfunc grab(e error) error {\n\tsink = e\n\treturn e\n}\n\nfunc Count() int {\n\tif grab(ErrX) != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "ErrX")
+		if chain.Arm != "" || len(chain.Links) != 0 {
+			t.Fatalf("chain = %+v, want empty - an opacity-discharged sentinel earned a chain", chain)
+		}
+	})
+	t.Run("opacity discharge covers direct escape sites", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"boom\")\n\nvar sink []error\n\nfunc Count() int {\n\tsink = append(sink, ErrX)\n\treturn len(sink)\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "ErrX")
+		if chain.Arm != "" || len(chain.Links) != 0 {
+			t.Fatalf("chain = %+v, want empty - an opacity-discharged direct escape earned a chain", chain)
+		}
+	})
+	t.Run("mixed unproven deferrals rank mutation first", func(t *testing.T) {
+		// A carrier with both an unproven argument deferral and an
+		// unproven method deferral chains as mutation - the arm the
+		// verdict ranking would name.
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype counter struct {\n\tn     int\n\thooks []func()\n}\n\nfunc (c *counter) Bump() int {\n\tc.n++\n\treturn c.n\n}\n\nvar Registry = &counter{}\n\nvar sink *counter\n\nfunc grab(c *counter) int {\n\tsink = c\n\treturn c.n\n}\n\nfunc Count() int { return Registry.Bump() + grab(Registry) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "mutation" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want a mutation chain for mixed deferrals", chain)
+		}
+	})
+	t.Run("resolved deferral contributes no chain", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc width(es []entry) int { return len(es) }\n\nfunc Count() int { return width(Registry) }\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "" || len(chain.Links) != 0 {
+			t.Fatalf("chain = %+v, want empty - a proven deferral earned a chain", chain)
+		}
+	})
+}
+
+//gofresh:pure
 func TestExplainChainBound(t *testing.T) {
 	// The production shape: stores and edges first, refusals appended
 	// innermost-first, the protected index at the first refusal.

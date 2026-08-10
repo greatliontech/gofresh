@@ -588,6 +588,14 @@ func explainMark(p *packages.Package, kind, key string, at token.Pos) {
 	}
 }
 
+// explainDeferralMark observes a deferred-use recording for the explain
+// surface; nil outside an explain re-derivation (REQ-explain-passive).
+func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, at token.Pos) {
+	if h := explainHooks.Load(); h != nil && h.deferral != nil {
+		h.deferral(p, kind, key, resolvent, at)
+	}
+}
+
 func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, fieldUses map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
@@ -841,7 +849,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if paramUses[key] == nil {
 				paramUses[key] = map[string]bool{}
 			}
-			paramUses[key][pkgPath+"\x00"+fn.Name()+"\x00"+strconv.Itoa(idx)] = true
+			paramKey := pkgPath + "\x00" + fn.Name() + "\x00" + strconv.Itoa(idx)
+			paramUses[key][paramKey] = true
+			explainDeferralMark(p, 'p', key, paramKey, target.Pos())
 			if onDeferred != nil {
 				onDeferred(target)
 			}
@@ -1046,18 +1056,21 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 										}
 										for want := range wants {
 											paramUses[key][want] = true
+											explainDeferralMark(p, 'p', key, want, n.X.Pos())
 										}
 										if len(methodWants) > 0 && methodUses[key] == nil {
 											methodUses[key] = map[string]bool{}
 										}
 										for want := range methodWants {
 											methodUses[key][want] = true
+											explainDeferralMark(p, 'm', key, want, n.X.Pos())
 										}
 										if len(fieldWants) > 0 && fieldUses[key] == nil {
 											fieldUses[key] = map[string]bool{}
 										}
 										for want := range fieldWants {
 											fieldUses[key][want] = true
+											explainDeferralMark(p, 'f', key, want, n.X.Pos())
 										}
 									}
 									if returned {
@@ -1149,7 +1162,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 										if methodUses[key] == nil {
 											methodUses[key] = map[string]bool{}
 										}
-										methodUses[key][methodFactKey(fn)] = true
+										factKey := methodFactKey(fn)
+										methodUses[key][factKey] = true
+										explainDeferralMark(p, 'm', key, factKey, n.Pos())
 										readContext[ident] = true
 										return true
 									}
@@ -1528,6 +1543,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								paramUses[key] = map[string]bool{}
 							}
 							paramUses[key][want] = true
+							explainDeferralMark(p, 'p', key, want, call.Pos())
 						}
 					}
 					for want := range siteMethodWants {
@@ -1536,6 +1552,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								methodUses[key] = map[string]bool{}
 							}
 							methodUses[key][want] = true
+							explainDeferralMark(p, 'm', key, want, call.Pos())
 						}
 					}
 					for want := range siteFieldWants {
@@ -1544,6 +1561,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								fieldUses[key] = map[string]bool{}
 							}
 							fieldUses[key][want] = true
+							explainDeferralMark(p, 'f', key, want, call.Pos())
 						}
 					}
 					if siteReturned {

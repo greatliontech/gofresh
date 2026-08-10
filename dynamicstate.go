@@ -579,45 +579,12 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// every callee it depends on resolves, so cycles and absent foreign
 	// proofs fail closed; an unresolved callee keeps the store's poison
 	// (REQ-closure-shared-dynamic-state).
-	envFreeDeclared := map[string]bool{}
-	envFreeDeps := map[string]map[string]bool{}
-	for _, facts := range state.facts {
-		for _, fact := range facts {
-			for _, key := range fact.ReturnEnvFree {
-				envFreeDeclared[key] = true
-			}
-			for _, edge := range fact.ReturnEnvDeps {
-				fnKey, callee, ok := strings.Cut(edge, "\x01")
-				if !ok {
-					continue
-				}
-				if envFreeDeps[fnKey] == nil {
-					envFreeDeps[fnKey] = map[string]bool{}
-				}
-				envFreeDeps[fnKey][callee] = true
-			}
+	resolution := newDeferralResolution(state.facts, func(fact dynamicStateFact) {
+		for _, key := range fact.Declares {
+			mutated[key] = true
 		}
-	}
-	envFreeResolved := map[string]bool{}
-	for changed := true; changed; {
-		changed = false
-		for fnKey := range envFreeDeclared {
-			if envFreeResolved[fnKey] {
-				continue
-			}
-			ok := true
-			for callee := range envFreeDeps[fnKey] {
-				if !envFreeResolved[callee] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				envFreeResolved[fnKey] = true
-				changed = true
-			}
-		}
-	}
+	})
+	envFreeResolved := resolution.envFreeResolved
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.EnvCallUses {
@@ -641,14 +608,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// whose method no fact proves read-only marks the variable mutated
 	// - fail-closed, the address-capture semantics the call site
 	// withheld (REQ-closure-shared-dynamic-state).
-	readOnly := map[string]bool{}
-	for _, facts := range state.facts {
-		for _, fact := range facts {
-			for _, key := range fact.ReceiverReadOnly {
-				readOnly[key] = true
-			}
-		}
-	}
+	readOnly := resolution.readOnly
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.MethodUses {
@@ -673,14 +633,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// leak-free marks the variable escaped - fail-closed, init flow
 	// included, because an alias outlives initialization
 	// (REQ-closure-shared-dynamic-state).
-	paramLeakFree := map[string]bool{}
-	for _, facts := range state.facts {
-		for _, fact := range facts {
-			for _, key := range fact.ParamLeakFree {
-				paramLeakFree[key] = true
-			}
-		}
-	}
+	paramLeakFree := resolution.paramLeakFree
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.ParamUses {
@@ -705,112 +658,6 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// dependency edges. Any poison, any unproven deferral, any unresolved
 	// constructor, and any malformed record keeps the escape - fail-closed
 	// (REQ-closure-shared-dynamic-state).
-	fieldPosition := func(part string, minIdx int) bool {
-		field, idx, ok := strings.Cut(part, "\x00")
-		if !ok || field == "" || strings.Contains(idx, "\x00") {
-			return false
-		}
-		n, err := strconv.Atoi(idx)
-		return err == nil && n >= minIdx
-	}
-	fieldDeferAt := map[string][]string{}
-	fieldPoisonAt := map[string]bool{}
-	retDeferAt := map[string][]string{}
-	retPoisonAt := map[string]bool{}
-	ctorsOf := map[string][]string{}
-	for _, facts := range state.facts {
-		for _, fact := range facts {
-			malformed := func() {
-				for _, key := range fact.Declares {
-					mutated[key] = true
-				}
-			}
-			for _, entry := range fact.FieldParamDefer {
-				parts := strings.SplitN(entry, "\x01", 3)
-				if len(parts) != 3 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
-					malformed()
-					continue
-				}
-				at := parts[0] + "\x01" + parts[1]
-				fieldDeferAt[at] = append(fieldDeferAt[at], parts[2])
-			}
-			for _, entry := range fact.FieldParamPoison {
-				key, position, ok := strings.Cut(entry, "\x01")
-				if ok && !fieldPosition(position, -1) {
-					malformed()
-					continue
-				}
-				if !ok {
-					fieldPoisonAt[key] = true
-				} else {
-					fieldPoisonAt[key+"\x01"+position] = true
-				}
-			}
-			for _, entry := range fact.ReturnFieldParamDefer {
-				parts := strings.SplitN(entry, "\x01", 3)
-				if len(parts) != 3 || strings.Count(parts[0], "\x00") != 1 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
-					malformed()
-					continue
-				}
-				at := parts[0] + "\x01" + parts[1]
-				retDeferAt[at] = append(retDeferAt[at], parts[2])
-			}
-			for _, entry := range fact.ReturnFieldParamPoison {
-				key, position, ok := strings.Cut(entry, "\x01")
-				if strings.Count(key, "\x00") != 1 || (ok && !fieldPosition(position, -1)) {
-					malformed()
-					continue
-				}
-				if !ok {
-					retPoisonAt[key] = true
-				} else {
-					retPoisonAt[key+"\x01"+position] = true
-				}
-			}
-			for _, use := range fact.EnvCallUses {
-				if varKey, callee, ok := strings.Cut(use, "\x01"); ok {
-					ctorsOf[varKey] = append(ctorsOf[varKey], callee)
-				}
-			}
-		}
-	}
-	fieldPopulationProves := func(varKey, field, idx string) bool {
-		position := field + "\x00" + idx
-		anyIdx := field + "\x00-1"
-		if fieldPoisonAt[varKey] || fieldPoisonAt[varKey+"\x01"+anyIdx] || fieldPoisonAt[varKey+"\x01"+position] {
-			return false
-		}
-		for _, paramKey := range fieldDeferAt[varKey+"\x01"+position] {
-			if !paramLeakFree[paramKey] {
-				return false
-			}
-		}
-		seen := map[string]bool{}
-		stack := append([]string(nil), ctorsOf[varKey]...)
-		for len(stack) > 0 {
-			fnKey := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			if seen[fnKey] {
-				continue
-			}
-			seen[fnKey] = true
-			if !envFreeResolved[fnKey] {
-				return false
-			}
-			if retPoisonAt[fnKey] || retPoisonAt[fnKey+"\x01"+anyIdx] || retPoisonAt[fnKey+"\x01"+position] {
-				return false
-			}
-			for _, paramKey := range retDeferAt[fnKey+"\x01"+position] {
-				if !paramLeakFree[paramKey] {
-					return false
-				}
-			}
-			for dep := range envFreeDeps[fnKey] {
-				stack = append(stack, dep)
-			}
-		}
-		return true
-	}
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.FieldParamUses {
@@ -822,7 +669,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					continue
 				}
 				field, idx, _ := strings.Cut(position, "\x00")
-				if !fieldPopulationProves(varKey, field, idx) {
+				if ok, _ := resolution.fieldPopulationProves(varKey, field, idx); !ok {
 					escaped[varKey] = true
 				}
 			}
@@ -912,23 +759,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
-	notOpaque := map[string]bool{}
-	for _, facts := range state.facts {
-		for _, fact := range facts {
-			opaque := make(map[string]bool, len(fact.Opaque))
-			for _, key := range fact.Opaque {
-				opaque[key] = true
-			}
-			for _, key := range fact.Declares {
-				if !opaque[key] {
-					notOpaque[key] = true
-				}
-			}
-			for _, key := range fact.OpacityBreaks {
-				notOpaque[key] = true
-			}
-		}
-	}
+	notOpaque := resolution.notOpaque
 	// A caller vouch discharges a would-be culprit in a version-pinned
 	// dependency (REQ-vouch-discharge): the variable is judged as if
 	// proven init-only, and the discharge is recorded per owning package
@@ -1188,4 +1019,215 @@ func pinnedBuckets(meta []closure.GraphPackage) (buckets map[string]string, unke
 		buckets[pin] = pin + "|" + hex.EncodeToString(sum[:8])
 	}
 	return buckets, unkeyable
+}
+
+// deferralResolution is the composed proof state every deferred mark
+// resolves against - the leak-free parameter union, the receiver
+// read-only union, the return-environment-free fixed point, and the
+// registered field populations. One derivation serves both the verdict
+// composition and the explain re-derivation, so a chain's resolution
+// can never disagree with the verdict's (REQ-explain-chain). The
+// malformed callback observes each fact carrying an unparseable
+// population record - the composition marks the fact's declared keys,
+// the explain path passes nil and lets the verdict's marks stand.
+type deferralResolution struct {
+	paramLeakFree map[string]bool
+	readOnly      map[string]bool
+	// notOpaque is the opacity intersection: a declared key is opaque -
+	// object-closed, escapes never refusing - only when every declaring
+	// fact judges it so and no fact breaks it. Escape-kind refusals gate
+	// on membership here, in the verdict composition and in explain
+	// chains alike (REQ-explain-chain).
+	notOpaque       map[string]bool
+	envFreeResolved map[string]bool
+	envFreeDeps     map[string]map[string]bool
+	fieldDeferAt    map[string][]string
+	fieldPoisonAt   map[string]bool
+	retDeferAt      map[string][]string
+	retPoisonAt     map[string]bool
+	ctorsOf         map[string][]string
+}
+
+func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *deferralResolution {
+	r := &deferralResolution{
+		paramLeakFree:   map[string]bool{},
+		readOnly:        map[string]bool{},
+		notOpaque:       map[string]bool{},
+		envFreeResolved: map[string]bool{},
+		envFreeDeps:     map[string]map[string]bool{},
+		fieldDeferAt:    map[string][]string{},
+		fieldPoisonAt:   map[string]bool{},
+		retDeferAt:      map[string][]string{},
+		retPoisonAt:     map[string]bool{},
+		ctorsOf:         map[string][]string{},
+	}
+	if malformed == nil {
+		malformed = func(dynamicStateFact) {}
+	}
+	envFreeDeclared := map[string]bool{}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, key := range fact.ParamLeakFree {
+				r.paramLeakFree[key] = true
+			}
+			for _, key := range fact.ReceiverReadOnly {
+				r.readOnly[key] = true
+			}
+			opaque := make(map[string]bool, len(fact.Opaque))
+			for _, key := range fact.Opaque {
+				opaque[key] = true
+			}
+			for _, key := range fact.Declares {
+				if !opaque[key] {
+					r.notOpaque[key] = true
+				}
+			}
+			for _, key := range fact.OpacityBreaks {
+				r.notOpaque[key] = true
+			}
+			for _, key := range fact.ReturnEnvFree {
+				envFreeDeclared[key] = true
+			}
+			for _, edge := range fact.ReturnEnvDeps {
+				fnKey, callee, ok := strings.Cut(edge, "\x01")
+				if !ok {
+					continue
+				}
+				if r.envFreeDeps[fnKey] == nil {
+					r.envFreeDeps[fnKey] = map[string]bool{}
+				}
+				r.envFreeDeps[fnKey][callee] = true
+			}
+		}
+	}
+	// The return-environment-free least fixed point: a conditional proof
+	// resolves only when every callee it depends on resolves - cycles and
+	// absent foreign proofs fail closed (REQ-closure-shared-dynamic-state).
+	for changed := true; changed; {
+		changed = false
+		for fnKey := range envFreeDeclared {
+			if r.envFreeResolved[fnKey] {
+				continue
+			}
+			ok := true
+			for callee := range r.envFreeDeps[fnKey] {
+				if !r.envFreeResolved[callee] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				r.envFreeResolved[fnKey] = true
+				changed = true
+			}
+		}
+	}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, entry := range fact.FieldParamDefer {
+				parts := strings.SplitN(entry, "\x01", 3)
+				if len(parts) != 3 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
+					malformed(fact)
+					continue
+				}
+				at := parts[0] + "\x01" + parts[1]
+				r.fieldDeferAt[at] = append(r.fieldDeferAt[at], parts[2])
+			}
+			for _, entry := range fact.FieldParamPoison {
+				key, position, ok := strings.Cut(entry, "\x01")
+				if ok && !fieldPosition(position, -1) {
+					malformed(fact)
+					continue
+				}
+				if !ok {
+					r.fieldPoisonAt[key] = true
+				} else {
+					r.fieldPoisonAt[key+"\x01"+position] = true
+				}
+			}
+			for _, entry := range fact.ReturnFieldParamDefer {
+				parts := strings.SplitN(entry, "\x01", 3)
+				if len(parts) != 3 || strings.Count(parts[0], "\x00") != 1 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
+					malformed(fact)
+					continue
+				}
+				at := parts[0] + "\x01" + parts[1]
+				r.retDeferAt[at] = append(r.retDeferAt[at], parts[2])
+			}
+			for _, entry := range fact.ReturnFieldParamPoison {
+				key, position, ok := strings.Cut(entry, "\x01")
+				if strings.Count(key, "\x00") != 1 || (ok && !fieldPosition(position, -1)) {
+					malformed(fact)
+					continue
+				}
+				if !ok {
+					r.retPoisonAt[key] = true
+				} else {
+					r.retPoisonAt[key+"\x01"+position] = true
+				}
+			}
+			for _, use := range fact.EnvCallUses {
+				if varKey, callee, ok := strings.Cut(use, "\x01"); ok {
+					r.ctorsOf[varKey] = append(r.ctorsOf[varKey], callee)
+				}
+			}
+		}
+	}
+	return r
+}
+
+// fieldPopulationProves resolves one field-position use against the
+// carrier's registered population. On failure the second result names
+// the unproven deferred parameter key when one decided it - empty when
+// a poison or an unresolved constructor decided
+// (REQ-closure-shared-dynamic-state, REQ-explain-chain).
+func (r *deferralResolution) fieldPopulationProves(varKey, field, idx string) (bool, string) {
+	position := field + "\x00" + idx
+	anyIdx := field + "\x00-1"
+	if r.fieldPoisonAt[varKey] || r.fieldPoisonAt[varKey+"\x01"+anyIdx] || r.fieldPoisonAt[varKey+"\x01"+position] {
+		return false, ""
+	}
+	for _, paramKey := range r.fieldDeferAt[varKey+"\x01"+position] {
+		if !r.paramLeakFree[paramKey] {
+			return false, paramKey
+		}
+	}
+	seen := map[string]bool{}
+	stack := append([]string(nil), r.ctorsOf[varKey]...)
+	for len(stack) > 0 {
+		fnKey := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[fnKey] {
+			continue
+		}
+		seen[fnKey] = true
+		if !r.envFreeResolved[fnKey] {
+			return false, ""
+		}
+		if r.retPoisonAt[fnKey] || r.retPoisonAt[fnKey+"\x01"+anyIdx] || r.retPoisonAt[fnKey+"\x01"+position] {
+			return false, ""
+		}
+		for _, paramKey := range r.retDeferAt[fnKey+"\x01"+position] {
+			if !r.paramLeakFree[paramKey] {
+				return false, paramKey
+			}
+		}
+		for dep := range r.envFreeDeps[fnKey] {
+			stack = append(stack, dep)
+		}
+	}
+	return true, ""
+}
+
+// fieldPosition validates a persisted field-position part - field name
+// and parameter index NUL-joined, the index a decimal integer at or
+// above minIdx (uses and deferrals require 0; poisons admit -1 as the
+// every-index cover). Anything else is a malformed record.
+func fieldPosition(part string, minIdx int) bool {
+	field, idx, ok := strings.Cut(part, "\x00")
+	if !ok || field == "" || strings.Contains(idx, "\x00") {
+		return false
+	}
+	n, err := strconv.Atoi(idx)
+	return err == nil && n >= minIdx
 }

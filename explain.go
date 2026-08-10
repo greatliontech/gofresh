@@ -75,6 +75,11 @@ type explainHookSet struct {
 	// store observes an environment-audit registration mark for a
 	// watched variable key.
 	store func(p *packages.Package, key string, pos token.Pos)
+	// deferral observes a deferred-use recording for a watched variable
+	// key: kind 'p' is a call-argument parameter deferral, 'm' a method
+	// use, 'f' a field-position use; resolvent is the persisted mark key
+	// the composition resolves.
+	deferral func(p *packages.Package, kind byte, key, resolvent string, at token.Pos)
 	// refusal observes the judgment's refusing expressions, innermost
 	// first.
 	refusal func(p *packages.Package, fn string, e ast.Expr, clause string)
@@ -158,6 +163,12 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 	var mu sync.Mutex
 	var sites []ChainLink
 	var stores []ChainLink
+	type deferralObservation struct {
+		kind      byte
+		resolvent string
+		link      ChainLink
+	}
+	var deferrals []deferralObservation
 	pos := func(p *packages.Package, at token.Pos) string {
 		if !at.IsValid() {
 			return ""
@@ -182,6 +193,14 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 			defer mu.Unlock()
 			stores = append(stores, ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)})
 		},
+		deferral: func(p *packages.Package, kind byte, key, resolvent string, at token.Pos) {
+			if key != varKey {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			deferrals = append(deferrals, deferralObservation{kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+		},
 	})
 	// Every compilation variant's fact joins the union, exactly as
 	// the verdict's composition appends and unions per path.
@@ -193,8 +212,23 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 	mu.Lock()
 	collectedSites := append([]ChainLink(nil), sites...)
 	collectedStores := append([]ChainLink(nil), stores...)
+	collectedDeferrals := append([]deferralObservation(nil), deferrals...)
 	mu.Unlock()
 
+	// The verdict's composed proof state gates chains exactly as it
+	// gated the refusal: an object-closed variable's escapes never
+	// refused, so escape-kind sites and deferrals contribute no links
+	// for it - a Valid verdict has no chain (REQ-explain-chain).
+	resolution := newDeferralResolution(facts, nil)
+	if !resolution.notOpaque[varKey] {
+		kept := collectedSites[:0]
+		for _, s := range collectedSites {
+			if s.Clause == "mutation" {
+				kept = append(kept, s)
+			}
+		}
+		collectedSites = kept
+	}
 	if len(collectedSites) > 0 {
 		arm := "escape"
 		for _, s := range collectedSites {
@@ -205,6 +239,54 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 		}
 		deduped := dedupeLinks(collectedSites)
 		return boundChain(Chain{Arm: arm, Links: deduped}, len(deduped)-1), nil
+	}
+
+	// A deferred use whose resolvent no fact proves is the composition's
+	// escape or mutation - the deciding site is the deferring use, the
+	// clause names the unproven resolvent. Resolution runs over the same
+	// composed proof state the verdict used (REQ-explain-chain).
+	if len(collectedDeferrals) > 0 {
+		var links []ChainLink
+		arm := "escape"
+		for _, obs := range collectedDeferrals {
+			link := obs.link
+			switch obs.kind {
+			case 'p':
+				if resolution.paramLeakFree[obs.resolvent] || !resolution.notOpaque[varKey] {
+					continue
+				}
+				link.Clause = "a deferred argument's parameter unproven"
+				link.Callee = paramKeyDisplay(obs.resolvent)
+			case 'm':
+				if resolution.readOnly[obs.resolvent] {
+					continue
+				}
+				link.Clause = "a deferred method use unproven"
+				link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
+				arm = "mutation"
+			case 'f':
+				field, idx, ok := strings.Cut(obs.resolvent, "\x00")
+				if !ok || !resolution.notOpaque[varKey] {
+					continue
+				}
+				proves, failParam := resolution.fieldPopulationProves(varKey, field, idx)
+				if proves {
+					continue
+				}
+				link.Clause = "the registered population refused the field position"
+				link.Callee = field + " parameter " + idx
+				if failParam != "" {
+					link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
+				}
+			default:
+				continue
+			}
+			links = append(links, link)
+		}
+		if len(links) > 0 {
+			deduped := dedupeLinks(links)
+			return boundChain(Chain{Arm: arm, Links: deduped}, len(deduped)-1), nil
+		}
 	}
 
 	// The environment-audit marks are unioned across every fact -
@@ -407,4 +489,14 @@ func boundChain(c Chain, protect int) Chain {
 	c.Omitted = len(c.Links) - len(kept)
 	c.Links = kept
 	return c
+}
+
+// paramKeyDisplay renders a persisted parameter key - package path,
+// function name, zero-based index NUL-joined - in source vocabulary.
+func paramKeyDisplay(paramKey string) string {
+	parts := strings.SplitN(paramKey, "\x00", 3)
+	if len(parts) != 3 {
+		return strings.ReplaceAll(paramKey, "\x00", ".")
+	}
+	return parts[0] + "." + parts[1] + " parameter " + parts[2]
 }

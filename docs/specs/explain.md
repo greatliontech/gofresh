@@ -23,8 +23,19 @@ unrecognized return shape". A registration naming the culprit lands
 from any package, own or foreign - the chain's store and edge links
 name the registering package. A
 mutation or escape chain names the deciding site with its position.
-Chains describe refusals; a Valid verdict has no chain, and a
-registration whose every dependency edge resolves contributes none.
+An escape or mutation decided at composition — a deferred call
+argument, a deferred method use, or a field-position use whose
+resolvent no fact proves — names the deferring use site as its
+deciding site and carries the unproven resolvent (the callee
+parameter, the method, or the field position, with the unproven
+registrant parameter when one decided the population), its clause one
+of the deferral clause set: "a deferred argument's parameter
+unproven", "a deferred method use unproven", "the registered
+population refused the field position". The deferral resolves over
+the same composed proof state the verdict used.
+Chains describe refusals; a Valid verdict has no chain, a
+registration whose every dependency edge resolves contributes none,
+and a deferral every fact proves contributes none.
 An environment-audit refusal that is the fixed point of a dependency
 cycle, or whose callee lies outside the loaded scope, has no single
 refusing expression: its chain ends at the edges.
