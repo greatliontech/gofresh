@@ -605,7 +605,7 @@ its activation decision.
       capture-leak-freedom definition gains the value plane; overlaps
       the tracked func-value-self-capture family where receiver fields
       hold the closure.
-- [ ] 58. gofresh: parameter-forwarding chains across packages - a
+- [x] 58. gofresh: parameter-forwarding chains across packages - a
       function forwarding its parameter to a foreign callee's
       parameter (NewRETALawRegistry's rows to proposition.New) records
       a conditional leak-free fact naming the foreign parameter it
