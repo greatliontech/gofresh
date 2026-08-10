@@ -546,7 +546,7 @@ its activation decision.
       histogram every call; cap reds harder, make the histogram
       opt-in, and add the actionable form - top blockers by witness
       count, one exemplar test each.
-- [ ] 79. gomutant: ephemeral kill evidence - the verdict returns
+- [x] 79. gomutant: ephemeral kill evidence - the verdict returns
       killer name but no test output, forcing a parallel go test
       -overlay re-run per review round (which also litters rapid
       .fail reproduction files agents must clean); return the killing
