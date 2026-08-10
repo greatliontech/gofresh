@@ -348,10 +348,12 @@ alias-handing argument to a plain named function defers to that
 parameter's leak-free fact exactly as a carrier argument does — the
 binding proof records the parameter keys it relies on, the range
 discharge carries them as the carrier's deferred argument marks resolved
-at composition, and a parameter's own fact-time proof chains only
-through same-package parameters to an intra-package fixed point, mutual
-recursion and cross-package chains unproven at fact time while the
-carried marks still resolve cross-package at composition; and a method
+at composition, and a parameter's own fact-time proof chains
+through same-package parameters to an intra-package fixed point with
+mutual recursion refusing, while a chain touching a foreign parameter
+records conditional edges naming the parameters it depends on,
+resolved at composition to a least fixed point exactly as the
+constructor proofs resolve - cycles and absence refusing; and a method
 call on a bound value defers identically to the method's
 receiver-read-only fact — statically dispatched non-interface receivers
 only, the call's instantiated results handing out no mutable reach —

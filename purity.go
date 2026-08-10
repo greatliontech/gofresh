@@ -4648,18 +4648,20 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 // unnamed parameters cannot be referenced and are leak-free by
 // construction; parameters whose type hands out no mutable reach are
 // omitted - no carrier can flow into them.
-func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) map[string]bool {
+func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) (map[string]bool, map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
-		return nil
+		return nil, nil
 	}
 	proven := map[string]bool{}
-	// A parameter's proof may rely on sibling parameters: a rooted
-	// argument handed to another plain named function in the same
-	// package chains when that parameter proves leak-free - an
-	// intra-package fixed point, mutual recursion refusing, any
-	// cross-package want unproven at fact time (the range discharge
-	// carries those as deferred marks instead; a fact-side chain stays
-	// package-local, fail-closed).
+	deps := map[string]map[string]bool{}
+	// A parameter's proof may rely on other parameters: a rooted
+	// argument handed to another plain named function chains when that
+	// parameter proves leak-free. Same-package chains resolve here to
+	// an intra-package fixed point, mutual recursion refusing; a chain
+	// touching a foreign parameter records conditional edges instead,
+	// resolved at composition to a least fixed point exactly as the
+	// constructor proofs resolve - cycles and absence refusing
+	// (REQ-closure-shared-dynamic-state).
 	conditional := map[string]map[string]bool{}
 	ownPath := ""
 	if p.Types != nil {
@@ -4667,9 +4669,9 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 	}
 	// Method wants at fact time resolve against the package's own
 	// receiver-read-only fixed point, computed once by the fact assembly;
-	// a cross-package method want leaves the parameter unproven exactly
-	// as a cross-package parameter want does - the range discharge
-	// carries those as deferred marks instead.
+	// a cross-package method want leaves the parameter unproven - only
+	// parameter wants earn the conditional-edge channel, method wants
+	// stay fact-time-local, deliberate conservatism.
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -4729,7 +4731,16 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 					}
 					if !crossPackage {
 						conditional[key] = local
+						continue
 					}
+					// The chain leaves the package: every want becomes a
+					// composition-resolved edge, full-keyed - the local
+					// fixed point cannot see foreign facts.
+					edges := map[string]bool{}
+					for want := range wants {
+						edges[want] = true
+					}
+					deps[key] = edges
 				}
 			}
 		}
@@ -4753,7 +4764,28 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 			}
 		}
 	}
-	return proven
+	// A same-package chain the local fixed point could not close may
+	// still resolve through a foreign hop downstream - the amended
+	// clause conditions on the chain, not the first hop. Promote each
+	// unresolved entry's remaining needs to composition-resolved edges,
+	// full-keyed; a purely mutual recursion becomes a composition cycle
+	// and refuses there exactly as it refused here.
+	for key, needs := range conditional {
+		if proven[key] {
+			continue
+		}
+		edges := deps[key]
+		if edges == nil {
+			edges = map[string]bool{}
+		}
+		for need := range needs {
+			if !proven[need] {
+				edges[ownPath+"\x00"+need] = true
+			}
+		}
+		deps[key] = edges
+	}
+	return proven, deps
 }
 
 // receiverReadOnlyMethods proves, in the declaring package alone, which

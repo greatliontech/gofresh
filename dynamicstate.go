@@ -57,6 +57,13 @@ type dynamicStateFact struct {
 	// declares and proves unable to write, retain, or hand out the
 	// bound value.
 	ParamLeakFree []string `json:"paramLeakFree,omitempty"`
+	// ParamLeakFreeDeps holds conditional leak-free edges: the owning
+	// parameter key and one dependency parameter key (both full: package
+	// path, function name, index NUL-joined) \x01-joined. The owner
+	// proves at composition only when every edge target proves - a
+	// least fixed point exactly as the constructor proofs resolve,
+	// cycles and absence refusing.
+	ParamLeakFreeDeps []string `json:"paramLeakFreeDeps,omitempty"`
 	// ParamUses holds deferred call-argument marks: variable key and
 	// callee parameter key joined by NUL. At composition the use is
 	// discharged only when the parameter is proven leak-free by its
@@ -239,10 +246,17 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
-		paramLeakFree := paramLeakFreeFunctions(p, readOnly)
+		paramLeakFree, paramDeps := paramLeakFreeFunctions(p, readOnly)
 		for paramKey := range paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
 		}
+		for paramKey, edges := range paramDeps {
+			ownKey := p.Types.Path() + "\x00" + paramKey
+			for dep := range edges {
+				fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, ownKey+"\x01"+dep)
+			}
+		}
+		sort.Strings(fact.ParamLeakFreeDeps)
 		envFree, envDeps, retFieldDefer, retFieldPoison := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
 		for fnName := range envFree {
 			fnKey := p.Types.Path() + "\x00" + fnName
@@ -1098,10 +1112,22 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 		malformed = func(dynamicStateFact) {}
 	}
 	envFreeDeclared := map[string]bool{}
+	paramDeps := map[string]map[string]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ParamLeakFree {
 				r.paramLeakFree[key] = true
+			}
+			for _, edge := range fact.ParamLeakFreeDeps {
+				own, dep, ok := strings.Cut(edge, "\x01")
+				if !ok || strings.Count(own, "\x00") != 2 || strings.Count(dep, "\x00") != 2 {
+					malformed(fact)
+					continue
+				}
+				if paramDeps[own] == nil {
+					paramDeps[own] = map[string]bool{}
+				}
+				paramDeps[own][dep] = true
 			}
 			for _, key := range fact.ReceiverReadOnly {
 				r.readOnly[key] = true
@@ -1130,6 +1156,29 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 					r.envFreeDeps[fnKey] = map[string]bool{}
 				}
 				r.envFreeDeps[fnKey][callee] = true
+			}
+		}
+	}
+	// The conditional leak-free least fixed point: a cross-package
+	// parameter-forwarding chain proves only when every edge target
+	// proves - cycles and absent foreign proofs fail closed
+	// (REQ-closure-shared-dynamic-state).
+	for changed := true; changed; {
+		changed = false
+		for own, edges := range paramDeps {
+			if r.paramLeakFree[own] {
+				continue
+			}
+			ok := true
+			for dep := range edges {
+				if !r.paramLeakFree[dep] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				r.paramLeakFree[own] = true
+				changed = true
 			}
 		}
 	}

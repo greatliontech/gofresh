@@ -905,6 +905,10 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 			// Two parts only - the owner key lost its frame.
 			fact.ElemParamUses = append(fact.ElemParamUses, "golang.org/x/sync/errgroup.Ghost\x01bad")
 		}},
+		{"paramLeakFreeDeps", func(fact *dynamicStateFact) {
+			// Dependency key lost a NUL frame.
+			fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, "golang.org/x/sync/errgroup\x00Go\x000\x01bad")
+		}},
 		{"elemNonCanonicalIndex", func(fact *dynamicStateFact) {
 			fact.ElemParamUses = append(fact.ElemParamUses, "golang.org/x/sync/errgroup.Ghost\x01owner.Key\x0100")
 		}},

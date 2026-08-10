@@ -4171,6 +4171,93 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a retaining element passed the range-binding dispatch", verdict)
 		}
 	})
+	t.Run("cross-package parameter forwarding resolves the chain", func(t *testing.T) {
+		// The helper forwards its parameter to a foreign leak-free
+		// parameter - the conditional edge resolves at composition.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/prop\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc helper(cols []string) int { return prop.Sum(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a cross-package forwarding chain refused the discharge", verdict)
+		}
+	})
+	t.Run("cross-package forwarding to a retaining parameter refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nvar sink []string\n\nfunc Sum(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/prop\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc helper(cols []string) int { return prop.Sum(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a retaining foreign parameter resolved", verdict)
+		}
+	})
+	t.Run("three-hop forwarding chain resolves transitively", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
+			"mid/mid.go":   "package mid\n\nimport \"example.com/xesc/prop\"\n\nfunc Pass(cols []string) int { return prop.Sum(cols) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/mid\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc helper(cols []string) int { return mid.Pass(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a three-hop forwarding chain refused the discharge", verdict)
+		}
+	})
+	t.Run("forwarding through a local intermediary resolves the foreign hop", func(t *testing.T) {
+		// The chain's first hop is same-package; the foreign hop sits
+		// behind it - the promoted edges resolve the whole chain.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/prop\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc local2(cols []string) int { return prop.Sum(cols) }\n\nfunc helper(cols []string) int { return local2(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a local intermediary blocked the foreign resolution", verdict)
+		}
+	})
+	t.Run("mutual recursion with a foreign hop refuses as a cycle", func(t *testing.T) {
+		// Both members route to the edge channel; their mutual edges
+		// cycle and the composition fixed point refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/prop\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc helper(cols []string) int {\n\tif len(cols) == 0 {\n\t\treturn prop.Sum(cols)\n\t}\n\treturn other(cols)\n}\n\nfunc other(cols []string) int {\n\tif len(cols) == 1 {\n\t\treturn prop.Sum(cols)\n\t}\n\treturn helper(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a mutual edge cycle resolved", verdict)
+		}
+	})
+	t.Run("field registrant defers to a conditionally proven parameter", func(t *testing.T) {
+		// The registrant's own parameter proof rides the edge channel -
+		// the 'd' mark resolves against the composed fixed point.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/prop\"\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nfunc relay(cols []string) int { return prop.Sum(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: relay}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a conditionally proven registrant parameter refused the field discharge", verdict)
+		}
+	})
 	t.Run("plain-data builder effects stay per-process", func(t *testing.T) {
 		// A registered named builder mutating a plain package variable is
 		// per-process-deterministic content the whole-graph hash already
@@ -5856,11 +5943,10 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a mutually recursive chain proved itself", verdict)
 		}
 	})
-	t.Run("cross-package parameter chain stays unproven at fact time", func(t *testing.T) {
-		// Sum's own parameter proof would need a foreign parameter -
-		// even a leak-free one with a same-named local sibling never
-		// satisfies the same-package fixed point, so the carrier
-		// deferred into Sum keeps its escape.
+	t.Run("cross-package parameter chain resolves past a same-named sibling", func(t *testing.T) {
+		// Sum's parameter proof depends on lib.Width's - the
+		// conditional edge resolves at composition, and the same-named
+		// local sibling never stands in for the foreign key.
 		files := map[string]string{
 			"go.mod":       goMod,
 			"lib/lib.go":   "package lib\n\nfunc Width(cols []string) int { return len(cols) }\n",
@@ -5870,8 +5956,24 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 		dir := writeModuleTree(t, files)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
-		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
-			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - a cross-package want satisfied the same-package fixed point", verdict)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a resolvable cross-package chain kept its escape", verdict)
+		}
+	})
+	t.Run("same-named sibling never stands in for a retaining foreign parameter", func(t *testing.T) {
+		// The foreign target retains; the leak-free local decoy shares
+		// its name - key discrimination must keep the refusal.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"lib/lib.go":   "package lib\n\nvar sink []string\n\nfunc Width(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n",
+			"val/val.go":   "package val\n\nimport \"example.com/xesc/lib\"\n\ntype Entry struct {\n\tCols  []string\n\tBuild func() int\n}\n\nfunc Width(cols []string) int { return len(cols) }\n\nfunc Sum(entries []Entry) int {\n\ttotal := 0\n\tfor _, e := range entries {\n\t\ttotal += lib.Width(e.Cols)\n\t}\n\treturn total\n}\n",
+			"reg/reg.go":   "package reg\n\nimport \"example.com/xesc/val\"\n\nvar Registry []val.Entry\n\nfunc init() {\n\tRegistry = []val.Entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int { return val.Sum(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a same-named sibling stood in for the retaining foreign key", verdict)
 		}
 	})
 	t.Run("wrapped goroutine call never defers", func(t *testing.T) {
