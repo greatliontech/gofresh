@@ -414,6 +414,23 @@ func TestExplainDeferralChains(t *testing.T) {
 			t.Fatalf("chain = %+v, want a mutation chain for mixed deferrals", chain)
 		}
 	})
+	t.Run("direct escape with unproven method deferral ranks mutation", func(t *testing.T) {
+		// The verdict reason would say "is mutated" - mutation outranks
+		// escape - so the chain's arm must match, the method deferral
+		// leading the links.
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype counter struct {\n\tn     int\n\thooks []func()\n}\n\nfunc (c *counter) Bump() int {\n\tc.n++\n\treturn c.n\n}\n\nvar Registry = &counter{}\n\nvar sink []*counter\n\nfunc Count() int {\n\tsink = append(sink, Registry)\n\treturn Registry.Bump()\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "mutation" || len(chain.Links) < 2 {
+			t.Fatalf("chain = %+v, want a mutation-armed chain carrying both the deferral and the escape site", chain)
+		}
+		if chain.Links[0].Clause != "a deferred method use unproven" {
+			t.Fatalf("links[0] = %+v, want the mutation-kind deferral leading", chain.Links[0])
+		}
+	})
 	t.Run("resolved deferral contributes no chain", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":     goMod,

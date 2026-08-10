@@ -339,16 +339,16 @@ its activation decision.
       Surface the deferral's use site and the unproven resolvent
       (parameter key, method key, or registrant) as chain links across
       all three deferral channels, within the explain vocabulary.
-- [ ] 56b. gofresh: explain chains honor every composition discharge -
-      two residues of the deferral-chain work, both pre-existing on the
-      direct-site branch: a vouch-discharged culprit (pinned-package
-      classes are absent from the explain re-derivation, so the
-      vouchedOut filter cannot run) still chains while the verdict is
-      Valid; and a variable with direct escape sites plus an unproven
-      method deferral chains as escape while the verdict reason says
-      mutated (the verdict ranks mutation first). Bring the chain's
-      arm and its discharge set to full parity with the verdict's
-      composed proof state.
+- [ ] 56b. gofresh: explain chain arm parity with the verdict ranking -
+      a variable with direct escape sites plus an unproven method
+      deferral chains as escape while the verdict reason says mutated
+      (the verdict ranks mutation first); merge sites and unresolved
+      deferrals into one chain whose arm and link order follow the
+      verdict's ranking. Vouch-discharged variables keep deriving
+      their chains by explicit contract (REQ-vouch-recorded: the vouch
+      suppresses the verdict's downgrade, never the derivation a
+      caller audits) - the originally chartered no-chain gate
+      contradicted that sentence and was reversed in review.
 - [ ] 57. gofresh: carrier index extraction admissions - a comma-ok
       existence read discarding the extracted element (the
       membership-validation shape) is writeless on any carrier, and a

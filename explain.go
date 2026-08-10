@@ -229,64 +229,63 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 		}
 		collectedSites = kept
 	}
-	if len(collectedSites) > 0 {
-		arm := "escape"
-		for _, s := range collectedSites {
-			if s.Clause == "mutation" {
-				arm = "mutation"
-				break
-			}
-		}
-		deduped := dedupeLinks(collectedSites)
-		return boundChain(Chain{Arm: arm, Links: deduped}, len(deduped)-1), nil
-	}
-
 	// A deferred use whose resolvent no fact proves is the composition's
 	// escape or mutation - the deciding site is the deferring use, the
 	// clause names the unproven resolvent. Resolution runs over the same
-	// composed proof state the verdict used (REQ-explain-chain).
-	if len(collectedDeferrals) > 0 {
-		var links []ChainLink
-		arm := "escape"
-		for _, obs := range collectedDeferrals {
-			link := obs.link
-			switch obs.kind {
-			case 'p':
-				if resolution.paramLeakFree[obs.resolvent] || !resolution.notOpaque[varKey] {
-					continue
-				}
-				link.Clause = "a deferred argument's parameter unproven"
-				link.Callee = paramKeyDisplay(obs.resolvent)
-			case 'm':
-				if resolution.readOnly[obs.resolvent] {
-					continue
-				}
-				link.Clause = "a deferred method use unproven"
-				link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
-				arm = "mutation"
-			case 'f':
-				field, idx, ok := strings.Cut(obs.resolvent, "\x00")
-				if !ok || !resolution.notOpaque[varKey] {
-					continue
-				}
-				proves, failParam := resolution.fieldPopulationProves(varKey, field, idx)
-				if proves {
-					continue
-				}
-				link.Clause = "the registered population refused the field position"
-				link.Callee = field + " parameter " + idx
-				if failParam != "" {
-					link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
-				}
-			default:
+	// composed proof state the verdict used, and direct sites and
+	// unresolved deferrals combine into one chain whose arm follows the
+	// verdict's ranking - mutation evidence anywhere names the chain
+	// mutation, exactly as the verdict reason would say "is mutated"
+	// (REQ-explain-chain).
+	var mutationLinks, escapeLinks []ChainLink
+	for _, s := range collectedSites {
+		if s.Clause == "mutation" {
+			mutationLinks = append(mutationLinks, s)
+		} else {
+			escapeLinks = append(escapeLinks, s)
+		}
+	}
+	for _, obs := range collectedDeferrals {
+		link := obs.link
+		switch obs.kind {
+		case 'p':
+			if resolution.paramLeakFree[obs.resolvent] || !resolution.notOpaque[varKey] {
 				continue
 			}
-			links = append(links, link)
+			link.Clause = "a deferred argument's parameter unproven"
+			link.Callee = paramKeyDisplay(obs.resolvent)
+			escapeLinks = append(escapeLinks, link)
+		case 'm':
+			if resolution.readOnly[obs.resolvent] {
+				continue
+			}
+			link.Clause = "a deferred method use unproven"
+			link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
+			mutationLinks = append(mutationLinks, link)
+		case 'f':
+			field, idx, ok := strings.Cut(obs.resolvent, "\x00")
+			if !ok || !resolution.notOpaque[varKey] {
+				continue
+			}
+			proves, failParam := resolution.fieldPopulationProves(varKey, field, idx)
+			if proves {
+				continue
+			}
+			link.Clause = "the registered population refused the field position"
+			link.Callee = field + " parameter " + idx
+			if failParam != "" {
+				link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
+			}
+			escapeLinks = append(escapeLinks, link)
 		}
-		if len(links) > 0 {
-			deduped := dedupeLinks(links)
-			return boundChain(Chain{Arm: arm, Links: deduped}, len(deduped)-1), nil
+	}
+	if len(mutationLinks) > 0 || len(escapeLinks) > 0 {
+		arm := "escape"
+		if len(mutationLinks) > 0 {
+			arm = "mutation"
 		}
+		deduped := dedupeLinks(append(mutationLinks, escapeLinks...))
+		return boundChain(Chain{Arm: arm, Links: deduped}, len(deduped)-1), nil
 	}
 
 	// The environment-audit marks are unioned across every fact -

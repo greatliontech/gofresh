@@ -35,7 +35,10 @@ population refused the field position". The deferral resolves over
 the same composed proof state the verdict used.
 Chains describe refusals; a Valid verdict has no chain, a
 registration whose every dependency edge resolves contributes none,
-and a deferral every fact proves contributes none.
+and a deferral every fact proves contributes none. The one exception
+is a vouch-discharged variable: its chain still derives on request —
+the vouch suppresses the verdict's downgrade, never the derivation a
+caller audits (REQ-vouch-recorded).
 An environment-audit refusal that is the fixed point of a dependency
 cycle, or whose callee lies outside the loaded scope, has no single
 refusing expression: its chain ends at the edges.
