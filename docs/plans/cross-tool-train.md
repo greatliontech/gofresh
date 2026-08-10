@@ -541,7 +541,7 @@ its activation decision.
       counts appear in check output but nothing names which gaps are
       due; gap list (id, reason, condition, fired, due) plus
       documenting re-declare as the only edit path.
-- [ ] 78. stipulator: check summary output diet - view=summary still
+- [x] 78. stipulator: check summary output diet - view=summary still
       carries the full reds list and the whole uncacheableReasonCounts
       histogram every call; cap reds harder, make the histogram
       opt-in, and add the actionable form - top blockers by witness
