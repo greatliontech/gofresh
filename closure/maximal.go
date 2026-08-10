@@ -828,11 +828,15 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 }
 
 // auditedRuntimeTypeSymbol reports whether a reflect-package symbol is
-// in the audited runtime-type set: reflect.Type values are
-// runtime-canonical and immutable, and reflect.TypeOf is
-// bit-deterministic pure computation over its operand's static type.
+// in the audited reflect set: reflect.Type values are runtime-canonical
+// and immutable, and reflect.TypeOf is bit-deterministic pure
+// computation over its operand's static type. reflect.DeepEqual is a
+// structural comparator that invokes nothing - no method call, no
+// Call/MethodByName dispatch; function values compare by nil-ness only
+// - so it reads its operands and defeats no reachability.
 // At the SSA tiers the bare-name match also admits methods named Type
-// - notably the deterministic-pure (reflect.Value).Type. Chained
+// - notably the deterministic-pure (reflect.Value).Type; no other
+// reflect declaration is named DeepEqual. Chained
 // selectors off admitted results are separate callees with their own
 // classifications at the declaration-RTA tier; this per-file scan
 // never sees them either way. reflect dispatch still defeats static
@@ -843,7 +847,7 @@ func auditedRuntimeTypeSymbol(pkgPath, name string) bool {
 		return false
 	}
 	switch name {
-	case "Type", "TypeOf":
+	case "Type", "TypeOf", "DeepEqual":
 		return true
 	default:
 		return false

@@ -103,6 +103,218 @@ func TestRegistered(t *testing.T) {
 	}
 }
 
+// The value-constructor and comparator admissions: math/big's
+// constructors, time.Date, and reflect.DeepEqual are pure computation
+// over their operands, while the ambient channels beside them - the
+// clock read, the Location globals, reflective value dispatch - keep
+// their classifications
+// (REQ-closure-observability-analysis's audited-set boundary).
+func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{"values", "calendar", "stamp", "clock", "mirror"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, dir, "go.mod", "module example.com/audited\n\ngo 1.26\n")
+	writeFile(t, dir, "values/values.go", `package values
+
+import (
+	"math/big"
+	"reflect"
+)
+
+var answer = big.NewInt(42)
+
+func Equal() bool {
+	return reflect.DeepEqual(big.NewInt(42), answer)
+}
+
+func Ratio() *big.Rat {
+	if reflect.DeepEqual(big.NewRat(1, 2), big.NewFloat(0.5)) {
+		return big.NewRat(1, 1)
+	}
+	return big.NewRat(1, 2)
+}
+
+func Indirect() bool {
+	mk := big.NewInt
+	f, _ := big.NewFloat(2.5).Int(nil)
+	return reflect.DeepEqual(mk(2), f)
+}
+`)
+	writeFile(t, dir, "values/values_test.go", `package values
+
+import "testing"
+
+func TestValues(t *testing.T) {
+	if !Equal() {
+		t.Fatal("value comparison")
+	}
+	_ = Ratio()
+}
+`)
+	writeFile(t, dir, "calendar/calendar.go", `package calendar
+
+import "time"
+
+type monther interface {
+	Month() time.Month
+}
+
+func Year() int {
+	var t time.Time
+	y, m, _ := t.Date()
+	var via monther = t
+	if m == time.January && m == via.Month() {
+		return y
+	}
+	return y + 1
+}
+`)
+	writeFile(t, dir, "calendar/calendar_test.go", `package calendar
+
+import "testing"
+
+func TestYear(t *testing.T) {
+	_ = Year()
+}
+`)
+	writeFile(t, dir, "stamp/stamp.go", `package stamp
+
+import "time"
+
+func Stamp() time.Time {
+	return time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+`)
+	writeFile(t, dir, "stamp/stamp_test.go", `package stamp
+
+import "testing"
+
+func TestStamp(t *testing.T) {
+	_ = Stamp()
+}
+`)
+	writeFile(t, dir, "clock/clock.go", `package clock
+
+import "time"
+
+func Now() time.Time {
+	return time.Now()
+}
+`)
+	writeFile(t, dir, "clock/clock_test.go", `package clock
+
+import "testing"
+
+func TestNow(t *testing.T) {
+	_ = Now()
+}
+`)
+	writeFile(t, dir, "mirror/mirror.go", `package mirror
+
+import "reflect"
+
+func Mirror(v any) reflect.Value {
+	return reflect.ValueOf(v)
+}
+`)
+	writeFile(t, dir, "mirror/mirror_test.go", `package mirror
+
+import "testing"
+
+func TestMirror(t *testing.T) {
+	_ = Mirror(1)
+}
+`)
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofs, err := h.ComputeObservabilityBatch([]Subject{
+		{Package: "example.com/audited/values", Symbol: "Equal"},
+		{Package: "example.com/audited/values", Symbol: "Ratio"},
+		{Package: "example.com/audited/values", Symbol: "Indirect"},
+		{Package: "example.com/audited/calendar", Symbol: "Year"},
+		{Package: "example.com/audited/stamp", Symbol: "Stamp"},
+		{Package: "example.com/audited/clock", Symbol: "Now"},
+		{Package: "example.com/audited/mirror", Symbol: "Mirror"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal := proofs[Subject{Package: "example.com/audited/values", Symbol: "Equal"}]
+	if !equal.Observable {
+		t.Fatalf("Equal = %+v, want the constructor/comparator subject observable", equal)
+	}
+	ratio := proofs[Subject{Package: "example.com/audited/values", Symbol: "Ratio"}]
+	if !ratio.Observable {
+		t.Fatalf("Ratio = %+v, want the constructed-type reference observable", ratio)
+	}
+	indirect := proofs[Subject{Package: "example.com/audited/values", Symbol: "Indirect"}]
+	if !indirect.Observable {
+		t.Fatalf("Indirect = %+v, want the admission holding for a locally closed dynamic target and a same-named pure method", indirect)
+	}
+	year := proofs[Subject{Package: "example.com/audited/calendar", Symbol: "Year"}]
+	if !year.Observable {
+		t.Fatalf("Year = %+v, want the calendar decomposition observable", year)
+	}
+	stamp := proofs[Subject{Package: "example.com/audited/stamp", Symbol: "Stamp"}]
+	if stamp.Observable || !strings.Contains(stamp.Reason, "time.UTC") {
+		t.Fatalf("Stamp = %+v, want the refusal naming the Location global - the ambient timezone channel, not the calendar arithmetic", stamp)
+	}
+	now := proofs[Subject{Package: "example.com/audited/clock", Symbol: "Now"}]
+	if now.Observable || !strings.Contains(now.Reason, "time.Now") {
+		t.Fatalf("Now = %+v, want the ambient clock read refused by name", now)
+	}
+	mirror := proofs[Subject{Package: "example.com/audited/mirror", Symbol: "Mirror"}]
+	if mirror.Observable || mirror.Reason == "" {
+		t.Fatalf("Mirror = %+v, want reflective value dispatch refused - the comparator admission must not open reflect", mirror)
+	}
+}
+
+// The admission sets are exactly the audited names: constructors and
+// execution-free references in, every ambient or reflective neighbor
+// out (REQ-closure-observability-analysis's audited-set boundary).
+func TestAuditedPureStandardBounds(t *testing.T) {
+	for _, tc := range []struct{ pkg, name string }{
+		{"math/big", "NewInt"}, {"math/big", "NewFloat"}, {"math/big", "NewRat"},
+		{"math/big", "Int"}, {"math/big", "Float"}, {"math/big", "Rat"},
+		{"time", "Date"}, {"time", "Time"}, {"time", "Month"},
+		{"time", "January"}, {"time", "February"}, {"time", "March"},
+		{"time", "April"}, {"time", "May"}, {"time", "June"},
+		{"time", "July"}, {"time", "August"}, {"time", "September"},
+		{"time", "October"}, {"time", "November"}, {"time", "December"},
+		{"fmt", "Stringer"}, {"fmt", "Sprint"},
+	} {
+		if !classBPureStandard(tc.pkg, tc.name) {
+			t.Errorf("classBPureStandard(%s, %s) = false, want audited", tc.pkg, tc.name)
+		}
+	}
+	for _, tc := range []struct{ pkg, name string }{
+		{"time", "Now"}, {"time", "UTC"}, {"time", "Local"},
+		{"time", "LoadLocation"}, {"time", "FixedZone"}, {"time", "Since"},
+		{"math/big", "Rand"}, {"math/big", "ParseFloat"},
+		{"fmt", "State"}, {"fmt", "Print"}, {"fmt", "Formatter"},
+	} {
+		if classBPureStandard(tc.pkg, tc.name) {
+			t.Errorf("classBPureStandard(%s, %s) = true, want outside the audited set", tc.pkg, tc.name)
+		}
+	}
+	if !auditedRuntimeTypeSymbol("reflect", "DeepEqual") {
+		t.Error("auditedRuntimeTypeSymbol(reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
+	}
+	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect"} {
+		if auditedRuntimeTypeSymbol("reflect", name) {
+			t.Errorf("auditedRuntimeTypeSymbol(reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
+		}
+	}
+	if classBPureStandard("example.com/big", "NewInt") || auditedRuntimeTypeSymbol("example.com/reflect", "DeepEqual") {
+		t.Error("an admission leaked to a non-standard package path")
+	}
+}
+
 // The harness failure/logging channel is exactly the output-only method
 // list; the harness's ambient-input and mutation surfaces and its
 // structural operations stay outside it

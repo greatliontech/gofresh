@@ -67,9 +67,15 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				continue
 			}
 			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(idx.path) {
+				// The audited-pure admissions hold for an enumerated
+				// dynamic target exactly as for a static callee - the
+				// admission is a property of the operation, not of the
+				// call form (REQ-closure-observability-analysis).
 				name := functionSymbolName(target)
-				effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
-				ok = true
+				if !classBPureStandard(idx.path, name) && !auditedSyncSymbol(idx.path, name) && !auditedRuntimeTypeSymbol(idx.path, name) {
+					effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
+					ok = true
+				}
 			}
 			if ok {
 				a.recordExternalEffect(effect)

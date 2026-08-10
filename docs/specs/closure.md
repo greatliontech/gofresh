@@ -653,10 +653,25 @@ standard-library access, or other unclassified external-capable syntax, but can 
 grant the proof on its own. The audited-pure standard set — packages and named
 operations through which every ambient effect must enter via a flagged
 constructor or global of an effect-bearing package, adding no
-testlog-invisible input channel of their own (fmt's Sprint family included:
-argument methods stay visible to reachability) — is deliberately bounded by
+testlog-invisible input channel of their own and no machine-variant
+results (fmt's Sprint family included: argument methods stay visible to
+reachability; math/big's value constructors NewInt, NewFloat, and NewRat
+included: software arithmetic over their operands, no CPU dispatch;
+time.Date included: calendar arithmetic over its operands, the ambient
+timezone channel entering only through the Location globals and
+constructors, which stay flagged — time.UTC is an exported mutable
+variable and refuses like any other; execution-free references
+included: an audited type or constant name — fmt.Stringer, time.Time,
+time.Month and its twelve constants, math/big's Int, Float, and Rat —
+declares or denotes and executes nothing, every dispatch through a
+value of such a type classified at its own site, and the pure value
+methods sharing an audited name admitted with it) —
+is deliberately bounded by
 two exclusions that are soundness, not caution: reflect defeats static
-reachability itself, and registration-shaped covert channels — flag registration returns
+reachability itself, so only its invoke-nothing members are admitted —
+the runtime-type set and the structural comparator DeepEqual, which
+performs no method call and compares function values by nil-ness alone —
+and registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
 are channels the testlog cannot audit. One admission in the audited set is

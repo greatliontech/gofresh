@@ -142,8 +142,16 @@ const DynamicStateStrategy = "gofresh/dynamic-state@22"
 // bare-name match reaches, notably the deterministic-pure
 // (reflect.Value).Type) no longer classify as unaudited standard
 // operations, while chained reflect results keep their own
-// classifications.
-const ObservationRTA = "gofresh/observation-rta@15"
+// classifications; @16 widens the audited-pure set with math/big's
+// value constructors (NewInt, NewFloat, NewRat - software arithmetic,
+// no CPU dispatch), time.Date (calendar arithmetic; the ambient
+// timezone channel stays flagged at the Location globals and
+// constructors), reflect.DeepEqual (a structural comparator invoking
+// nothing), and execution-free type and constant references
+// (fmt.Stringer, time.Time, time.Month and its constants, math/big's
+// Int, Float, and Rat - each declares or denotes and executes
+// nothing, pure same-named value methods admitted with them).
+const ObservationRTA = "gofresh/observation-rta@16"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

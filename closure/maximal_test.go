@@ -468,28 +468,28 @@ func TestMaximalUnauditedOperationNamesThePreferredDiagnostic(t *testing.T) {
 	}
 	named := write("unaudited.go", `package effects
 import "fmt"
-type wrap struct{ s fmt.Stringer }
+type wrap struct{ s fmt.State }
 func F(w wrap) string { return fmt.Sprintf("%v", w.s) }
 `)
 	scan, err := maximalFileEffects(named)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation fmt.Stringer" {
+	if scan.preferred != "reaches unaudited standard operation fmt.State" {
 		t.Fatalf("preferred diagnostic = %q, want the unaudited operation named - the name-free fallback hides the sink", scan.preferred)
 	}
 	first := write("unaudited_two.go", `package effects
 import "fmt"
 type pair struct {
-	a fmt.Stringer
-	b fmt.State
+	a fmt.State
+	b fmt.Formatter
 }
 `)
 	scan, err = maximalFileEffects(first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation fmt.Stringer" {
+	if scan.preferred != "reaches unaudited standard operation fmt.State" {
 		t.Fatalf("preferred diagnostic = %q, want the first unaudited operation in walk order", scan.preferred)
 	}
 	fallback := write("pure_only.go", `package effects
@@ -503,6 +503,18 @@ func G(v int) string { return fmt.Sprintf("%d", v) }
 	if len(scan.effects) != 0 || scan.preferred != "reaches fmt (potential external dependence)" {
 		t.Fatalf("audited-pure-only file = effects %+v preferred %q, want no effects and the import fallback preserved", scan.effects, scan.preferred)
 	}
+	stringerOnly := write("stringer_only.go", `package effects
+import "fmt"
+type labeled struct{ s fmt.Stringer }
+func H(l labeled) string { return fmt.Sprint(l.s) }
+`)
+	scan, err = maximalFileEffects(stringerOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.effects) != 0 || scan.preferred != "reaches fmt (potential external dependence)" {
+		t.Fatalf("Stringer-reference file = effects %+v preferred %q, want the interface-type reference admitted as executing nothing", scan.effects, scan.preferred)
+	}
 }
 
 // A sibling file with no effects offers only the import fallback; the
@@ -511,8 +523,8 @@ func G(v int) string { return fmt.Sprintf("%d", v) }
 // that contributes no blocker
 // (REQ-closure-observability-analysis's cause-preference order).
 func TestMaximalPackageFoldPrefersEffectBackedReasons(t *testing.T) {
-	backed := maximalEffectScan{preferred: "reaches unaudited standard operation fmt.Stringer"}
-	backed.add(symbolExternalEffect(externalEffectUnauditedStandard, "fmt", "Stringer", "reaches unaudited standard operation fmt.Stringer"))
+	backed := maximalEffectScan{preferred: "reaches unaudited standard operation fmt.State"}
+	backed.add(symbolExternalEffect(externalEffectUnauditedStandard, "fmt", "State", "reaches unaudited standard operation fmt.State"))
 	fallback := maximalEffectScan{preferred: "reaches fmt (potential external dependence)"}
 
 	selected, isBacked := foldMaximalPreferred("", false, fallback)
@@ -520,11 +532,11 @@ func TestMaximalPackageFoldPrefersEffectBackedReasons(t *testing.T) {
 		t.Fatalf("effectless-first fold = %q backed=%v, want the fallback held as effectless", selected, isBacked)
 	}
 	selected, isBacked = foldMaximalPreferred(selected, isBacked, backed)
-	if selected != "reaches unaudited standard operation fmt.Stringer" || !isBacked {
+	if selected != "reaches unaudited standard operation fmt.State" || !isBacked {
 		t.Fatalf("backed reason did not displace the effectless fallback: %q backed=%v", selected, isBacked)
 	}
 	selected, isBacked = foldMaximalPreferred(selected, isBacked, fallback)
-	if selected != "reaches unaudited standard operation fmt.Stringer" || !isBacked {
+	if selected != "reaches unaudited standard operation fmt.State" || !isBacked {
 		t.Fatalf("effectless fallback displaced the effect-backed cause: %q backed=%v", selected, isBacked)
 	}
 	stronger := maximalEffectScan{preferred: "reaches cgo external library"}
