@@ -519,7 +519,7 @@ its activation decision.
       so the loop that is supposed to orient from requirement text
       falls back to grepping spec files; the no-resource-support
       mirror path must deliver the bundle body in the tool result.
-- [ ] 74. stipulator: witness-classification verdicts name their
+- [x] 74. stipulator: witness-classification verdicts name their
       reason - a bound property test classified as an executed
       example (rapid.Check invoked in a helper, not the bound body)
       reads the generic "needs a property witness or analyzer proof";
