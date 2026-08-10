@@ -593,7 +593,7 @@ its activation decision.
       collision-free encoding (length-prefixed or escaped components)
       without changing any collision-free key's identity semantics -
       existing evidence keyed by test identity is unaffected.
-- [ ] 59. gofresh: signature-typed handouts judged on the value plane -
+- [x] 59. gofresh: signature-typed handouts judged on the value plane -
       the leak-free judgment consumes a rooted signature-typed result
       as a scalar copy (the reach walk admits no signature), so a
       registered or returned literal handing out a captured method
