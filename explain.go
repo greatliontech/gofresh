@@ -262,6 +262,27 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 			link.Clause = "a deferred method use unproven"
 			link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
 			mutationLinks = append(mutationLinks, link)
+		case 'q':
+			// An init-region argument deferral resolves against either
+			// parameter grade - writes through the parameter are init
+			// flow's own exempt shape (REQ-explain-chain).
+			if resolution.paramLeakFree[obs.resolvent] || resolution.paramRetentionFree[obs.resolvent] || !resolution.notOpaque[varKey] {
+				continue
+			}
+			link.Clause = "an init-flow argument's parameter unproven"
+			link.Callee = paramKeyDisplay(obs.resolvent)
+			escapeLinks = append(escapeLinks, link)
+		case 'n':
+			// An init-region receiver deferral resolves against the
+			// retention grade alone - read-only never substitutes, a
+			// reading method can still retain its receiver
+			// (REQ-explain-chain).
+			if resolution.receiverRetention[obs.resolvent] || !resolution.notOpaque[varKey] {
+				continue
+			}
+			link.Clause = "an init-flow receiver's method unproven"
+			link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
+			escapeLinks = append(escapeLinks, link)
 		case 'f':
 			field, idx, ok := strings.Cut(obs.resolvent, "\x00")
 			if !ok || !resolution.notOpaque[varKey] {

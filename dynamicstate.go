@@ -47,6 +47,12 @@ type dynamicStateFact struct {
 	// receiver type, method) this package declares and proves unable to
 	// write receiver-reachable state.
 	ReceiverReadOnly []string `json:"receiverReadOnly,omitempty"`
+	// ReceiverRetentionFree holds the retention grade of the same
+	// keys: the method never escapes or outlives its receiver, writes
+	// through it tolerated - the sole grade init-flow receiver
+	// deferrals resolve against; read-only never substitutes, a
+	// reading method can still retain its receiver.
+	ReceiverRetentionFree []string `json:"receiverRetentionFree,omitempty"`
 	// MethodUses holds deferred method-use marks: variable key and
 	// method key joined by NUL. At composition the use is discharged
 	// only when the method key is proven read-only by its declaring
@@ -64,6 +70,18 @@ type dynamicStateFact struct {
 	// least fixed point exactly as the constructor proofs resolve,
 	// cycles and absence refusing.
 	ParamLeakFreeDeps []string `json:"paramLeakFreeDeps,omitempty"`
+	// ParamRetentionFree holds the retention-only grade of the same
+	// keys: the parameter provably never retains or hands out the bound
+	// value, while writes through it are tolerated - the grade an
+	// init-flow argument defers to, where direct stores are already
+	// exempt. Recorded only where the leak-free grade failed; consumers
+	// union the two.
+	ParamRetentionFree []string `json:"paramRetentionFree,omitempty"`
+	// ParamRetentionFreeDeps holds the retention grade's conditional
+	// edges, encoded exactly as ParamLeakFreeDeps and resolved in the
+	// same least fixed point, an edge satisfiable by either grade of
+	// its target.
+	ParamRetentionFreeDeps []string `json:"paramRetentionFreeDeps,omitempty"`
 	// ParamUses holds deferred call-argument marks: variable key and
 	// callee parameter key joined by NUL. At composition the use is
 	// discharged only when the parameter is proven leak-free by its
@@ -71,6 +89,27 @@ type dynamicStateFact struct {
 	// fail-closed, init flow included, because an alias outlives
 	// initialization.
 	ParamUses []string `json:"paramUses,omitempty"`
+	// InitParamUses holds the exempt-region deferred call-argument
+	// marks, encoded exactly as ParamUses: a carrier argument from an
+	// init body, an init-only helper, or an initializer expression. At
+	// composition the use discharges when the parameter is proven
+	// leak-free OR retention-free - a write through the parameter is
+	// init-flow's own exempt store - and marks escaped otherwise.
+	InitParamUses []string `json:"initParamUses,omitempty"`
+	// InitMethodUses holds the exempt-region deferred method-call
+	// marks: variable key and method key joined by NUL - a statically
+	// dispatched method call on a carrier receiver in init flow. At
+	// composition the use discharges when the method is proven
+	// receiver-read-only OR receiver-retention-free - a write through
+	// the receiver is init-flow's own exempt store - and marks escaped
+	// otherwise.
+	InitMethodUses []string `json:"initMethodUses,omitempty"`
+	// CarrierLinks holds cross-carrier storage links: two variable keys
+	// \x01-joined - an init-flow bind or store made one carrier an
+	// alias of another, so the pair shares one backing. At composition
+	// mutation, escape, and environment marks cross every link
+	// symmetrically and transitively.
+	CarrierLinks []string `json:"carrierLinks,omitempty"`
 	// FieldParamUses holds deferred field-position argument marks:
 	// variable key, then field name and zero-based parameter index
 	// NUL-joined, the two parts joined by \x01 - a binding of the
@@ -163,12 +202,15 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	initOnly := initOnlyReachableHelpers(p)
 	methodUses := map[string]map[string]bool{}
 	paramUses := map[string]map[string]bool{}
+	initParamUses := map[string]map[string]bool{}
+	initMethodUses := map[string]map[string]bool{}
+	carrierLinks := map[string]map[string]bool{}
 	fieldUses := map[string]map[string]bool{}
 	elemUses := map[string]map[string]bool{}
 	var attributedUses []attributedUse
 	funcRefs := map[string]map[string]bool{}
 	envCarrying := map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, fieldUses, elemUses, &attributedUses)
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
 	envCalls := map[string]map[string]bool{}
@@ -233,12 +275,19 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	}
 	sort.Strings(fact.FuncRefs)
 	readOnly := receiverReadOnlyMethods(p)
+	retentionMethods := receiverRetentionFreeMethods(p, readOnly)
 	for method := range readOnly {
 		if p.Types != nil {
 			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
 		}
 	}
 	sort.Strings(fact.ReceiverReadOnly)
+	for method := range retentionMethods {
+		if p.Types != nil {
+			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, p.Types.Path()+"\x00"+method)
+		}
+	}
+	sort.Strings(fact.ReceiverRetentionFree)
 	for varKey, methodKeys := range methodUses {
 		for methodKey := range methodKeys {
 			fact.MethodUses = append(fact.MethodUses, varKey+"\x00"+methodKey)
@@ -246,7 +295,7 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
-		paramLeakFree, paramDeps := paramLeakFreeFunctions(p, readOnly)
+		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps := paramLeakFreeFunctions(p, readOnly, retentionMethods)
 		for paramKey := range paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
 		}
@@ -257,6 +306,17 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 			}
 		}
 		sort.Strings(fact.ParamLeakFreeDeps)
+		for paramKey := range paramRetention {
+			fact.ParamRetentionFree = append(fact.ParamRetentionFree, p.Types.Path()+"\x00"+paramKey)
+		}
+		for paramKey, edges := range paramRetentionDeps {
+			ownKey := p.Types.Path() + "\x00" + paramKey
+			for dep := range edges {
+				fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, ownKey+"\x01"+dep)
+			}
+		}
+		sort.Strings(fact.ParamRetentionFree)
+		sort.Strings(fact.ParamRetentionFreeDeps)
 		envFree, envDeps, retFieldDefer, retFieldPoison := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
 		for fnName := range envFree {
 			fnKey := p.Types.Path() + "\x00" + fnName
@@ -287,6 +347,24 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 		}
 	}
 	sort.Strings(fact.ParamUses)
+	for varKey, paramKeys := range initParamUses {
+		for paramKey := range paramKeys {
+			fact.InitParamUses = append(fact.InitParamUses, varKey+"\x00"+paramKey)
+		}
+	}
+	sort.Strings(fact.InitParamUses)
+	for varKey, methodKeys := range initMethodUses {
+		for methodKey := range methodKeys {
+			fact.InitMethodUses = append(fact.InitMethodUses, varKey+"\x00"+methodKey)
+		}
+	}
+	sort.Strings(fact.InitMethodUses)
+	for keyA, others := range carrierLinks {
+		for keyB := range others {
+			fact.CarrierLinks = append(fact.CarrierLinks, keyA+"\x01"+keyB)
+		}
+	}
+	sort.Strings(fact.CarrierLinks)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}
@@ -655,6 +733,25 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					mutated[varKey] = true
 				}
 			}
+			// An exempt-region method call on a carrier receiver
+			// discharges through the receiver retention grade alone: a
+			// write through the receiver is init flow's own exempt
+			// store, only escape or outliving refuses - and the
+			// read-only grade never substitutes, a reading method can
+			// still retain its receiver
+			// (REQ-closure-shared-dynamic-state).
+			for _, use := range fact.InitMethodUses {
+				varKey, methodKey, ok := strings.Cut(use, "\x00")
+				if !ok {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if !resolution.receiverRetention[methodKey] {
+					escaped[varKey] = true
+				}
+			}
 		}
 	}
 	// Deferred call-argument uses resolve against the leak-free
@@ -674,6 +771,22 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					continue
 				}
 				if !paramLeakFree[parts[1]] {
+					escaped[parts[0]] = true
+				}
+			}
+			// An exempt-region use additionally discharges through the
+			// retention grade: a write through the parameter is init
+			// flow's own exempt store, only retention or a handout
+			// refuses (REQ-closure-shared-dynamic-state).
+			for _, use := range fact.InitParamUses {
+				parts := strings.SplitN(use, "\x00", 2)
+				if len(parts) != 2 || strings.Count(parts[1], "\x00") != 2 {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if !paramLeakFree[parts[1]] && !resolution.paramRetentionFree[parts[1]] {
 					escaped[parts[0]] = true
 				}
 			}
@@ -802,6 +915,52 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					}
 				default:
 					mutated[key] = true
+				}
+			}
+		}
+	}
+	// Cross-carrier storage links: an init-flow bind of one carrier
+	// from another made the pair one backing, so mutation, escape, and
+	// environment marks cross every link symmetrically and transitively
+	// - a mark on either side refuses both
+	// (REQ-closure-shared-dynamic-state).
+	linkAdj := map[string]map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, link := range fact.CarrierLinks {
+				a, b, ok := strings.Cut(link, "\x01")
+				if !ok || a == "" || b == "" {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if linkAdj[a] == nil {
+					linkAdj[a] = map[string]bool{}
+				}
+				if linkAdj[b] == nil {
+					linkAdj[b] = map[string]bool{}
+				}
+				linkAdj[a][b] = true
+				linkAdj[b][a] = true
+			}
+		}
+	}
+	for changed := len(linkAdj) > 0; changed; {
+		changed = false
+		for a, others := range linkAdj {
+			for b := range others {
+				if mutated[a] && !mutated[b] {
+					mutated[b] = true
+					changed = true
+				}
+				if escaped[a] && !escaped[b] {
+					escaped[b] = true
+					changed = true
+				}
+				if envCarrying[a] && !envCarrying[b] {
+					envCarrying[b] = true
+					changed = true
 				}
 			}
 		}
@@ -1079,7 +1238,16 @@ func pinnedBuckets(meta []closure.GraphPackage) (buckets map[string]string, unke
 // the explain path passes nil and lets the verdict's marks stand.
 type deferralResolution struct {
 	paramLeakFree map[string]bool
-	readOnly      map[string]bool
+	// paramRetentionFree is the retention-only grade: never retains or
+	// hands out, writes tolerated - the grade init-flow deferrals
+	// resolve against, unioned with paramLeakFree (leak-free implies
+	// retention-free).
+	paramRetentionFree map[string]bool
+	readOnly           map[string]bool
+	// receiverRetention is the method-side retention grade: never
+	// escapes or outlives the receiver, writes tolerated - init-flow
+	// receiver deferrals resolve against it unioned with readOnly.
+	receiverRetention map[string]bool
 	// notOpaque is the opacity intersection: a declared key is opaque -
 	// object-closed, escapes never refusing - only when every declaring
 	// fact judges it so and no fact breaks it. Escape-kind refusals gate
@@ -1097,8 +1265,10 @@ type deferralResolution struct {
 
 func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *deferralResolution {
 	r := &deferralResolution{
-		paramLeakFree:   map[string]bool{},
-		readOnly:        map[string]bool{},
+		paramLeakFree:      map[string]bool{},
+		paramRetentionFree: map[string]bool{},
+		readOnly:           map[string]bool{},
+		receiverRetention:  map[string]bool{},
 		notOpaque:       map[string]bool{},
 		envFreeResolved: map[string]bool{},
 		envFreeDeps:     map[string]map[string]bool{},
@@ -1113,6 +1283,7 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 	}
 	envFreeDeclared := map[string]bool{}
 	paramDeps := map[string]map[string]bool{}
+	retentionDeps := map[string]map[string]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ParamLeakFree {
@@ -1129,8 +1300,25 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				}
 				paramDeps[own][dep] = true
 			}
+			for _, key := range fact.ParamRetentionFree {
+				r.paramRetentionFree[key] = true
+			}
+			for _, edge := range fact.ParamRetentionFreeDeps {
+				own, dep, ok := strings.Cut(edge, "\x01")
+				if !ok || strings.Count(own, "\x00") != 2 || strings.Count(dep, "\x00") != 2 {
+					malformed(fact)
+					continue
+				}
+				if retentionDeps[own] == nil {
+					retentionDeps[own] = map[string]bool{}
+				}
+				retentionDeps[own][dep] = true
+			}
 			for _, key := range fact.ReceiverReadOnly {
 				r.readOnly[key] = true
+			}
+			for _, key := range fact.ReceiverRetentionFree {
+				r.receiverRetention[key] = true
 			}
 			opaque := make(map[string]bool, len(fact.Opaque))
 			for _, key := range fact.Opaque {
@@ -1178,6 +1366,29 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 			}
 			if ok {
 				r.paramLeakFree[own] = true
+				changed = true
+			}
+		}
+	}
+	// The retention grade's least fixed point runs after the leak-free
+	// one - an edge is satisfiable by either grade of its target, a
+	// leak-free hop retaining nothing a fortiori; cycles and absence
+	// refuse identically (REQ-closure-shared-dynamic-state).
+	for changed := true; changed; {
+		changed = false
+		for own, edges := range retentionDeps {
+			if r.paramRetentionFree[own] || r.paramLeakFree[own] {
+				continue
+			}
+			ok := true
+			for dep := range edges {
+				if !r.paramRetentionFree[dep] && !r.paramLeakFree[dep] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				r.paramRetentionFree[own] = true
 				changed = true
 			}
 		}

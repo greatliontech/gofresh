@@ -357,6 +357,27 @@ func TestExplainDeferralChains(t *testing.T) {
 			t.Fatalf("callee = %q, want the unproven method named", link.Callee)
 		}
 	})
+	t.Run("unproven init receiver deferral is an escape chain", func(t *testing.T) {
+		// The retention grade decides an init-flow receiver deferral -
+		// a read-only-but-retaining method must still derive a chain
+		// naming itself, never an empty derivation.
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype box struct{ fns []func() int }\n\nfunc (b *box) Keep() {\n\tgo func() { _ = b.fns }()\n}\n\nfunc (b *box) Tally() int { return len(b.fns) }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{fns: []func() int{one}}\n\nfunc init() {\n\tRegistry.Keep()\n}\n\nfunc Count() int { return Registry.Tally() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+		if chain.Arm != "escape" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want an escape deferral chain for the retained receiver", chain)
+		}
+		link := chain.Links[0]
+		if link.Clause != "an init-flow receiver's method unproven" {
+			t.Fatalf("clause = %q - the init receiver deferral family is missing", link.Clause)
+		}
+		if !strings.Contains(link.Callee, "box.Keep") {
+			t.Fatalf("callee = %q, want the unproven method named", link.Callee)
+		}
+	})
 	t.Run("refused field position names the failing registrant", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":     goMod,

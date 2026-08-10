@@ -4633,6 +4633,167 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Hooks - an init-body handout to a method stayed exempt", verdict)
 		}
 	})
+	t.Run("init-body fill through a writing parameter discharges", func(t *testing.T) {
+		// The callee writes a data field through its parameter but
+		// retains nothing - in init flow the write is the region's own
+		// exempt store, so the retention grade discharges the deferral.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tN     int\n\tBuild func() int\n}\n\nfunc one() int { return 1 }\n\nvar Registry = map[string]*entry{\"a\": {N: 1, Build: one}}\n\nfunc touch(m map[string]*entry) {\n\tm[\"a\"].N++\n\tm[\"a\"].N = 2\n}\n\nfunc init() {\n\ttouch(Registry)\n}\n\nfunc Run() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an init-flow fill through a retention-free parameter kept the escape", verdict)
+		}
+	})
+	t.Run("program-code fill through a writing parameter refuses", func(t *testing.T) {
+		// The same callee reached from program code: the write is a
+		// post-initialization mutation channel, the strict leak-free
+		// grade governs and refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tN     int\n\tBuild func() int\n}\n\nfunc one() int { return 1 }\n\nvar Registry = map[string]*entry{\"a\": {N: 1, Build: one}}\n\nfunc touch(m map[string]*entry) {\n\tm[\"a\"].N++\n\tm[\"a\"].N = 2\n}\n\nfunc Run() int {\n\ttouch(Registry)\n\treturn len(Registry)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a program-code fill slipped the strict grade", verdict)
+		}
+	})
+	t.Run("init-flow fill chaining a retaining method refuses", func(t *testing.T) {
+		// The helper writes (retention tolerates that) but then calls a
+		// method whose goroutine retains the receiver - the retention
+		// grade's method chain must demand retention, never read-only.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct {\n\tn   int\n\tfns []func() int\n}\n\nfunc (b *box) Keep() {\n\tgo func() { _ = b.fns }()\n}\n\nfunc (b *box) Count() int { return len(b.fns) }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{fns: []func() int{one}}\n\nfunc hand(b *box) {\n\tb.n = 1\n\tb.Keep()\n}\n\nfunc init() {\n\thand(Registry)\n}\n\nfunc Run() int { return Registry.Count() }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a retaining method rode a writing helper through init", verdict)
+		}
+	})
+	t.Run("foreign carrier stored through an init fill refuses", func(t *testing.T) {
+		// The stored value reaches another carrier: tolerating the store
+		// would silently alias two backings through the parameter.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc fill(m map[string][]func() int) {\n\tm[\"a\"] = Inner\n}\n\nfunc init() {\n\tfill(Hooks)\n}\n\nfunc Run() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks - a foreign carrier rode a tolerated store", verdict)
+		}
+	})
+	t.Run("eager goroutine argument keeps the discharge", func(t *testing.T) {
+		// A go statement's direct arguments are evaluated at the
+		// statement and retain nothing - only the goroutine's own
+		// literal captures refuse.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nfunc one() int { return 1 }\n\nvar Hooks = map[string][]func() int{\"a\": {one}}\n\nfunc emit(int) {}\n\nfunc note(m map[string][]func() int) {\n\tgo emit(len(m))\n}\n\nfunc init() {\n\tnote(Hooks)\n}\n\nfunc Run() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an eager goroutine argument refused the retention grade", verdict)
+		}
+	})
+	t.Run("init fill laundering a carrier through a local hop refuses", func(t *testing.T) {
+		// A local bound from the foreign carrier is that carrier's
+		// backing - the store tolerance must see through the hop.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc fill(m map[string][]func() int) {\n\tx := Inner\n\tm[\"a\"] = x\n}\n\nfunc init() {\n\tfill(Hooks)\n}\n\nfunc Run() int { return len(Hooks) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Hooks") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks - a local hop laundered the foreign carrier", verdict)
+		}
+	})
+	t.Run("leak-free proof survives a converting read-only method", func(t *testing.T) {
+		// The conversion of a tracked read to a reach-free result is a
+		// fresh copy - the retention grade must not refuse it, or every
+		// leak-free proof chaining through the method breaks.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct {\n\traw []byte\n\tfns []func() int\n}\n\nfunc (b *box) Dump() string { return string(b.raw) }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{raw: []byte(\"x\"), fns: []func() int{one}}\n\nfunc use(b *box) int {\n\treturn len(b.Dump())\n}\n\nfunc Run() int { return use(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a converting read-only method broke the leak-free chain", verdict)
+		}
+	})
+	t.Run("init-bound method result stays valid", func(t *testing.T) {
+		// A called method's receiver is priced by the call's own
+		// deferral - binding the RESULT retains nothing of the receiver.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct{ fns []func() int }\n\nfunc (b *box) Count() int { return len(b.fns) }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{fns: []func() int{one}}\n\nvar total int\n\nfunc init() {\n\tt := Registry.Count()\n\ttotal = t\n}\n\nfunc Run() int { return total }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a bound method result escaped its receiver", verdict)
+		}
+	})
+	t.Run("bound carrier method value in init flow escapes", func(t *testing.T) {
+		// The bound value retains its receiver past initialization -
+		// fail-closed exactly as the call spelling's unproven receiver.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct{ fns []func() int }\n\nfunc (b *box) Keep() {\n\tgo func() { _ = b.fns }()\n}\n\nfunc (b *box) Count() int { return len(b.fns) }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{fns: []func() int{one}}\n\nfunc init() {\n\tf := Registry.Keep\n\tf()\n}\n\nfunc Run() int { return Registry.Count() }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a bound method value slipped the exempt region", verdict)
+		}
+	})
+	t.Run("init-body writing method fill on a carrier receiver discharges", func(t *testing.T) {
+		// The method writes receiver state but retains nothing - in init
+		// flow the write is the region's own exempt store, so the
+		// receiver retention grade discharges the deferral.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct {\n\tn   int\n\tfns []func() int\n}\n\nfunc (b *box) Fill() {\n\tb.n = 2\n}\n\nfunc (b *box) Count() int { return len(b.fns) + b.n }\n\nfunc one() int { return 1 }\n\nvar Registry = &box{fns: []func() int{one}}\n\nfunc init() {\n\tRegistry.Fill()\n}\n\nfunc Run() int { return Registry.Count() }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an init-flow method fill through a retention-free receiver kept the escape", verdict)
+		}
+	})
+	t.Run("init-body method call on a carrier receiver escapes", func(t *testing.T) {
+		// The receiver is handed to the callee exactly as an argument
+		// is - a retaining method (the goroutine outlives initialization)
+		// must not slip through the exempt region unmarked.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype box struct{ fns []func() int }\n\nfunc (b *box) Keep() {\n\tgo func() { _ = b.fns }()\n}\n\nfunc (b *box) Count() int { return len(b.fns) }\n\nvar Registry = &box{fns: []func() int{func() int { return 1 }}}\n\nfunc init() {\n\tRegistry.Keep()\n}\n\nfunc Run() int { return Registry.Count() }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Run() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape downgrade naming reg.Registry - an init-body carrier receiver stayed exempt", verdict)
+		}
+	})
 	t.Run("foreign self-append of a judged element discharges", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,

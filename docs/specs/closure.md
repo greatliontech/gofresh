@@ -301,7 +301,21 @@ attribute (a helper parameter bound at the init call site, a composite
 target such as a struct field) is a recorded residue of this clause —
 while init-flow stores and calls stay exempt from the mutation marks;
 a carrier call-argument still earns its deferral or the fail-closed
-escape wherever it appears. Two further narrowings
+escape wherever it appears, and a carrier method-call receiver in init
+flow — handed to the callee exactly as an argument is — defers to the
+method's receiver retention fact: statically dispatched non-interface
+methods whose results hand out nothing, the receiver a bare identifier
+naming the package variable (an expression or foreign-qualified
+receiver keeps the escape), the method provably never
+escaping or outliving its receiver while writes through it are
+tolerated (init flow's own exempt shape), an unproven, dispatched,
+result-handing, or value-bound method keeping the fail-closed escape —
+a bound method value retains its receiver past initialization. An init-flow
+bind or store whose target is itself a carrier links the two keys as
+one storage — mutation, escape, and environment marks crossing the
+pair symmetrically and transitively at composition, since the shared
+backing is one object under every name it carries — reach-free
+sources recording no key and staying unlinked. Two further narrowings
 discharge specific escape shapes by proof: a carrier passed as a direct
 call argument to a plain named function — a deferred call included, a go
 statement's arguments never, since the goroutine runs concurrently, and
@@ -310,9 +324,15 @@ defers to that parameter's leak-free fact, recorded by the declaring
 package (the bound value provably never writes, escapes, or outlives
 the call, with every unrecognized use refusing) and resolved at
 composition, absence refusing, a carrier argument to any other callee
-shape keeping the fail-closed escape (a callee that writes its parameter
-refuses the deferral even where the write itself would be init flow —
-deliberate conservatism of the single fact class); and a range binding over an alias-handing
+shape keeping the fail-closed escape. A callee that writes its
+parameter refuses the program-code deferral; an init-flow argument
+defers instead to the parameter's retention fact — the bound value
+provably never escapes or outlives the call, its writes through the
+binding tolerated exactly as the region's own stores are exempt, the
+write-path element and field reads feeding those stores priced as
+writes rather than handouts — recorded beside the leak-free grade,
+chained and resolved identically with either grade satisfying an
+edge, absence refusing; and a range binding over an alias-handing
 carrier discharges the iteration read when every alias-handing bound
 value is proven leak-free over the loop body by the same judgment,
 fail-closed on any other binding shape — where the leak-free judgment

@@ -16,6 +16,7 @@ import (
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"golang.org/x/tools/go/packages"
 )
 
 // writePinnedDepModule writes a module depending on golang.org/x/sync at the
@@ -803,6 +804,179 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 	}
 }
 
+// An init-flow bind of one carrier from another records the storage
+// link in the declaring package's fact
+// (REQ-closure-shared-dynamic-state).
+func TestCarrierAliasLinkRecorded(t *testing.T) {
+	files := map[string]string{
+		"go.mod":     "module example.com/xesc\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Hooks = map[string]func() int{\"a\": one}\n\nvar Alias = Hooks\n\nfunc Count() int { return len(Hooks) }\n",
+	}
+	dir := writeModuleTree(t, files)
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir}
+	pkgs, err := packages.Load(cfg, "example.com/xesc/reg")
+	if err != nil || len(pkgs) != 1 {
+		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
+	}
+	fact := dynamicStateFactOf(pkgs[0])
+	want := "example.com/xesc/reg.Alias\x01example.com/xesc/reg.Hooks"
+	found := false
+	for _, link := range fact.CarrierLinks {
+		if link == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("CarrierLinks = %q, want the Alias-to-Hooks storage link recorded", fact.CarrierLinks)
+	}
+}
+
+// An init-flow element store whose target is a carrier links the two
+// backings exactly as a whole-name bind does, while a call-result bind
+// records no link - the callee's value is not the argument's backing
+// (REQ-closure-shared-dynamic-state).
+func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
+	files := map[string]string{
+		"go.mod":     "module example.com/xesc\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc pick(m map[string][]func() int) map[string][]func() int { return m }\n\nvar Picked = pick(Hooks)\n\nfunc init() {\n\tHooks[\"a\"] = Inner\n}\n\nfunc Count() int { return len(Hooks) }\n",
+	}
+	dir := writeModuleTree(t, files)
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir}
+	pkgs, err := packages.Load(cfg, "example.com/xesc/reg")
+	if err != nil || len(pkgs) != 1 {
+		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
+	}
+	fact := dynamicStateFactOf(pkgs[0])
+	wantStore := "example.com/xesc/reg.Hooks\x01example.com/xesc/reg.Inner"
+	foundStore := false
+	for _, link := range fact.CarrierLinks {
+		if link == wantStore {
+			foundStore = true
+		}
+		if strings.Contains(link, "Picked") {
+			t.Fatalf("CarrierLinks = %q, want no link through a call result", fact.CarrierLinks)
+		}
+	}
+	if !foundStore {
+		t.Fatalf("CarrierLinks = %q, want the element-store link recorded", fact.CarrierLinks)
+	}
+}
+
+// A cross-carrier storage link crosses mutation marks symmetrically: a
+// mutation recorded against an aliasing key refuses the linked origin
+// key too - one backing under every name it carries
+// (REQ-closure-shared-dynamic-state).
+func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|carrier-link-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			// The origin is declared; the mutation lands on an
+			// undeclared aliasing key - without the link no culprit
+			// exists, with it the mark crosses to the origin.
+			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+			fact.Mutates = append(fact.Mutates, "golang.org/x/sync/errgroup.ghostAlias")
+			fact.CarrierLinks = append(fact.CarrierLinks, "golang.org/x/sync/errgroup.ghostAlias\x01golang.org/x/sync/errgroup.Ghost")
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+	linked := runScan(t, scope, dir, pkg)
+	if reason := linked.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+		t.Fatalf("downgrade reason %q does not cross the link - the shared backing split across keys", reason)
+	}
+}
+
+// The link crosses escape marks identically: an escape recorded against
+// an aliasing key refuses the linked origin
+// (REQ-closure-shared-dynamic-state).
+func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|carrier-link-escape-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+			fact.Escapes = append(fact.Escapes, "golang.org/x/sync/errgroup.ghostAlias")
+			fact.CarrierLinks = append(fact.CarrierLinks, "golang.org/x/sync/errgroup.ghostAlias\x01golang.org/x/sync/errgroup.Ghost")
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+	linked := runScan(t, scope, dir, pkg)
+	if reason := linked.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost escapes writable") {
+		t.Fatalf("downgrade reason %q does not cross the escape link - the shared backing split across keys", reason)
+	}
+}
+
+// A persisted cross-carrier link the consumer cannot parse is not
+// trusted: every key the fact declares marks mutated — fail-closed like
+// every malformed-fact arm (REQ-closure-shared-dynamic-state).
+func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|malformed-link-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+			// No separator - the link lost one of its keys.
+			fact.CarrierLinks = append(fact.CarrierLinks, "golang.org/x/sync/errgroup.Ghost")
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+	poisoned := runScan(t, scope, dir, pkg)
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+		t.Fatalf("downgrade reason %q does not mark the declared key - a malformed link slipped through", reason)
+	}
+}
+
 // A persisted deferred call-argument mark the consumer cannot parse is
 // not trusted: every key the fact declares marks mutated — fail-closed
 // like every malformed-fact arm (REQ-closure-shared-dynamic-state).
@@ -908,6 +1082,18 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 		{"paramLeakFreeDeps", func(fact *dynamicStateFact) {
 			// Dependency key lost a NUL frame.
 			fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, "golang.org/x/sync/errgroup\x00Go\x000\x01bad")
+		}},
+		{"paramRetentionFreeDeps", func(fact *dynamicStateFact) {
+			// The retention grade's edges validate identically.
+			fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, "golang.org/x/sync/errgroup\x00Go\x000\x01bad")
+		}},
+		{"initParamUses", func(fact *dynamicStateFact) {
+			// One NUL only - the callee parameter key lost its frame.
+			fact.InitParamUses = append(fact.InitParamUses, "golang.org/x/sync/errgroup.Ghost\x00bad")
+		}},
+		{"initMethodUses", func(fact *dynamicStateFact) {
+			// No separator - the method key is missing.
+			fact.InitMethodUses = append(fact.InitMethodUses, "golang.org/x/sync/errgroup.Ghost")
 		}},
 		{"elemNonCanonicalIndex", func(fact *dynamicStateFact) {
 			fact.ElemParamUses = append(fact.ElemParamUses, "golang.org/x/sync/errgroup.Ghost\x01owner.Key\x0100")

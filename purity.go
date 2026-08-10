@@ -498,7 +498,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil)
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -596,7 +596,7 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 	}
 }
 
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, fieldUses, elemUses map[string]map[string]bool, attributed *[]attributedUse) {
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -685,7 +685,118 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			})
 			return keys
 		}
-		bind := func(target ast.Expr, keys map[string]bool) bool {
+		// linkKeys is rhsKeys minus call results: a call's value is the
+		// callee's, not the argument carrier's backing, so it aliases
+		// conservatively but never links keys.
+		linkKeys := func(expr ast.Expr) map[string]bool {
+			keys := map[string]bool{}
+			ast.Inspect(expr, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.FuncLit, *ast.CallExpr:
+					return false
+				case *ast.Ident:
+					if obj, ok := resolve(n); ok {
+						if variable, ok := dynamicPackageVar(obj); ok {
+							keys[dynamicVarKey(variable)] = true
+						} else if source := aliased[obj]; source != nil {
+							for key := range source {
+								keys[key] = true
+							}
+						}
+					}
+				}
+				return true
+			})
+			return keys
+		}
+		// storeLink links a composite store target's base carrier to the
+		// stored value's carriers - an element or field store aliases the
+		// backings exactly as a whole-name bind does
+		// (REQ-closure-shared-dynamic-state).
+		storeLink := func(target ast.Expr, lkeys map[string]bool) {
+			if len(lkeys) == 0 || carrierLinks == nil {
+				return
+			}
+			base := target
+			for {
+				switch t := base.(type) {
+				case *ast.IndexExpr:
+					base = t.X
+				case *ast.SelectorExpr:
+					base = t.X
+				case *ast.StarExpr:
+					base = t.X
+				case *ast.ParenExpr:
+					base = t.X
+				default:
+					ident, identOK := base.(*ast.Ident)
+					if !identOK {
+						return
+					}
+					obj, objOK := resolve(ident)
+					if !objOK {
+						return
+					}
+					variable, varOK := dynamicPackageVar(obj)
+					if !varOK {
+						return
+					}
+					own := dynamicVarKey(variable)
+					for key := range lkeys {
+						if key == own {
+							continue
+						}
+						if carrierLinks[own] == nil {
+							carrierLinks[own] = map[string]bool{}
+						}
+						carrierLinks[own][key] = true
+					}
+					return
+				}
+			}
+		}
+		// markRHSMethodValues escapes the receiver of every bound method
+		// value in the expression: the bound value retains its receiver
+		// past initialization, fail-closed exactly as the call
+		// spelling's unproven receiver
+		// (REQ-closure-shared-dynamic-state).
+		markRHSMethodValues := func(rhs ast.Expr) {
+			calledFuns := map[ast.Node]bool{}
+			ast.Inspect(rhs, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					calledFuns[unparenExpr(call.Fun)] = true
+				}
+				return true
+			})
+			ast.Inspect(rhs, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || calledFuns[sel] {
+					// A called method's receiver is priced by the call's
+					// own arm - only the BOUND value retains.
+					return true
+				}
+				if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
+					ast.Inspect(sel.X, func(inner ast.Node) bool {
+						if ident, ok := inner.(*ast.Ident); ok {
+							if obj, ok := resolve(ident); ok {
+								if variable, ok := dynamicPackageVar(obj); ok {
+									explainMark(p, "escape", dynamicVarKey(variable), ident.Pos())
+									escaped[dynamicVarKey(variable)] = true
+								} else {
+									for key := range aliased[obj] {
+										explainMark(p, "escape", key, ident.Pos())
+										escaped[key] = true
+									}
+								}
+							}
+						}
+						return true
+					})
+				}
+				return true
+			})
+		}
+		bind := func(target ast.Expr, keys, lkeys map[string]bool) bool {
 			if len(keys) == 0 {
 				return false
 			}
@@ -704,7 +815,25 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if !ok {
 				return false
 			}
-			if _, pkg := dynamicPackageVar(obj); pkg {
+			if variable, pkg := dynamicPackageVar(obj); pkg {
+				// A carrier bound from another carrier shares its
+				// backing: the two keys link as one storage, mutation,
+				// escape, and environment marks crossing the pair at
+				// composition; reach-free sources and call results
+				// record no link key and stay unlinked
+				// (REQ-closure-shared-dynamic-state).
+				if carrierLinks != nil {
+					own := dynamicVarKey(variable)
+					for key := range lkeys {
+						if key == own {
+							continue
+						}
+						if carrierLinks[own] == nil {
+							carrierLinks[own] = map[string]bool{}
+						}
+						carrierLinks[own][key] = true
+					}
+				}
 				return false
 			}
 			if !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
@@ -731,16 +860,22 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				case *ast.AssignStmt:
 					if len(n.Lhs) == len(n.Rhs) {
 						for i, rhs := range n.Rhs {
-							if bind(n.Lhs[i], rhsKeys(rhs)) {
+							markRHSMethodValues(rhs)
+							lkeys := linkKeys(rhs)
+							if bind(n.Lhs[i], rhsKeys(rhs), lkeys) {
 								changed = true
 							}
+							storeLink(n.Lhs[i], lkeys)
 						}
 					} else if len(n.Rhs) == 1 {
+						markRHSMethodValues(n.Rhs[0])
 						keys := rhsKeys(n.Rhs[0])
+						lkeys := linkKeys(n.Rhs[0])
 						for _, lhs := range n.Lhs {
-							if bind(lhs, keys) {
+							if bind(lhs, keys, lkeys) {
 								changed = true
 							}
+							storeLink(lhs, lkeys)
 						}
 					}
 				case *ast.ValueSpec:
@@ -748,22 +883,26 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// assignment binding does.
 					if len(n.Names) == len(n.Values) {
 						for i, name := range n.Names {
-							if bind(name, rhsKeys(n.Values[i])) {
+							markRHSMethodValues(n.Values[i])
+							if bind(name, rhsKeys(n.Values[i]), linkKeys(n.Values[i])) {
 								changed = true
 							}
 						}
 					} else if len(n.Values) == 1 {
+						markRHSMethodValues(n.Values[0])
 						keys := rhsKeys(n.Values[0])
+						lkeys := linkKeys(n.Values[0])
 						for _, name := range n.Names {
-							if bind(name, keys) {
+							if bind(name, keys, lkeys) {
 								changed = true
 							}
 						}
 					}
 				case *ast.RangeStmt:
 					keys := rhsKeys(n.X)
+					lkeys := linkKeys(n.X)
 					for _, target := range []ast.Expr{n.Key, n.Value} {
-						if target != nil && bind(target, keys) {
+						if target != nil && bind(target, keys, lkeys) {
 							changed = true
 						}
 					}
@@ -774,9 +913,11 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// assignment-bound alias is.
 					if ident, ok := n.Fun.(*ast.Ident); ok && len(n.Args) == 2 {
 						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
-							if bind(n.Args[0], rhsKeys(n.Args[1])) {
+							lkeys := linkKeys(n.Args[1])
+							if bind(n.Args[0], rhsKeys(n.Args[1]), lkeys) {
 								changed = true
 							}
+							storeLink(n.Args[0], lkeys)
 						}
 					}
 				}
@@ -827,7 +968,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		}
 		return target, variable
 	}
-	deferCarrierArgs := func(n *ast.CallExpr, onDeferred func(*ast.Ident)) {
+	deferCarrierArgs := func(n *ast.CallExpr, sink map[string]map[string]bool, kind byte, onDeferred func(*ast.Ident)) {
 		fn, pkgPath := plainCalleeFunc(p, n.Fun)
 		if fn == nil {
 			return
@@ -846,12 +987,12 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				idx = sig.Params().Len() - 1
 			}
 			key := dynamicVarKey(variable)
-			if paramUses[key] == nil {
-				paramUses[key] = map[string]bool{}
+			if sink[key] == nil {
+				sink[key] = map[string]bool{}
 			}
 			paramKey := pkgPath + "\x00" + fn.Name() + "\x00" + strconv.Itoa(idx)
-			paramUses[key][paramKey] = true
-			explainDeferralMark(p, 'p', key, paramKey, target.Pos())
+			sink[key][paramKey] = true
+			explainDeferralMark(p, kind, key, paramKey, target.Pos())
 			if onDeferred != nil {
 				onDeferred(target)
 			}
@@ -891,7 +1032,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		})
 	}
 	scanExemptCalls := func(body ast.Node) {
-		if paramUses == nil || body == nil {
+		if initParamUses == nil || body == nil {
 			return
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
@@ -914,7 +1055,38 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				plain := false
 				if fn, _ := plainCalleeFunc(p, n.Fun); fn != nil {
 					plain = true
-					deferCarrierArgs(n, nil)
+					deferCarrierArgs(n, initParamUses, 'q', nil)
+				} else if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
+					// A method call's receiver is handed to the callee
+					// exactly as an argument is: a statically dispatched
+					// non-interface method on a carrier receiver defers to
+					// the method's receiver retention proof - writes are
+					// the region's own exempt shape, only escape or
+					// outliving refuses - and every other shape escapes
+					// fail-closed; a dispatched func value's base is a
+					// callee-position read, tolerated like every call
+					// (REQ-closure-shared-dynamic-state).
+					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
+						deferred := false
+						if fn, fnOK := selection.Obj().(*types.Func); fnOK && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+							if ident, idOK := sel.X.(*ast.Ident); idOK {
+								if obj, rOK := resolve(ident); rOK {
+									if variable, vOK := dynamicPackageVar(obj); vOK {
+										key := dynamicVarKey(variable)
+										if initMethodUses[key] == nil {
+											initMethodUses[key] = map[string]bool{}
+										}
+										initMethodUses[key][methodFactKey(fn)] = true
+										explainDeferralMark(p, 'n', key, methodFactKey(fn), sel.Pos())
+										deferred = true
+									}
+								}
+							}
+						}
+						if !deferred {
+							markExemptEscapes(sel.X)
+						}
+					}
 				}
 				for _, arg := range n.Args {
 					if plain {
@@ -1164,7 +1336,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// of the proof restores the escape there
 				// (REQ-closure-shared-dynamic-state).
 				if paramUses != nil && !goCalls[n] {
-					deferCarrierArgs(n, func(target *ast.Ident) {
+					deferCarrierArgs(n, paramUses, 'p', func(target *ast.Ident) {
 						readContext[target] = true
 					})
 				}
@@ -1395,7 +1567,10 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// code — a package-level `var rebind = func() {...}`
 				// mutator must be walked — and a call in an initializer
 				// expression is an init-flow call whose carrier arguments
-				// earn the same deferral as an init body's.
+				// earn the same deferral as an init body's. The alias
+				// scan runs here too: a package-level carrier bound from
+				// another carrier records the storage link.
+				aliasedLocals = initAliasedLocals(decl)
 				ast.Inspect(decl, func(n ast.Node) bool {
 					if lit, ok := n.(*ast.FuncLit); ok && lit.Body != nil {
 						walkBody(lit.Body)
@@ -1404,6 +1579,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					return true
 				})
 				scanExemptCalls(decl)
+				aliasedLocals = nil
 			}
 		}
 	}
@@ -4187,6 +4363,20 @@ func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool
 // composition against that carrier's element population - never from a
 // go statement's call (REQ-closure-shared-dynamic-state).
 func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool) bool {
+	return boundValueJudged(p, roots, body, wants, returns, methodWants, fieldWants, elemWants, false)
+}
+
+// boundValueRetentionFreeJudged proves the retention-only grade: the
+// bound value never escapes or outlives the call, while writes through
+// the binding - stores and increments - are tolerated. This is the
+// init-flow deferral's grade, where direct stores are already exempt;
+// every other use keeps the leak-free rules
+// (REQ-closure-shared-dynamic-state).
+func boundValueRetentionFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, methodWants map[string]bool) bool {
+	return boundValueJudged(p, roots, body, wants, nil, methodWants, nil, nil, true)
+}
+
+func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool, tolerateRootedStores bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
@@ -4194,6 +4384,7 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 	// the walked body - a call wrapped in a goroutine literal exactly as
 	// the direct spelling - so none of them defers.
 	goCalls := map[*ast.CallExpr]bool{}
+	goIdents := map[ast.Node]bool{}
 	litReturns := map[*ast.ReturnStmt]bool{}
 	// calleeReads marks call-Fun selector and index nodes: invoking a
 	// signature-carrying read is not a handout - the call arms price the
@@ -4218,6 +4409,24 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 				if call, ok := inner.(*ast.CallExpr); ok {
 					goCalls[call] = true
 				}
+				if lit, ok := inner.(*ast.FuncLit); ok {
+					// A literal under the go statement is the goroutine's
+					// own code: a rooted read it captures is a retained
+					// alias whatever shape consumes it - fail-closed for
+					// every grade. The statement's direct arguments are
+					// evaluated at the go statement and retain nothing;
+					// the goCalls gate already prices them.
+					ast.Inspect(lit, func(deep ast.Node) bool {
+						if call, ok := deep.(*ast.CallExpr); ok {
+							goCalls[call] = true
+						}
+						if ident, ok := deep.(*ast.Ident); ok {
+							goIdents[ident] = true
+						}
+						return true
+					})
+					return false
+				}
 				return true
 			})
 		case *ast.FuncLit:
@@ -4234,6 +4443,87 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 		}
 		return true
 	})
+	// carrierReaching marks body locals bound from expressions whose
+	// subtree reads a dynamic-capable package variable - directly or
+	// through such a local, to a fixpoint - so a tolerated store cannot
+	// launder a foreign backing through a local hop
+	// (REQ-closure-shared-dynamic-state).
+	carrierReaching := map[types.Object]bool{}
+	carrierReach := func(expr ast.Expr) bool {
+		if expr == nil {
+			return false
+		}
+		found := false
+		ast.Inspect(expr, func(m ast.Node) bool {
+			if found {
+				return false
+			}
+			if ident, ok := m.(*ast.Ident); ok {
+				if obj := p.TypesInfo.Uses[ident]; obj != nil {
+					if carrierReaching[obj] {
+						found = true
+						return false
+					}
+					if variable, ok := obj.(*types.Var); ok && variable.Pkg() != nil &&
+						variable.Parent() == variable.Pkg().Scope() &&
+						typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+						found = true
+					}
+				}
+			}
+			return true
+		})
+		return found
+	}
+	if tolerateRootedStores {
+		mark := func(ident *ast.Ident) bool {
+			obj := p.TypesInfo.Defs[ident]
+			if obj == nil {
+				obj = p.TypesInfo.Uses[ident]
+			}
+			if obj == nil || carrierReaching[obj] {
+				return false
+			}
+			carrierReaching[obj] = true
+			return true
+		}
+		for changed := true; changed; {
+			changed = false
+			ast.Inspect(body, func(m ast.Node) bool {
+				switch m := m.(type) {
+				case *ast.AssignStmt:
+					if len(m.Lhs) == len(m.Rhs) {
+						for i, rhs := range m.Rhs {
+							if carrierReach(rhs) {
+								if ident, ok := m.Lhs[i].(*ast.Ident); ok && mark(ident) {
+									changed = true
+								}
+							}
+						}
+					} else if len(m.Rhs) == 1 && carrierReach(m.Rhs[0]) {
+						for _, lhs := range m.Lhs {
+							if ident, ok := lhs.(*ast.Ident); ok && mark(ident) {
+								changed = true
+							}
+						}
+					}
+				case *ast.ValueSpec:
+					for i, name := range m.Names {
+						var rhs ast.Expr
+						if len(m.Names) == len(m.Values) {
+							rhs = m.Values[i]
+						} else if len(m.Values) == 1 {
+							rhs = m.Values[0]
+						}
+						if rhs != nil && carrierReach(rhs) && mark(name) {
+							changed = true
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
 	tainted := map[types.Object]bool{}
 	isRoot := func(expr ast.Expr) bool {
 		ident, ok := expr.(*ast.Ident)
@@ -4449,7 +4739,32 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 					continue
 				}
 				if rooted(lhs) {
-					leaky = true
+					// A store through the binding is a write, not a
+					// handout - the retention grade tolerates it and
+					// consumes the target's root read. A stored value
+					// reaching another package carrier keeps the
+					// refusal: the store would alias two backings
+					// through the binding, a link the call-scoped
+					// judgment cannot record.
+					var rhs ast.Expr
+					if len(n.Lhs) == len(n.Rhs) {
+						rhs = n.Rhs[i]
+					} else if len(n.Rhs) == 1 {
+						rhs = n.Rhs[0]
+					}
+					smuggles := false
+					if rhs != nil {
+						if t := p.TypesInfo.TypeOf(rhs); t == nil ||
+							typeHandsOutMutableReach(t, make(map[types.Type]bool)) ||
+							typeCarriesSignature(t, make(map[types.Type]bool)) {
+							smuggles = carrierReach(rhs) || t == nil
+						}
+					}
+					if tolerateRootedStores && !smuggles {
+						consume(lhs)
+					} else {
+						leaky = true
+					}
 				}
 			}
 		case *ast.ValueSpec:
@@ -4484,7 +4799,13 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			}
 		case *ast.IncDecStmt:
 			if rooted(n.X) {
-				leaky = true
+				// A pure write through the binding - the retention grade
+				// tolerates it exactly as a store.
+				if tolerateRootedStores {
+					consume(n.X)
+				} else {
+					leaky = true
+				}
 			}
 		case *ast.SendStmt:
 			if rooted(n.Chan) {
@@ -4547,6 +4868,21 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 					}
 					break
 				}
+			}
+			if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
+				// A conversion of a tracked value is a value read judged
+				// by its result type: a reach-free, signature-free result
+				// is a fresh copy that cannot write back or hand out the
+				// binding; any other result may alias the operand and
+				// keeps the refusal. A method-value operand carries its
+				// receiver whatever the result type says - never consumed
+				// (REQ-closure-shared-dynamic-state).
+				if len(n.Args) == 1 && rooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
+					if t := p.TypesInfo.TypeOf(n); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) && !typeCarriesSignature(t, make(map[types.Type]bool)) {
+						consume(n.Args[0])
+					}
+				}
+				break
 			}
 			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && rooted(sel.X) {
 				selection, selOK := p.TypesInfo.Selections[sel]
@@ -4695,7 +5031,7 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 			// consumed is an unrecognized use - fail-closed. A call
 			// position is an invocation, not a handout - the call's own
 			// arms price it.
-			if !allowed[n] && isRoot(n) && !calleeReads[n] {
+			if isRoot(n) && (goIdents[n] || (!allowed[n] && !calleeReads[n])) {
 				leaky = true
 			}
 		}
@@ -4710,13 +5046,20 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 // "name\x00index"; the fact layer prefixes the package path. Blank and
 // unnamed parameters cannot be referenced and are leak-free by
 // construction; parameters whose type hands out no mutable reach are
-// omitted - no carrier can flow into them.
-func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) (map[string]bool, map[string]map[string]bool) {
+// omitted - no carrier can flow into them. The second proven set is the
+// retention-only grade - writes through the binding tolerated, every
+// other rule kept - recorded only where the leak-free grade failed
+// (leak-free implies retention-free; consumers union the two)
+// (REQ-closure-shared-dynamic-state).
+func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal, retentionMethods map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	proven := map[string]bool{}
 	deps := map[string]map[string]bool{}
+	retention := map[string]bool{}
+	retentionDeps := map[string]map[string]bool{}
+	retentionConditional := map[string]map[string]bool{}
 	// A parameter's proof may rely on other parameters: a rooted
 	// argument handed to another plain named function chains when that
 	// parameter proves leak-free. Same-package chains resolve here to
@@ -4735,6 +5078,50 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 	// a cross-package method want leaves the parameter unproven - only
 	// parameter wants earn the conditional-edge channel, method wants
 	// stay fact-time-local, deliberate conservatism.
+	//
+	// retainOnly attempts the retention grade where the leak-free grade
+	// failed: same collection, same method-want resolution, the needs
+	// satisfiable by either grade of the chained parameter (a write in
+	// the chain is a write through the same bound value).
+	retainOnly := func(obj types.Object, body ast.Node, key string) {
+		wants := map[string]bool{}
+		methodWants := map[string]bool{}
+		if !boundValueRetentionFreeJudged(p, map[types.Object]bool{obj: true}, body, wants, methodWants) {
+			return
+		}
+		for want := range methodWants {
+			// The retention grade tolerates writes, so a method call on
+			// the binding needs the retention proof alone - read-only
+			// never substitutes, a reading method can still retain.
+			pkgPath, rest, ok := strings.Cut(want, "\x00")
+			if !ok || pkgPath != ownPath || !retentionMethods[rest] {
+				return
+			}
+		}
+		if len(wants) == 0 {
+			retention[key] = true
+			return
+		}
+		local := map[string]bool{}
+		crossPackage := false
+		for want := range wants {
+			pkgPath, rest, ok := strings.Cut(want, "\x00")
+			if !ok || pkgPath != ownPath {
+				crossPackage = true
+				break
+			}
+			local[rest] = true
+		}
+		if !crossPackage {
+			retentionConditional[key] = local
+			return
+		}
+		edges := map[string]bool{}
+		for want := range wants {
+			edges[want] = true
+		}
+		retentionDeps[key] = edges
+	}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -4761,15 +5148,21 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 					if !typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
 						continue
 					}
+					key := fd.Name.Name + "\x00" + strconv.Itoa(idx)
 					wants := map[string]bool{}
 					methodWants := map[string]bool{}
 					if !boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants, nil, nil) {
+						retainOnly(obj, fd.Body, key)
 						continue
 					}
 					methodsProven := true
 					for want := range methodWants {
+						// The leak-free contract includes never-outliving:
+						// a read-only method can still retain the binding
+						// (a goroutine capture reads after the call ends),
+						// so both grades must hold.
 						pkgPath, rest, ok := strings.Cut(want, "\x00")
-						if !ok || pkgPath != ownPath || !readOnlyLocal[rest] {
+						if !ok || pkgPath != ownPath || !readOnlyLocal[rest] || !retentionMethods[rest] {
 							methodsProven = false
 							break
 						}
@@ -4777,7 +5170,6 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 					if !methodsProven {
 						continue
 					}
-					key := fd.Name.Name + "\x00" + strconv.Itoa(idx)
 					if len(wants) == 0 {
 						proven[key] = true
 						continue
@@ -4848,7 +5240,144 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 		}
 		deps[key] = edges
 	}
-	return proven, deps
+	// The retention grade's chains resolve identically, satisfiable by
+	// either grade - a leak-free hop retains nothing a fortiori.
+	for changed := true; changed; {
+		changed = false
+		for key, needs := range retentionConditional {
+			if retention[key] || proven[key] {
+				continue
+			}
+			ok := true
+			for need := range needs {
+				if !retention[need] && !proven[need] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				retention[key] = true
+				changed = true
+			}
+		}
+	}
+	for key, needs := range retentionConditional {
+		if retention[key] || proven[key] {
+			continue
+		}
+		edges := retentionDeps[key]
+		if edges == nil {
+			edges = map[string]bool{}
+		}
+		for need := range needs {
+			if !retention[need] && !proven[need] {
+				edges[ownPath+"\x00"+need] = true
+			}
+		}
+		retentionDeps[key] = edges
+	}
+	return proven, deps, retention, retentionDeps
+}
+
+// receiverRetentionFreeMethods proves, in the declaring package alone,
+// which methods never escape or outlive their receiver: writes through
+// the receiver are tolerated - the grade an init-flow receiver deferral
+// resolves against, where direct stores are the region's own exempt
+// shape - while every escape shape keeps the leak-free rules. The
+// read-only grade never substitutes: a method can read its receiver
+// only and still retain it (a goroutine capture reads after
+// initialization ends), so retention is proven for every method on its
+// own. A receiver handed to a parameter leaves the proof, and a method
+// chains only into same-package siblings proven retention-free - an
+// intra-package fixed point, fail-closed on every other shape
+// (REQ-closure-shared-dynamic-state). Keys are "Recv.Method"; the fact
+// layer prefixes the package path.
+func receiverRetentionFreeMethods(p *packages.Package, readOnlyLocal map[string]bool) map[string]bool {
+	if p == nil || p.TypesInfo == nil {
+		return nil
+	}
+	proven := map[string]bool{}
+	pending := map[string]map[string]bool{}
+	ownPath := ""
+	if p.Types != nil {
+		ownPath = p.Types.Path()
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || fd.Name == nil || fd.Body == nil || len(fd.Recv.List) != 1 {
+				continue
+			}
+			recvName := recvTypeName(fd)
+			if recvName == "" {
+				continue
+			}
+			key := recvName + "." + fd.Name.Name
+			var recvIdent *ast.Ident
+			if names := fd.Recv.List[0].Names; len(names) == 1 && names[0].Name != "_" {
+				recvIdent = names[0]
+			}
+			if recvIdent == nil {
+				// A blank or anonymous receiver cannot be referenced -
+				// nothing can retain it.
+				proven[key] = true
+				continue
+			}
+			recvObj := p.TypesInfo.Defs[recvIdent]
+			if recvObj == nil {
+				continue
+			}
+			wants := map[string]bool{}
+			methodWants := map[string]bool{}
+			if !boundValueRetentionFreeJudged(p, map[types.Object]bool{recvObj: true}, fd.Body, wants, methodWants) {
+				continue
+			}
+			if len(wants) != 0 {
+				// A receiver handed to a parameter leaves the method's
+				// own proof - deliberate conservatism of the receiver
+				// grade.
+				continue
+			}
+			needs := map[string]bool{}
+			sound := true
+			for want := range methodWants {
+				pkgPath, rest, ok := strings.Cut(want, "\x00")
+				if !ok || pkgPath != ownPath {
+					sound = false
+					break
+				}
+				needs[rest] = true
+			}
+			if !sound {
+				continue
+			}
+			if len(needs) == 0 {
+				proven[key] = true
+				continue
+			}
+			pending[key] = needs
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for key, needs := range pending {
+			if proven[key] {
+				continue
+			}
+			ok := true
+			for need := range needs {
+				if !proven[need] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				proven[key] = true
+				changed = true
+			}
+		}
+	}
+	return proven
 }
 
 // receiverReadOnlyMethods proves, in the declaring package alone, which
