@@ -621,7 +621,7 @@ its activation decision.
       refusals) are the standard subtest idiom; whether harness-internal
       subtest execution joins the audited-harness admission for the
       maximal scan needs its own design pass.
-- [ ] 52. gofresh: init-flow fill precision and cross-carrier aliasing -
+- [x] 52. gofresh: init-flow fill precision and cross-carrier aliasing -
       a retention-only parameter fact class admits the synchronous
       init-flow fill through a writing parameter that the leak-free
       deferral conservatively refuses (the single-fact-class
