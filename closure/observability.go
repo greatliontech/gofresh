@@ -394,7 +394,13 @@ func nonStandardFunctions(functions map[*ssa.Function]bool) map[*ssa.Function]bo
 }
 
 func maximalObservabilityBlocker(effect externalEffect) bool {
-	if effect.packagePath == "testing" && effect.symbol == "Run" {
+	// The AST scan cannot see the receiver, so testing.Run covers t.Run,
+	// b.Run, and m.Run alike, and testing.Fuzz would block every sibling
+	// subject in a package declaring one fuzz test; both narrow to
+	// diagnostics - the subject tier classifies each reached driver by
+	// its receiver, and a fuzz subject still refuses there
+	// (REQ-closure-observability-analysis).
+	if effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "Fuzz") {
 		return false
 	}
 	// The receiver-escape rejection is package-scan diagnostic, never a

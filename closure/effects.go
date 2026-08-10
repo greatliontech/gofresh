@@ -158,6 +158,17 @@ func harnessLoggingEffect(name string) externalEffect {
 	return effect
 }
 
+// harnessSubtestDriverEffect is the admitted harness fact recorded for a
+// reached subtest driver ((*T).Run, (*B).Run) in place of descending
+// into harness internals: observable, so the observation proof never
+// blocks on it, while the record still flips the legacy unverifiable
+// projection - an admitted driver is not purity evidence.
+func harnessSubtestDriverEffect() externalEffect {
+	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", "Run", "reaches testing.Run (test harness subtest execution)")
+	effect.observable = true
+	return effect
+}
+
 // classBPureStandard audits specific operations of effect-bearing
 // standard packages as pure: value-to-value computation with no ambient
 // acquisition, no testlog-invisible channel, and no machine-variant

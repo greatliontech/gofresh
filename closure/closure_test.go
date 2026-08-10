@@ -1663,7 +1663,21 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "initfmthelper", subject: "TestAfterInitHelperFormat", reason: "startup effect: reaches fmt.Fprintf"},
 		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
 		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
-		{fixture: "observablecallbackbad", subject: "TestSubtestRead", reason: "fmt.Fprintf"},
+		{fixture: "observablecallbackbad", subject: "TestSubtestRead", observable: true},
+		{fixture: "observablecallbackbad", subject: "TestNestedSubtestRead", observable: true},
+		// A user-constructed testing.M is subject flow: its Run is the
+		// test-main driver, never the subtest-driver admission - the
+		// refusal names whichever of M.Run's own effects ranks highest.
+		{fixture: "observablecallbackbad", subject: "TestConstructedMRun", reason: "reaches"},
+		{fixture: "subtestparallel", subject: "TestParallelChild", reason: "testing.Parallel"},
+		// The b.Run driver is admitted like t.Run, but a benchmark body
+		// stays startup-reachable through the harness's own benchmark
+		// driver - the pre-existing benchmark attribution shape, not the
+		// subtest driver, is what refuses here.
+		{fixture: "subtestbench", subject: "BenchmarkSubRead", reason: "startup effect"},
+		{fixture: "subtestbench", subject: "BenchmarkSubPure", observable: true},
+		{fixture: "fuzzsibling", subject: "FuzzDecode", reason: "testing.Fuzz"},
+		{fixture: "fuzzsibling", subject: "TestSiblingRead", observable: true},
 		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
 		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
 		// User test-main flow is startup, not subject time: its effects

@@ -150,8 +150,14 @@ const DynamicStateStrategy = "gofresh/dynamic-state@22"
 // nothing), and execution-free type and constant references
 // (fmt.Stringer, time.Time, time.Month and its constants, math/big's
 // Int, Float, and Rat - each declares or denotes and executes
-// nothing, pure same-named value methods admitted with them).
-const ObservationRTA = "gofresh/observation-rta@16"
+// nothing, pure same-named value methods admitted with them); @17
+// admits the harness subtest drivers (*testing.T).Run and
+// (*testing.B).Run as admitted harness facts - receiver-discriminated,
+// (*M).Run and (*F).Fuzz keep their classifications - with the driver
+// bodies cut from the walk exactly as the logging channel's, and the
+// package-scan testing.Fuzz finding narrowed to a diagnostic so one
+// fuzz declaration no longer blocks every sibling subject.
+const ObservationRTA = "gofresh/observation-rta@17"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

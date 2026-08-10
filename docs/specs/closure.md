@@ -714,7 +714,32 @@ admitted harness fact instead of descending into harness internals. The
 admission applies to statically and RTA-resolved callees only — an
 unresolvable reference stays refused like any other — and the harness's
 ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
-runtime-configuration reads) keep their own classifications. An interface
+runtime-configuration reads) keep their own classifications. The audited
+set likewise carries the harness's subtest drivers — exactly `(*T).Run`
+and `(*B).Run`, matched by receiver and name: the driver allocates a
+child harness handle, prints run-boundary bytes into the recorded
+output, keeps write-only harness bookkeeping no testing API hands back,
+consults run-filter state that shapes selection and recorded-output
+bytes only — outside the proof's claim exactly as the logging path's
+presentation state — and runs the caller-supplied callback on a
+harness-managed goroutine it waits for, returning only an outcome bit.
+The callback is subject flow: its body is walked and classified at its
+own sites, and the walk records the reached driver as an admitted
+harness fact instead of descending into harness internals. A parallel
+subtest defers its body past the driver's return; `Parallel` keeps its
+test-runtime classification, so the interleaved shape refuses.
+Receiver discrimination is load-bearing: `(*M).Run` is test-main flow,
+not a subtest driver, and keeps its classification, and `(*F).Fuzz` is
+no admission candidate at all — it dispatches its target reflectively
+(an unwalked body can earn no proof), consumes corpus files that are
+semantic inputs, and can coordinate worker processes — refusing at the
+subject tier, while the package-scan findings for the driver names,
+blind to receivers, narrow to diagnostics so the subject tiers decide.
+The driver admission applies to static callees only — a driver reached
+as a dynamic target or through a bound value keeps its classification,
+the conservative refusal — and the toolchain's declaration inventory of
+the driver names is walked by an enforcement test so drift refuses
+instead of silently widening. An interface
 dispatch the walk cannot resolve widens the subject world — the synthetic
 interface-method wrapper family (any interface, the harness included)
 carries the same obligation in the closed-value walk itself: a bound

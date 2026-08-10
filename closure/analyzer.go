@@ -502,7 +502,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && (classifiedOK && classified.kind == externalEffectFileIO || atomicObservabilityOperation(fn) || harnessLoggingFunction(fn)) {
+	if idx.std && (classifiedOK && classified.kind == externalEffectFileIO || atomicObservabilityOperation(fn) || harnessLoggingFunction(fn) || auditedHarnessSubtestDriver(fn) || harnessFuzzDriver(fn)) {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -696,6 +696,14 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	if auditedHarnessLogging(pkgPath, name) {
 		a.recordExternalEffect(harnessLoggingEffect(name))
+		return
+	}
+	if auditedHarnessSubtestDriver(callee) {
+		// The callback is subject flow reached through the harness's own
+		// dispatch and classified at its own sites; the driver itself is
+		// an admitted harness fact, never descended into
+		// (REQ-closure-observability-analysis's subtest-driver channel).
+		a.recordExternalEffect(harnessSubtestDriverEffect())
 		return
 	}
 	if observableFileMethod(callee) {

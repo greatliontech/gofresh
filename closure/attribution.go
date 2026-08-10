@@ -261,6 +261,54 @@ func isTestingMRun(fn *ssa.Function) bool {
 	return strings.Contains(fn.String(), "testing.M).Run")
 }
 
+// auditedHarnessSubtestDriver reports whether a function is the
+// harness's subtest driver - exactly (*testing.T).Run and
+// (*testing.B).Run, matched by receiver and name. The driver allocates
+// a child harness handle, prints run-boundary bytes into the recorded
+// output, keeps write-only harness bookkeeping no testing API hands
+// back, consults run-filter state that shapes selection and
+// recorded-output bytes only, and runs the caller-supplied callback -
+// whose body is walked and classified at its own sites - on a
+// harness-managed goroutine it waits for, returning only an outcome
+// bit. Receiver discrimination is load-bearing: (*testing.M).Run is
+// the test-main driver and (*testing.F).Fuzz dispatches its target
+// reflectively over corpus files - both keep their classifications
+// (REQ-closure-observability-analysis).
+func auditedHarnessSubtestDriver(fn *ssa.Function) bool {
+	if fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
+		return false
+	}
+	if fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	recv := fn.Signature.Recv().Type()
+	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
+		recv = ptr.Elem()
+	}
+	named, ok := types.Unalias(recv).(*types.Named)
+	return ok && named.Obj() != nil && (named.Obj().Name() == "T" || named.Obj().Name() == "B")
+}
+
+// harnessFuzzDriver reports (*testing.F).Fuzz - never admitted (its
+// target dispatches reflectively over corpus files), but its
+// harness-internal body is cut from the walk so the refusal names the
+// driver itself rather than the harness's own formatting internals
+// (REQ-closure-observability-analysis).
+func harnessFuzzDriver(fn *ssa.Function) bool {
+	if fn == nil || fn.Name() != "Fuzz" || funcPkgPath(fn) != "testing" {
+		return false
+	}
+	if fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	recv := fn.Signature.Recv().Type()
+	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
+		recv = ptr.Elem()
+	}
+	named, ok := types.Unalias(recv).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Name() == "F"
+}
+
 // enumerationClosure is one signature-open subject's whole-view caller
 // closure (REQ-closure-analysis): the direct static call sites that are
 // its only references, plus the dispatch candidates those sites pass —

@@ -443,3 +443,67 @@ func TestHarnessLoggingDeclarationInventory(t *testing.T) {
 		t.Error("testing package no longer declares the shared embedded core type this audit assumes — re-audit the harness-logging channel")
 	}
 }
+
+// The subtest-driver admission is sound only while the driver names are
+// declared exactly where the audit looked: Run as a method of T, B, and
+// M alone (T and B admitted, M the test-main driver the receiver check
+// excludes), Fuzz as a method of F alone (never admitted - reflective
+// dispatch over corpus files), and neither as a package-level function.
+// A drifting toolchain fails here instead of silently widening
+// (REQ-closure-observability-analysis).
+func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo
+	pkgs, err := packages.Load(&packages.Config{Mode: mode}, "testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 || pkgs[0].Types == nil {
+		t.Fatalf("loaded %d packages for testing, want one with types", len(pkgs))
+	}
+	if len(pkgs[0].Syntax) == 0 {
+		t.Fatal("testing loaded without syntax — the inventory no longer type-checks from source and cannot see unexported declarations")
+	}
+	allowedRun := map[string]bool{"T": true, "B": true, "M": true}
+	scope := pkgs[0].Types.Scope()
+	for _, typeName := range scope.Names() {
+		object := scope.Lookup(typeName)
+		if _, isFunc := object.(*types.Func); isFunc && (object.Name() == "Run" || object.Name() == "Fuzz") {
+			t.Errorf("testing declares driver name %s as a package-level function — re-audit the subtest-driver channel before trusting this toolchain", object.Name())
+			continue
+		}
+		named, ok := object.Type().(*types.Named)
+		if !ok {
+			continue
+		}
+		for i := 0; i < named.NumMethods(); i++ {
+			method := named.Method(i)
+			switch method.Name() {
+			case "Run":
+				if !allowedRun[typeName] {
+					t.Errorf("testing.%s declares driver name Run outside the audited receivers — re-audit the subtest-driver channel before trusting this toolchain", typeName)
+				}
+			case "Fuzz":
+				if typeName != "F" {
+					t.Errorf("testing.%s declares driver name Fuzz outside *testing.F — re-audit the subtest-driver channel before trusting this toolchain", typeName)
+				}
+			}
+		}
+	}
+	for _, typeName := range scope.Names() {
+		object := scope.Lookup(typeName)
+		iface, ok := object.Type().Underlying().(*types.Interface)
+		if !ok {
+			continue
+		}
+		for i := 0; i < iface.NumExplicitMethods(); i++ {
+			if name := iface.ExplicitMethod(i).Name(); name == "Run" || name == "Fuzz" {
+				t.Errorf("testing interface %s declares driver name %s — re-audit the subtest-driver channel before trusting this toolchain", typeName, name)
+			}
+		}
+	}
+	for _, want := range []string{"T", "B", "M", "F"} {
+		if scope.Lookup(want) == nil {
+			t.Errorf("testing package no longer declares %s — the subtest-driver audit assumes the harness type family", want)
+		}
+	}
+}
