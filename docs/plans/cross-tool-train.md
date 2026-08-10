@@ -329,7 +329,7 @@ its activation decision.
       parameter facts, audited literals judged at registration,
       constructor results through the return-env-free channel), any
       unproven registrant keeping the escape.
-- [ ] 56a. gofresh: composition-refused deferrals earn explain chains -
+- [x] 56a. gofresh: composition-refused deferrals earn explain chains -
       ExplainDynamicState returns an empty chain for any culprit whose
       escape is decided at composition rather than fact time (a
       deferred argument mark whose parameter never proves, a deferred
