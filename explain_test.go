@@ -64,9 +64,9 @@ func TestExplainChains(t *testing.T) {
 	})
 	t.Run("cross-package edge chain names the foreign refusal", func(t *testing.T) {
 		files := map[string]string{
-			"go.mod":      goMod,
-			"law/law.go":  "package law\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype Handler func(n int) int\n\nfunc Build() []Handler {\n\tc := &counter{}\n\treturn []Handler{c.Next}\n}\n",
-			"reg/reg.go":  "package reg\n\nimport \"example.com/explain/law\"\n\nfunc gen() []law.Handler { return law.Build() }\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
+			"go.mod":     goMod,
+			"law/law.go": "package law\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype Handler func(n int) int\n\nfunc Build() []Handler {\n\tc := &counter{}\n\treturn []Handler{c.Next}\n}\n",
+			"reg/reg.go": "package reg\n\nimport \"example.com/explain/law\"\n\nfunc gen() []law.Handler { return law.Build() }\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
 		}
 		dir := writeModuleTree(t, files)
 		chain := explainView(t, dir, "example.com/explain/reg", "Registry")
@@ -183,13 +183,13 @@ func TestExplainChains(t *testing.T) {
 		// REQ-explain-vocabulary: every emitted clause is one of the
 		// spec's enumerated families.
 		allowed := map[string]bool{
-			"write or capture broke the binding":                 true,
-			"a binding source refused":                           true,
-			"a stored value refused":                             true,
+			"write or capture broke the binding":                    true,
+			"a binding source refused":                              true,
+			"a stored value refused":                                true,
 			"callee outside the audited set and dependency channel": true,
-			"a literal element refused":                          true,
-			"an unadmitted derivation shape":                     true,
-			"an unrecognized return shape":                       true,
+			"a literal element refused":                             true,
+			"an unadmitted derivation shape":                        true,
+			"an unrecognized return shape":                          true,
 		}
 		files := map[string]string{
 			"go.mod":     goMod,

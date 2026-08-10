@@ -3480,9 +3480,11 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want Valid - a func-field call through the binding refused the discharge", verdict)
 		}
 	})
-	t.Run("func-field call handing out the binding refuses", func(t *testing.T) {
-		// The call target is fine but an argument hands the callee an
-		// alias into carrier state - the argument loop must still refuse.
+	t.Run("func-field argument discharges through the registered population", func(t *testing.T) {
+		// An argument handing the callee an alias into carrier state
+		// defers to the field position's registered population: the only
+		// registrant is a named function whose parameter proves
+		// leak-free, so the binding proof composes.
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -3490,8 +3492,329 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 		dir := writeModuleTree(t, files)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free registered population refused the field-position discharge", verdict)
+		}
+	})
+	t.Run("func-field argument refuses when a registrant retains the alias", func(t *testing.T) {
+		// The same shape with a registrant that stores its parameter
+		// into package state: the population cannot prove the position
+		// leak-free, so the escape stays.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: grab}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
-			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a carrier alias handed to a func-field callee passed the loop proof", verdict)
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - an alias-retaining registrant passed the population proof", verdict)
+		}
+	})
+	t.Run("func-field argument discharges through a judged literal registrant", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int { return len(cols) }}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free literal registrant refused the field-position discharge", verdict)
+		}
+	})
+	t.Run("func-field argument refuses on a leaking literal registrant", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int {\n\t\tsink = cols\n\t\treturn len(cols)\n\t}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a leaking literal registrant passed the population proof", verdict)
+		}
+	})
+	t.Run("func-field argument discharges through a constructor registrant", func(t *testing.T) {
+		// The registry is built by a proven return-environment-free
+		// constructor: its field marks join the population through the
+		// carrier's constructor-registration pair.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc build() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a constructor-supplied leak-free population refused the discharge", verdict)
+		}
+	})
+	t.Run("func-field argument refuses on a constructor's leaking registrant", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc build() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: grab}}\n}\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a constructor's alias-retaining registrant passed the population proof", verdict)
+		}
+	})
+	t.Run("func-field argument refuses on a method-expression registrant", func(t *testing.T) {
+		// A method expression carries a receiver frame no leak-free fact
+		// covers - the classification poisons the field position.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ cols []string }\n\nfunc (c *counter) grab(cols []string) int {\n\tc.cols = cols\n\treturn len(cols)\n}\n\ntype entry struct {\n\tCols  []string\n\tBuild func(c *counter, cols []string) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: (*counter).grab}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tc := &counter{}\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(c, e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a method-expression registrant passed the population proof", verdict)
+		}
+	})
+	t.Run("constructor-argument registrants join the population", func(t *testing.T) {
+		// A passthrough constructor's parameters carry the store site's
+		// values into the carrier - the arguments are classified at the
+		// store site, so the leaking registrant inside one refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc pass(es []entry) []entry { return es }\n\nvar Registry = pass([]entry{{Cols: []string{\"a\"}, Build: grab}})\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a constructor argument's registrant escaped the population", verdict)
+		}
+	})
+	t.Run("constructor-argument leak-free registrants discharge", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc pass(es []entry) []entry { return es }\n\nvar Registry = pass([]entry{{Cols: []string{\"a\"}, Build: width}})\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a passthrough constructor's leak-free argument registrant refused the discharge", verdict)
+		}
+	})
+	t.Run("rebound binding detaches from the population and refuses", func(t *testing.T) {
+		// Rebinding the tracked local from a value the population never
+		// registered would resolve its field calls against the wrong
+		// registrants - the proof refuses the rebinding.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\tFn  func(cols []string) int\n\tPad []string\n}\n\ntype entry struct {\n\tCols []string\n\tSub  inner\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Sub: inner{Fn: width}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ts := e.Sub\n\t\ts = inner{Fn: grab}\n\t\ttotal += s.Fn(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a rebound binding resolved against the carrier's population", verdict)
+		}
+	})
+	t.Run("foreign-valued declaration of a tracked binding refuses", func(t *testing.T) {
+		// The declaration twin of the rebinding refusal: the name is
+		// tracked by a later carrier assignment, but its initial value
+		// is one the population never registered - the declaration
+		// ident stays unconsumed and the tracked-ident catch-all
+		// refuses, no dedicated arm needed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\tFn  func(cols []string) int\n\tPad []string\n}\n\ntype entry struct {\n\tCols []string\n\tSub  inner\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Sub: inner{Fn: width}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tvar s inner = inner{Fn: grab}\n\t\ts = e.Sub\n\t\ttotal += s.Fn(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a foreign-valued declaration resolved against the carrier's population", verdict)
+		}
+	})
+	t.Run("delegating constructor joins its dependency's population", func(t *testing.T) {
+		// The proven constructor returns another constructor's result -
+		// the dependency's field marks decide, joined over the proof's
+		// dependency edges.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc part() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: grab}}\n}\n\nfunc build() []entry { return part() }\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a delegated constructor's registrant escaped the transitive join", verdict)
+		}
+	})
+	t.Run("delegating constructor's leak-free dependency discharges", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc part() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc build() []entry { return part() }\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a delegating constructor's leak-free dependency refused the transitive discharge", verdict)
+		}
+	})
+	t.Run("literal registrant's own deferral resolves at composition", func(t *testing.T) {
+		// The judged literal hands its parameter to a named function -
+		// the deferral rides the population marks and resolves against
+		// the leak-free union.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int { return width(cols) }}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a literal registrant's carried deferral refused the discharge", verdict)
+		}
+	})
+	t.Run("literal registrant's unproven deferral refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int { return grab(cols) }}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a literal's unproven deferral passed the population proof", verdict)
+		}
+	})
+	t.Run("func-field argument through an unrelated value keeps the escape", func(t *testing.T) {
+		// The invoked field belongs to a local that is not the judged
+		// binding - its callee is outside the carrier's registered
+		// population, so the want must not be recorded against it.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc Total() int {\n\thelper := entry{Build: grab}\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += helper.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - an unrelated value's field call earned the carrier's deferral", verdict)
+		}
+	})
+	t.Run("constructor reading a func-carrying package variable poisons its population", func(t *testing.T) {
+		// The proof's derivation channel could hand the read variable's
+		// unclassified interior into the result - whole-population
+		// poison, whatever the constructor's literals prove.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar hidden []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc build() []entry {\n\t_ = len(hidden)\n\treturn []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a constructor's package-variable read left its population unpoisoned", verdict)
+		}
+	})
+	t.Run("nested registrant pools into the population by field name", func(t *testing.T) {
+		// A nested struct's func field can become a judged binding
+		// through the taint chain - its registrants share the field-name
+		// namespace, so the nested leaking registrant must refuse.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\tFn  func(cols []string) int\n\tPad []string\n}\n\ntype entry struct {\n\tCols []string\n\tSub  inner\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Sub: inner{Fn: grab}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ts := e.Sub\n\t\ttotal += s.Fn(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a nested leaking registrant escaped the pooled population", verdict)
+		}
+	})
+	t.Run("non-signature rebind of a carrier-derived local stays discharged", func(t *testing.T) {
+		// A rebound []string local can never be a func-field base - the
+		// rebinding refusal is scoped to signature-carrying bindings,
+		// so the default-fallback pattern keeps its discharge.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar fallback = []string{\"z\"}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tc := e.Cols\n\t\tif len(c) == 0 {\n\t\t\tc = fallback\n\t\t}\n\t\ttotal += len(c)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a non-signature fallback rebind lost its discharge", verdict)
+		}
+	})
+	t.Run("make-constructed registry discharges", func(t *testing.T) {
+		// make's type argument is not a value - the population stays
+		// exactly the appended registrants'.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nvar Registry = make([]entry, 0)\n\nfunc init() {\n\tRegistry = append(Registry, entry{Cols: []string{\"a\"}, Build: width})\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - make's type argument poisoned the population", verdict)
+		}
+	})
+	t.Run("named func-typed field earns the discharge", func(t *testing.T) {
+		// The http.HandlerFunc idiom: the field's type is a named func
+		// type, unwrapped to its signature on both sides.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype Builder func(cols []string) int\n\ntype entry struct {\n\tCols  []string\n\tBuild Builder\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a named func-typed field refused the discharge", verdict)
+		}
+	})
+	t.Run("nested leak-free registrant discharges through the pooled population", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\tFn  func(cols []string) int\n\tPad []string\n}\n\ntype entry struct {\n\tCols []string\n\tSub  inner\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Sub: inner{Fn: width}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ts := e.Sub\n\t\ttotal += s.Fn(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a nested leak-free registrant refused the pooled discharge", verdict)
+		}
+	})
+	t.Run("go-statement func-field argument keeps the escape", func(t *testing.T) {
+		// The goroutine runs concurrently with the loop - the field call's
+		// argument never defers, whatever the population proves.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tgo e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a concurrent field call's argument earned the deferral", verdict)
+		}
+	})
+	t.Run("func-field argument refuses on a direct field-write registrant", func(t *testing.T) {
+		// Re-registration through the carrier's own storage joins the
+		// population exactly as the initial store did.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: width}}\n\tRegistry[0].Build = grab\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a field-write registrant escaped the population", verdict)
 		}
 	})
 	t.Run("plain-data builder effects stay per-process", func(t *testing.T) {

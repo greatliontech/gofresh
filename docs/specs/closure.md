@@ -308,7 +308,26 @@ value is proven leak-free over the loop body by the same judgment,
 fail-closed on any other binding shape — where the leak-free judgment
 recognizes the call of a func-typed field of a bound value: the target
 is the field read the read shapes already judge, and the callee receives
-only its arguments, judged like any call; and where a rooted
+only its arguments, judged like any call — a rooted alias-handing
+argument through such a field call deferring to the field position's
+registered population: every value the environment-free registration
+audit admits into the carrier contributes a recorded disposition for
+each func-signature field it can populate — a plain named registrant
+defers each parameter index to that parameter's leak-free fact, an
+audited literal registrant is judged at registration with its own
+deferrals carried, and a proven return-environment-free constructor's
+results contribute the constructor's recorded field marks, joined
+through the carrier's constructor-registration pairs transitively over
+the proof's dependency edges — while a method expression, a
+re-registration the walk cannot attribute, and every other shape poison
+the position or the whole population (a method value never reaches the
+population: its receiver environment already refuses the carrier at
+admission), marks pooling by field name
+across composite levels since a nested value can become a judged
+binding through the taint chain; at composition the use discharges only
+when no poison covers the position, every deferral resolves against the
+leak-free union, and every constructor resolves, any malformed record
+marking the declaring fact's variables fail-closed; and where a rooted
 alias-handing argument to a plain named function defers to that
 parameter's leak-free fact exactly as a carrier argument does — the
 binding proof records the parameter keys it relies on, the range

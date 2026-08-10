@@ -840,6 +840,104 @@ func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
 	}
 }
 
+// A persisted deferred field-position mark the consumer cannot parse is
+// not trusted: every key the fact declares marks mutated — fail-closed
+// like every malformed-fact arm (REQ-closure-shared-dynamic-state).
+func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writePinnedDepModule(t)
+	const pkg = "example.com/pinned"
+	subject := Subject{Package: pkg, Symbol: "Run"}
+	processFactCache = sync.Map{}
+	const scope = DynamicStateStrategy + "|malformed-fieldparam-toolchain|cfg"
+
+	clean := runScan(t, scope, dir, pkg)
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("baseline already downgraded: %q", reason)
+	}
+
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+			// The position part lost its index NUL - unparseable.
+			fact.FieldParamUses = append(fact.FieldParamUses, "golang.org/x/sync/errgroup.Ghost\x01bad")
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no errgroup fact in the process cache")
+	}
+	poisoned := runScan(t, scope, dir, pkg)
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+		t.Fatalf("downgrade reason %q does not mark the declared key - a malformed field deferral slipped through", reason)
+	}
+}
+
+// Every persisted registered-population record shares the malformed-fact
+// discipline: an entry the consumer cannot parse marks every key the
+// carrying fact declares mutated — fail-closed
+// (REQ-closure-shared-dynamic-state).
+func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
+	cases := []struct {
+		name   string
+		poison func(fact *dynamicStateFact)
+	}{
+		{"fieldParamDefer", func(fact *dynamicStateFact) {
+			// Deferral with a negative index - outside the record domain.
+			fact.FieldParamDefer = append(fact.FieldParamDefer, "golang.org/x/sync/errgroup.Ghost\x01Build\x00-1\x01p\x00f\x000")
+		}},
+		{"fieldParamPoison", func(fact *dynamicStateFact) {
+			// Position part lost its index NUL.
+			fact.FieldParamPoison = append(fact.FieldParamPoison, "golang.org/x/sync/errgroup.Ghost\x01bad")
+		}},
+		{"returnFieldParamDefer", func(fact *dynamicStateFact) {
+			// Function key lost its NUL frame.
+			fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, "badfn\x01Build\x000\x01p\x00f\x000")
+		}},
+		{"returnFieldParamPoison", func(fact *dynamicStateFact) {
+			fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, "badfn\x01Build\x000")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			dir := writePinnedDepModule(t)
+			const pkg = "example.com/pinned"
+			subject := Subject{Package: pkg, Symbol: "Run"}
+			processFactCache = sync.Map{}
+			scope := DynamicStateStrategy + "|malformed-fieldpop-" + tc.name + "|cfg"
+
+			clean := runScan(t, scope, dir, pkg)
+			if reason := clean.downgradeReason[subject]; reason != "" {
+				t.Fatalf("baseline already downgraded: %q", reason)
+			}
+
+			var hit bool
+			processFactCache.Range(func(k, v any) bool {
+				if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
+					fact := v.(dynamicStateFact)
+					fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
+					tc.poison(&fact)
+					processFactCache.Store(k, fact)
+					hit = true
+				}
+				return true
+			})
+			if !hit {
+				t.Fatal("no errgroup fact in the process cache")
+			}
+			poisoned := runScan(t, scope, dir, pkg)
+			if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
+				t.Fatalf("downgrade reason %q does not mark the declared key - a malformed population record slipped through", reason)
+			}
+		})
+	}
+}
+
 // A pinned module's bucket moves when any pinned module reachable from it
 // changes version — the import-cone version signature completing the fact's
 // input identity (REQ-closure-dynamic-state-memo): a dependency bump that

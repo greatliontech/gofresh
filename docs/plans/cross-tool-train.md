@@ -21,7 +21,7 @@ verdict domain, every refusal carrying a handle to its derivation
 through the surfaces agents already use - then 66, then 81
 (blocking-a-user: an oracle OOM burst pins the reporting user's host
 during campaigns; 82 rides the tail with 80), then the
-discharge tail 56, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
+discharge tail 56, 56a, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
 74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
 startup-effect-precision plan activation decision with 29-46 (80
 rides beside 39a - the same oversubscription mechanism, one repo
@@ -329,6 +329,16 @@ its activation decision.
       parameter facts, audited literals judged at registration,
       constructor results through the return-env-free channel), any
       unproven registrant keeping the escape.
+- [ ] 56a. gofresh: composition-refused deferrals earn explain chains -
+      ExplainDynamicState returns an empty chain for any culprit whose
+      escape is decided at composition rather than fact time (a
+      deferred argument mark whose parameter never proves, a deferred
+      method use, a field-position population refusal): the fact-time
+      hooks observe only immediate marks, so the re-derivation sees a
+      discharged read where the verdict saw a refused deferral.
+      Surface the deferral's use site and the unproven resolvent
+      (parameter key, method key, or registrant) as chain links across
+      all three deferral channels, within the explain vocabulary.
 - [ ] 57. gofresh: carrier index extraction admissions - a comma-ok
       existence read discarding the extracted element (the
       membership-validation shape) is writeless on any carrier, and a
