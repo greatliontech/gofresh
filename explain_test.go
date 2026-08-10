@@ -431,6 +431,24 @@ func TestExplainDeferralChains(t *testing.T) {
 			t.Fatalf("links[0] = %+v, want the mutation-kind deferral leading", chain.Links[0])
 		}
 	})
+	t.Run("refused element position names the owner and registrant", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":     goMod,
+			"reg/reg.go": "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": grab}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Count() int {\n\treturn Legs[\"w\"](Shared)\n}\n",
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explain/reg", "Shared")
+		if chain.Arm != "escape" || len(chain.Links) == 0 {
+			t.Fatalf("chain = %+v, want an escape deferral chain", chain)
+		}
+		link := chain.Links[0]
+		if link.Clause != "the element population refused the position" {
+			t.Fatalf("clause = %q - the element deferral family is missing", link.Clause)
+		}
+		if !strings.Contains(link.Callee, "example.com/explain/reg.Legs element parameter 0") || !strings.Contains(link.Callee, "example.com/explain/reg.grab parameter 0") {
+			t.Fatalf("callee = %q, want the owner and failing registrant named", link.Callee)
+		}
+	})
 	t.Run("resolved deferral contributes no chain", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":     goMod,

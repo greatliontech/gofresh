@@ -73,6 +73,14 @@ type dynamicStateFact struct {
 	// field position leak-free; otherwise the variable marks escaped -
 	// fail-closed.
 	FieldParamUses []string `json:"fieldParamUses,omitempty"`
+	// ElemParamUses holds deferred dispatch-argument marks: the
+	// escaping variable key, the dispatch carrier's variable key (the
+	// element-population owner - a callee-position index read of it
+	// supplied the callee), and the zero-based parameter index, all
+	// \x01-joined. At composition the use is discharged only when the
+	// owner's element population proves the position leak-free;
+	// otherwise the escaping variable marks escaped - fail-closed.
+	ElemParamUses []string `json:"elemParamUses,omitempty"`
 	// FieldParamDefer holds registered-population deferrals: variable
 	// key, field position (field name, parameter index NUL-joined), and
 	// callee parameter key, \x01-joined - one admitted registrant's
@@ -149,10 +157,11 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	methodUses := map[string]map[string]bool{}
 	paramUses := map[string]map[string]bool{}
 	fieldUses := map[string]map[string]bool{}
+	elemUses := map[string]map[string]bool{}
 	var attributedUses []attributedUse
 	funcRefs := map[string]map[string]bool{}
 	envCarrying := map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, fieldUses, &attributedUses)
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, fieldUses, elemUses, &attributedUses)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
 	envCalls := map[string]map[string]bool{}
@@ -181,6 +190,12 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 		}
 	}
 	sort.Strings(fact.FieldParamUses)
+	for argKey, wants := range elemUses {
+		for want := range wants {
+			fact.ElemParamUses = append(fact.ElemParamUses, argKey+"\x01"+want)
+		}
+	}
+	sort.Strings(fact.ElemParamUses)
 	for key := range envCarrying {
 		fact.EnvCarrying = append(fact.EnvCarrying, key)
 	}
@@ -671,6 +686,24 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				field, idx, _ := strings.Cut(position, "\x00")
 				if ok, _ := resolution.fieldPopulationProves(varKey, field, idx); !ok {
 					escaped[varKey] = true
+				}
+			}
+			for _, use := range fact.ElemParamUses {
+				parts := strings.SplitN(use, "\x01", 3)
+				if len(parts) != 3 {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if n, err := strconv.Atoi(parts[2]); err != nil || n < 0 || strconv.Itoa(n) != parts[2] {
+					for _, key := range fact.Declares {
+						mutated[key] = true
+					}
+					continue
+				}
+				if ok, _ := resolution.fieldPopulationProves(parts[1], elemPositionField, parts[2]); !ok {
+					escaped[parts[0]] = true
 				}
 			}
 		}
@@ -1229,5 +1262,8 @@ func fieldPosition(part string, minIdx int) bool {
 		return false
 	}
 	n, err := strconv.Atoi(idx)
-	return err == nil && n >= minIdx
+	// Canonical spelling only: "00" or "+0" would build a position no
+	// recorded mark matches, and a defer-only population would then
+	// prove empty - fail-open through a corrupted fact.
+	return err == nil && n >= minIdx && strconv.Itoa(n) == idx
 }

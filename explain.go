@@ -277,6 +277,21 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string) 
 				link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
 			}
 			escapeLinks = append(escapeLinks, link)
+		case 'e':
+			ownerKey, idx, ok := strings.Cut(obs.resolvent, "\x01")
+			if !ok || !resolution.notOpaque[varKey] {
+				continue
+			}
+			proves, failParam := resolution.fieldPopulationProves(ownerKey, elemPositionField, idx)
+			if proves {
+				continue
+			}
+			link.Clause = "the element population refused the position"
+			link.Callee = ownerKey + " element parameter " + idx
+			if failParam != "" {
+				link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
+			}
+			escapeLinks = append(escapeLinks, link)
 		}
 	}
 	if len(mutationLinks) > 0 || len(escapeLinks) > 0 {

@@ -235,7 +235,9 @@ or capacity, or comparing it — is not mutation, and the indexing and iteration
 discharges hold only when the produced value hands out no mutable reach — a
 pointer, map, slice, channel, or interface anywhere in it refuses; a function
 value is program code judged where written, not write access (an indexed-out
-map still writes through) — and never for a channel (ranging a channel
+map still writes through), and a comma-ok existence read whose extracted
+element lands in a blank is writeless on any carrier — no value is
+produced to hand out — and never for a channel (ranging a channel
 receives); a write through the carrier, growth or deletion, a send or receive, an
 address capture, or a rebinding is mutation; every other use — escaping the value
 into a call argument, a store, a return, a binding, a method call on it, or a
@@ -327,7 +329,21 @@ across composite levels since a nested value can become a judged
 binding through the taint chain; at composition the use discharges only
 when no poison covers the position, every deferral resolves against the
 leak-free union, and every constructor resolves, any malformed record
-marking the declaring fact's variables fail-closed; and where a rooted
+marking the declaring fact's variables fail-closed — and a carrier
+argument to a callee-position index read of another carrier (the
+dispatch-table shape) defers identically to the dispatch carrier's
+element population, a reserved position the same records carry: a bare
+registered function dispositions per parameter index exactly as a
+field registrant does, a registered literal is judged at registration,
+and a proven constructor contributes its whole body's value-position
+dispositions through the return-environment-free channel - every
+bare-function reference dispositions per parameter index, callees
+handed a tracked binding or producing a signature-carrying result join
+their own recorded populations over the proof's dependency edges, a
+callee or receiver the proof cannot attribute breaks the binding it
+reaches, and every other signature-carrying value-position shape
+poisons the element position, fail-closed; go statements never defer,
+and init flow keeps the escape; and where a rooted
 alias-handing argument to a plain named function defers to that
 parameter's leak-free fact exactly as a carrier argument does — the
 binding proof records the parameter keys it relies on, the range

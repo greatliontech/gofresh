@@ -31,7 +31,8 @@ parameter, the method, or the field position, with the unproven
 registrant parameter when one decided the population), its clause one
 of the deferral clause set: "a deferred argument's parameter
 unproven", "a deferred method use unproven", "the registered
-population refused the field position". The deferral resolves over
+population refused the field position", "the element population
+refused the position". The deferral resolves over
 the same composed proof state the verdict used.
 Chains describe refusals; a Valid verdict has no chain, a
 registration whose every dependency edge resolves contributes none,

@@ -901,6 +901,18 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 		{"returnFieldParamPoison", func(fact *dynamicStateFact) {
 			fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, "badfn\x01Build\x000")
 		}},
+		{"elemParamUses", func(fact *dynamicStateFact) {
+			// Two parts only - the owner key lost its frame.
+			fact.ElemParamUses = append(fact.ElemParamUses, "golang.org/x/sync/errgroup.Ghost\x01bad")
+		}},
+		{"elemNonCanonicalIndex", func(fact *dynamicStateFact) {
+			fact.ElemParamUses = append(fact.ElemParamUses, "golang.org/x/sync/errgroup.Ghost\x01owner.Key\x0100")
+		}},
+		{"nonCanonicalIndex", func(fact *dynamicStateFact) {
+			// "00" spells a position no recorded mark can match - it
+			// must be malformed, never a silently empty population.
+			fact.FieldParamDefer = append(fact.FieldParamDefer, "golang.org/x/sync/errgroup.Ghost\x01Build\x0000\x01p\x00f\x000")
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

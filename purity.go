@@ -498,7 +498,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil)
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -596,7 +596,7 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 	}
 }
 
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, fieldUses map[string]map[string]bool, attributed *[]attributedUse) {
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, fieldUses, elemUses map[string]map[string]bool, attributed *[]attributedUse) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -967,6 +967,17 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						markRead(index.X)
 					}
 				}
+				// A comma-ok existence read whose element lands in a
+				// blank produces no value to hand out - writeless on any
+				// carrier, whatever the element type
+				// (REQ-closure-shared-dynamic-state).
+				if len(n.Lhs) == 2 && len(n.Rhs) == 1 {
+					if blank, ok := n.Lhs[0].(*ast.Ident); ok && blank.Name == "_" {
+						if index, ok := unparenExpr(n.Rhs[0]).(*ast.IndexExpr); ok {
+							markRead(unparenExpr(index.X))
+						}
+					}
+				}
 			case *ast.IncDecStmt:
 				markTargets(n.X)
 			case *ast.RangeStmt:
@@ -1015,7 +1026,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						// disposition judges its callers by package-local
 						// fixed point after the walk. A carrier the walk
 						// cannot key keeps the strict proof.
-						var wants, methodWants, fieldWants map[string]bool
+						var wants, methodWants, fieldWants, elemWants map[string]bool
 						var returned bool
 						var retPtr *bool
 						if paramUses != nil {
@@ -1026,12 +1037,15 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							if fieldUses != nil {
 								fieldWants = map[string]bool{}
 							}
+							if elemUses != nil {
+								elemWants = map[string]bool{}
+							}
 							if currentFn != nil && currentFn.Recv == nil && currentFn.Name != nil && !currentFn.Name.IsExported() && currentFn.Name.Name != "init" {
 								retPtr = &returned
 							}
 						}
-						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr, methodWants, fieldWants)) {
-							if len(wants) == 0 && len(methodWants) == 0 && len(fieldWants) == 0 && !returned {
+						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr, methodWants, fieldWants, elemWants)) {
+							if len(wants) == 0 && len(methodWants) == 0 && len(fieldWants) == 0 && len(elemWants) == 0 && !returned {
 								markRead(n.X)
 							} else {
 								var keys []string
@@ -1072,6 +1086,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 											fieldUses[key][want] = true
 											explainDeferralMark(p, 'f', key, want, n.X.Pos())
 										}
+										if len(elemWants) > 0 && elemUses[key] == nil {
+											elemUses[key] = map[string]bool{}
+										}
+										for want := range elemWants {
+											elemUses[key][want] = true
+											explainDeferralMark(p, 'e', key, want, n.X.Pos())
+										}
 									}
 									if returned {
 										pendingReturns = append(pendingReturns, pendingReturnDisposition{
@@ -1095,7 +1116,10 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			case *ast.IndexExpr:
 				// The discharge holds only when the produced element is
 				// not itself alias-handing - an indexed-out map or slice
-				// still writes through (REQ-closure-shared-dynamic-state).
+				// still writes through; a comma-ok context's recorded
+				// tuple type keeps the fail-closed default, and its
+				// blank-target admission is the assignment arm's
+				// (REQ-closure-shared-dynamic-state).
 				if t := p.TypesInfo.TypeOf(n); t == nil || !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
 					markRead(n.X)
 				}
@@ -1143,6 +1167,51 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					deferCarrierArgs(n, func(target *ast.Ident) {
 						readContext[target] = true
 					})
+				}
+				// A carrier argument to a callee-position index read of
+				// another carrier (the dispatch-table shape
+				// legs[token](arg)) defers to the dispatch carrier's
+				// element population - never from a go statement, and
+				// init flow keeps the escape like every deferral
+				// (REQ-closure-shared-dynamic-state).
+				if elemUses != nil && !goCalls[n] {
+					if index, ok := unparenExpr(n.Fun).(*ast.IndexExpr); ok {
+						if base, ok := unparenExpr(index.X).(*ast.Ident); ok {
+							if obj, ok := resolve(base); ok {
+								if owner, ok := dynamicPackageVar(obj); ok {
+									if sig, ok := types.Unalias(p.TypesInfo.TypeOf(n.Fun)).Underlying().(*types.Signature); ok {
+										ownerKey := dynamicVarKey(owner)
+										for i, arg := range n.Args {
+											ident, ok := unparenExpr(arg).(*ast.Ident)
+											if !ok {
+												continue
+											}
+											aobj, ok := resolve(ident)
+											if !ok {
+												continue
+											}
+											variable, ok := dynamicPackageVar(aobj)
+											if !ok || !typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+												continue
+											}
+											idx := i
+											if sig.Variadic() && idx >= sig.Params().Len()-1 {
+												idx = sig.Params().Len() - 1
+											}
+											argKey := dynamicVarKey(variable)
+											want := ownerKey + "\x01" + strconv.Itoa(idx)
+											if elemUses[argKey] == nil {
+												elemUses[argKey] = map[string]bool{}
+											}
+											elemUses[argKey][want] = true
+											explainDeferralMark(p, 'e', argKey, want, arg.Pos())
+											readContext[ident] = true
+										}
+									}
+								}
+							}
+						}
+					}
 				}
 			case *ast.SelectorExpr:
 				// A pointer-receiver method USE — bind or call alike —
@@ -1521,19 +1590,22 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						return true
 					}
 					siteWants := map[string]bool{}
-					var siteMethodWants, siteFieldWants map[string]bool
+					var siteMethodWants, siteFieldWants, siteElemWants map[string]bool
 					if methodUses != nil {
 						siteMethodWants = map[string]bool{}
 					}
 					if fieldUses != nil {
 						siteFieldWants = map[string]bool{}
 					}
+					if elemUses != nil {
+						siteElemWants = map[string]bool{}
+					}
 					var siteReturned bool
 					var siteRet *bool
 					if siteEligible {
 						siteRet = &siteReturned
 					}
-					if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet, siteMethodWants, siteFieldWants) {
+					if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet, siteMethodWants, siteFieldWants, siteElemWants) {
 						bad[fnName] = true
 						return true
 					}
@@ -1562,6 +1634,15 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 							}
 							fieldUses[key][want] = true
 							explainDeferralMark(p, 'f', key, want, call.Pos())
+						}
+					}
+					for want := range siteElemWants {
+						for key := range returnerKeys[fnName] {
+							if elemUses[key] == nil {
+								elemUses[key] = map[string]bool{}
+							}
+							elemUses[key][want] = true
+							explainDeferralMark(p, 'e', key, want, call.Pos())
 						}
 					}
 					if siteReturned {
@@ -1862,7 +1943,7 @@ func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosi
 			}
 		}
 	}
-	if !boundValueLeakFreeJudged(p, roots, lit.Body, wants, nil, methodWants, nil) {
+	if !boundValueLeakFreeJudged(p, roots, lit.Body, wants, nil, methodWants, nil, nil) {
 		return false
 	}
 	if enclosing == nil {
@@ -1885,7 +1966,7 @@ func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosi
 					break
 				}
 			}
-			if shared && !boundValueLeakFreeJudged(p, roots, n.Body, wants, nil, methodWants, nil) {
+			if shared && !boundValueLeakFreeJudged(p, roots, n.Body, wants, nil, methodWants, nil, nil) {
 				sound = false
 			}
 			return false
@@ -1965,12 +2046,20 @@ func unparenExpr(expr ast.Expr) ast.Expr {
 	}
 }
 
+// elemPositionField is the reserved position name for a carrier's own
+// element population - the values a callee-position index read can
+// invoke (legs[token](args)). No Go identifier can collide with it, so
+// it shares the field-mark encoding and resolution unchanged
+// (REQ-closure-shared-dynamic-state).
+const elemPositionField = "\x02"
+
 // classifyRegistrantFlow classifies a whole value flowing into carrier
-// storage. Bare function values contribute no field namespace - a call
-// through them never spells a field selector on the binding - and call
-// results join the population through the callee's return-environment-free
-// field marks (EnvCallUses names the callee). Everything else that can
-// carry a function is unattributable here: whole-population poison.
+// storage. A bare function value is an element-population registrant -
+// a callee-position index read can invoke it, so it dispositions at
+// the reserved element position; call results join the population
+// through the callee's return-environment-free field marks
+// (EnvCallUses names the callee). Everything else that can carry a
+// function is unattributable here: whole-population poison.
 func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldRegMark)) {
 	switch e := unparenExpr(expr).(type) {
 	case *ast.CompositeLit:
@@ -1981,7 +2070,10 @@ func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldR
 			classifyRegistrantFlow(p, e.X, emit)
 			return
 		}
-	case *ast.FuncLit, *ast.BasicLit:
+	case *ast.FuncLit:
+		classifyLiteralRegistrant(p, elemPositionField, e, emit)
+		return
+	case *ast.BasicLit:
 		return
 	case *ast.CallExpr:
 		// An admitted call is the constructor channel: the result's
@@ -2005,13 +2097,17 @@ func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldR
 	case *ast.Ident:
 		if obj, ok := identUseOrDef(p, e); ok {
 			switch obj.(type) {
-			case *types.Func, *types.Nil:
+			case *types.Func:
+				classifyFieldRegistrantValue(p, elemPositionField, e, emit)
+				return
+			case *types.Nil:
 				return
 			}
 		}
 	case *ast.SelectorExpr:
 		if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
 			if _, isFunc := obj.(*types.Func); isFunc {
+				classifyFieldRegistrantValue(p, elemPositionField, e, emit)
 				return
 			}
 		}
@@ -2158,7 +2254,7 @@ func classifyLiteralRegistrant(p *packages.Package, field string, lit *ast.FuncL
 					continue
 				}
 				wants := map[string]bool{}
-				if boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil) {
+				if boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil, nil) {
 					for want := range wants {
 						emit(fieldRegMark{class: 'd', field: field, idx: idx, param: want})
 					}
@@ -2765,6 +2861,11 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			// slot writes never count as writes into the origin's.
 			var aliasPairs [][2]types.Object
 			var heldPairs [][2]types.Object
+			// stmtCallDeps carries the plain named callees handed a
+			// tracked binding anywhere in the body - their recorded
+			// populations join this proof's over dependency edges
+			// exactly like return-position callees'.
+			stmtCallDeps := map[string]bool{}
 			trackedVar := func(obj types.Object) (*types.Var, bool) {
 				v, ok := obj.(*types.Var)
 				if !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope() || !carries(v.Type()) {
@@ -3110,7 +3211,13 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 						if fn, ok := selection.Obj().(*types.Func); ok {
 							if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-								if _, ptr := types.Unalias(sig.Recv().Type()).(*types.Pointer); ptr {
+								_, ptr := types.Unalias(sig.Recv().Type()).(*types.Pointer)
+								// A value receiver whose backing or copied
+								// interior reaches mutable state writes
+								// through exactly like a pointer receiver -
+								// same exemption, same break; only a
+								// reach-free receiver copy is inert.
+								if ptr || sharesHeader(sig.Recv().Type()) || typeHandsOutMutableReach(sig.Recv().Type(), make(map[types.Type]bool)) {
 									pkgPath, rest, ok := strings.Cut(methodFactKey(fn), "\x00")
 									if !ok || pkgPath != ownPath || !readOnly[rest] {
 										breakBase(n.X)
@@ -3120,10 +3227,76 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						}
 					}
 				case *ast.CallExpr:
-					if ident, ok := unparen(n.Fun).(*ast.Ident); ok && len(n.Args) == 2 {
-						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
-							bindLocal(n.Args[0], nil, true)
+					if ident, ok := unparen(n.Fun).(*ast.Ident); ok {
+						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+							if ident.Name == "copy" && len(n.Args) == 2 {
+								bindLocal(n.Args[0], nil, true)
+							}
+							// Builtin reads and construction cannot
+							// insert elements; append and copy have
+							// their own admitted arms.
+							return true
 						}
+					}
+					// Any callee handed a tracked binding can mutate its
+					// backing - insert an element the recorded
+					// population never sees. A plain named callee's own
+					// body is swept when it proves, so its insertions
+					// join the population over a dependency edge instead
+					// of breaking the binding - an unproven callee then
+					// fails the proof's resolution, fail-closed; the
+					// audited value-plane helpers are proven
+					// non-mutating and pass free. Every other callee
+					// shape is unattributable: the tracked bindings its
+					// arguments reach break.
+					if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
+						// A conversion is not a callee - the converted
+						// value's disposition rides the admitted
+						// conversion arms.
+						return true
+					}
+					if fn := plainNamedCalleeFn(p, n); fn != nil {
+						if !auditedValuePlane[fn.Pkg().Path()+"\x00"+fn.Name()] {
+							// A signature-carrying result can land in the
+							// returned elements wherever it flows - the
+							// callee's own recorded population must join.
+							reaches := typeCarriesSignature(p.TypesInfo.TypeOf(n), make(map[types.Type]bool))
+							for _, arg := range n.Args {
+								ast.Inspect(arg, func(inner ast.Node) bool {
+									if ident, ok := inner.(*ast.Ident); ok {
+										obj := p.TypesInfo.Uses[ident]
+										if obj == nil {
+											obj = p.TypesInfo.Defs[ident]
+										}
+										if obj != nil {
+											if _, ok := trackedVar(obj); ok || params[obj] {
+												reaches = true
+											}
+										}
+									}
+									return !reaches
+								})
+								if reaches {
+									break
+								}
+							}
+							if reaches {
+								stmtCallDeps[fn.Pkg().Path()+"\x00"+fn.Name()] = true
+							}
+						}
+						return true
+					}
+					for _, arg := range n.Args {
+						breakTargets(arg)
+					}
+					// A func-valued callee expression's own tracked reach
+					// shares backing with the call; method receivers have
+					// their own arm with the read-only exemption.
+					if sel, ok := unparen(n.Fun).(*ast.SelectorExpr); !ok || func() bool {
+						selection, ok := p.TypesInfo.Selections[sel]
+						return !ok || selection.Kind() != types.MethodVal
+					}() {
+						breakTargets(n.Fun)
 					}
 				}
 				return true
@@ -3351,6 +3524,9 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 			}
 			fnDeps := map[string]bool{}
+			for callee := range stmtCallDeps {
+				fnDeps[callee] = true
+			}
 			var free func(expr ast.Expr) bool
 			localFree := map[types.Object]int{} // 0 unknown, 1 proving, 2 free, 3 refused
 			var judgeLocal func(obj types.Object) bool
@@ -3665,11 +3841,42 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 			}
 		}
 	}
+	// Every bare-function reference in VALUE position is an
+	// element-population registrant: the proof's derivation channels
+	// admit locals, index writes, conversions, and appends that carry
+	// the value into the returned elements, so any such reference pools
+	// its disposition - only call-position references are excluded
+	// (calling a helper registers nothing), and only parameters skip,
+	// priced by the store site's argument classification. Pooling a
+	// value the result never reaches only adds constraints - the
+	// fail-closed direction (REQ-closure-shared-dynamic-state).
+	funPositions := map[ast.Node]bool{}
+	writePositions := map[ast.Node]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			fun := unparenExpr(n.Fun)
+			funPositions[fun] = true
+			if sel, ok := fun.(*ast.SelectorExpr); ok {
+				funPositions[sel.Sel] = true
+			}
+		case *ast.AssignStmt:
+			// A write target is not a produced value - the stored
+			// value's own visit prices it.
+			for _, lhs := range n.Lhs {
+				writePositions[unparenExpr(lhs)] = true
+			}
+		case *ast.IncDecStmt:
+			writePositions[unparenExpr(n.X)] = true
+		}
+		return true
+	})
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.CompositeLit:
 			classifyRegistrantComposite(p, n, emit)
 			return false
+
 		case *ast.AssignStmt:
 			if len(n.Lhs) == len(n.Rhs) {
 				for i, lhs := range n.Lhs {
@@ -3680,8 +3887,65 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 					fieldWrite(lhs, n.Rhs[0])
 				}
 			}
+		case *ast.FuncLit:
+			if !funPositions[n] {
+				classifyLiteralRegistrant(p, elemPositionField, n, emit)
+			}
+		case *ast.CallExpr:
+			// A conversion produces its operand - the operand is swept
+			// on descent. A plain named callee's result joins over the
+			// dependency edge the binding walk records; a builtin
+			// constructs or reads. Any other call producing a
+			// signature-carrying value is unattributable - poison the
+			// element position, fail-closed.
+			if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
+				break
+			}
+			if ident, ok := unparenExpr(n.Fun).(*ast.Ident); ok {
+				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+					break
+				}
+			}
+			if plainNamedCalleeFn(p, n) != nil {
+				break
+			}
+			if typeCarriesSignature(p.TypesInfo.TypeOf(n), make(map[types.Type]bool)) {
+				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+			}
+		case *ast.SelectorExpr:
+			if funPositions[n] || writePositions[n] {
+				break
+			}
+			if _, isFunc := p.TypesInfo.Uses[n.Sel].(*types.Func); isFunc {
+				classifyFieldRegistrantValue(p, elemPositionField, n, emit)
+				break
+			}
+			// A field or foreign read producing a signature-carrying
+			// value is an element registrant the sweep cannot attribute
+			// - poison, fail-closed. (A package variable read is the
+			// Ident arm's whole-population poison via its Sel visit.)
+			if typeCarriesSignature(p.TypesInfo.TypeOf(n), make(map[types.Type]bool)) {
+				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+			}
+		case *ast.IndexExpr:
+			// An element read handed onward re-registers a value this
+			// carrier's records never priced - poison, fail-closed.
+			if !funPositions[n] && !writePositions[n] && typeCarriesSignature(p.TypesInfo.TypeOf(n), make(map[types.Type]bool)) {
+				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+			}
 		case *ast.Ident:
+			if funPositions[n] {
+				break
+			}
+			if _, isFunc := p.TypesInfo.Uses[n].(*types.Func); isFunc {
+				classifyFieldRegistrantValue(p, elemPositionField, n, emit)
+				break
+			}
 			if v, ok := p.TypesInfo.Uses[n].(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeCarriesSignature(v.Type(), make(map[types.Type]bool)) {
+				// Locals' contents are priced where their values are
+				// stored - every stored value is itself swept - and a
+				// parameter's direct value at the store site; only the
+				// package-variable read is unattributable here.
 				emit(fieldRegMark{class: 'p', idx: -1})
 			}
 		}
@@ -3868,11 +4132,11 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 // defer, the goroutine runs concurrently
 // (REQ-closure-shared-dynamic-state).
 func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
-	return boundValueLeakFreeJudged(p, roots, body, nil, nil, nil, nil)
+	return boundValueLeakFreeJudged(p, roots, body, nil, nil, nil, nil, nil)
 }
 
 func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
-	return boundValueLeakFreeJudged(p, roots, body, wants, nil, nil, nil)
+	return boundValueLeakFreeJudged(p, roots, body, wants, nil, nil, nil, nil)
 }
 
 // boundValueLeakFreeJudged additionally tolerates return-position handouts
@@ -3895,7 +4159,13 @@ func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool
 // the parameter leak-free at that field, any unproven registrant keeping
 // the escape (REQ-closure-shared-dynamic-state). Never from a go
 // statement's call, the goroutine runs concurrently.
-func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool) bool {
+// An elemWants collector defers a rooted alias-handing argument passed
+// through a callee-position index read of a package carrier (the
+// dispatch-table shape legs[token](arg)): the want carries the dispatch
+// carrier's key and the parameter index \x01-joined, resolved at
+// composition against that carrier's element population - never from a
+// go statement's call (REQ-closure-shared-dynamic-state).
+func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
@@ -4303,6 +4573,24 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 								}
 							}
 						}
+						if !deferred && elemWants != nil && !goCalls[n] {
+							if index, ok := unparenExpr(n.Fun).(*ast.IndexExpr); ok {
+								if base, ok := unparenExpr(index.X).(*ast.Ident); ok {
+									obj := p.TypesInfo.Uses[base]
+									if v, isVar := obj.(*types.Var); isVar && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeMayCarryUnknownDynamic(v.Type(), make(map[types.Type]bool)) {
+										if sig, sigOK := types.Unalias(p.TypesInfo.TypeOf(n.Fun)).Underlying().(*types.Signature); sigOK && sig.Params().Len() > 0 {
+											idx := i
+											if sig.Variadic() && idx >= sig.Params().Len()-1 {
+												idx = sig.Params().Len() - 1
+											}
+											elemWants[dynamicVarKey(v)+"\x01"+strconv.Itoa(idx)] = true
+											consume(arg)
+											deferred = true
+										}
+									}
+								}
+							}
+						}
 						if !deferred {
 							leaky = true
 						}
@@ -4410,7 +4698,7 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal map[string]bool) 
 					}
 					wants := map[string]bool{}
 					methodWants := map[string]bool{}
-					if !boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants, nil) {
+					if !boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants, nil, nil) {
 						continue
 					}
 					methodsProven := true

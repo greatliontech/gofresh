@@ -3817,6 +3817,360 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a field-write registrant escaped the population", verdict)
 		}
 	})
+	t.Run("comma-ok existence read discharges on any carrier", func(t *testing.T) {
+		// The blank target produces no value to hand out - writeless
+		// whatever the element type.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Table = map[string]entry{\"a\": {Cols: []string{\"x\"}}}\n\nfunc Has(token string) bool {\n\t_, ok := Table[token]\n\treturn ok\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() bool { return reg.Has(\"a\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a blank existence read refused", verdict)
+		}
+	})
+	t.Run("comma-ok binding that writes through refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Table = map[string]entry{\"a\": {Cols: []string{\"x\"}}}\n\nfunc Poke(token string) bool {\n\tv, ok := Table[token]\n\tif ok {\n\t\tv.Cols[0] = \"z\"\n\t}\n\treturn ok\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() bool { return reg.Poke(\"a\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Table") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Table - a written-through comma-ok binding passed", verdict)
+		}
+	})
+	t.Run("dispatch-table carrier argument discharges through the element population", func(t *testing.T) {
+		// legs[token](shared): the callee is unknowable statically, so
+		// the argument defers to the dispatch carrier's element
+		// population - every registered value must prove the position.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar Legs = map[string]func(v *inv) int{\"w\": width}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free element population refused the dispatch argument", verdict)
+		}
+	})
+	t.Run("dispatch-table argument refuses when an element retains it", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": grab}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a retaining element passed the population proof", verdict)
+		}
+	})
+	t.Run("dispatch-table literal element judges at registration", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": func(v *inv) int { return len(v.Cols) }}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free literal element refused the dispatch argument", verdict)
+		}
+	})
+	t.Run("dispatch-table leaking literal element refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nvar Legs = map[string]func(v *inv) int{\"w\": func(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a leaking literal element passed", verdict)
+		}
+	})
+	t.Run("dispatch element from a constructor-returned bare function refuses", func(t *testing.T) {
+		// The registrant reaches the element through a proven
+		// constructor's returned bare function - its disposition rides
+		// the return-environment-free channel.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() func(v *inv) int { return grab }\n\nvar Legs = map[string]func(v *inv) int{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a constructor-returned retaining element passed", verdict)
+		}
+	})
+	t.Run("dispatch element from a constructor-returned leak-free function discharges", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() func(v *inv) int { return width }\n\nvar Legs = map[string]func(v *inv) int{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a constructor-returned leak-free element refused the dispatch argument", verdict)
+		}
+	})
+	t.Run("dispatch element through a constructor local passthrough refuses", func(t *testing.T) {
+		// The proof admits the local; the value-position sweep pools
+		// its source - the retaining registrant must surface.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() func(v *inv) int {\n\tf := grab\n\treturn f\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a local-passthrough registrant escaped the population", verdict)
+		}
+	})
+	t.Run("dispatch element written into a constructor local refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = grab\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - an index-written registrant escaped the population", verdict)
+		}
+	})
+	t.Run("dispatch element behind a conversion refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype Leg func(v *inv) int\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() Leg { return Leg(grab) }\n\nvar Legs = map[string]Leg{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a converted registrant escaped the population", verdict)
+		}
+	})
+	t.Run("dispatch element appended in a constructor refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() []func(v *inv) int {\n\treturn append([]func(v *inv) int{}, grab)\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[0](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - an appended registrant escaped the population", verdict)
+		}
+	})
+	t.Run("dispatch element written into a constructor local discharges when leak-free", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar kept []string\n\nfunc keep(s []string) { kept = s }\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() map[string]func(v *inv) int {\n\tkeep(nil)\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free index-written registrant refused the discharge", verdict)
+		}
+	})
+	t.Run("callee-mutated constructor local refuses the dispatch discharge", func(t *testing.T) {
+		// A callee handed the local can insert a registrant after the
+		// recorded population - the local breaks at the call, keeping
+		// the proof and the discharge fail-closed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc hookf(m map[string]func(v *inv) int) {\n\tm[\"w\"] = grab\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a callee-inserted registrant escaped the population", verdict)
+		}
+	})
+	t.Run("signature-var callee handed the constructor local refuses", func(t *testing.T) {
+		// The callee is a func-valued package variable - unattributable,
+		// so the handed local breaks and the proof refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar hook = func(m map[string]func(v *inv) int) int {\n\tm[\"w\"] = grab\n\treturn 0\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\t_ = hook(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a signature-var callee's insertion escaped the population", verdict)
+		}
+	})
+	t.Run("closure-mutated constructor local refuses the dispatch discharge", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype config struct {\n\tFn func(v *inv) int\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick(cfg config) map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\tswap := func() { r[\"w\"] = cfg.Fn }\n\tswap()\n\treturn r\n}\n\nvar Legs = pick(config{Fn: grab})\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a closure-inserted registrant escaped the population", verdict)
+		}
+	})
+	t.Run("param-field insertion into the constructor local refuses", func(t *testing.T) {
+		// cfg.Fn is priced under its field name at the store site - an
+		// element-position insertion is a different position, so the
+		// sweep's fail-closed default poisons it.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype config struct {\n\tFn func(v *inv) int\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick(cfg config) map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = cfg.Fn\n\treturn r\n}\n\nvar Legs = pick(config{Fn: grab})\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a param-field insertion escaped the population", verdict)
+		}
+	})
+	t.Run("void-callee param-field insertion refuses through the edge", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype config struct {\n\tFn func(v *inv) int\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc hookf(m map[string]func(v *inv) int, cfg config) {\n\tm[\"w\"] = cfg.Fn\n}\n\nfunc pick(cfg config) map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r, cfg)\n\treturn r\n}\n\nvar Legs = pick(config{Fn: grab})\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a void callee's param-field insertion escaped", verdict)
+		}
+	})
+	t.Run("value-receiver method insertion refuses", func(t *testing.T) {
+		// A value receiver over a map-underlying type writes through -
+		// the receiver breaks exactly like a handed argument.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype legmap map[string]func(v *inv) int\n\nfunc (m legmap) swap() int {\n\tm[\"w\"] = grab\n\treturn 0\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() map[string]func(v *inv) int {\n\tr := legmap{}\n\tr[\"w\"] = width\n\t_ = r.swap()\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a value-receiver insertion escaped", verdict)
+		}
+	})
+	t.Run("void-callee call-result insertion refuses", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc mk() func(v *inv) int { return grab }\n\nfunc hookf(m map[string]func(v *inv) int) {\n\tm[\"w\"] = mk()\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a void callee's call-result insertion escaped", verdict)
+		}
+	})
+	t.Run("struct-receiver interior insertion refuses", func(t *testing.T) {
+		// The receiver copies by value but its interior map shares
+		// backing - the break covers any receiver whose interior hands
+		// out mutable reach.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype holder struct {\n\tf map[string]func(v *inv) int\n}\n\nfunc (h holder) swap() int {\n\th.f[\"w\"] = grab\n\treturn 0\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\tvar h holder\n\th.f = r\n\t_ = h.swap()\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a struct-receiver interior insertion escaped", verdict)
+		}
+	})
+	t.Run("void-callee signature-var call-result insertion refuses", func(t *testing.T) {
+		// The producing callee is a func-valued variable - its result
+		// is unattributable, so the sweep's fail-closed default poisons
+		// the element position.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar maker = func() func(v *inv) int { return grab }\n\nfunc hookf(m map[string]func(v *inv) int) {\n\tm[\"w\"] = maker()\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a signature-var call result escaped the population", verdict)
+		}
+	})
+	t.Run("callee-inserted leak-free element discharges", func(t *testing.T) {
+		// The edge's precision pin: the callee's swept marks join the
+		// population, and a leak-free insertion discharges.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc hookf(m map[string]func(v *inv) int) {\n\tm[\"x\"] = width\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a leak-free callee insertion refused the edge-joined discharge", verdict)
+		}
+	})
+	t.Run("init-body dispatch argument keeps the escape", func(t *testing.T) {
+		// Init flow is program code for deferrals - the alias outlives
+		// initialization, so the dispatch admission never applies there.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar Legs = map[string]func(v *inv) int{\"w\": width}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nvar total int\n\nfunc init() {\n\ttotal = Legs[\"w\"](Shared)\n}\n\nfunc Total() int { return total }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - an init-body dispatch argument earned the deferral", verdict)
+		}
+	})
+	t.Run("go-statement dispatch argument keeps the escape", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar Legs = map[string]func(v *inv) int{\"w\": width}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\tgo Legs[token](Shared)\n\treturn 0\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Shared") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Shared - a concurrent dispatch argument earned the deferral", verdict)
+		}
+	})
+	t.Run("range-binding dispatch argument defers through the element population", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nvar Legs = map[string]func(cols []string) int{\"w\": width}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total(token string) int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += Legs[token](e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a range-binding dispatch argument refused the element discharge", verdict)
+		}
+	})
+	t.Run("range-binding dispatch argument refuses on a retaining element", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nvar Legs = map[string]func(cols []string) int{\"w\": grab}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total(token string) int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += Legs[token](e.Cols)\n\t}\n\treturn total\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Total(\"w\") }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Registry - a retaining element passed the range-binding dispatch", verdict)
+		}
+	})
 	t.Run("plain-data builder effects stay per-process", func(t *testing.T) {
 		// A registered named builder mutating a plain package variable is
 		// per-process-deterministic content the whole-graph hash already
