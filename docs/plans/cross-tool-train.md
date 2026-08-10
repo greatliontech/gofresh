@@ -611,7 +611,7 @@ its activation decision.
       a conditional leak-free fact naming the foreign parameter it
       depends on, resolved at composition to a fixed point exactly as
       the env-call channel resolves, cycles and absence refusing.
-- [ ] 53. gofresh: audited-pure standard-set additions the named
+- [x] 53. gofresh: audited-pure standard-set additions the named
       verdicts justify - source-audit math/big value constructors,
       time.Date, reflect.DeepEqual, and interface-type references of
       the fmt.Stringer shape (the second re-measure's 131 named
