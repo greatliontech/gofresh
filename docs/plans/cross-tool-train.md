@@ -537,7 +537,7 @@ its activation decision.
       compile/witness pass (>120s); resolved-record deletion should
       be near-instant, and whatever work genuinely must run must be
       named in the phase report.
-- [ ] 77. stipulator: gap triage gains a read surface - gapsDue
+- [x] 77. stipulator: gap triage gains a read surface - gapsDue
       counts appear in check output but nothing names which gaps are
       due; gap list (id, reason, condition, fired, due) plus
       documenting re-declare as the only edit path.
