@@ -527,7 +527,7 @@ its activation decision.
       "bound witness X classified executed-example: rapid.Check not
       invoked in the bound body" - the field session lost two full
       fix rounds to the trial-and-error discovery.
-- [ ] 75. stipulator: check ids scopes execution, not just display -
+- [x] 75. stipulator: check ids scopes execution, not just display -
       ids=... still executes the full witness set (2-5 minutes,
       always past the 120s MCP window); a genuinely scoped fast mode
       compiles and covers the named ids only, the verdict flagged
