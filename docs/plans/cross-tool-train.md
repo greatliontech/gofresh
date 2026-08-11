@@ -459,7 +459,7 @@ its activation decision.
       mutant at a different site never inherits it; measure the
       re-anchor rate, tighten the key, and pin the
       no-cross-site-inheritance property.
-- [ ] 68. gomutant: property-suite oracle prerequisites - field
+- [x] 68. gomutant: property-suite oracle prerequisites - field
       report: rapid-based suites need a pinned seed plus a
       no-failfile setting to be usable oracles at all (unpinned
       property suites are nondeterministic oracles - verdicts
