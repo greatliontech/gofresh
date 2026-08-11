@@ -154,7 +154,7 @@ its activation decision.
       row's re-measure signpost, attest echoing disposition and layer,
       the promotion-commit warning, and the two progress cosmetics;
       the four docs delete at close.
-- [ ] 31. gomutant: record correctness and lifecycle (gomutant
+- [x] 31. gomutant: record correctness and lifecycle (gomutant
       docs/issues: detached-record-lifecycle, fresh-stamp-manifest-base,
       growth-drift-promotion-untested) - prune and retarget verbs with
       attestations carried by survivor identity, terminal labeling of
