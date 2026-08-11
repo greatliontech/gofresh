@@ -419,7 +419,7 @@ its activation decision.
       backing-sharing bind; distinct from chunk 53's
       unaudited-standard-operation named verdicts, which live on a
       different refusal arm.
-- [ ] 65. gofresh: argument-position address captures share backing -
+- [x] 65. gofresh: argument-position address captures share backing -
       the chunk-62 review's fifth and sixth clause-family members,
       probe-confirmed reproducing before that chunk: an address
       capture rooted at a call (sink(&id(s)[0]) with sink writing
@@ -690,3 +690,22 @@ its activation decision.
       needs object-closure-style treatment of returned interface and
       alias values (the field registry returns reflect.Type), else the
       read stays fail-closed.
+- [ ] 83. gofresh: callee-argument insertions join the population -
+      the chunk-65 review's seventh and eighth clause-family members,
+      both reproducing before that chunk: a bind-then-pass capture
+      (p := &holder{rows: rows}; sink(p); return rows, sink writing
+      p.rows[0]) composes Valid because the plain-named-callee
+      dependency edge proves return-position environment-freedom only
+      - a callee with no returns resolves vacuously and its writes
+      into argument storage are recorded nowhere (the no-address
+      spelling sink2(s) with sink2 writing q[0] is the same root);
+      and Go's elided address-of in pointer-element composite
+      literals (sink([]*holder{{rows: rows}})) carries no UnaryExpr,
+      so both the capture arm and the argument-literal walk miss it.
+      The spec already demands the mechanism (closure.md: callees
+      handed a tracked binding join their own recorded populations
+      over the proof's dependency edges) - the edge must carry
+      argument-storage insertions, not only return-position freedom,
+      and literal detection must include the elided spelling; the
+      admission legs (returned literal constructor, bind-position
+      literal without a callee) must stay admissible.
