@@ -5763,6 +5763,69 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a call-rooted write chain was invisible", verdict)
 		}
 	})
+	t.Run("argument-position call-rooted address capture keeps the poison", func(t *testing.T) {
+		// sink(&id(s)[0]) hands the callee a pointer into s's backing
+		// through the call result; the call-rooted capture breaks every
+		// tracked name the operand reaches, fail-closed.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc id(s []handler) []handler { return s }\n\nfunc sink(p *handler) {\n\tc := &counter{}\n\t*p = c.Next\n}\n\nfunc gen(h handler) []handler {\n\ts := []handler{h}\n\tsink(&id(s)[0])\n\treturn s\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - an argument-position call-rooted capture was invisible", verdict)
+		}
+	})
+	t.Run("argument-position literal capture hands out embedded reach", func(t *testing.T) {
+		// sink(&holder{rows: rows}) lets the callee write p.rows[0] -
+		// the literal is fresh storage, but its embedded tracked names
+		// travel with the pointer; the literal exemption is sound only
+		// where the bind link or the returned-literal audit carries the
+		// reach.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc sink(p *holder) {\n\tc := &counter{}\n\tp.rows[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tsink(&holder{rows: rows})\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - an argument-position literal capture handed out reach invisibly", verdict)
+		}
+	})
+	t.Run("returned literal constructor stays admissible", func(t *testing.T) {
+		// return &T{field: param} is the constructor idiom the
+		// returned-literal audit owns: the literal addresses fresh
+		// storage and the parameter's reach rides the audit, never a
+		// break - the fail-closed capture extension must not refuse it.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc build(rows []handler) *holder {\n\treturn &holder{rows: rows}\n}\n\nfunc gen(h handler) []handler {\n\tb := build([]handler{h})\n\treturn b.rows\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the return-position literal capture was spuriously broken", verdict)
+		}
+	})
+	t.Run("bind-position literal capture links without breaking", func(t *testing.T) {
+		// p := &holder{rows: rows} rides the bind link: reach is
+		// carried, nothing breaks, and absent writes the registration
+		// composes Valid.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc gen(rows []handler) []handler {\n\tp := &holder{rows: rows}\n\t_ = p\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a bind-position literal capture broke instead of linking", verdict)
+		}
+	})
 	t.Run("element read of a judged map derives", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,

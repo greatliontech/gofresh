@@ -504,7 +504,18 @@ while the holder's own storage stays its own. Range bindings link at
 the container's kind: a value-array range copies its elements and
 links held; every other container links as sharing — fail-closed.
 Reach-free values stay unlinked as independent storage. While any
-other derivation, an address capture of the binding — the implicit
+other derivation, an address capture of the binding — an ident-rooted operand breaking its
+base binding, a call-rooted operand breaking every tracked name it
+reaches (the call may hand back any of their backing), and a
+composite-literal operand addressing fresh storage whose embedded
+tracked reach the bind link carries in bind position and the
+returned-literal audit in return position, while in argument position
+the embedded tracked names break — the callee holds a write path into
+their backing the population sweep never sees; audited value-plane
+callees, proven non-mutating, keep the exemption; builtin callees are
+likewise exempt, append and copy never holding the argument beyond the
+call, their destinations covered by the bind link and the copy
+target-break — the implicit
 address of a pointer-receiver method use included, exempting methods
 the declaring package proves receiver-read-only — or any bind
 position or address

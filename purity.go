@@ -3337,12 +3337,23 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				switch n := n.(type) {
 				case *ast.UnaryExpr:
 					// An address capture opens a write path the binding
-					// walk cannot see - the operand's base binding
-					// breaks. A composite-literal operand addresses
-					// fresh storage and breaks nothing.
+					// walk cannot see. An ident root's base binding
+					// breaks; a chain rooted at a call result still
+					// addresses storage that call may hand back, so
+					// every tracked name the operand reaches breaks -
+					// fail-closed, in every position. A composite-
+					// literal operand addresses fresh storage and
+					// breaks nothing here: its embedded reach is the
+					// bind link's and the returned-literal audit's in
+					// bind and return position, and the call arm's in
+					// argument position, per the capture clause in
+					// docs/specs/closure.md.
 					if n.Op == token.AND {
-						if ident, ok := chainRoot(n.X).(*ast.Ident); ok {
-							breakTargets(ident)
+						switch root := chainRoot(n.X).(type) {
+						case *ast.Ident:
+							breakTargets(root)
+						case *ast.CallExpr:
+							breakTargets(n.X)
 						}
 					}
 				case *ast.AssignStmt:
@@ -3479,6 +3490,28 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							}
 							if reaches {
 								stmtCallDeps[fn.Pkg().Path()+"\x00"+fn.Name()] = true
+							}
+							// An argument-position literal capture hands
+							// the callee a pointer into storage embedding
+							// tracked reach - a write path the dependency
+							// edge's population sweep never sees, so the
+							// literal's embedded tracked names break,
+							// fail-closed. The literal exemption is sound
+							// only where the bind link or the
+							// returned-literal audit carries the reach;
+							// audited value-plane callees are proven
+							// non-mutating and keep it.
+							for _, arg := range n.Args {
+								ast.Inspect(arg, func(inner ast.Node) bool {
+									u, ok := inner.(*ast.UnaryExpr)
+									if !ok || u.Op != token.AND {
+										return true
+									}
+									if _, ok := chainRoot(u.X).(*ast.CompositeLit); ok {
+										breakTargets(u.X)
+									}
+									return true
+								})
 							}
 						}
 						return true
