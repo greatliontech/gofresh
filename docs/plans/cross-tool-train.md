@@ -709,3 +709,14 @@ its activation decision.
       and literal detection must include the elided spelling; the
       admission legs (returned literal constructor, bind-position
       literal without a callee) must stay admissible.
+- [ ] 84. stipulator: build-tagged symbols bind (stipulator
+      docs/issues/build-tagged-symbol-binding.md) - binding-side
+      resolution loads one package view per distinct build selection
+      in the accepted policy (execution discovery is already
+      tag-aware; Resolve is not), so tag-gated tests - the dst leg's
+      witnesses - resolve, shape-hash, and bind; witness evidence
+      keys to the declaring view so tag-gated edits invalidate the
+      right witnesses. Consumers: tugboat REQ-node-support-stability's
+      dst-schedule witness gap, and tugboat lifecycle chunk 12's four
+      invariant gaps whose property-class enforcement is DST arms -
+      the field deadline: lands before that chunk's close-out.
