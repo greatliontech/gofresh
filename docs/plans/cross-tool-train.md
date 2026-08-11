@@ -146,7 +146,7 @@ its activation decision.
       fixed, and the unrefinable-class interaction is settled;
       display-only (verdicts unchanged), so it rides after the
       re-measure.
-- [ ] 30. gomutant: consumer-surface bounds and visibility (gomutant
+- [x] 30. gomutant: consumer-surface bounds and visibility (gomutant
       docs/issues: findings-output-unbounded,
       changed-mode-oracle-delta-routing, attest-and-promotion-visibility,
       plan-and-progress-cosmetics) - bounded findings summary by
