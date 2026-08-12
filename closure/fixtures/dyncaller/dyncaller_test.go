@@ -68,6 +68,20 @@ func MeasureFile(s Sizer) int {
 
 var escaped = RunEscaped
 
+// namedHook is held by a package-level variable; a computed call
+// through the variable dispatches a value with a stable identity. The
+// signature is distinct from every other fixture subject's — dyninit's
+// included, which documents that distinctness — so the address-taken
+// value enters no sibling subject's dispatch candidates under any mask
+// (docs/issues/enumeration-targets-over-approximated.md).
+func namedHook(b byte) byte { return b }
+
+var hook = namedHook
+
+// RunViaVar calls through a package-level function variable: the
+// refusal names the variable it dispatches.
+func RunViaVar(b byte) byte { return hook(b) }
+
 // RunDead has zero references and never moves its parameter: only the
 // absence-of-provenance arm refuses it.
 func RunDead(check func(int) int, n int) int {

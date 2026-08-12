@@ -861,7 +861,8 @@ the harness's files. An open-world refusal names the dispatch edge
 that widened it — the enclosing function and, for an unresolved
 interface invoke, the receiver interface type and method it
 dispatches, or, for a computed call, the stably-identified value it
-calls (a package-level function or method value, a parameter) — so the
+calls (a parameter, or a value read from a named package-level
+variable, naming the edge by the variable) — so the
 refusal points at the specific dispatch rather than the bare shape;
 the naming carries no source position, so it stays portable across
 checkouts and stable under the lexicographic-least selection that

@@ -1427,36 +1427,32 @@ func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
 // invokeEdgeName names the interface-dispatch edge an unresolved invoke
 // opens: the enclosing function and the interface method it dispatches
 // (receiver interface type qualified by package path, then the method
-// name). Portable across checkouts - it carries no source position, so
-// an unrelated edit never thrashes the memoized reason - and stable
-// under the lexicographic-least widen selection, which then names a
-// concrete opening edge instead of the bare shape
-// (REQ-closure-observability-analysis's diagnostic clause).
+// name; invoke-mode SSA always carries both). Portable across checkouts
+// - it carries no source position, so an unrelated edit never thrashes
+// the memoized reason - and stable under the lexicographic-least widen
+// selection, which then names a concrete opening edge instead of the
+// bare shape (REQ-closure-observability-analysis's diagnostic clause).
 func invokeEdgeName(c *ssa.CallCommon, caller *ssa.Function) string {
-	edge := caller.String() + " dispatches "
-	if c.Value != nil {
-		edge += types.TypeString(c.Value.Type(), nil) + "."
-	}
-	if c.Method != nil {
-		edge += c.Method.Name()
-	}
-	return edge
+	return caller.String() + " dispatches " +
+		types.TypeString(c.Value.Type(), nil) + "." + c.Method.Name()
 }
 
 // computedEdgeSuffix names the called value of a computed function call
-// where it has a stable identity - a package-level function or method
-// value, or a parameter - so the refusal points past the enclosing
-// function to the value dispatched. An anonymous or register-only
-// operand adds nothing and the suffix stays empty
+// where it has a stable identity - a parameter, or a load from a named
+// package-level variable (a package-level function called directly is a
+// static call per ssa.CallCommon.StaticCallee, so the stably-named
+// computed shapes are exactly these) - so the refusal points past the
+// enclosing function to the value dispatched. A register-only operand
+// adds nothing and the suffix stays empty
 // (REQ-closure-observability-analysis's diagnostic clause).
 func computedEdgeSuffix(c *ssa.CallCommon) string {
 	switch v := c.Value.(type) {
-	case *ssa.Function:
-		return " calling " + funcPkgPath(v) + "." + functionSymbolName(v)
 	case *ssa.Parameter:
 		return " calling parameter " + v.Name()
-	case *ssa.Global:
-		return " calling " + v.RelString(nil)
+	case *ssa.UnOp:
+		if g, ok := v.X.(*ssa.Global); ok && v.Op == token.MUL {
+			return " calling " + g.RelString(nil)
+		}
 	}
 	return ""
 }

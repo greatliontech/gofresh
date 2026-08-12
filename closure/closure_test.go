@@ -1653,6 +1653,9 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// A computed call names the value it calls where that value has
 		// a stable identity - here the escaped parameter.
 		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call in github.com/greatliontech/gofresh/closure/fixtures/dyncaller.RunEscaped calling parameter check"},
+		// A computed call through a package-level function variable
+		// names the variable it dispatches.
+		{fixture: "dyncaller", subject: "RunViaVar", reason: "computed function call in github.com/greatliontech/gofresh/closure/fixtures/dyncaller.RunViaVar calling github.com/greatliontech/gofresh/closure/fixtures/dyncaller.hook"},
 		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunDead", reason: "open subject world"},

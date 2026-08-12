@@ -178,8 +178,11 @@ const DynamicStateStrategy = "gofresh/dynamic-state@24"
 // widens on - the enclosing function and the interface method a
 // unresolved invoke dispatches, or the value a computed call calls -
 // so the reason points at the specific dispatch instead of the bare
-// shape.
-const ObservationRTA = "gofresh/observation-rta@21"
+// shape; @22 corrects the computed-call naming to the reachable
+// identities - a parameter, or a load from a named package-level
+// variable - where @21's arms matched SSA nodes that never reach the
+// widen path and left the package-variable dispatch unnamed.
+const ObservationRTA = "gofresh/observation-rta@22"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
