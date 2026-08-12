@@ -714,11 +714,11 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && operandClosed
 	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.harnessOnlyInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
-		a.requestWiden("interface invoke outside RTA")
+		a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
 	}
 	if !c.IsInvoke() && c.StaticCallee() == nil {
 		if _, ok := c.Value.(*ssa.Builtin); !ok && !callerStd && !resolved {
-			a.requestWiden("computed function call in " + caller.String())
+			a.requestWiden("computed function call in " + caller.String() + computedEdgeSuffix(c))
 		}
 	}
 	callee := c.StaticCallee()
@@ -1422,6 +1422,43 @@ func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
 		}
 	}
 	return nil
+}
+
+// invokeEdgeName names the interface-dispatch edge an unresolved invoke
+// opens: the enclosing function and the interface method it dispatches
+// (receiver interface type qualified by package path, then the method
+// name). Portable across checkouts - it carries no source position, so
+// an unrelated edit never thrashes the memoized reason - and stable
+// under the lexicographic-least widen selection, which then names a
+// concrete opening edge instead of the bare shape
+// (REQ-closure-observability-analysis's diagnostic clause).
+func invokeEdgeName(c *ssa.CallCommon, caller *ssa.Function) string {
+	edge := caller.String() + " dispatches "
+	if c.Value != nil {
+		edge += types.TypeString(c.Value.Type(), nil) + "."
+	}
+	if c.Method != nil {
+		edge += c.Method.Name()
+	}
+	return edge
+}
+
+// computedEdgeSuffix names the called value of a computed function call
+// where it has a stable identity - a package-level function or method
+// value, or a parameter - so the refusal points past the enclosing
+// function to the value dispatched. An anonymous or register-only
+// operand adds nothing and the suffix stays empty
+// (REQ-closure-observability-analysis's diagnostic clause).
+func computedEdgeSuffix(c *ssa.CallCommon) string {
+	switch v := c.Value.(type) {
+	case *ssa.Function:
+		return " calling " + funcPkgPath(v) + "." + functionSymbolName(v)
+	case *ssa.Parameter:
+		return " calling parameter " + v.Name()
+	case *ssa.Global:
+		return " calling " + v.RelString(nil)
+	}
+	return ""
 }
 
 func funcPkgPath(fn *ssa.Function) string {

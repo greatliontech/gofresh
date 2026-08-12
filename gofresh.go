@@ -174,8 +174,12 @@ const DynamicStateStrategy = "gofresh/dynamic-state@24"
 // unverifiable-by-hash, the property callback walked as subject flow,
 // and every value crossing the harness boundary judged at a per-flow
 // gate (subject-closed, handed-in handle, gated call result, or
-// judged variadic).
-const ObservationRTA = "gofresh/observation-rta@20"
+// judged variadic); @21 names the call edge an open-world refusal
+// widens on - the enclosing function and the interface method a
+// unresolved invoke dispatches, or the value a computed call calls -
+// so the reason points at the specific dispatch instead of the bare
+// shape.
+const ObservationRTA = "gofresh/observation-rta@21"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

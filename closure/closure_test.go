@@ -1531,7 +1531,9 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "harnesssetenv", subject: "TestSetenvStaysBlocked", reason: "testing.Setenv"},
 		{fixture: "harnesstb", subject: "TestHelperTBFatal", observable: true},
 		{fixture: "harnesstb", subject: "TestHelperTBTwice", observable: true},
-		{fixture: "harnesstb", subject: "TestHelperTBRecursive", reason: "interface invoke outside RTA"},
+		// The open-world refusal names the dispatch edge: the enclosing
+		// function and the interface method the unresolved invoke calls.
+		{fixture: "harnesstb", subject: "TestHelperTBRecursive", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/harnesstb.mustBaselineDeep dispatches testing.TB.Fatal"},
 		{fixture: "harnesstbenv", subject: "TestHelperTBSetenv", reason: "interface invoke outside RTA"},
 		{fixture: "harnesswrap", subject: "TestQuietWrappedFatal", reason: "interface invoke outside RTA"},
 		{fixture: "harnessshared", subject: "TestConsume", reason: "interface invoke outside RTA"},
@@ -1648,7 +1650,9 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// arguments keep the open world (REQ-closure-analysis).
 		{fixture: "dyncaller", subject: "RunCheck", observable: true},
 		{fixture: "dyncaller", subject: "RunEffect", reason: "os.WriteFile"},
-		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call"},
+		// A computed call names the value it calls where that value has
+		// a stable identity - here the escaped parameter.
+		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call in github.com/greatliontech/gofresh/closure/fixtures/dyncaller.RunEscaped calling parameter check"},
 		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunDead", reason: "open subject world"},

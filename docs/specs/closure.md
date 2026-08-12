@@ -857,7 +857,15 @@ keeps the package unverifiable at the closure tier — the audit admits
 observation, never purity: a property run's outcome rides the
 harness's log-surfaced run configuration, not the sources alone, so
 the package scan records an admitted harness fact where it exempts
-the harness's files. An interface
+the harness's files. An open-world refusal names the dispatch edge
+that widened it — the enclosing function and, for an unresolved
+interface invoke, the receiver interface type and method it
+dispatches, or, for a computed call, the stably-identified value it
+calls (a package-level function or method value, a parameter) — so the
+refusal points at the specific dispatch rather than the bare shape;
+the naming carries no source position, so it stays portable across
+checkouts and stable under the lexicographic-least selection that
+picks one edge deterministically from the widened set. An interface
 dispatch the walk cannot resolve widens the subject world — the synthetic
 interface-method wrapper family (any interface, the harness included)
 carries the same obligation in the closed-value walk itself: a bound
