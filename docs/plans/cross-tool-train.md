@@ -720,3 +720,17 @@ its activation decision.
       dst-schedule witness gap, and tugboat lifecycle chunk 12's four
       invariant gaps whose property-class enforcement is DST arms -
       the field deadline: lands before that chunk's close-out.
+- [ ] 85. gomutant: tool-minted oracle TMPDIR declared at ingest
+      (gomutant docs/issues/oracle-ephemeral-root-undeclared.md) -
+      field report, blocking-a-user band: oracleScratch mints one
+      out-of-module TMPDIR per oracle process tree but ingest never
+      declares it, so every testing.TempDir-touching oracle is
+      runtime-unverifiable - survivors bucket unstable-oracle instead
+      of triageable buckets and records never reuse (719 of ~1400
+      candidates' survivors unbucketed in the reporting campaign);
+      one seam: thread the minted root to processObservationContext
+      as runtimeinput.WithEphemeralTempRoot, which the root satisfies
+      by construction; rides with a named decision-line reason for
+      mutant-written tree drift; the doc deletes at close. Appended
+      unordered - execution-order insertion is the user's call
+      (chunk-81 precedent pulls blocking-a-user forward).
