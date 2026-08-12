@@ -57,18 +57,3 @@ when its work lands (git holds history).
   check window now shares per phase; same amplification class, producer path, cost-only.
   *Lands: when the producer validation path next changes, or a field measurement shows
   validation-time digesting as a standing cost.*
-- **[object-closure-initializer-address-capture](object-closure-initializer-address-capture.md)** —
-  an address capture of an interface variable inside a package-level initializer expression
-  escapes every audit arm, so a later init-body store through the captured pointer leaves the
-  variable object-closed: false Valid. *Lands: cross-tool train chunk 32.*
-- **[object-closure-selector-store-unaudited](object-closure-selector-store-unaudited.md)** —
-  selector-shaped cross-package stores (`reg.Err = errors.New(…)` in a sibling init) fail-close
-  without the value audit the spec's "from any package" clause requires; spurious refusal, with
-  a spec-amend fork. *Lands: cross-tool train chunk 32.*
-- **[object-closure-subtree-appearance-breaks](object-closure-subtree-appearance-breaks.md)** —
-  the audit's unattributable-store arm breaks closure over writeless appearances (an interface
-  var as a map key) in proven functions; fail-closed precision loss re-refusing the
-  registration shape, with a spec-amend fork. *Lands: cross-tool train chunk 32.*
-- **[deferred-init-flow-unpinned](deferred-init-flow-unpinned.md)** — "a deferred init call
-  stays init flow" holds only by non-interception of `DeferStmt` and no test pins it.
-  *Lands: cross-tool train chunk 32.*

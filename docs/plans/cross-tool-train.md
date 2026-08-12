@@ -161,7 +161,7 @@ its activation decision.
       resolved-dead records, per-subject manifest bases for the fresh
       stamp and Committable, and the growth/drift promotion-shape
       pins; the three docs delete at close.
-- [ ] 32. gofresh: init-flow audit completion (gofresh docs/issues:
+- [x] 32. gofresh: init-flow audit completion (gofresh docs/issues:
       object-closure-initializer-address-capture,
       object-closure-selector-store-unaudited,
       object-closure-subtree-appearance-breaks,

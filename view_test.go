@@ -7153,6 +7153,84 @@ func TestProvenInitFlowStoresAuditedForObjectClosure(t *testing.T) {
 			t.Fatalf("verdict = %+v, want Valid - an audited construction through a proven function broke the closure", verdict)
 		}
 	})
+	t.Run("initializer-expression address capture breaks the closure", func(t *testing.T) {
+		// The receiving-carrier channel is deliberately absent (the
+		// address is discarded): only the capture arm over initializer
+		// expressions sees this shape, so the row pins that arm alone -
+		// the audit cannot attribute what happens to a captured
+		// address, and the spec breaks the closure fail-closed.
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Err error\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\nvar _ = &reg.Err\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Err") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Err - an initializer-expression capture kept the variable object-closed", verdict)
+		}
+	})
+	t.Run("capture stored through a pointer refuses on the pointer carrier", func(t *testing.T) {
+		// The issue's original reproducer: the receiving pointer's own
+		// escape channel now refuses it independently of the capture
+		// arm - the verdict must stay Unverifiable whichever culprit
+		// the composition names.
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Err error\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\ntype impl struct{ N int }\n\nfunc (i *impl) Error() string { return \"boom\" }\n\nvar p = &reg.Err\n\nfunc init() { *p = &impl{} }\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable {
+			t.Fatalf("verdict = %+v, want Unverifiable - a mutable pointer laundered an object-closed sentinel", verdict)
+		}
+	})
+	t.Run("qualified store of an audited construction keeps the closure", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Err error\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport (\n\t\"errors\"\n\n\t\"example.com/xop/reg\"\n)\n\nfunc init() { reg.Err = errors.New(\"configured\") }\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a qualified store of an audited construction broke the closure", verdict)
+		}
+	})
+	t.Run("qualified composite store aliases no package name", func(t *testing.T) {
+		// reg.Hooks = My unwraps to the reg package name: binding it as
+		// a local would make every later reg.X mention in the body a
+		// spurious carrier touch - the qualified-store class owns the
+		// shape instead.
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Slots []map[string]int\n\nvar Err error\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\nvar My = []map[string]int{{\"k\": 1}}\n\nvar probe func() error\n\nfunc init() {\n\treg.Slots = My\n\tprobe = func() error { return reg.Err }\n}\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a qualified composite store aliased the package name", verdict)
+		}
+	})
+	t.Run("qualified store of a non-audited value breaks the closure", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
+			"reg/reg.go":   "package reg\n\nvar Err error\n\nfunc Get() error { return Err }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xop/reg\"\n\ntype impl struct{ N int }\n\nfunc (i *impl) Error() string { return \"boom\" }\n\nfunc init() { reg.Err = &impl{} }\n\nfunc F() bool { return reg.Get() == nil }\n",
+		}
+		dir := writeModuleTree(t, files)
+		subject := Subject{Package: "example.com/xop/user", Symbol: "F"}
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Err") {
+			t.Fatalf("verdict = %+v, want the downgrade naming reg.Err - a qualified non-audited store kept the variable object-closed", verdict)
+		}
+	})
 }
 
 func writeModuleTree(t *testing.T, files map[string]string) string {
@@ -7253,6 +7331,10 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"generic receiver read discharges":            "package view\n\ntype reg[A comparable] struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg[string]{}\n\nfunc (r *reg[A]) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
 		"init-only helper registration":               "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 		"helper chain registration":                   "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool { return install(name) }\n\nfunc install(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"sentinel map-key registration":               "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nvar index = map[error]string{}\n\nfunc init() { index[ErrX] = \"x\" }\n\nfunc F() error { return ErrX }\n",
+		"deferred init registration stays init flow":  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = boot()\n\nfunc boot() bool {\n\tdefer register()\n\treturn true\n}\n\nfunc register() {\n\tHooks[\"k\"] = func() {}\n}\n\nfunc F() int { return len(Hooks) }\n",
+		"by-value carrier argument seeds nothing":     "package view\n\nvar Count = func() {}\n\nvar Rebind func()\n\nfunc setup(f func()) {\n\tRebind = func() { f() }\n}\n\nfunc init() { setup(Count) }\n\nfunc F() bool { return Count != nil }\n",
+		"non-spread variadic copies the carrier":      "package view\n\nvar OnBoot = func() {}\n\nvar Rebind func()\n\nfunc register(hooks ...func()) {\n\tRebind = func() { hooks[0]() }\n}\n\nfunc init() { register(OnBoot) }\n\nfunc F() bool { return OnBoot != nil }\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeViewModule(t, source)
@@ -7312,6 +7394,17 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		"goroutine-in-init sentinel rebind": {
 			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc use(err error) {}\n\nfunc init() { go func() { ErrX = errors.New(\"later\") }() }\n\nfunc F() { use(ErrX) }\n",
 			culprit: "example.com/view.ErrX is mutated",
+		},
+		"helper parameter bound at the init call site": {
+			// The helper declares BEFORE the init that calls it: the
+			// seed must cross bodies through the package-level
+			// fixpoint, not ride declaration order.
+			source:  "package view\n\nvar Hooks = []func(){func() {}}\n\nvar Rebind func()\n\nfunc setup(hs []func()) {\n\tRebind = func() { hs[0] = func() {} }\n}\n\nfunc init() { setup(Hooks) }\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
+		},
+		"composite-target binding carries the alias": {
+			source:  "package view\n\ntype holder struct{ m []func() }\n\nvar Hooks = []func(){func() {}}\n\nvar Rebind func()\n\nfunc init() {\n\tvar s holder\n\ts.m = Hooks\n\tRebind = func() { s.m[0] = func() {} }\n}\n\nfunc F() int { return len(Hooks) }\n",
+			culprit: "example.com/view.Hooks is mutated",
 		},
 		"helper also called from program code": {
 			source:  "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = declare(\"k\")\n\nfunc declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc Register(name string) { declare(name) }\n\nfunc F() int { return len(Hooks) }\n",

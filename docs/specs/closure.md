@@ -294,11 +294,19 @@ discharges by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
 rules; `init` bodies and qualified helpers are scanned exactly for
 alias-creating bindings — an init-flow local bound from a carrier by
-whole-identifier assignment or declaration, by range binding, or as a
-builtin copy destination, chained to a fixpoint,
-is the carrier inside nested program code; a binding the scan cannot
-attribute (a helper parameter bound at the init call site, a composite
-target such as a struct field) is a recorded residue of this clause —
+whole-identifier assignment or declaration, by range binding, as a
+builtin copy destination, as a qualified helper's parameter bound at
+an init call site (carried across bodies to the same fixpoint, under
+the alias-handing type gate of the value's landing type — a non-spread
+variadic argument lands as the element, boxing into an interface keeps
+the gate's fail-close — for the direct, parenthesized, and
+generic-instantiated call spellings; a conversion-wrapped or
+func-value spelling refuses fail-closed through the escape backstop
+instead), or
+through a composite target (a struct field, element, or indirection
+store binds its base coarsely — the whole base is the carrier),
+chained to a fixpoint,
+is the carrier inside nested program code —
 while init-flow stores and calls stay exempt from the mutation marks;
 a carrier call-argument still earns its deferral or the fail-closed
 escape wherever it appears, and a carrier method-call receiver in init

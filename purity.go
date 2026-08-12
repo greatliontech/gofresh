@@ -657,6 +657,41 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			return true
 		})
 	}
+	// initOnlyParams maps each init-only-qualified helper to its
+	// positional parameter objects (nil placeholders for unnamed
+	// parameters), so an init call site can bind a carrier argument to
+	// the parameter the helper's own scan sees - closing the recorded
+	// helper-parameter residue. paramSeeds carries those bindings
+	// across bodies; seedingPass suppresses the scan's advisory side
+	// channels (escapes, links, explain marks) while the package-level
+	// seed fixpoint converges, so nothing double-records.
+	initOnlyParams := map[*types.Func][]types.Object{}
+	paramSeeds := map[types.Object]map[string]bool{}
+	paramSeedGrowth := false
+	seedingPass := false
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || !initOnly[fd.Name.Name] || fd.Type == nil || fd.Type.Params == nil {
+				continue
+			}
+			fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
+			if !ok {
+				continue
+			}
+			var params []types.Object
+			for _, field := range fd.Type.Params.List {
+				if len(field.Names) == 0 {
+					params = append(params, nil)
+					continue
+				}
+				for _, name := range field.Names {
+					params = append(params, p.TypesInfo.Defs[name])
+				}
+			}
+			initOnlyParams[fn] = params
+		}
+	}
 	// initAliasedLocals maps an init-flow body's locals bound from
 	// carriers to the carrier keys they alias, to a fixpoint over
 	// assignment and range chains, with nested literals and go
@@ -664,6 +699,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 	// An interior that touches such a local touches the carrier.
 	initAliasedLocals := func(body ast.Node) map[types.Object]map[string]bool {
 		aliased := map[types.Object]map[string]bool{}
+		for obj, keys := range paramSeeds {
+			set := map[string]bool{}
+			for key := range keys {
+				set[key] = true
+			}
+			aliased[obj] = set
+		}
 		rhsKeys := func(expr ast.Expr) map[string]bool {
 			keys := map[string]bool{}
 			ast.Inspect(expr, func(n ast.Node) bool {
@@ -714,7 +756,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		// backings exactly as a whole-name bind does
 		// (REQ-closure-shared-dynamic-state).
 		storeLink := func(target ast.Expr, lkeys map[string]bool) {
-			if len(lkeys) == 0 || carrierLinks == nil {
+			if len(lkeys) == 0 || carrierLinks == nil || seedingPass {
 				return
 			}
 			base := target
@@ -761,6 +803,9 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		// spelling's unproven receiver
 		// (REQ-closure-shared-dynamic-state).
 		markRHSMethodValues := func(rhs ast.Expr) {
+			if seedingPass {
+				return
+			}
 			calledFuns := map[ast.Node]bool{}
 			ast.Inspect(rhs, func(n ast.Node) bool {
 				if call, ok := n.(*ast.CallExpr); ok {
@@ -800,12 +845,29 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if len(keys) == 0 {
 				return false
 			}
+			// A composite-target binding (s.m = Hooks, a[i] = Hooks, *p =
+			// Hooks) makes the whole base a carrier: a later literal
+			// writing through the composite writes carrier state, so the
+			// base binds coarsely - fail-closed, closing the recorded
+			// composite-target residue.
+			composite := false
+		unwrap:
 			for {
-				paren, ok := target.(*ast.ParenExpr)
-				if !ok {
-					break
+				switch t := target.(type) {
+				case *ast.ParenExpr:
+					target = t.X
+				case *ast.SelectorExpr:
+					target = t.X
+					composite = true
+				case *ast.IndexExpr:
+					target = t.X
+					composite = true
+				case *ast.StarExpr:
+					target = t.X
+					composite = true
+				default:
+					break unwrap
 				}
-				target = paren.X
 			}
 			ident, ok := target.(*ast.Ident)
 			if !ok {
@@ -815,6 +877,13 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if !ok {
 				return false
 			}
+			if _, isPkg := obj.(*types.PkgName); isPkg {
+				// A package-qualified composite target (reg.Var = ...) is
+				// the qualified-store class, not a local binding: aliasing
+				// the package name would make every later reg.X mention a
+				// spurious carrier touch.
+				return false
+			}
 			if variable, pkg := dynamicPackageVar(obj); pkg {
 				// A carrier bound from another carrier shares its
 				// backing: the two keys link as one storage, mutation,
@@ -822,7 +891,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// composition; reach-free sources and call results
 				// record no link key and stay unlinked
 				// (REQ-closure-shared-dynamic-state).
-				if carrierLinks != nil {
+				if carrierLinks != nil && !seedingPass {
 					own := dynamicVarKey(variable)
 					for key := range lkeys {
 						if key == own {
@@ -836,7 +905,11 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				}
 				return false
 			}
-			if !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
+			if !composite && !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
+				// A composite binding skips the type gate: the stored
+				// carrier keys are themselves the proof the base now
+				// reaches carrier state, whatever the base's own type
+				// would hand out.
 				return false
 			}
 			changed := false
@@ -918,6 +991,71 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								changed = true
 							}
 							storeLink(n.Args[0], lkeys)
+						}
+					}
+					// A qualified helper's parameter binds at the init
+					// call site: the argument's carrier keys seed the
+					// parameter for the helper's own scan, and the
+					// package-level fixpoint carries the seeds across
+					// bodies - closing the recorded helper-parameter
+					// residue. The binding takes the same alias-handing
+					// type gate as a whole-identifier bind - a by-value
+					// carrier cannot be rebound through the argument -
+					// and every call spelling of the helper binds
+					// (parenthesized, generic-instantiated). Excess
+					// variadic arguments seed the final parameter.
+					callee := n.Fun
+				unwrapFun:
+					for {
+						switch f := callee.(type) {
+						case *ast.ParenExpr:
+							callee = f.X
+						case *ast.IndexExpr:
+							callee = f.X
+						case *ast.IndexListExpr:
+							callee = f.X
+						default:
+							break unwrapFun
+						}
+					}
+					if ident, ok := callee.(*ast.Ident); ok {
+						if fn, ok := p.TypesInfo.Uses[ident].(*types.Func); ok {
+							if params := initOnlyParams[fn]; len(params) != 0 {
+								variadic := false
+								if sig, ok := fn.Type().(*types.Signature); ok {
+									variadic = sig.Variadic()
+								}
+								for i, arg := range n.Args {
+									slot := min(i, len(params)-1)
+									param := params[slot]
+									if param == nil {
+										continue
+									}
+									// A non-spread variadic argument is
+									// copied into a fresh slice: the gate
+									// judges the ELEMENT type the value
+									// lands as, not the slice the helper
+									// sees.
+									gateType := param.Type()
+									if variadic && slot == len(params)-1 && n.Ellipsis == token.NoPos {
+										if slice, ok := types.Unalias(gateType).(*types.Slice); ok {
+											gateType = slice.Elem()
+										}
+									}
+									if !typeHandsOutDynamicAlias(gateType, make(map[types.Type]bool)) {
+										continue
+									}
+									for key := range rhsKeys(arg) {
+										if paramSeeds[param] == nil {
+											paramSeeds[param] = map[string]bool{}
+										}
+										if !paramSeeds[param][key] {
+											paramSeeds[param][key] = true
+											paramSeedGrowth = true
+										}
+									}
+								}
+							}
 						}
 					}
 				}
@@ -1443,6 +1581,32 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			}
 			return true
 		})
+	}
+	// The helper-parameter seed fixpoint runs the alias scan over every
+	// init-flow body until no call site grows a parameter's seed set,
+	// advisory side channels suppressed; the main walk below then scans
+	// each body once with the converged seeds in force.
+	if len(initOnlyParams) != 0 {
+		seedingPass = true
+		for {
+			paramSeedGrowth = false
+			for _, file := range p.Syntax {
+				for _, decl := range file.Decls {
+					switch decl := decl.(type) {
+					case *ast.FuncDecl:
+						if decl.Recv == nil && decl.Name != nil && decl.Body != nil && (decl.Name.Name == "init" || initOnly[decl.Name.Name]) {
+							initAliasedLocals(decl.Body)
+						}
+					case *ast.GenDecl:
+						initAliasedLocals(decl)
+					}
+				}
+			}
+			if !paramSeedGrowth {
+				break
+			}
+		}
+		seedingPass = false
 	}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
@@ -6310,7 +6474,7 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			}
 		}
 	}
-	failTargets := func(expr ast.Expr) {
+	failSubtree := func(expr ast.Expr) {
 		ast.Inspect(expr, func(n ast.Node) bool {
 			ident, ok := n.(*ast.Ident)
 			if !ok {
@@ -6319,6 +6483,62 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			if obj, ok := p.TypesInfo.Uses[ident]; ok {
 				if variable, ok := interfacePackageVar(obj); ok {
 					failed[dynamicVarKey(variable)] = true
+				}
+			}
+			return true
+		})
+	}
+	// failTargets fails the interface package variables a target
+	// expression can actually write or capture: the base chain through
+	// selections, indexing, indirection, and parentheses. An index
+	// expression is a read of its key - a registry indexed by a
+	// sentinel never writes the sentinel - discharged exactly as the
+	// carrier read rules discharge writeless reads; an unrecognized
+	// target shape keeps the whole-subtree fail-close.
+	failTargets := func(expr ast.Expr) {
+		for {
+			switch t := expr.(type) {
+			case *ast.Ident:
+				if obj, ok := p.TypesInfo.Uses[t]; ok {
+					if variable, ok := interfacePackageVar(obj); ok {
+						failed[dynamicVarKey(variable)] = true
+					}
+				}
+				return
+			case *ast.SelectorExpr:
+				// A qualified reference (pkg.Var) resolves as the
+				// variable itself; a field selector chains to its base.
+				if obj, ok := p.TypesInfo.Uses[t.Sel]; ok {
+					if variable, ok := interfacePackageVar(obj); ok {
+						failed[dynamicVarKey(variable)] = true
+						return
+					}
+				}
+				expr = t.X
+			case *ast.IndexExpr:
+				expr = t.X
+			case *ast.StarExpr:
+				expr = t.X
+			case *ast.ParenExpr:
+				expr = t.X
+			default:
+				failSubtree(expr)
+				return
+			}
+		}
+	}
+	// failCaptures runs the init-flow fail arms over an expression: an
+	// address capture licenses later unattributable stores wherever it
+	// sits - a package-level initializer expression included - while a
+	// nested literal stays program code for the mutation walk to judge.
+	failCaptures := func(expr ast.Expr) {
+		ast.Inspect(expr, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.UnaryExpr:
+				if n.Op == token.AND {
+					failTargets(n.X)
 				}
 			}
 			return true
@@ -6343,6 +6563,12 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 							continue
 						}
 						audit(ident, value)
+						if value != nil {
+							// An initializer expression is init flow: a
+							// capture inside it breaks the closure exactly
+							// as one in an init body does.
+							failCaptures(value)
+						}
 					}
 				}
 			case *ast.FuncDecl:
@@ -6358,18 +6584,34 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 						return false
 					case *ast.AssignStmt:
 						for i, lhs := range n.Lhs {
-							if _, ok := lhs.(*ast.Ident); !ok {
-								// An indirect or selector store the audit
-								// cannot attribute fails every interface
-								// variable the target subtree reaches.
-								failTargets(lhs)
-								continue
-							}
 							var value ast.Expr
 							if i < len(n.Rhs) {
 								value = n.Rhs[i]
 							}
-							audit(lhs, value)
+							switch target := lhs.(type) {
+							case *ast.Ident:
+								audit(target, value)
+							case *ast.SelectorExpr:
+								// A qualified store (pkg.Var = ...) is a
+								// direct store the auditing package
+								// resolves to the variable - the spec's
+								// clause admits it from any package - so
+								// it takes the same value audit as an
+								// identifier store; a field selector is
+								// the unattributable fail arm's.
+								if base, ok := target.X.(*ast.Ident); ok {
+									if _, isPkg := p.TypesInfo.Uses[base].(*types.PkgName); isPkg {
+										audit(target.Sel, value)
+										continue
+									}
+								}
+								failTargets(lhs)
+							default:
+								// An indirect store the audit cannot
+								// attribute fails every interface variable
+								// the target chain reaches.
+								failTargets(lhs)
+							}
 						}
 					case *ast.UnaryExpr:
 						if n.Op == token.AND {
