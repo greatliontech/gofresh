@@ -1510,6 +1510,10 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		fixture, subject string
 		observable       bool
 		reason           string
+		// absent, when set, asserts the reason does NOT contain the
+		// substring - it pins WHICH arm produced the refusal (walk vs
+		// package-scan backstop), not just its cause.
+		absent string
 	}{
 		{fixture: "observable", subject: "TestReadFile", observable: true},
 		{fixture: "observable", subject: "TestGetenv", observable: true},
@@ -1695,6 +1699,58 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// into a locally constructed in-memory sink is value
 		// computation.
 		{fixture: "harnessmainfmt", subject: "TestProd", observable: true},
+		// Flag REGISTRATION is a process-local registry mutation in
+		// startup and test-main flow - the covert channel is the read
+		// side, which keeps the exclusion in subject and test-main
+		// flow, guarded by the registration-facts sink judgment.
+		{fixture: "flagreginit", subject: "TestProd", observable: true},
+		{fixture: "flagregmain", subject: "TestProd", observable: true},
+		// The subject-tier registration refusal comes from the walk,
+		// not the scan: the scan admits registration by name.
+		{fixture: "flagregsubject", subject: "TestProd", reason: "flag.Bool", absent: "package scan:"},
+		// The test-main walk refuses Parse before the scan is ever
+		// consulted; the subject-flow Lookup falls to the scan because
+		// the subject arm's blocking loop runs after it.
+		{fixture: "flagparsemain", subject: "TestProd", reason: "flag.Parse", absent: "package scan:"},
+		{fixture: "flaglookupsubject", subject: "TestProd", reason: "package scan: reaches unaudited standard operation flag.Lookup"},
+		// A field registration roots at the struct variable: untouched,
+		// the subject stays observable; referenced, the reference is the
+		// covert channel's read side and refuses.
+		{fixture: "flagregstruct", subject: "TestProd", observable: true},
+		{fixture: "flagregstruct", subject: "TestProdRead", reason: "flag-registered state"},
+		// The field address escaping into an ordinary call refuses:
+		// only the registration write's own argument computation
+		// passes the reference refusal.
+		{fixture: "flagregstruct", subject: "TestProdEscape", reason: "flag-registered state"},
+		// A sink the registration-facts judgment cannot trace poisons
+		// the package: admission by name stays sound because the
+		// unguarded storage blocks every subject sharing the program.
+		{fixture: "flagregescape", subject: "TestProd", reason: "untraceable sink"},
+		{fixture: "flagreglocalmain", subject: "TestProd", reason: "untraceable sink"},
+		// Callback families run arbitrary code at Parse and keep the
+		// exclusion outright.
+		{fixture: "flagregcallback", subject: "TestProd", reason: "flag.BoolFunc"},
+		// Registered storage read in test-main flow refuses: the
+		// implicit Parse inside m.Run precedes the read.
+		{fixture: "flagregmainread", subject: "TestProd", reason: "flag-registered state", absent: "package scan:"},
+		// A dynamically dispatched registration target is admitted
+		// nowhere - the facts walk sink-judges only static sites - so
+		// the family-named invoke target blocks in test-main and
+		// startup flow alike.
+		{fixture: "flagreginvoke", subject: "TestProd", reason: "flag.BoolVar", absent: "package scan:"},
+		{fixture: "flagreginvokeinit", subject: "TestProd", reason: "flag.BoolVar", absent: "package scan:"},
+		// Method-form registration rides a flag.CommandLine (or
+		// NewFlagSet) mention, which the scan blocks as an unaudited
+		// symbol - the method-form sink judgment itself is pinned by
+		// the white-box registration-facts assertions.
+		{fixture: "flagregmethod", subject: "TestProd", reason: "package scan: reaches unaudited standard operation flag.CommandLine"},
+		// An init escaping the registered storage's address (q =
+		// &quiet) refuses at the escape site: the alias would carry
+		// parsed state past the mark.
+		{fixture: "flagregalias", subject: "TestProd", reason: "startup effect: references flag-registered state"},
+		// A dependency's untraceable sink blocks this package's
+		// subjects too - the poison spans the test binary.
+		{fixture: "flagregdep", subject: "TestProd", reason: "untraceable sink in github.com/greatliontech/gofresh/closure/fixtures/flagregescape"},
 		// With the startup arm no longer covering test-main flow, the
 		// benchmark-bearing sibling surfaces the pre-existing
 		// package-scan blocker on testing.Loop - the b.Loop audit is
@@ -1712,8 +1768,67 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 			if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
 				t.Fatalf("observability = %+v, want observable=%v reason containing %q", got, tc.observable, tc.reason)
 			}
+			if tc.absent != "" && strings.Contains(got.Reason, tc.absent) {
+				t.Fatalf("observability = %+v, want reason without %q", got, tc.absent)
+			}
 		})
 	}
+}
+
+// The registration-facts sink judgment is pinned white-box for the
+// shapes whose packages the scan blocks anyway (the method form rides
+// a flag.CommandLine mention, itself an unaudited symbol): the marks
+// and the poison must be right independent of which tier's verdict
+// surfaces first.
+func TestFlagRegistrationFacts(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
+	facts := func(t *testing.T, pkgPath string) (map[string]bool, map[string]string) {
+		t.Helper()
+		prog, err := h.loadCached(pkgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metas, err := h.list(pkgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backed, poisoned := newTier2Base(h, prog, metas).flagRegistrationFacts()
+		names := map[string]bool{}
+		for g := range backed {
+			if g.Pkg != nil && g.Pkg.Pkg != nil && g.Pkg.Pkg.Path() == pkgPath {
+				names[g.Name()] = true
+			}
+		}
+		return names, poisoned
+	}
+	t.Run("method and method-expression forms judge past the receiver", func(t *testing.T) {
+		names, poisoned := facts(t, base+"flagregmethod")
+		if !names["verbose"] || !names["quiet"] {
+			t.Fatalf("marked globals = %v, want verbose and quiet", names)
+		}
+		if len(poisoned) != 0 {
+			t.Fatalf("poisoned = %v, want none", poisoned)
+		}
+	})
+	t.Run("field and index selections chase to the variable", func(t *testing.T) {
+		names, poisoned := facts(t, base+"flagregstruct")
+		if !names["cfg"] || !names["arr"] || !names["holder"] {
+			t.Fatalf("marked globals = %v, want cfg, arr, and holder", names)
+		}
+		if len(poisoned) != 0 {
+			t.Fatalf("poisoned = %v, want none", poisoned)
+		}
+	})
+	t.Run("untraceable sink poisons its package", func(t *testing.T) {
+		_, poisoned := facts(t, base+"flagregescape")
+		if !strings.Contains(poisoned[base+"flagregescape"], "untraceable sink") {
+			t.Fatalf("poisoned = %v, want the escape package poisoned", poisoned)
+		}
+	})
 }
 
 func TestOrdinaryOpenFileRequiresZeroFlags(t *testing.T) {

@@ -720,7 +720,29 @@ performs no method call and compares function values by nil-ness alone —
 and registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
-are channels the testlog cannot audit. One admission in the audited set is
+are channels the testlog cannot audit. The registration WRITE itself is
+tier-scoped: standard flag registration through the value and pointer
+families (Bool through Duration and their *Var forms) reached in
+startup or user test-main flow is a process-local registry mutation
+admitted by those walks and by the package-scan backstop — the
+registered storage holds the default until Parse runs, in harness flow
+at the earliest. That admission is sound only paired with a
+program-wide sink judgment at every statically dispatched registration
+call site — a dynamically dispatched family-named target keeps its
+classification, since no sink can be judged there: the registered
+storage (a pointer-family call's target argument, every store of a
+value-family result) must trace, through field and index selections,
+to a package-level variable. A traced variable refuses any later
+reference in every analyzed flow — subject, test-main, and startup
+alike — as the channel's read side: a subject or test-main reference
+reads state Parse can have written, including the unparsed default,
+and a startup reference is at best a default read and at worst an
+escape of the storage's address into subject-reachable state, an alias
+the trace cannot follow. A sink that does not trace blocks every
+subject sharing the program. Parse, Lookup, and the
+callback families (Var, TextVar, Func, BoolFunc — arbitrary code at
+Parse) keep the exclusion everywhere, and subject-flow registration
+keeps the exclusion whole. One admission in the audited set is
 operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
 Fprintln) is Sprint-equivalent value computation exactly when the writer
 operand provably pins every dynamic type it can carry to an audited

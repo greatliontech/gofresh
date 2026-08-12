@@ -468,6 +468,14 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					}
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
 					// admitted test-main epilogue
+				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
+					// flag registration is a process-local registry
+					// mutation; the name-based admission is sound
+					// because the registration-facts sink judgment
+					// guards every call site program-wide - traced
+					// storage refuses on reference, an untraceable
+					// sink poisons the package
+					// (REQ-closure-observability-analysis).
 				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 					if unauditedReason == "" {

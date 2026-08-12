@@ -67,7 +67,19 @@ import "flag"
 
 var verbose = flag.Bool("audited-verbose", false, "covert channel")
 
+var quiet bool
+
+func init() { flag.BoolVar(&quiet, "audited-quiet", false, "covert channel") }
+
+var cfg struct{ N int }
+
+func init() { flag.IntVar(&cfg.N, "audited-n", 1, "covert channel") }
+
 func Registered() bool { return *verbose }
+
+func RegisteredVar() bool { return quiet }
+
+func RegisteredField() int { return cfg.N }
 `)
 	writeFile(t, dir, "flagged/flagged_test.go", `package flagged
 
@@ -85,6 +97,8 @@ func TestRegistered(t *testing.T) {
 		{Package: "example.com/audited/pure", Symbol: "Formats"},
 		{Package: "example.com/audited/mirrored", Symbol: "Reflected"},
 		{Package: "example.com/audited/flagged", Symbol: "Registered"},
+		{Package: "example.com/audited/flagged", Symbol: "RegisteredVar"},
+		{Package: "example.com/audited/flagged", Symbol: "RegisteredField"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +110,14 @@ func TestRegistered(t *testing.T) {
 	registered := proofs[Subject{Package: "example.com/audited/flagged", Symbol: "Registered"}]
 	if registered.Observable || !strings.Contains(registered.Reason, "flag") {
 		t.Fatalf("flag-registration subject = %+v, want blocked on the covert channel", registered)
+	}
+	registeredVar := proofs[Subject{Package: "example.com/audited/flagged", Symbol: "RegisteredVar"}]
+	if registeredVar.Observable || !strings.Contains(registeredVar.Reason, "flag") {
+		t.Fatalf("Var-family registration subject = %+v, want blocked on the covert channel", registeredVar)
+	}
+	registeredField := proofs[Subject{Package: "example.com/audited/flagged", Symbol: "RegisteredField"}]
+	if registeredField.Observable || !strings.Contains(registeredField.Reason, "flag") {
+		t.Fatalf("field-registration subject = %+v, want blocked on the covert channel", registeredField)
 	}
 	reflected := proofs[Subject{Package: "example.com/audited/mirrored", Symbol: "Reflected"}]
 	if reflected.Observable || (!strings.Contains(reflected.Reason, "reflect") && !strings.Contains(reflected.Reason, "reachability")) {

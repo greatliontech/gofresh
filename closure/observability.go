@@ -3,9 +3,14 @@ package closure
 import (
 	"fmt"
 	"go/token"
+	"go/types"
+	"maps"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 
 	prog "github.com/greatliontech/gofresh/closure/internal/program"
 )
@@ -302,6 +307,17 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 			return Observability{Reason: "package scan: " + effect.reason}, nil
 		}
 	}
+	// The registration-sink judgment is the flag admission's soundness
+	// belt: registration is admitted by symbol name in the walks and the
+	// package scan, so a registration whose registered storage the facts
+	// walk cannot trace must block every subject sharing the program -
+	// the program is this package's own test binary, so the poisoned
+	// package is always in the subject's world
+	// (REQ-closure-observability-analysis).
+	if _, poisonedPkgs := base.flagRegistrationFacts(); len(poisonedPkgs) != 0 {
+		paths := slices.Sorted(maps.Keys(poisonedPkgs))
+		return Observability{Reason: poisonedPkgs[paths[0]]}, nil
+	}
 	// The refusal names the highest-ranked blocking effect under the
 	// shared cause-preference order; the projection is already sorted
 	// under the total order, so the first max-rank hit is deterministic —
@@ -346,6 +362,14 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 		}
 		for _, block := range function.Blocks {
 			for _, instruction := range block.Instrs {
+				// Test-main flow references registered storage after the
+				// implicit flag.Parse inside m.Run can have written it, so
+				// a flag-backed reference here is the covert channel's
+				// read side exactly as in subject flow - it can steer the
+				// harness verdict (an exit-code mask, at minimum) on
+				// command-line state the test log cannot audit
+				// (REQ-closure-observability-analysis).
+				recordFlagBackedReferences(analyzer.flagBacked, analyzer.recordExternalEffect, instruction)
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {
 					continue
@@ -376,6 +400,13 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 		return
 	}
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
+	// Static sites only: the facts walk can sink-judge only a statically
+	// dispatched registration, so a dynamically dispatched family-named
+	// target keeps its classification - fail-closed
+	// (REQ-closure-observability-analysis).
+	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
+		return
+	}
 	// os.Exit is the canonical test-main epilogue - the harness protocol
 	// itself (os.Exit(m.Run())). It runs after every test completed and
 	// the log flushed, post-bracket, and adds no input channel to any
@@ -423,6 +454,15 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 		}
 		for _, block := range function.Blocks {
 			for _, instruction := range block.Instrs {
+				// Startup flow references registered storage too: outside
+				// the sanctioned write shapes, a startup reference is at
+				// best a read of the unparsed default and at worst an
+				// escape of the storage's address into subject-reachable
+				// state (q = &registered), an alias the mark cannot
+				// follow - both refuse, keeping the admission's guard
+				// airtight in every analyzed flow
+				// (REQ-closure-observability-analysis).
+				recordFlagBackedReferences(analyzer.flagBacked, analyzer.recordExternalEffect, instruction)
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {
 					continue
@@ -463,6 +503,12 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 		return
 	}
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
+	// Static sites only, exactly as the test-main walk: the facts walk
+	// cannot sink-judge a dynamically dispatched registration target
+	// (REQ-closure-observability-analysis).
+	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
+		return
+	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
 	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
@@ -562,4 +608,319 @@ func isOpenFlagSymbol(symbol string) bool {
 	default:
 		return false
 	}
+}
+
+// flagRegistrationSymbol reports whether pkg.name is standard flag
+// REGISTRATION with a value-shaped sink - a process-local registry
+// mutation whose registered storage the registration facts walk can
+// trace and guard. The callback families (Var, TextVar, Func,
+// BoolFunc) run arbitrary code at Parse and keep the audited-pure
+// exclusion. The read side - Parse and every reference to registered
+// storage - keeps the exclusion too; this admission is consulted by
+// the startup and test-main direct walks and the package-scan
+// backstop, and is sound only because flagRegistrationFacts judges
+// every call site's sinks program-wide
+// (REQ-closure-observability-analysis).
+func flagRegistrationSymbol(pkgPath, name string) bool {
+	return flagValueRegistration(pkgPath, name) || flagPointerRegistration(pkgPath, name)
+}
+
+// flagValueRegistration matches the value families: the registered
+// storage is the returned pointer's target.
+func flagValueRegistration(pkgPath, name string) bool {
+	if pkgPath != "flag" {
+		return false
+	}
+	switch name {
+	case "Bool", "Int", "Int64", "Uint", "Uint64", "String", "Float64", "Duration":
+		return true
+	}
+	return false
+}
+
+// flagPointerRegistration matches the pointer families: the registered
+// storage is the first argument's target.
+func flagPointerRegistration(pkgPath, name string) bool {
+	if pkgPath != "flag" {
+		return false
+	}
+	switch name {
+	case "BoolVar", "IntVar", "Int64Var", "UintVar", "Uint64Var", "StringVar", "Float64Var", "DurationVar":
+		return true
+	}
+	return false
+}
+
+// flagRegistrationFacts walks every function body in the program's
+// non-standard packages once per base and judges each registration
+// call's registered storage: a pointer-family call's first argument
+// and every store of a value-family result must trace, through field
+// and index selections, to a package-level variable. A traced variable
+// is marked - its value changes at flag.Parse, command-line state the
+// test log cannot audit, so any later reference in subject or
+// test-main flow refuses as the covert channel's read side. A sink the
+// judgment cannot trace poisons the whole package: registration is
+// admitted by symbol name (direct walks and package scan alike), and
+// that admission is sound only because an admitted-but-untraceable
+// registration blocks every subject sharing the program. Bodies are
+// judged whether or not any walk reaches them - the package scan
+// admits registration in flows no walk attributes, so the facts must
+// cover exactly what source can express. Standard-library bodies are
+// excluded exactly as the direct walks exclude them: the harness's own
+// registrations are audited surface
+// (REQ-closure-observability-analysis).
+func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]string) {
+	if b.flagBacked != nil {
+		return b.flagBacked, b.flagUntraceable
+	}
+	backed := map[*ssa.Global]bool{}
+	poisoned := map[string]string{}
+	poison := func(fn *ssa.Function, instr ssa.Instruction, what string) {
+		pkgPath := funcPkgPath(fn)
+		if pkgPath == "" {
+			return
+		}
+		pos := ""
+		if b.prog != nil && b.prog.Prog != nil && instr.Pos().IsValid() {
+			position := b.prog.Prog.Fset.Position(instr.Pos())
+			name := position.Filename
+			// Module-relative where possible, bare file name otherwise
+			// (module-cache dependencies): the reason persists in
+			// recorded proofs, and a machine-local absolute path would
+			// vary across checkouts of the same tree - the package path
+			// in the reason already locates the file.
+			relative := ""
+			if b.h != nil && b.h.dir != "" {
+				if rel, err := filepath.Rel(b.h.dir, name); err == nil && !strings.HasPrefix(rel, "..") {
+					relative = rel
+				}
+			}
+			if relative != "" {
+				name = relative
+			} else {
+				name = filepath.Base(name)
+			}
+			pos = fmt.Sprintf(" at %s:%d:%d", name, position.Line, position.Column)
+		}
+		reason := "flag registration with untraceable sink in " + pkgPath + " (" + what + ")" + pos + "; blocks every subject sharing the test binary"
+		// Lexicographic minimum, not first-wins: the walk iterates a
+		// function set in map order, and the recorded reason must not
+		// vary run to run.
+		if current, ok := poisoned[pkgPath]; !ok || reason < current {
+			poisoned[pkgPath] = reason
+		}
+	}
+	for fn := range ssautil.AllFunctions(b.prog.Prog) {
+		pkgPath := funcPkgPath(fn)
+		if pkgPath == "" || isStdImportPath(pkgPath) {
+			continue
+		}
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				site, ok := instr.(ssa.CallInstruction)
+				if !ok || site.Common() == nil {
+					continue
+				}
+				callee := site.Common().StaticCallee()
+				if callee == nil {
+					continue
+				}
+				calleePkg, calleeName := funcPkgPath(callee), functionSymbolName(callee)
+				args := site.Common().Args
+				if callee.Signature != nil && len(args) > 0 &&
+					(callee.Signature.Recv() != nil || flagSetReceiverParam(callee.Signature)) {
+					// Method form: (*FlagSet).Bool and kin carry the
+					// receiver as the first argument - as an ordinary
+					// first parameter in the method-expression form,
+					// where Recv is nil.
+					args = args[1:]
+				}
+				switch {
+				case flagPointerRegistration(calleePkg, calleeName):
+					if len(args) == 0 {
+						poison(fn, instr, calleeName+" has no pointer argument")
+						continue
+					}
+					if g := packageLevelRoot(args[0]); g != nil {
+						backed[g] = true
+					} else {
+						poison(fn, instr, calleeName+" target is not a package-level variable")
+					}
+				case flagValueRegistration(calleePkg, calleeName):
+					call, ok := instr.(*ssa.Call)
+					if !ok {
+						// go/defer forms discard the result: nothing to
+						// guard beyond Lookup, which keeps the exclusion.
+						continue
+					}
+					refs := call.Referrers()
+					if refs == nil {
+						continue
+					}
+					for _, ref := range *refs {
+						if _, ok := ref.(*ssa.DebugRef); ok {
+							continue
+						}
+						if store, ok := ref.(*ssa.Store); ok && store.Val == call {
+							if g := packageLevelRoot(store.Addr); g != nil {
+								backed[g] = true
+								continue
+							}
+						}
+						poison(fn, instr, calleeName+" result escapes its registration site")
+					}
+				}
+			}
+		}
+	}
+	b.flagBacked = backed
+	b.flagUntraceable = poisoned
+	return backed, poisoned
+}
+
+// flagSetReceiverParam reports whether the signature carries a
+// *flag.FlagSet receiver as its first ordinary parameter - the
+// method-expression form of the registration methods, where
+// Signature.Recv is nil.
+func flagSetReceiverParam(sig *types.Signature) bool {
+	if sig == nil || sig.Recv() != nil || sig.Params() == nil || sig.Params().Len() == 0 {
+		return false
+	}
+	ptr, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := types.Unalias(ptr.Elem()).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil &&
+		named.Obj().Pkg().Path() == "flag" && named.Obj().Name() == "FlagSet"
+}
+
+// packageLevelRoot resolves an address through field and index
+// selections to the package-level variable it roots at, or nil.
+func packageLevelRoot(v ssa.Value) *ssa.Global {
+	for {
+		switch x := v.(type) {
+		case *ssa.Global:
+			return x
+		case *ssa.FieldAddr:
+			v = x.X
+		case *ssa.IndexAddr:
+			v = x.X
+		default:
+			return nil
+		}
+	}
+}
+
+// flagRegistrationWriteShape reports whether an instruction belongs to
+// the sanctioned registration write: the registration call itself, or
+// the store of a value-family result. These are the only instructions
+// whose reference to registered storage is the write that creates it;
+// every other reference is the read side.
+func flagRegistrationWriteShape(instr ssa.Instruction) bool {
+	switch x := instr.(type) {
+	case ssa.CallInstruction:
+		if x.Common() == nil {
+			return false
+		}
+		callee := x.Common().StaticCallee()
+		return callee != nil && flagRegistrationSymbol(funcPkgPath(callee), functionSymbolName(callee))
+	case *ssa.Store:
+		call, ok := x.Val.(*ssa.Call)
+		if !ok || call.Common() == nil {
+			return false
+		}
+		callee := call.Common().StaticCallee()
+		return callee != nil && flagValueRegistration(funcPkgPath(callee), functionSymbolName(callee))
+	}
+	return false
+}
+
+// registrationAddressComputation reports whether every use of an
+// address-computation value feeds the sanctioned registration write -
+// the &v.field / &v[i] argument shape, or the address a value-family
+// result stores through - directly or through further selections. Any
+// other use escapes the address and keeps the refusal. The seen map
+// only dedups: selection chains are acyclic by SSA dominance (operands
+// dominate users; a Phi lands in the default arm), so a revisit is a
+// diamond, never a cycle.
+func registrationAddressComputation(v ssa.Value, seen map[ssa.Value]bool) bool {
+	if seen[v] {
+		return true
+	}
+	seen[v] = true
+	refs := v.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return false
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case ssa.CallInstruction:
+			if !flagRegistrationWriteShape(r) {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if !registrationAddressComputation(r, seen) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if !registrationAddressComputation(r, seen) {
+				return false
+			}
+		case *ssa.Store:
+			// The address a value-family result stores through
+			// (cfg.V = flag.Bool(...)) is the write's own sink; the
+			// address appearing as the stored VALUE is an escape.
+			if r.Addr != v || !flagRegistrationWriteShape(r) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// recordFlagBackedReferences refuses every operand reference to a
+// marked flag-backed variable outside the registration write shape: a
+// load is the covert channel's read side, and an address escaping into
+// the flow can only be read or laundered - refusing the reference
+// itself is the fail-closed judgment that needs no points-to chase.
+// Field and index selections whose every use feeds the registration
+// write are that write's own argument computation and pass with it.
+func recordFlagBackedReferences(backed map[*ssa.Global]bool, record func(externalEffect), instr ssa.Instruction) {
+	if len(backed) == 0 || flagRegistrationWriteShape(instr) {
+		return
+	}
+	switch x := instr.(type) {
+	case *ssa.FieldAddr:
+		if registrationAddressComputation(x, map[ssa.Value]bool{}) {
+			return
+		}
+	case *ssa.IndexAddr:
+		if registrationAddressComputation(x, map[ssa.Value]bool{}) {
+			return
+		}
+	}
+	for _, rand := range instr.Operands(nil) {
+		if rand == nil || *rand == nil {
+			continue
+		}
+		if g, ok := (*rand).(*ssa.Global); ok && backed[g] {
+			record(flagBackedReadEffect(g))
+		}
+	}
+}
+
+// flagBackedReadEffect is the refusal a flag-backed reference records.
+// The wording covers every refusing flow: a post-Parse read carries
+// command-line state, and a pre-Parse reference is at best a default
+// read and at worst an address escape - indistinguishable here.
+func flagBackedReadEffect(g *ssa.Global) externalEffect {
+	pkgPath := ""
+	if g.Pkg != nil && g.Pkg.Pkg != nil {
+		pkgPath = g.Pkg.Pkg.Path()
+	}
+	return symbolExternalEffect(externalEffectEnvironment, pkgPath, g.Name(), "references flag-registered state "+g.String()+" (storage flag.Parse writes from the command line, a channel the test log cannot audit)")
 }

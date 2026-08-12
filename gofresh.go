@@ -161,8 +161,14 @@ const DynamicStateStrategy = "gofresh/dynamic-state@23"
 // installs before the user test main runs, so its reads are bracketed
 // observation inputs classified per effect with the subject tier's
 // admissions, its unclosed dispatches still widen, and the canonical
-// os.Exit epilogue is admitted as harness protocol.
-const ObservationRTA = "gofresh/observation-rta@18"
+// os.Exit epilogue is admitted as harness protocol; @19 audits
+// standard flag REGISTRATION as a process-local registry mutation in
+// startup and test-main flow, paired with a program-wide sink
+// judgment: registered storage traces to package-level variables
+// whose later references refuse in subject and test-main flow, an
+// untraceable sink blocks the whole program, and the callback
+// families keep the audited-pure exclusion outright.
+const ObservationRTA = "gofresh/observation-rta@19"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

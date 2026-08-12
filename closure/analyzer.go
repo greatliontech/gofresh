@@ -152,6 +152,17 @@ type tier2Base struct {
 	idxByTypes       map[*types.Package]*pkgIndex
 	objByName        map[string]types.Object
 	objsByLinkTarget map[string][]types.Object
+	// flagBacked marks package-level variables carrying flag-registered
+	// state, judged at every registration call site program-wide by
+	// flagRegistrationFacts. Their values change at flag.Parse -
+	// command-line state the test log cannot audit - so a subject-flow
+	// or test-main-flow reference is the covert channel's read side.
+	// flagUntraceable records, per package path, a registration whose
+	// registered storage the judgment could not trace - such a package
+	// blocks every subject sharing the program
+	// (REQ-closure-observability-analysis). Both computed once per base.
+	flagBacked      map[*ssa.Global]bool
+	flagUntraceable map[string]string
 }
 
 type tier2Analyzer struct {
@@ -160,6 +171,7 @@ type tier2Analyzer struct {
 	prog       *program
 	metas      []listPkg
 	metaByPath map[string]*listPkg
+	flagBacked map[*ssa.Global]bool
 	// skipOriginScan marks parameterized origins whose rooted
 	// instantiations carry the concrete forms of every site: the
 	// open-over-T origin body is never scanned, whatever path reaches it
@@ -253,6 +265,7 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 }
 
 func (b *tier2Base) analyzer() *tier2Analyzer {
+	flagBacked, _ := b.flagRegistrationFacts()
 	return &tier2Analyzer{
 		h:                  b.h,
 		buildFlags:         b.buildFlags,
@@ -262,6 +275,7 @@ func (b *tier2Base) analyzer() *tier2Analyzer {
 		idxByTypes:         b.idxByTypes,
 		objByName:          b.objByName,
 		objsByLinkTarget:   b.objsByLinkTarget,
+		flagBacked:         flagBacked,
 		seenObjects:        map[types.Object]bool{},
 		seenTypes:          map[types.Type]bool{},
 		filePkgs:           map[*pkgIndex]bool{},
@@ -606,6 +620,13 @@ func isOSFileType(t types.Type) bool {
 }
 
 func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
+	// A reference to a flag-backed package variable is the registration
+	// channel's read side: the value changes at flag.Parse -
+	// command-line input the test log cannot audit - and an address
+	// escaping into the flow can only be read or laundered, so the
+	// operand reference itself refuses
+	// (REQ-closure-observability-analysis).
+	recordFlagBackedReferences(a.flagBacked, a.recordExternalEffect, instr)
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
 		a.scanCall(idx, caller, x, fromRTA, suppressNestedFileIO)
@@ -738,6 +759,16 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if classified {
 		effect.observable = observableCallEffect(effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
+			return
+		}
+		// The flag package's own prints are help-path only - usage
+		// output, Parse errors, and redefinition panics - none of which
+		// execute in a run that neither fails Parse nor prints help; a
+		// redefinition panic crashes loudly, never a silent input. The
+		// registration admission would otherwise be defeated by the
+		// internals it statically reaches
+		// (REQ-closure-observability-analysis).
+		if callerIdx != nil && callerIdx.path == "flag" && effect.kind == externalEffectFormattedOutput {
 			return
 		}
 		if !(suppressNestedFileIO && effect.kind == externalEffectFileIO) {

@@ -16,7 +16,7 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       dependency init and before TestMain, so TestMain's reads are
       bracketed observation inputs while package inits stay genuinely
       pre-bracket (driver: gomutant rapid-oracle records never serve).
-- [ ] 0b. flag-registration startup audit - standard flag registration
+- [x] 0b. flag-registration startup audit - standard flag registration
       (flag.Bool/String/Var family) from a package init is a
       process-local registry mutation; the usage-printing reaches
       inside the flag package are help-path only (own audit; same
@@ -26,6 +26,17 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       shapes) whose operand is a locally closed func literal does not
       open the subject world (the test-main dispatch-closure precedent;
       same driver).
+- [ ] 0b2. custom-FlagSet-scoped sink precision - 0b's sink judgment
+      poisons on any untraceable registration, including registrations
+      on a locally-owned FlagSet parsed only from explicit arguments,
+      where the command-line channel needs a Parse that is already
+      independently blocked; scoping the poison to registrations whose
+      FlagSet (or the default set) can carry os.Args requires Parse-
+      argument provenance. Same-package subjects were scan-blocked
+      before 0b; a dependency's registration in a function no walk
+      reached was not visible to dependents pre-0b and can newly
+      poison them - that widening is the fail-closed price of 0b's
+      admission, and this chunk is where it narrows.
 - [ ] 0d. benchmark-loop package-scan audit - testing.Loop in the
       maximal package scan blocks every subject in a benchmark-bearing
       package; startup masking hid it until the test-main flow moved
