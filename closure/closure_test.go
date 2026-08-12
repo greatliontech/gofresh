@@ -1680,10 +1680,26 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "fuzzsibling", subject: "TestSiblingRead", observable: true},
 		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
 		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
-		// User test-main flow is startup, not subject time: its effects
-		// block the proof (REQ-closure-observability-analysis) — the pin
-		// that keeps the test main in the startup provenance roots.
-		{fixture: "harnessroot", subject: "BenchmarkProd", reason: "startup effect"},
+		// TestMain flow classifies within subject-time observation: the
+		// test log is installed before the user test main runs, so its
+		// admitted fixture read is a bracketed observation input
+		// (REQ-closure-observability-analysis).
+		{fixture: "harnessobserved", subject: "TestProd", observable: true},
+		// A test-main write is not a bracketed observation input: the
+		// per-effect classification blocks with the write's own reason.
+		{fixture: "harnessmainwrite", subject: "TestProd", reason: "os.WriteFile"},
+		// The os.Exit epilogue admission is declaration-scoped: an
+		// os.Exit outside TestMain keeps the package-scan finding.
+		{fixture: "harnessexitoutside", subject: "TestProd", reason: "package scan: reaches unaudited standard operation os.Exit"},
+		// The writer-sink admission holds in test-main flow: a format
+		// into a locally constructed in-memory sink is value
+		// computation.
+		{fixture: "harnessmainfmt", subject: "TestProd", observable: true},
+		// With the startup arm no longer covering test-main flow, the
+		// benchmark-bearing sibling surfaces the pre-existing
+		// package-scan blocker on testing.Loop - the b.Loop audit is
+		// its own roadmap line.
+		{fixture: "harnessroot", subject: "BenchmarkProd", reason: "package scan: reaches testing.Loop"},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {

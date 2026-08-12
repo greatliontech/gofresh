@@ -241,6 +241,46 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		}
 		return Observability{Reason: "startup effect: " + reason}, nil
 	}
+	// User test-main flow classifies within subject-time observation:
+	// the test log installs in the toolchain-generated test-main
+	// package's initializer - after every dependency initializer,
+	// before the user test main - so a test-main read is a bracketed
+	// observation input, honored through the effect classification's
+	// own observable flags, while package initializers stay genuinely
+	// pre-bracket in the startup walk above. The flow keeps its own
+	// dispatch discipline: it is the one flow here that can dispatch a
+	// test-planted value after the harness run
+	// (REQ-closure-observability-analysis).
+	if len(reach.testMainFunctions) > 0 {
+		testMainReach := reach
+		testMainReach.functions = nonStandardFunctions(reach.testMainFunctions)
+		testMainResult := testMainObservedEffects(base, testMainReach)
+		if testMainResult.widen {
+			reason := testMainResult.widenReason
+			if reason == "" {
+				reason = "test-main dispatch is not closed"
+			}
+			return Observability{Reason: reason}, nil
+		}
+		// The refusal names the highest-ranked blocking effect under the
+		// shared cause-preference order, exactly as the subject arm does
+		// (REQ-closure-observability-analysis's diagnostic clause).
+		var blocking *externalEffect
+		blockingRank := 0
+		for i := range testMainResult.effects {
+			effect := &testMainResult.effects[i]
+			if effect.observable {
+				continue
+			}
+			if rank := effectCauseRank(*effect); blocking == nil || rank > blockingRank {
+				blocking = effect
+				blockingRank = rank
+			}
+		}
+		if blocking != nil {
+			return Observability{Reason: blocking.reason}, nil
+		}
+	}
 	if subjectResult.widen || subjectReach.openWorld {
 		reason := subjectResult.widenReason
 		if reason == "" {
@@ -285,6 +325,95 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	return Observability{Observable: true}, nil
 }
 
+// testMainObservedEffects classifies user test-main flow within
+// subject-time observation: effects record through the same direct
+// classification the startup walk uses, but the caller honors each
+// effect's observable flag instead of blocking uniformly - the test
+// log is already installed when this flow runs. Any dispatch whose
+// provenance is not locally closed widens: the planted channel is
+// always a load from shared mutable state, so an interface invoke or
+// computed call alike widens unless its operand is locally closed; a
+// static callee is an *ssa.Function, closed by construction, so a
+// test-main's own calls and constructions keep their classification
+// (REQ-closure-observability-analysis).
+func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
+	analyzer := base.analyzer()
+	analyzer.fresh = newFreshParamAnalysis(reachable)
+	for function := range reachable.functions {
+		idx := analyzer.idxForFunction(function)
+		if idx == nil || idx.std || idx.testMain {
+			continue
+		}
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				site, ok := instruction.(ssa.CallInstruction)
+				if !ok || site.Common() == nil {
+					continue
+				}
+				if !testMainDispatchClosed(site) {
+					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
+				}
+				if callee := site.Common().StaticCallee(); callee != nil {
+					recordTestMainCallEffect(analyzer, callee, site)
+				}
+				for target := range reachable.dynamicTargets[site] {
+					recordTestMainCallEffect(analyzer, target, site)
+				}
+			}
+		}
+	}
+	return analyzer.result()
+}
+
+// recordTestMainCallEffect classifies one test-main call exactly as the
+// startup walk's direct classification does, then applies the subject
+// tier's per-site observation admission: test-main flow runs with the
+// test log installed, so an admitted read is a bracketed observation
+// input rather than a blocking effect
+// (REQ-closure-observability-analysis).
+func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.CallInstruction) {
+	if analyzer == nil || callee == nil || observableFileMethod(callee) || observableDirEntryCall(site) || isTestingMRun(callee) {
+		return
+	}
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
+	// os.Exit is the canonical test-main epilogue - the harness protocol
+	// itself (os.Exit(m.Run())). It runs after every test completed and
+	// the log flushed, post-bracket, and adds no input channel to any
+	// subject's execution; an exit before m.Run means no measurement
+	// ever runs - an execution condition, not an observability leak.
+	if pkgPath == "os" && name == "Exit" {
+		return
+	}
+	effect, classified := classBEffect(pkgPath, name)
+	calleeIdx := analyzer.idxForFunction(callee)
+	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
+		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+		classified = true
+	}
+	if osOpenFileMayMutate(callee, pkgPath, name, site.Common()) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
+		classified = true
+	}
+	if !classified && syscallOpenMayCreate(pkgPath, name, site.Common()) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
+		classified = true
+	}
+	if classified && site.Common().StaticCallee() == callee && fmtFprintFamily(pkgPath, name) && len(site.Common().Args) != 0 &&
+		inMemoryFormattedSink(site.Common().Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, analyzer.fresh) {
+		// Static leg only: a dynamically reached Fprint's site arguments
+		// belong to the dynamic signature, not fmt's writer-first shape
+		// (REQ-closure-observability-analysis).
+		// The writer-sink admission holds here exactly as in the other
+		// tiers: a format into a provably in-memory sink is value
+		// computation (REQ-closure-observability-analysis).
+		classified = false
+	}
+	if classified {
+		effect.observable = observableCallEffect(effect, site.Common(), site, analyzer.fresh)
+		analyzer.recordExternalEffect(effect)
+	}
+}
+
 func directExternalEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
 	for function := range reachable.functions {
@@ -299,26 +428,10 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 					continue
 				}
 				callee := site.Common().StaticCallee()
-				// User test-main flow is the one startup flow that can
-				// dispatch a test-planted value (after m.Run). The planted
-				// channel is always a load from shared mutable state, so any
-				// dispatch here — interface invoke or computed call alike —
-				// widens unless its operand is locally closed; a static
-				// callee is an *ssa.Function, closed by construction, so a
-				// test-main's own calls and constructions keep today's
-				// shape. Initializer flow stays unwidened: nothing is
-				// plantable before tests run
-				// (REQ-closure-observability-analysis's startup clause).
-				if reachable.testMainFunctions[function] && !testMainDispatchClosed(site) {
-					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
-				}
 				if callee != nil {
 					recordDirectCallEffect(analyzer, callee, site)
 				}
 				for target := range reachable.dynamicTargets[site] {
-					if observableDirEntryCall(site) {
-						continue
-					}
 					recordDirectCallEffect(analyzer, target, site)
 				}
 			}

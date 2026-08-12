@@ -172,12 +172,15 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.Roots[subjects[i].Symbol]
+		// Startup provenance is package initializers alone: user
+		// test-main flow classifies within subject-time observation -
+		// the test log installs in the toolchain-generated test-main
+		// package's initializer, after every dependency initializer and
+		// before the user test main, so user test-main reads are
+		// bracketed observation inputs while initializer reads stay
+		// genuinely pre-bracket (REQ-closure-observability-analysis).
+		// The flow keeps its own slice below for the dispatch widen.
 		startupRoots := initRoots
-		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-			startupRoots = make([]*ssa.Function, 0, len(initRoots)+1)
-			startupRoots = append(startupRoots, prog.TestMain)
-			startupRoots = append(startupRoots, initRoots...)
-		}
 		// The subject's provenance roots are exactly the roots its mask
 		// was given: for a bounded generic those are its materialized
 		// instantiations, so the effect walk sees every dispatch-reached

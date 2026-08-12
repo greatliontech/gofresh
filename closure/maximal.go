@@ -448,6 +448,15 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		}
 	}
 	bodyReason := ""
+	// The canonical test-main epilogue is harness protocol, not an
+	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
+	// declaration is admitted exactly as the observed test-main walk
+	// admits it - it runs post-bracket and adds no input channel to any
+	// subject's execution (REQ-closure-observability-analysis).
+	testMainDecl := userTestMainDecl(file, aliases)
+	inTestMain := func(node ast.Node) bool {
+		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
+	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		if sel, ok := node.(*ast.SelectorExpr); ok {
 			if ident, ok := sel.X.(*ast.Ident); ok {
@@ -457,6 +466,8 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					if bodyReason == "" && pkgPath != "" {
 						bodyReason = effect.reason
 					}
+				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
+					// admitted test-main epilogue
 				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 					if unauditedReason == "" {
@@ -954,4 +965,42 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 	storeEffectScan(effectScanDirName, effectScanScope(), key, fileFold)
 	fold(fileFold)
 	return composite, true, nil
+}
+
+// userTestMainDecl returns the file's user TestMain declaration - a
+// top-level func TestMain with exactly one parameter of syntactic type
+// *testing.M under the file's own testing import alias - or nil. The
+// syntactic shape is the harness contract: the toolchain only calls a
+// TestMain matching it.
+func userTestMainDecl(file *ast.File, aliases map[string]string) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name != "TestMain" || fd.Type == nil || fd.Type.Params == nil {
+			continue
+		}
+		if len(fd.Type.Params.List) != 1 || len(fd.Type.Params.List[0].Names) > 1 {
+			continue
+		}
+		star, ok := fd.Type.Params.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		// Both harness shapes: *testing.M under the file's own import
+		// alias, and bare *M under a dot-imported testing.
+		switch x := star.X.(type) {
+		case *ast.SelectorExpr:
+			pkgIdent, ok := x.X.(*ast.Ident)
+			if !ok || x.Sel == nil || x.Sel.Name != "M" || aliases[pkgIdent.Name] != "testing" {
+				continue
+			}
+		case *ast.Ident:
+			if x.Name != "M" || aliases["."] != "testing" {
+				continue
+			}
+		default:
+			continue
+		}
+		return fd
+	}
+	return nil
 }

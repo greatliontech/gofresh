@@ -183,6 +183,9 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		pkgPath := aliases[ident.Name]
 		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
 			scan.add(effect)
+		} else if pkgPath == "os" && sel.Sel.Name == "Exit" && referenceInTestMain(file, aliases, sel) {
+			// admitted test-main epilogue - mirrors the production
+			// carve-out
 		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
@@ -417,4 +420,40 @@ func referenceTestingMethodEffects(file *ast.File, aliases map[string]string) []
 		})
 	}
 	return effects
+}
+
+// referenceInTestMain is an independently written check that node lies
+// inside the user TestMain(*testing.M) declaration - the reference's
+// own walk, not a call into the production detector.
+func referenceInTestMain(file *ast.File, aliases map[string]string, node ast.Node) bool {
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name != "TestMain" {
+			continue
+		}
+		if fd.Type == nil || fd.Type.Params == nil || len(fd.Type.Params.List) != 1 || len(fd.Type.Params.List[0].Names) > 1 {
+			continue
+		}
+		star, ok := fd.Type.Params.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		// Both harness shapes: *testing.M under the file's own import
+		// alias, and bare *M under a dot-imported testing.
+		switch x := star.X.(type) {
+		case *ast.SelectorExpr:
+			pkgIdent, ok := x.X.(*ast.Ident)
+			if !ok || x.Sel == nil || x.Sel.Name != "M" || aliases[pkgIdent.Name] != "testing" {
+				continue
+			}
+		case *ast.Ident:
+			if x.Name != "M" || aliases["."] != "testing" {
+				continue
+			}
+		default:
+			continue
+		}
+		return node.Pos() >= fd.Pos() && node.End() <= fd.End()
+	}
+	return false
 }

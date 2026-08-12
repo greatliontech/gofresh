@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@17" {
-		t.Fatalf("ObservationRTA = %q, want harness subtest-driver admission semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@18" {
+		t.Fatalf("ObservationRTA = %q, want test-main observed-window semantics", ObservationRTA)
 	}
 }
 

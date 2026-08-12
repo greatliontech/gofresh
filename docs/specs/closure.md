@@ -661,10 +661,25 @@ build-configuration guard is recorded rather than a different default build.
 **REQ-closure-observability-analysis** (invariant): An observability proof MUST use the
 whole-program SSA, standard-library bodies, generic instantiations, executable
 build selection, and subject attribution of REQ-closure-analysis, and preserves
-root provenance: any external effect attributable to a package initializer or to
-user test-main flow rather than the subject is outside subject-time observation and
-blocks the proof, while subject flow is classified against the admitted observation
-set. Every reachable call and effect is classified to the walk's end; the preferred
+root provenance: any external effect attributable to a package initializer
+rather than the subject is outside subject-time observation and blocks the
+proof, while subject flow is classified against the admitted observation
+set. User test-main flow classifies within subject-time observation: the
+test log installs in the toolchain-generated test-main package's
+initializer — after every dependency initializer and before the user test
+main — so a user test-main read is a bracketed observation input, admitted
+per effect through the same per-site observation admissions subject flow
+answers to, with a blocking test-main effect refusing under its own
+reason. The canonical test-main epilogue `os.Exit` is harness protocol,
+not an effect: it runs post-bracket and adds no input channel to any
+subject's execution (an exit before the harness run means no measurement
+ever runs — an execution condition, not an observability leak). The
+observed walk admits it throughout user test-main flow — helpers
+included, since an exit anywhere in that flow means the harness
+protocol ended or never ran a measurement — while the package-scan
+backstop scopes its admission to the syntactic `TestMain(*testing.M)`
+declaration, the conservative direction for text the scan cannot
+attribute to flow. Every reachable call and effect is classified to the walk's end; the preferred
 human diagnostic is derived afterward and can never select which facts
 participate: a refusal names the highest-ranked blocking effect under one
 cause-preference order shared with the legacy single-reason projection —
@@ -797,15 +812,15 @@ extra target happens to do. The maximal scan's receiver-escape rejection
 is package-scan diagnostic, not a package blocker: every subject-tier
 dispatch on an escaped harness value is classified — admitted only under
 this admission, widened or effect-recorded otherwise — and user test-main
-flow, the one startup flow that can dispatch a test-planted value after
-the harness run, widens the startup result on any dispatch whose provenance
-is not locally closed — the operand under the same wrapper-carrying
-closed-value walk, with a static thunk call judged by its receiver
-argument, because the wrapper family's toolchain-attributed bodies
-perform the real dispatch where no walk records effects; the planted
-channel is a load from shared mutable state, while a test-main's own
-constructions keep their classification — blocking the proof like any
-other startup effect. Initializer flow keeps attributed-effect recording alone:
+flow, the one flow classified within subject-time observation that can
+dispatch a test-planted value after the harness run, refuses on any
+dispatch whose provenance is not locally closed — the operand under the
+same wrapper-carrying closed-value walk, with a static thunk call judged
+by its receiver argument, because the wrapper family's
+toolchain-attributed bodies perform the real dispatch where no walk
+records effects; the planted channel is a load from shared mutable
+state, while a test-main's own calls and constructions keep their
+per-effect classification. Initializer flow keeps attributed-effect recording alone:
 nothing is plantable before tests run, so an initializer's unattributed
 dispatch is not the demonstrated channel and stays unwidened. The admitted observation set includes the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other

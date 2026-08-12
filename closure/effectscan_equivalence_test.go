@@ -49,6 +49,13 @@ func effectScanCorpusFiles() map[string]string {
 		"func F() { s := \"//go:wasmimport\"; _ = s }\n",
 		"func F() { s := \"//go:linkname\"; _ = s }\n",
 		"//go:linkname F runtime.f\nfunc F()\n",
+		// TestMain shapes: the os.Exit epilogue admission is
+		// declaration-scoped in the scan, and the dot-imported bare *M
+		// form is a valid harness TestMain.
+		"func TestMain(m *testing.M) { os.Exit(m.Run()) }\n",
+		"func TestMain(m *M) { os.Exit(m.Run()) }\n",
+		"func TestMain(m *testing.M) { os.Exit(m.Run()) }\nfunc H() { os.Exit(3) }\n",
+		"func TestMain(m *testing.M) { _ = m }\nfunc TestMain2() { os.Exit(1) }\n",
 	}
 	directives := []string{"", "//go:wasmimport env f\n"}
 	files := map[string]string{}
@@ -73,6 +80,13 @@ func effectScanCorpusFiles() map[string]string {
 	files["nul_import_path.go"] = "package corpus\n\nimport \"\\x00\"\n"
 	files["import_syntax_error.go"] = "package corpus\n\nimport foo\n\nfunc F() {\n"
 	files["wasm_and_unparseable.go"] = "//go:wasmimport env f\npackage corpus\n\nfunc F() {\n"
+	// Named TestMain pairs the diagonal sampling cannot guarantee: the
+	// os.Exit epilogue admission is declaration-scoped, and the
+	// dot-imported bare *M form is a valid harness TestMain.
+	files["testmain_exit.go"] = "package corpus\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestMain(m *testing.M) { os.Exit(m.Run()) }\n"
+	files["testmain_dot_exit.go"] = "package corpus\n\nimport (\n\t\"os\"\n\t. \"testing\"\n)\n\nfunc TestMain(m *M) { os.Exit(m.Run()) }\n"
+	files["testmain_helper_exit.go"] = "package corpus\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestMain(m *testing.M) { os.Exit(m.Run()) }\n\nfunc H() { os.Exit(3) }\n"
+	files["testmain_wrong_name.go"] = "package corpus\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestMain(m *testing.M) { _ = m }\n\nfunc TestMain2() { os.Exit(1) }\n"
 	// L3 named pairs the diagonal sampling misses, plus alias collisions —
 	// this corpus is also the walk-consolidation refactor's oracle.
 	files["pair_os_readfile.go"] = "package corpus\n\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"x\") }\n"

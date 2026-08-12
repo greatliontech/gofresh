@@ -9,7 +9,7 @@ git log --all --grep "startup-effect-precision plan charters". Each
 chunk is one commit through the full adversarial loop; audited-set
 changes each carry their own source audit and strategy bump. WIP = 1.
 
-- [ ] 0a. TestMain rides the observed window - the user TestMain flow
+- [x] 0a. TestMain rides the observed window - the user TestMain flow
       (already tracked as its own reachability slice) classifies under
       the observed subject walk, not the startup tier: the test log
       installs in the generated test-main init, which runs after every
@@ -26,6 +26,13 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       shapes) whose operand is a locally closed func literal does not
       open the subject world (the test-main dispatch-closure precedent;
       same driver).
+- [ ] 0d. benchmark-loop package-scan audit - testing.Loop in the
+      maximal package scan blocks every subject in a benchmark-bearing
+      package; startup masking hid it until the test-main flow moved
+      into the observed window (surfaced by 0a's harnessroot fixture).
+      Decide the class: harness pacing protocol like m.Run (admit) or
+      genuine runtime configuration (keep, with the refusal naming the
+      benchmark) - own audit.
 - [ ] 1. writer-sensitive fmt.Fprint startup classification - an init
       formatting into a provably-local pure sink is value computation
       (the sink-keying precedent extended to the startup tier;

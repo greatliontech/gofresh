@@ -156,8 +156,13 @@ const DynamicStateStrategy = "gofresh/dynamic-state@23"
 // (*M).Run and (*F).Fuzz keep their classifications - with the driver
 // bodies cut from the walk exactly as the logging channel's, and the
 // package-scan testing.Fuzz finding narrowed to a diagnostic so one
-// fuzz declaration no longer blocks every sibling subject.
-const ObservationRTA = "gofresh/observation-rta@17"
+// fuzz declaration no longer blocks every sibling subject; @18 moves
+// user test-main flow into subject-time observation - the test log
+// installs before the user test main runs, so its reads are bracketed
+// observation inputs classified per effect with the subject tier's
+// admissions, its unclosed dispatches still widen, and the canonical
+// os.Exit epilogue is admitted as harness protocol.
+const ObservationRTA = "gofresh/observation-rta@18"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
