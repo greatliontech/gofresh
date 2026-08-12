@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@19" {
-		t.Fatalf("ObservationRTA = %q, want flag-registration startup-audit semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@20" {
+		t.Fatalf("ObservationRTA = %q, want property-harness audit semantics", ObservationRTA)
 	}
 }
 

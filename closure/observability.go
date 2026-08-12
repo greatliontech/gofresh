@@ -407,6 +407,18 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
 		return
 	}
+	// The property-harness boundary gate holds in test-main flow
+	// exactly as in subject flow: the harness's bodies are unscanned,
+	// so a callable crossing here is judged at the boundary or not at
+	// all (REQ-closure-observability-analysis).
+	if analyzer.propertyHarnessAudited(pkgPath) {
+		if site.Common().StaticCallee() != callee {
+			analyzer.requestWiden("property harness reached as a dynamic target in test-main flow")
+		} else if !propertyHarnessClosedArgs(site.Common(), analyzer.fresh) {
+			analyzer.requestWiden("property-harness argument is not locally closed in test-main flow")
+		}
+		return
+	}
 	// os.Exit is the canonical test-main epilogue - the harness protocol
 	// itself (os.Exit(m.Run())). It runs after every test completed and
 	// the log flushed, post-bracket, and adds no input channel to any
@@ -447,6 +459,17 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 
 func directExternalEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
+	// Startup flow deliberately runs without the cross-boundary
+	// fresh-path analysis; the bit-only view carries just the
+	// property-harness audit verdict so the boundary gate's
+	// call-result admission holds here as the spec's every-flow
+	// judgment requires - an initializer composing generators
+	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
+	// subject flow. Parameter crossing stays refused exactly as with a
+	// nil analysis (REQ-closure-observability-analysis).
+	if reachable.propertyHarnessAudited {
+		analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: true}
+	}
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
 		if idx == nil || idx.std || idx.testMain {
@@ -509,6 +532,19 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
 		return
 	}
+	// The property-harness boundary gate holds in startup flow too: an
+	// initializer can create harness values (a package-level MakeCheck
+	// callback) whose bindings must be judged where they cross - the
+	// anonymous-target admission downstream rests on every flow
+	// carrying this gate (REQ-closure-observability-analysis).
+	if analyzer.propertyHarnessAudited(pkgPath) {
+		if site.Common().StaticCallee() != callee {
+			analyzer.requestWiden("property harness reached as a dynamic target in startup flow")
+		} else if !propertyHarnessClosedArgs(site.Common(), analyzer.fresh) {
+			analyzer.requestWiden("property-harness argument is not locally closed in startup flow")
+		}
+		return
+	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := analyzer.idxForFunction(callee)
 	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
@@ -560,6 +596,12 @@ func maximalObservabilityBlocker(effect externalEffect) bool {
 	// its receiver, and a fuzz subject still refuses there
 	// (REQ-closure-observability-analysis).
 	if effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "Fuzz") {
+		return false
+	}
+	// The property-harness fact keeps the closure verdict unverifiable
+	// without blocking observability: the subject tiers judge every
+	// harness crossing precisely (REQ-closure-observability-analysis).
+	if effect.kind == externalEffectTestRuntime && propertyHarnessPath(effect.packagePath) {
 		return false
 	}
 	// The receiver-escape rejection is package-scan diagnostic, never a

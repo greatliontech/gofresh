@@ -21,7 +21,7 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       process-local registry mutation; the usage-printing reaches
       inside the flag package are help-path only (own audit; same
       driver - the real rapid library registers its flags in init).
-- [ ] 0c. property-driver dispatch closure - a computed prop-callback
+- [x] 0c. property-driver dispatch closure - a computed prop-callback
       call inside a recognized property driver (rapid.Check/MakeCheck
       shapes) whose operand is a locally closed func literal does not
       open the subject world (the test-main dispatch-closure precedent;

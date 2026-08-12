@@ -33,6 +33,10 @@ type attributedReachability struct {
 	// names the function the sites call.
 	enumeratedRootSites []ssa.CallInstruction
 	subjectRoot         *ssa.Function
+	// propertyHarnessAudited carries the program-level audit verdict for
+	// the property harness into the per-subject walks: the closed-value
+	// arms consult it so no admission outlives the audit.
+	propertyHarnessAudited bool
 }
 
 // attributedReachableSets runs package-local RTA once and projects its masks
@@ -159,16 +163,18 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		}
 	}
 	reachable := make([]attributedReachability, len(subjects))
+	harnessAudited := propertyHarnessAuditedProg(prog)
 	for i := range reachable {
 		enc, enumerated := enumClosed[i]
 		reachable[i] = attributedReachability{
-			functions:           make(map[*ssa.Function]bool, len(res.Reachable)),
-			resolved:            make(map[ssa.CallInstruction]bool, len(res.Resolved)),
-			dynamicTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
-			instantiatedOrigins: instantiated[uint64(1)<<i],
-			openWorld:           !enumerated && rootMayReceiveUnknownDynamic(prog, prog.Roots[subjects[i].Symbol]),
-			enumeratedRootSites: enc.sites,
-			subjectRoot:         prog.Roots[subjects[i].Symbol],
+			functions:              make(map[*ssa.Function]bool, len(res.Reachable)),
+			resolved:               make(map[ssa.CallInstruction]bool, len(res.Resolved)),
+			dynamicTargets:         make(map[ssa.CallInstruction]map[*ssa.Function]bool),
+			instantiatedOrigins:    instantiated[uint64(1)<<i],
+			openWorld:              !enumerated && rootMayReceiveUnknownDynamic(prog, prog.Roots[subjects[i].Symbol]),
+			enumeratedRootSites:    enc.sites,
+			subjectRoot:            prog.Roots[subjects[i].Symbol],
+			propertyHarnessAudited: harnessAudited,
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.Roots[subjects[i].Symbol]
@@ -197,16 +203,16 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 				}
 			}
 		}
-		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res)
+		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited)
 		if err != nil {
 			return nil, err
 		}
-		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res)
+		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res, harnessAudited)
 		if err != nil {
 			return nil, err
 		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res)
+			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited)
 			if err != nil {
 				return nil, err
 			}
@@ -653,7 +659,7 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 // tier2Reachable analyzes one attributed reachability set: effects,
 // widen, and verdict, with the cross-boundary fresh-path analysis always
 // in force (only the observability walk consults effect.observable).
-func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result) (map[*ssa.Function]bool, error) {
+func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool) (map[*ssa.Function]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -670,8 +676,12 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 			continue
 		}
 		scanned[fn] = true
-		testingFunction := funcPkgPath(fn) == "testing"
-		if !testingFunction {
+		// A harness frame - the standard testing package or an audited
+		// property harness - is never subject content; its dispatch
+		// targets still traverse, so the caller-supplied callbacks it
+		// runs stay subject flow (REQ-closure-observability-analysis).
+		harnessFrame := funcPkgPath(fn) == "testing" || harnessAudited && propertyHarnessPath(funcPkgPath(fn))
+		if !harnessFrame {
 			reachable[fn] = true
 		}
 		for _, block := range fn.Blocks {
@@ -685,11 +695,12 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					continue
 				}
 				if callee != nil {
-					calleeTesting := funcPkgPath(callee) == "testing"
-					if !testingFunction || calleeTesting {
+					calleePath := funcPkgPath(callee)
+					calleeHarness := calleePath == "testing" || harnessAudited && propertyHarnessPath(calleePath)
+					if !harnessFrame || calleeHarness {
 						queue = append(queue, callee)
 					}
-					if calleeTesting && !testingFunction {
+					if calleeHarness && !harnessFrame {
 						continue
 					}
 				}
@@ -697,8 +708,9 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					if targetMask&mask == 0 || isTestingMRun(target) {
 						continue
 					}
-					targetTesting := funcPkgPath(target) == "testing"
-					if !testingFunction || targetTesting || !isStdImportPath(funcPkgPath(target)) {
+					targetPath := funcPkgPath(target)
+					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
+					if !harnessFrame || targetHarness || !isStdImportPath(targetPath) {
 						queue = append(queue, target)
 					}
 				}

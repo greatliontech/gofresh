@@ -1105,6 +1105,13 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 		return closedDynamicValue(v.X, seen, done, fp)
 	case *ssa.Convert:
 		return closedDynamicValue(v.X, seen, done, fp)
+	case *ssa.Call:
+		// A gate-passing static call into the property harness yields a
+		// closed value: the harness wraps exactly the closed callables
+		// the boundary gate judged (rapid.MakeCheck's returned callback
+		// feeding the subtest driver is the driving shape). Every other
+		// call result stays open.
+		return propertyHarnessClosedResult(v, fp)
 	case *ssa.Phi:
 		if len(v.Edges) == 0 {
 			return false

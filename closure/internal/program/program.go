@@ -33,7 +33,7 @@ type Program struct {
 func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...string) *packages.Config {
 	return &packages.Config{
 		Context:    ctx,
-		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
+		Mode:       packages.LoadAllSyntax | packages.NeedForTest | packages.NeedModule,
 		Tests:      true,
 		Dir:        dir,
 		Env:        append([]string(nil), env...),

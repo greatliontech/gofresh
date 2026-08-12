@@ -50,6 +50,7 @@ type Module struct {
 	Version string
 	Dir     string
 	Main    bool
+	Replace *Module
 }
 
 // Error is go list's per-package load failure.

@@ -807,7 +807,49 @@ The driver admission applies to static callees only — a driver reached
 as a dynamic target or through a bound value keeps its classification,
 the conservative refusal — and the toolchain's declaration inventory of
 the driver names is walked by an enforcement test so drift refuses
-instead of silently widening. An interface
+instead of silently widening. The audited property-testing harness —
+exactly `pgregory.net/rapid` — extends the same discipline to a
+third-party harness package: its bodies are cut from every walk and
+from the package-scan backstop, because everything ambient in them is
+the harness's own protocol (the run configuration it reads and the
+clock it paces by surface in its harness-log summary line on every
+outcome, its failure artifacts are output-only reproduction files, and
+its value generation is process-local PRNG state seeded by that same
+log-surfaced configuration), and the property callback is subject
+flow, walked and classified at its own sites through the harness's
+dispatch. The audit is version-gated — it names the releases it
+covers (v1.3.0) plus local source, a deliberate choice rather than a
+silent registry upgrade, and an unlisted release keeps the package's
+ordinary classification. The audit is sound only paired with a
+boundary gate on every flow that can call into the harness — subject,
+test-main, and startup alike: each dynamic-carrying argument of a
+statically dispatched harness call must be judged closed, where the judgment
+admits exactly the subject-closed value walk, the harness's own
+handed-in handle at parameter position (the property harness's `T`
+and the standard harness's `T`/`B`/`TB` — constructed only by their
+harness behind unexported fields and handed per-invocation; a handle
+loaded from shared state is a sibling invocation's value and refuses
+like any other load), a gate-passing harness call result (the wrapped
+callback and generator values, closed for dispatch judgment wherever
+they later cross a gate), and a locally built variadic slice of
+judged elements; every other value — a load from shared mutable
+state, a generator laundered through an ordinary parameter whose
+callers pass unjudged values — widens the subject world. Harness-
+owned TYPES confer no admission by themselves: a gated call's closure
+is per-subject provenance, never a per-program fact a sibling's flow
+could have supplied. A named harness function reached as a dynamic
+target keeps the conservative refusal — no static site exists to gate
+the crossing — while an anonymous harness function (the wrapped
+callback MakeCheck returns) is admitted as a subject-flow dynamic
+target: it exists only because a gated harness call in some analyzed
+flow created it, which is exactly why every flow carries the gate;
+the test-main and startup arms stay stricter and refuse every
+dynamically reached harness target. Importing the audited harness
+keeps the package unverifiable at the closure tier — the audit admits
+observation, never purity: a property run's outcome rides the
+harness's log-surfaced run configuration, not the sources alone, so
+the package scan records an admitted harness fact where it exempts
+the harness's files. An interface
 dispatch the walk cannot resolve widens the subject world — the synthetic
 interface-method wrapper family (any interface, the harness included)
 carries the same obligation in the closed-value walk itself: a bound

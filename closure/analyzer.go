@@ -58,7 +58,25 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				continue
 			}
 			idx := a.idxForFunction(target)
-			if idx == nil || !idx.std {
+			if idx == nil {
+				continue
+			}
+			// A NAMED harness function reached as a dynamic target keeps
+			// the conservative refusal: its body is unscanned and no
+			// static call site exists to gate the crossing arguments. An
+			// anonymous harness function - the wrapped callback
+			// MakeCheck returns - exists only because a gated harness
+			// call in some analyzed flow created it: every flow that can
+			// call into the harness carries the boundary gate, so its
+			// bindings are already judged
+			// (REQ-closure-observability-analysis).
+			if a.propertyHarnessAudited(idx.path) {
+				if target.Parent() == nil {
+					a.requestWiden("property harness reached as a dynamic target in " + site.Parent().String())
+				}
+				continue
+			}
+			if !idx.std {
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
@@ -486,6 +504,12 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if idx == nil || idx.testMain {
 		return
 	}
+	if a.propertyHarnessAudited(idx.path) {
+		// Audited property-harness surface: bodies are never walked -
+		// the boundary gate at the call site is the whole judgment
+		// (REQ-closure-observability-analysis).
+		return
+	}
 	if !idx.std {
 		a.markFilePackage(idx)
 		if obj := fn.Object(); obj != nil {
@@ -684,7 +708,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// Every other subject keeps the local walk: classifiability stays a
 	// property of the dispatch shape, never of what a crossed-in
 	// target's effects happen to be (the harnesswrap pin).
-	operandClosed := locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
+	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.localHarnessView())
 	if !operandClosed && a.fresh != nil && a.fresh.enumRoot != nil {
 		operandClosed = subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
 	}
@@ -725,6 +749,18 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		// an admitted harness fact, never descended into
 		// (REQ-closure-observability-analysis's subtest-driver channel).
 		a.recordExternalEffect(harnessSubtestDriverEffect())
+		return
+	}
+	if !callerStd && a.propertyHarnessAudited(pkgPath) {
+		// The property-harness boundary gate: harness bodies are never
+		// scanned, so every dynamic-carrying argument must be judged
+		// here - judged callables become subject flow through the
+		// harness's own dispatch; a judged call passes silently
+		// exactly as the exempted standard harness does
+		// (REQ-closure-observability-analysis).
+		if !propertyHarnessClosedArgs(c, a.fresh) {
+			a.requestWiden("property-harness argument is not locally closed in " + caller.String())
+		}
 		return
 	}
 	if observableFileMethod(callee) {

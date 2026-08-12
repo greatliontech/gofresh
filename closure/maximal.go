@@ -149,6 +149,20 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
+		if propertyHarnessPath(pkg.ImportPath) &&
+			auditedPropertyHarnessModule(pkg.Module.Version, pkg.Module.Main,
+				pkg.Module.Replace != nil && pkg.Module.Replace.Version == "") {
+			// Audited property-harness surface: its files carry the
+			// harness's own clock, filesystem, and flag protocol, all
+			// covered by the package audit - the scan backstop exempts
+			// them exactly as it exempts the standard library's. The
+			// recorded fact keeps the package unverifiable-by-hash: the
+			// audit admits observation, never purity - a property run's
+			// outcome rides the harness's log-surfaced configuration,
+			// not the sources alone (REQ-closure-observability-analysis).
+			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
+			continue
+		}
 		if scan, ok, err := h.pinnedEffectScan(pkg); err != nil {
 			return nil, "", err
 		} else if ok {
@@ -166,6 +180,26 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 				return nil, "", err
 			}
 			record(scan)
+		}
+	}
+	// The maximal diagnostic owes the shared cause-preference order: when
+	// no arm fed an effect-BACKED reason but effects exist (a closure
+	// whose only finding is the audited property-harness fact, possibly
+	// beside unbacked import fallbacks), the diagnostic names the
+	// highest-ranked effect rather than going silent or naming a
+	// fallback that blocks nothing.
+	if !selectedBacked && len(effects) != 0 {
+		best, bestRank := "", 0
+		for _, effect := range effects {
+			if effect.reason == "" {
+				continue
+			}
+			if rank := effectCauseRank(effect); best == "" || rank > bestRank || rank == bestRank && effect.reason < best {
+				best, bestRank = effect.reason, rank
+			}
+		}
+		if best != "" {
+			selected = best
 		}
 	}
 	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected}

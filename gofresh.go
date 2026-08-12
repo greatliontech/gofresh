@@ -167,8 +167,15 @@ const DynamicStateStrategy = "gofresh/dynamic-state@23"
 // judgment: registered storage traces to package-level variables
 // whose later references refuse in subject and test-main flow, an
 // untraceable sink blocks the whole program, and the callback
-// families keep the audited-pure exclusion outright.
-const ObservationRTA = "gofresh/observation-rta@19"
+// families keep the audited-pure exclusion outright; @20 audits the
+// property-testing harness (pgregory.net/rapid, version-gated) as
+// harness surface - bodies cut from the walks and the package scan
+// with an admitted harness fact keeping the closure verdict
+// unverifiable-by-hash, the property callback walked as subject flow,
+// and every value crossing the harness boundary judged at a per-flow
+// gate (subject-closed, handed-in handle, gated call result, or
+// judged variadic).
+const ObservationRTA = "gofresh/observation-rta@20"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

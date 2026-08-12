@@ -40,6 +40,10 @@ type freshParamAnalysis struct {
 
 	argFresh map[freshParamKey]bool
 	usesOK   map[freshParamKey]bool
+	// propertyHarnessAudited carries the program-level audit verdict:
+	// the closed-value walk's harness arms consult it so no admission
+	// outlives the audit.
+	propertyHarnessAudited bool
 }
 
 type freshParamKey struct {
@@ -49,11 +53,12 @@ type freshParamKey struct {
 
 func newFreshParamAnalysis(reach attributedReachability) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
-		functions: reach.functions,
-		callers:   map[*ssa.Function][]ssa.CallInstruction{},
-		dynamic:   map[*ssa.Function]bool{},
-		argFresh:  map[freshParamKey]bool{},
-		usesOK:    map[freshParamKey]bool{},
+		functions:              reach.functions,
+		callers:                map[*ssa.Function][]ssa.CallInstruction{},
+		dynamic:                map[*ssa.Function]bool{},
+		argFresh:               map[freshParamKey]bool{},
+		usesOK:                 map[freshParamKey]bool{},
+		propertyHarnessAudited: reach.propertyHarnessAudited,
 	}
 	if len(reach.enumeratedRootSites) > 0 {
 		fp.enumRoot = reach.subjectRoot
