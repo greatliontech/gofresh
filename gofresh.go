@@ -358,7 +358,7 @@ func WithAssumePure(pred func(Subject) bool) Option {
 // actually discharged culprits reachable from a subject are recorded on
 // its fingerprint (REQ-vouch-recorded). A vouch naming a variable in
 // mutable-local source confers nothing — code the caller can edit is
-// fixed, not vouched.
+// fixed, not vouched (REQ-vouch-dependency-boundary).
 func WithDynamicStateVouches(identities ...string) Option {
 	return func(e *Engine) {
 		if len(identities) == 0 {

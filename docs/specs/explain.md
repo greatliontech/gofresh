@@ -24,15 +24,17 @@ from any package, own or foreign - the chain's store and edge links
 name the registering package. A
 mutation or escape chain names the deciding site with its position.
 An escape or mutation decided at composition — a deferred call
-argument, a deferred method use, or a field-position use whose
+argument, a deferred method use, an init-flow argument or
+receiver-method deferral, or a field-position use whose
 resolvent no fact proves — names the deferring use site as its
 deciding site and carries the unproven resolvent (the callee
 parameter, the method, or the field position, with the unproven
 registrant parameter when one decided the population), its clause one
 of the deferral clause set: "a deferred argument's parameter
-unproven", "a deferred method use unproven", "the registered
-population refused the field position", "the element population
-refused the position". The deferral resolves over
+unproven", "a deferred method use unproven", "an init-flow argument's
+parameter unproven", "an init-flow receiver's method unproven", "the
+registered population refused the field position", "the element
+population refused the position". The deferral resolves over
 the same composed proof state the verdict used.
 Chains describe refusals; a Valid verdict has no chain, a
 registration whose every dependency edge resolves contributes none,

@@ -574,13 +574,16 @@ assembly sources are already downgraded whole by the native-code and linkage
 blind-spot dispositions. The toolchain-generated test-main package is startup
 scaffolding, not an analysis surface: its registration tables contribute neither
 declarations nor mutations, the same disposition REQ-closure-analysis gives its
-registration initializer. The downgrade's refusal reason MUST name the owning
-package and a mutated variable and be distinct from the signature-dynamism
-refusal — the two channels are separately actionable. A dynamic-capable variable the program never mutates under these
-rules is ordinary source — the closure hashes its initializer like any
+registration initializer. A dynamic-capable variable the program never
+mutates under these rules is ordinary source — the closure hashes its initializer like any
 declaration — and confers no downgrade; the unconditional type-level blanket would
 refuse verifiability to nearly every real program, since hook-typed package
 variables are ubiquitous.
+
+**REQ-closure-shared-dynamic-state-reason** (behavior): The shared-dynamic-state
+downgrade's refusal reason MUST name the owning package and a mutated variable
+and be distinct from the signature-dynamism refusal — the two channels are
+separately actionable.
 
 ## Analysis requirements
 

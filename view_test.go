@@ -1100,7 +1100,7 @@ func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
 
 // A vouch naming a mutable-local variable confers nothing: code the
 // caller can edit is fixed, not vouched — the downgrade stands and no
-// discharge is recorded (REQ-vouch-discharge).
+// discharge is recorded (REQ-vouch-dependency-boundary).
 func TestVouchConfersNothingOnMutableLocalState(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n\nfunc Rebind(f func()) { Callback = f }\n")
 	engine, err := New(WithDir(dir), WithDynamicStateVouches("", "example.com/view.Callback"))
@@ -7362,9 +7362,9 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 	}
 }
 
-// Escapes of writable carriers and sentinel rebinds stay mutation, and
-// the refusal names the owning package and variable
-// (REQ-closure-shared-dynamic-state).
+// Escapes of writable carriers and sentinel rebinds stay mutation
+// (REQ-closure-shared-dynamic-state), and the refusal names the owning
+// package and variable (REQ-closure-shared-dynamic-state-reason).
 func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"sentinel rebind": {

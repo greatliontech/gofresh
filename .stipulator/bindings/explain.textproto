@@ -1,0 +1,56 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-explain-chain"
+  content_hash: "5a549095c5463ab550e4b21f7004defda6be6c4a4c2ffdd2b9c55e06b22821f3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainChains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "263d0ea149725b169888dcc48f6c909332c88ddc8a361be449c2b0408fc52d47"
+}
+
+bindings {
+  requirement_id: "REQ-explain-chain"
+  content_hash: "5a549095c5463ab550e4b21f7004defda6be6c4a4c2ffdd2b9c55e06b22821f3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainDeferralChains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1995dfe495889df71bbef666c558801879d89c5f6804eac44249919a5b588ba5"
+}
+
+bindings {
+  requirement_id: "REQ-explain-vocabulary"
+  content_hash: "08d45a32c67db9fdde7334f89c24500fd232c1b9a5de0bda1e2586d4f2eac0be"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainChains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "263d0ea149725b169888dcc48f6c909332c88ddc8a361be449c2b0408fc52d47"
+}
+
+bindings {
+  requirement_id: "REQ-explain-bounded"
+  content_hash: "4ccb44ebab7dcb47e57100132fd76ee2af4b2e33ca2347bf8cdd1a88e5b8302d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainChainBound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8f6b612e90f1dd31e05de63dc915e368772e180c4ac4102b0d5f8828006380ad"
+}
+
+bindings {
+  requirement_id: "REQ-explain-passive"
+  content_hash: "701e7b97e03d02f1ea2cc107bda5ff7a9affd7cf7b72d5b67816ce28eab2e274"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestChainHooksArmOnlyDuringExplain"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0c6ded04da2683c275d0bff0540f2b333a2c58c3654f7c3b6816b1a83a76802d"
+}
+
+bindings {
+  requirement_id: "REQ-explain-bounded"
+  content_hash: "4ccb44ebab7dcb47e57100132fd76ee2af4b2e33ca2347bf8cdd1a88e5b8302d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainChainBoundsSurfaceDerivation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dfd5c54edee0c629ddf2b7e37eabdc2d307ddfd64fedf4624a2322e5b45b8a2e"
+}

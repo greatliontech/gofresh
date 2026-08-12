@@ -25,11 +25,11 @@ when its work lands (git holds history).
   whole-mask over-approximation; an init-flow closure of matching signature drags initializer
   content into sibling subjects — spurious refusals, never false valids. *Lands: the next
   gofresh plan, with the startup-effect precision family.*
-- **[spec-two-normative-keywords](spec-two-normative-keywords.md)** — REQ-closure-shared-dynamic-state
-  and REQ-vouch-discharge carry two normative keywords each under stipulator's
-  one-keyword compile rule, so corpus compilation fails and zero witnesses execute
-  repo-wide; the split is a normative spec edit. *Lands: user decision on the
-  requirement split (spec-amend channel).*
+- **[explain-chain-unpinned-clauses](explain-chain-unpinned-clauses.md)** — REQ-explain-chain's
+  link-order and edge-terminated-chain clauses have no pinning witness, and
+  REQ-explain-bounded's deferral-arm bound is unexercised end-to-end; all are
+  example-pin extensions of the existing fixture family. *Lands: when the explain
+  surface next changes, or with the chunk that extends the explain test surface.*
 - **[observation-facts-struct](observation-facts-struct.md)** — newView, View.Sibling, and
   newSeededValidationView hand-build near-identical View literals around the same immutable
   observation facts; extracting the facts into one mutex-free struct makes read-only sharing

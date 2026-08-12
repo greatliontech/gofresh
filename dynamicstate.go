@@ -971,7 +971,8 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// proven init-only, and the discharge is recorded per owning package
 	// so subjects reaching it carry the acceptance in their evidence
 	// (REQ-vouch-recorded). A vouch naming mutable-local source confers
-	// nothing — code the caller can edit is fixed, not vouched.
+	// nothing — code the caller can edit is fixed, not vouched
+	// (REQ-vouch-dependency-boundary).
 	pinnedPkg := map[string]bool{}
 	for _, node := range meta {
 		if node.Class == closure.PinnedPackage {

@@ -130,7 +130,7 @@ type subjectScan struct {
 	external  map[Subject]bool
 	// downgradeReason maps each subject of a shared-dynamic-state
 	// downgraded package to the refusal reason naming the owning package
-	// and variable (REQ-closure-shared-dynamic-state).
+	// and variable (REQ-closure-shared-dynamic-state-reason).
 	downgradeReason map[Subject]string
 	// vouchDischarges maps each subject to the canonical sorted
 	// comma-joined caller-vouch identities that discharged would-be

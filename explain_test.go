@@ -2,6 +2,7 @@ package gofresh
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -516,5 +517,78 @@ func TestExplainChainBound(t *testing.T) {
 	got = boundChain(short, 0)
 	if got.Links[len(got.Links)-1].Symbol != "tail" {
 		t.Fatalf("head-protected bound dropped the tail: %+v", got.Links[len(got.Links)-1])
+	}
+}
+
+//gofresh:pure
+func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
+	// The normal analysis path constructs no chains: a view derivation
+	// over a refusing culprit leaves the explain hooks unarmed, and the
+	// on-demand re-derivation disarms them on return
+	// (REQ-explain-passive). The nil assertions read a process-global
+	// atomic, so this test must not run beside another explain
+	// derivation - the package's tests are serial (no t.Parallel), and
+	// the assertions depend on that.
+	files := map[string]string{
+		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc gen() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
+	}
+	dir := writeModuleTree(t, files)
+	if explainHooks.Load() != nil {
+		t.Fatal("explain hooks armed at rest")
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explainHooks.Load() != nil {
+		t.Fatal("normal view derivation armed the explain hooks - chain work belongs to the explain re-derivation alone")
+	}
+	if _, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry"); err != nil {
+		t.Fatal(err)
+	}
+	if explainHooks.Load() != nil {
+		t.Fatal("the explain re-derivation left its hooks armed")
+	}
+}
+
+//gofresh:pure
+func TestExplainChainBoundsSurfaceDerivation(t *testing.T) {
+	// A derivation whose environment-audit path is deeper than the
+	// link cap bounds end-to-end: the omitted remainder is counted and
+	// the innermost refusal survives the bound (REQ-explain-bounded).
+	var reg strings.Builder
+	reg.WriteString("package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\n")
+	const depth = chainLinkCap + 6
+	for i := 0; i < depth; i++ {
+		if i == depth-1 {
+			fmt.Fprintf(&reg, "func gen%d() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\n", i)
+			continue
+		}
+		fmt.Fprintf(&reg, "func gen%d() map[string]handler { return gen%d() }\n\n", i, i+1)
+	}
+	reg.WriteString("var Registry = gen0()\n\nfunc Count() int { return len(Registry) }\n")
+	files := map[string]string{
+		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
+		"reg/reg.go": reg.String(),
+	}
+	dir := writeModuleTree(t, files)
+	chain := explainView(t, dir, "example.com/explain/reg", "Registry")
+	if chain.Arm != "environment-audit" {
+		t.Fatalf("arm = %q, want environment-audit; chain %+v", chain.Arm, chain)
+	}
+	if chain.Omitted == 0 {
+		t.Fatalf("deep chain reported no omitted links: %d links, omitted %d", len(chain.Links), chain.Omitted)
+	}
+	if len(chain.Links) != chainLinkCap {
+		t.Fatalf("bound kept %d links, want %d", len(chain.Links), chainLinkCap)
+	}
+	last := chain.Links[len(chain.Links)-1]
+	if last.Kind != "refusal" {
+		t.Fatalf("the innermost refusal did not survive the bound: %+v", last)
 	}
 }
