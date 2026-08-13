@@ -179,7 +179,7 @@ its activation decision.
       Hooks then the literal writes s.m) both currently stay invisible
       to the init-alias fixpoint - both are reachable wrong-Valid
       shapes with reviewer reproducers; the four docs delete at close.
-- [ ] 33. gofresh: open-world dynamic edges named and refined - the
+- [x] 33. gofresh: open-world dynamic edges named and refined - the
       field report's biggest cost (caller-supplied dynamic triggered
       by dependency interface dispatch wipes caching for yaml-heavy
       packages, ~25 minutes per run over 929 candidates) with no call
