@@ -142,7 +142,7 @@ its activation decision.
       receiver-effect rung), and a range-value binding over a carrier
       whose element type hands out mutable reach discharges when the
       binding is demonstrably read-only; fail-closed everywhere else.
-- [ ] 29. gofresh: maximal-tier reason ranking conforms to the shared
+- [x] 29. gofresh: maximal-tier reason ranking conforms to the shared
       order (gofresh docs/issues/maximal-tier-reason-ranking.md) - rank
       plumbing replaces the per-file stratum switch and the two-class
       package fold, the shared rank table's packagePath branch is
