@@ -5284,6 +5284,27 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - an auto-addressed method write stayed judged", verdict)
 		}
 	})
+	t.Run("self-capturing field bind breaks the read-only proof", func(t *testing.T) {
+		// A constructor-installed closure capturing the receiver is the
+		// receiver-stored launder: the holding field reads reach-free
+		// under the carrier rules, yet calling it writes receiver state.
+		// A signature-carrying receiver-rooted read therefore refuses -
+		// the read-only proof fails, the auto-address break stays
+		// judged, and the verdict refuses instead of serving a proof
+		// that assumed the receiver stable
+		// (REQ-closure-shared-dynamic-state).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\ntype row struct {\n\tName string\n\tH    handler\n}\n\nfunc mk() row {\n\tvar r row\n\tr.H = func(n int) int {\n\t\tr.Name = \"written\"\n\t\treturn n\n\t}\n\treturn r\n}\n\nfunc (r *row) title() string {\n\th := r.H\n\t_ = h(1)\n\treturn r.Name\n}\n\nfunc gen(rows ...row) []row {\n\tout := make([]row, 0, len(rows))\n\tfor _, r := range rows {\n\t\t_ = r.title()\n\t\tout = append(out, r)\n\t}\n\treturn out\n}\n\nvar Registry = gen(mk())\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status == Valid {
+			t.Fatalf("verdict = %+v, want a refusal - the self-capturing field bind was proven receiver-read-only", verdict)
+		}
+		t.Logf("reason: %q", verdict.Reason)
+	})
 	t.Run("read-only method call on a judged binding stays judged", func(t *testing.T) {
 		// The in-package receiver-read-only proof exempts the
 		// auto-address break - the precision the exemption exists for.

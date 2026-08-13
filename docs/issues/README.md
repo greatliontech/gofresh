@@ -41,10 +41,6 @@ when its work lands (git holds history).
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
   *Lands: startup-effect-precision plan, per each doc.*
-- **[func-value-self-capture](func-value-self-capture.md)** — receiver-stored func values
-  whose closures capture the receiver read as reach-free, laundering receiver writes
-  through proven-read-only bindings; pre-existing Signature-classification hole. *Lands: startup-effect-precision
-  plan, per each doc.*
 - **[validation-manifest-evaluation-unshared](validation-manifest-evaluation-unshared.md)** —
   producer validation evaluates each subject's manifest independently, twice, where the
   check window now shares per phase; same amplification class, producer path, cost-only.

@@ -6034,7 +6034,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 					// invoked - so it never consumes and the selector arm
 					// refuses it.
 					if len(n.Args) == 1 && recvRooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
-						if t := p.TypesInfo.TypeOf(n); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+						if t := p.TypesInfo.TypeOf(n); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) && !typeCarriesSignature(t, make(map[types.Type]bool)) {
 							consume(n.Args[0])
 						}
 					}
@@ -6077,8 +6077,11 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				if recvRooted(n.X) && !allowed[rootIdent(n.X)] {
 					// Outside a tainting assignment or a return, an
 					// indexed-out value escapes: it is judged by mutable
-					// reach exactly as before the taint paths existed.
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+					// reach exactly as before the taint paths existed -
+					// and a signature-carrying value IS its environment,
+					// so it refuses whatever the reach walk says
+					// (the receiver-stored closure launder).
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
@@ -6104,7 +6107,15 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 						disqualified[key] = true
 						break
 					}
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+					// A signature-carrying produced value refuses whatever
+					// the reach walk says of its type: a constructor-
+					// installed closure captures the receiver invisibly to
+					// the carrier rules, so a func-valued field read - or
+					// a composite holding one - is mutable reach unless
+					// the declaring package could prove every install
+					// environment-free, which this engine does not audit
+					// (the receiver-stored closure launder).
+					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
