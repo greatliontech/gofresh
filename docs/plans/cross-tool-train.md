@@ -22,7 +22,10 @@ through the surfaces agents already use - then 66, then 81
 (blocking-a-user: an oracle OOM burst pins the reporting user's host
 during campaigns; 82 rides the tail with 80), then the
 discharge tail 56, 56a, 56b, 57, 58, 59, 53, 54, 52, then stipulator ergonomics
-74, 75, 76, 77, 78, then 79, 67, 68, 65, then the
+74, 75, 76, 77, 78, then 79, 67, 68, 65, then 85 (blocking-a-user,
+inserted per the chunk-81 precedent: the undeclared tool-minted
+oracle TMPDIR leaves every temp-touching oracle runtime-unverifiable
+in a reporting consumer's campaign), then the
 startup-effect-precision plan activation decision with 29-46 (80
 rides beside 39a - the same oversubscription mechanism, one repo
 each), then 16
