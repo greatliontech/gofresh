@@ -723,7 +723,7 @@ its activation decision.
       dst-schedule witness gap, and tugboat lifecycle chunk 12's four
       invariant gaps whose property-class enforcement is DST arms -
       the field deadline: lands before that chunk's close-out.
-- [ ] 85. gomutant: tool-minted oracle TMPDIR declared at ingest
+- [x] 85. gomutant: tool-minted oracle TMPDIR declared at ingest
       (gomutant docs/issues/oracle-ephemeral-root-undeclared.md) -
       field report, blocking-a-user band: oracleScratch mints one
       out-of-module TMPDIR per oracle process tree but ingest never

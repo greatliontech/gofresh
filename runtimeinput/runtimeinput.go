@@ -405,8 +405,11 @@ func WithBuildCacheRoot(root string) TestLogOption {
 // directories as an ephemeral root (REQ-inputs-ephemeral-root): the root's
 // OWN identity — declared or resolved form — records nothing, because
 // temp-tree creation machinery stats it to mint fresh per-run subtrees and
-// no state a subject observes flows from its existing content. The
-// admission is one identity wide: every deeper read stays observed.
+// no state a subject observes flows from its existing content. A deeper
+// read whose object is absent at observation ingest likewise records
+// nothing — per-run scratch by construction — while a deeper read still
+// present at ingest stays observed, and an unresolvable root declares
+// nothing.
 func WithEphemeralTempRoot(root string) TestLogOption {
 	return func(c *testLogConfig) {
 		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
