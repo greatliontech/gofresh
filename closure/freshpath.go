@@ -1033,7 +1033,8 @@ func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 // refuses: analysis is subject-scoped but the process heap is shared,
 // so a sibling subject's runtime flow can plant an implementation the
 // subject's attributed enumeration cannot see
-// (REQ-closure-observability-analysis's harness-dispatch admission).
+// (REQ-closure-observability-analysis's subject-determined dispatch
+// admission).
 func subjectClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	return closedDynamicValue(value, seen, map[ssa.Value]bool{}, fp)
 }

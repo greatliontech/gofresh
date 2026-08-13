@@ -878,9 +878,16 @@ thunk value never closes (its receiver arrives at call sites the value
 walk cannot see) and a static thunk call judges its receiver argument, so
 a wrapper over sibling-planted shared state refuses exactly as the direct
 invoke would, whatever carried the wrapper to the call — with one
-harness-dispatch admission: a site does not widen when its RTA-enumerated,
-subject-attributed target set is non-empty and entirely audited harness
-methods AND the dispatch operand's dynamic types are fully determined by
+subject-determined dispatch admission: a site does not widen when its
+RTA-enumerated, subject-attributed target set is non-empty, every
+target is an audited harness method or an analyzed function of an
+indexed non-test-main package (an unindexed or test-main target
+refuses the admission; a harness method classifies as the admitted
+harness fact, a standard-library target classifies through the audited
+symbol tables exactly as an enumerated dynamic target always has, and
+every other target's body classifies its own effects into the subject
+exactly as reachable content always does),
+AND the dispatch operand's dynamic types are fully determined by
 the subject's own flow — the operand derives from local construction or
 from a parameter whose function is not dynamically targeted, closes over
 nothing, is not variadic, and has at least one subject-attributed call
@@ -889,10 +896,13 @@ callers is absence of provenance, refused, never a vacuous pass); a load
 from shared mutable state refuses, because analysis is
 subject-scoped while the process heap is shared, so a sibling subject's
 runtime flow can plant an implementation the subject's attributed
-enumeration cannot see. A target set containing any non-harness method
-keeps the widen regardless of that target's own effects, because
-classifiability is a property of the dispatch shape, never of what the
-extra target happens to do. The maximal scan's receiver-escape rejection
+enumeration cannot see. The subject-determined operand is the
+admission's soundness pillar: it proves the runtime callee's concrete
+type was materialized in subject-attributed flow, so the enumerated
+target set contains it and its effects were classified — the admission
+keys on dispatch shape (operand provenance and target analyzability),
+never on what any target's effects happen to be; the effects then
+refuse or admit on their own terms. The maximal scan's receiver-escape rejection
 is package-scan diagnostic, not a package blocker: every subject-tier
 dispatch on an escaped harness value is classified — admitted only under
 this admission, widened or effect-recorded otherwise — and user test-main

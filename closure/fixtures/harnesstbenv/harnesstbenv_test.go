@@ -6,8 +6,9 @@ import (
 )
 
 // mustEnv routes a non-audited harness method through the interface
-// dispatch shape: the target set is not harness-only, so the invoke
-// keeps the widen no matter what the target does.
+// dispatch shape: the subject-determined dispatch admission classifies
+// the enumerated targets instead of widening, and testing.Setenv's own
+// process-mutation classification refuses the subject causally.
 func mustEnv(tb testing.TB) {
 	tb.Setenv("HARNESSTBENV_FIXTURE", "1")
 }

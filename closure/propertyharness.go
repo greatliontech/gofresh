@@ -22,7 +22,16 @@ import (
 // a gate-passing harness call result, or as a locally built variadic
 // of judged elements - so the only callables the harness's unscanned
 // bodies can ever dispatch are structurally closed functions the
-// reachability walk already scans. A harness function reached as a
+// reachability walk already scans. The gate-passing call-result arm
+// carries a second audited property the subject-determined dispatch
+// admission leans on: every value the audited releases return is a
+// concrete generator, a plain value, or a wrapped callback - never an
+// interface whose dynamic type escapes the caller's own flow - so a
+// harness result feeding any dispatch operand pins no type outside
+// the subject's mask. Audited surfaces: (*Generator[V]).Draw is
+// interface-typed only under the caller's own instantiation, and the
+// reflective Make[V] yields a nil interface for interface types,
+// which panics on dispatch rather than pinning a foreign type. A harness function reached as a
 // dynamic target keeps the conservative refusal: no gate can judge a
 // dispatched-to boundary. The audit is version-gated: an unlisted
 // harness release keeps the package's ordinary classification

@@ -1534,8 +1534,15 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// The open-world refusal names the dispatch edge: the enclosing
 		// function and the interface method the unresolved invoke calls.
 		{fixture: "harnesstb", subject: "TestHelperTBRecursive", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/harnesstb.mustBaselineDeep dispatches testing.TB.Fatal"},
-		{fixture: "harnesstbenv", subject: "TestHelperTBSetenv", reason: "interface invoke outside RTA"},
-		{fixture: "harnesswrap", subject: "TestQuietWrappedFatal", reason: "interface invoke outside RTA"},
+		{fixture: "harnesstbenv", subject: "TestHelperTBSetenv", reason: "package scan: reaches testing.Setenv (process or path mutation)"},
+		// The subject-determined dispatch admission classifies the
+		// enumerated targets instead of widening; the wrapper type's
+		// promoted method set drains testing's bodies into the walk and
+		// the subject refuses causally on the file I/O reached there -
+		// at the subject tier (absent discriminates the backstop). The
+		// specific std symbol is toolchain-dependent, so the pin holds
+		// the class.
+		{fixture: "harnesswrap", subject: "TestQuietWrappedFatal", reason: "(file I/O)", absent: "package scan:"},
 		{fixture: "harnessshared", subject: "TestConsume", reason: "interface invoke outside RTA"},
 		{fixture: "harnesssetenv", subject: "TestCleanRead", reason: "package scan: reaches testing.Setenv"},
 		{fixture: "observablefresh", subject: "TestTempDirWriteReadCleanup", observable: true},
@@ -1656,6 +1663,16 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// A computed call through a package-level function variable
 		// names the variable it dispatches.
 		{fixture: "dyncaller", subject: "RunViaVar", reason: "computed function call in github.com/greatliontech/gofresh/closure/fixtures/dyncaller.RunViaVar calling github.com/greatliontech/gofresh/closure/fixtures/dyncaller.hook"},
+		// The subject-determined dispatch admission: a helper-interior
+		// invoke whose operand derives wholly from subject flow and
+		// whose enumerated targets are analyzed content stops widening -
+		// the targets' own effects decide (REQ-closure-observability-
+		// analysis's subject-determined dispatch admission). A load from
+		// shared mutable state keeps the refusal.
+		{fixture: "depdispatch", subject: "RunLocalDispatch", observable: true},
+		{fixture: "depdispatch", subject: "RunEffectDispatch", reason: "os.WriteFile"},
+		{fixture: "depdispatch", subject: "RunSharedDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/depdispatch.measureVia dispatches github.com/greatliontech/gofresh/closure/fixtures/depdispatch.sizer.size"},
+		{fixture: "depdispatch", subject: "RunNilDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/depdispatch.dispatchNever dispatches github.com/greatliontech/gofresh/closure/fixtures/depdispatch.never.nope"},
 		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunDead", reason: "open subject world"},

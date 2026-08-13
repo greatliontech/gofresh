@@ -36,21 +36,40 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		if callerIdx == nil || callerIdx.testMain {
 			continue
 		}
-		// The harness-dispatch admission: a site whose enumerated target
-		// set is non-empty and entirely audited harness methods does not
-		// widen (REQ-closure-observability-analysis). The bound is the
-		// target SET — one non-harness target keeps the widen regardless
-		// of that target's own effects.
+		// The subject-determined dispatch admission: a site whose
+		// enumerated target set is non-empty and wholly classifiable -
+		// audited harness methods or analyzed functions of indexed
+		// packages - does not widen when its operand's dynamic types are
+		// fully determined by the subject's own flow
+		// (REQ-closure-observability-analysis). The operand proof is the
+		// soundness pillar: it puts the runtime callee's concrete type
+		// inside the enumerated set, so the admission never outruns
+		// classification. An unindexed target refuses the admission.
+		// The guards are the admission's fail-closed backstops. The len
+		// and index arms are structurally unreachable: dynamicTargets
+		// never carries an empty set (the per-site map is created on
+		// first insert) and every RTA target resolves an index today -
+		// they encode the spec's non-empty and analyzed-content clauses
+		// against SSA shapes this derivation has not seen. The test-main
+		// arm is different: test-main targets exist (the generated
+		// package's testDeps method set), but their invoke sites sit in
+		// testing frames the subject-frame filter above already cut, so
+		// the arm backstops the caller-side filter rather than an
+		// impossible shape.
 		if a.rtaResolved[site] && !a.openWorld && len(targets) != 0 {
-			allHarness := true
+			admitted := true
 			for target := range targets {
-				if !harnessLoggingFunction(target) {
-					allHarness = false
+				if harnessLoggingFunction(target) {
+					continue
+				}
+				idx := a.idxForFunction(target)
+				if idx == nil || idx.testMain {
+					admitted = false
 					break
 				}
 			}
-			if allHarness {
-				a.harnessOnlyInvokes[site] = true
+			if admitted {
+				a.subjectDeterminedInvokes[site] = true
 			}
 		}
 		for target := range targets {
@@ -211,10 +230,13 @@ type tier2Analyzer struct {
 	filePkgs    map[*pkgIndex]bool
 	rtaReach    map[*ssa.Function]bool
 	rtaResolved map[ssa.CallInstruction]bool
-	// harnessOnlyInvokes marks invoke sites whose RTA-enumerated target
-	// set is entirely audited harness methods: the one dispatch shape an
-	// unresolved invoke may take without widening the subject world.
-	harnessOnlyInvokes map[ssa.CallInstruction]bool
+	// subjectDeterminedInvokes marks invoke sites whose RTA-enumerated
+	// target set is wholly classifiable - audited harness methods
+	// (admitted harness facts) or analyzed functions of indexed packages
+	// (their bodies classify their own effects into the subject): the
+	// dispatch shape an unresolved invoke may take without widening the
+	// subject world, provided its operand proves subject-determined.
+	subjectDeterminedInvokes map[ssa.CallInstruction]bool
 	// fresh carries the subject's cross-boundary fresh-path analysis;
 	// nil outside per-subject reachability walks (maximal tier,
 	// startup effects), where the intraprocedural grammar alone applies.
@@ -285,22 +307,22 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 func (b *tier2Base) analyzer() *tier2Analyzer {
 	flagBacked, _ := b.flagRegistrationFacts()
 	return &tier2Analyzer{
-		h:                  b.h,
-		buildFlags:         b.buildFlags,
-		prog:               b.prog,
-		metas:              b.metas,
-		metaByPath:         b.metaByPath,
-		idxByTypes:         b.idxByTypes,
-		objByName:          b.objByName,
-		objsByLinkTarget:   b.objsByLinkTarget,
-		flagBacked:         flagBacked,
-		seenObjects:        map[types.Object]bool{},
-		seenTypes:          map[types.Type]bool{},
-		filePkgs:           map[*pkgIndex]bool{},
-		rtaReach:           map[*ssa.Function]bool{},
-		rtaResolved:        map[ssa.CallInstruction]bool{},
-		harnessOnlyInvokes: map[ssa.CallInstruction]bool{},
-		scanned:            map[*ssa.Function]bool{},
+		h:                        b.h,
+		buildFlags:               b.buildFlags,
+		prog:                     b.prog,
+		metas:                    b.metas,
+		metaByPath:               b.metaByPath,
+		idxByTypes:               b.idxByTypes,
+		objByName:                b.objByName,
+		objsByLinkTarget:         b.objsByLinkTarget,
+		flagBacked:               flagBacked,
+		seenObjects:              map[types.Object]bool{},
+		seenTypes:                map[types.Type]bool{},
+		filePkgs:                 map[*pkgIndex]bool{},
+		rtaReach:                 map[*ssa.Function]bool{},
+		rtaResolved:              map[ssa.CallInstruction]bool{},
+		subjectDeterminedInvokes: map[ssa.CallInstruction]bool{},
+		scanned:                  map[*ssa.Function]bool{},
 	}
 }
 
@@ -705,15 +727,15 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// For an enumeration-closed subject the operand walk crosses
 	// subject-attributed parameters through to the root's whole-view
 	// caller sites — that crossing is the enumeration design itself.
-	// Every other subject keeps the local walk: classifiability stays a
-	// property of the dispatch shape, never of what a crossed-in
-	// target's effects happen to be (the harnesswrap pin).
+	// Every other subject keeps the local walk for this short-circuit;
+	// the subject-determined dispatch admission below carries the
+	// subject-internal parameter crossing for enumerated-target sites.
 	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.localHarnessView())
 	if !operandClosed && a.fresh != nil && a.fresh.enumRoot != nil {
 		operandClosed = subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
 	}
 	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && operandClosed
-	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.harnessOnlyInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
+	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.subjectDeterminedInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
 		a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
 	}
 	if !c.IsInvoke() && c.StaticCallee() == nil {

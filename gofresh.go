@@ -181,8 +181,13 @@ const DynamicStateStrategy = "gofresh/dynamic-state@24"
 // shape; @22 corrects the computed-call naming to the reachable
 // identities - a parameter, or a load from a named package-level
 // variable - where @21's arms matched SSA nodes that never reach the
-// widen path and left the package-variable dispatch unnamed.
-const ObservationRTA = "gofresh/observation-rta@22"
+// widen path and left the package-variable dispatch unnamed; @23
+// generalizes the harness-dispatch admission to subject-determined
+// dispatch - an unresolved invoke no longer widens when its operand's
+// dynamic types derive wholly from subject-attributed flow and every
+// enumerated target is an audited harness method or analyzed indexed
+// content, whose effects then classify on their own terms.
+const ObservationRTA = "gofresh/observation-rta@23"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
