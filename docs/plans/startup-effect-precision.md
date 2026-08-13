@@ -59,7 +59,7 @@ changes each carry their own source audit and strategy bump. WIP = 1.
 - [ ] 5. maximal-tier pure-shape selector audits - net/url.Parse,
       time.Time, path/filepath.Ext (the audited-symbol precedent;
       ~23).
-- [ ] 6. func-value self-capture closes - a receiver-stored func value
+- [x] 6. func-value self-capture closes - a receiver-stored func value
       whose literal captures mutable-reach state is itself mutable
       reach (gofresh docs/issues/func-value-self-capture.md).
 - [x] 7. dotless module paths classified standard (gofresh

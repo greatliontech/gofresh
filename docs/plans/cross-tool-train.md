@@ -186,7 +186,7 @@ its activation decision.
       edge named in the reason; the naming half follows the chunk-27
       pattern, the refinement half narrows the open-world rule over
       proven dependency dispatch.
-- [ ] 34. gofresh: startup-walk soundness pair (gofresh docs/issues:
+- [x] 34. gofresh: startup-walk soundness pair (gofresh docs/issues:
       dotless-module-paths-classified-standard,
       func-value-self-capture) - a dotless module path silently
       disables the whole startup walk, and receiver-stored closures
