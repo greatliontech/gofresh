@@ -205,16 +205,42 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 				}
 			}
 		}
-		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths)
+		// The enumeration-target narrowing applies to the subject walk
+		// alone: an init-parented anonymous closure outside the pinned
+		// enumerated set can never be a subject-closed operand's value
+		// (a shared-state load refuses operand-side), so RTA's
+		// matching-signature collision must not drag initializer
+		// content into the subject's scan. The startup walk keeps its
+		// own judgment of initializer content
+		// (REQ-closure-analysis's enumeration design).
+		// The drop applies only at sites in user frames: the operand-
+		// closed proof that anchors the narrowing runs only for
+		// non-standard callers (a std frame's computed dispatch never
+		// widens and never proves its operand), so a std-frame site
+		// keeps the whole-mask drag - spurious, never unsound. The
+		// site's frame classifies by the load's module facts exactly as
+		// the walks do.
+		var dropCollided func(site ssa.CallInstruction, target *ssa.Function) bool
+		if enumerated {
+			pinned := enc.addrTaken
+			dropCollided = func(site ssa.CallInstruction, target *ssa.Function) bool {
+				framePath := funcPkgPath(site.Parent())
+				if isStdImportPath(framePath) && !userPaths[framePath] {
+					return false
+				}
+				return initParentedAnonymous(target) && !pinned[target]
+			}
+		}
+		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided)
 		if err != nil {
 			return nil, err
 		}
-		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res, harnessAudited, userPaths)
+		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res, harnessAudited, userPaths, nil)
 		if err != nil {
 			return nil, err
 		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths)
+			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -236,6 +262,22 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 			}
 			for target, masks := range targets {
 				if masks&mask != 0 && reachable[i].functions[target] {
+					// An enumeration-closed subject's dispatch operands
+					// pin their value set exactly - the enumerated
+					// caller arguments and subject-local constructions -
+					// yet RTA's mask carries every address-taken function
+					// of matching signature, and init-flow closures are
+					// address-taken under every mask. An init-parented
+					// anonymous closure outside the pinned set is that
+					// collision: dropping it removes the spurious
+					// initializer-content drag (a refusal class, never a
+					// false valid - a subject-closed operand can hold an
+					// init-planted value only through a shared-state
+					// load the closed-value walk refuses)
+					// (REQ-closure-analysis's enumeration design).
+					if dropCollided != nil && dropCollided(site, target) {
+						continue
+					}
 					projected := reachable[i].dynamicTargets[site]
 					if projected == nil {
 						projected = make(map[*ssa.Function]bool)
@@ -661,7 +703,7 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 // tier2Reachable analyzes one attributed reachability set: effects,
 // widen, and verdict, with the cross-boundary fresh-path analysis always
 // in force (only the observability walk consults effect.observable).
-func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool) (map[*ssa.Function]bool, error) {
+func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -710,6 +752,9 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					if targetMask&mask == 0 || isTestingMRun(target) {
 						continue
 					}
+					if dropTarget != nil && dropTarget(site, target) {
+						continue
+					}
 					targetPath := funcPkgPath(target)
 					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
 					// User callbacks dispatched from harness frames stay
@@ -742,4 +787,40 @@ func userModulePaths(pkgs []*packages.Package) map[string]bool {
 		}
 	})
 	return user
+}
+
+// initParentedAnonymous reports an anonymous function whose top-level
+// parent is a package initializer (the synthetic init or a user init#N
+// body): address-taken under every mask by the init roots, the one
+// provenance an enumeration-closed subject's pinned operand set can
+// never legitimately carry. Init-flow qualified helpers' closures keep
+// their masks - the narrowing stays at the initializer boundary.
+func initParentedAnonymous(fn *ssa.Function) bool {
+	if fn == nil || fn.Parent() == nil {
+		return false
+	}
+	top := fn
+	for top.Parent() != nil {
+		top = top.Parent()
+	}
+	// A method named init is an ordinary function: only the synthetic
+	// package initializer and the compiler-numbered user init bodies
+	// qualify - dropping any other parent's closures would remove
+	// legitimate subject content, the unsound direction.
+	if top.Signature != nil && top.Signature.Recv() != nil {
+		return false
+	}
+	name := top.Name()
+	if name == "init" {
+		return top.Synthetic == "package initializer"
+	}
+	if rest, ok := strings.CutPrefix(name, "init#"); ok {
+		for _, r := range rest {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return rest != ""
+	}
+	return false
 }

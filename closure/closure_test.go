@@ -1672,6 +1672,18 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "depdispatch", subject: "RunLocalDispatch", observable: true},
 		{fixture: "depdispatch", subject: "RunEffectDispatch", reason: "os.WriteFile"},
 		{fixture: "depdispatch", subject: "RunSharedDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/depdispatch.measureVia dispatches github.com/greatliontech/gofresh/closure/fixtures/depdispatch.sizer.size"},
+		// The enumeration-target narrowing: an init-parented closure of
+		// matching signature stays out of an enumeration-closed
+		// subject's target set, so the initializer's read no longer
+		// drags a spurious refusal in (the startup walk still judges
+		// the initializer itself on its own terms).
+		{fixture: "dyninitcollide", subject: "Run", observable: true},
+		// The std-frame keep is load-bearing: an init-planted
+		// comparator passed as a plain argument into a std generic
+		// dispatches inside the std frame where no operand proof runs,
+		// so the whole-mask drag stays and the latent write refuses at
+		// the subject tier.
+		{fixture: "dyninitstdframe", subject: "RunSort", reason: "os.WriteFile", absent: "startup effect:"},
 		{fixture: "depdispatch", subject: "RunNilDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/closure/fixtures/depdispatch.dispatchNever dispatches github.com/greatliontech/gofresh/closure/fixtures/depdispatch.never.nope"},
 		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
@@ -2017,7 +2029,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false, nil); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable = %v, want context.Canceled", err)
 	}
 	h, err := New()
@@ -2031,7 +2043,7 @@ func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	}
 	root := prog.Roots["TestReadFile"]
 	bounded := &cancelProvenanceContext{Context: context.Background(), remaining: 1}
-	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &rta.Result{Reachable: map[*ssa.Function]uint64{root: 1}}, false, nil); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &rta.Result{Reachable: map[*ssa.Function]uint64{root: 1}}, false, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable during traversal = %v, want context.Canceled", err)
 	}
 }

@@ -1210,20 +1210,30 @@ func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fi
 }
 
 func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
+	// One evaluation per distinct encoded manifest per pass: the observed
+	// state is a function of (manifest, module, env) alone, so subjects
+	// sharing a manifest share it - the same amplification collapse the
+	// check window carries, on the producer path. The memo is per-call
+	// on purpose: the second validation pass must re-evaluate to prove
+	// the inputs stable across the re-analysis window.
+	observedByManifest := map[string]runtimeinput.State{}
 	for _, subject := range subjects {
 		state := attached[subject]
 		if !state.OK || state.Manifest == "" || state.Digest == "" {
 			return fmt.Errorf("gofresh: subject %s.%s has no attached completed observation", subject.Package, subject.Symbol)
 		}
-		var observed runtimeinput.State
-		var err error
-		if v.runtimeCurrent != nil {
-			observed, err = v.runtimeCurrent(ctx, state.Manifest, v.moduleDir)
-		} else {
-			observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.env)
-		}
-		if err != nil {
-			return err
+		observed, evaluated := observedByManifest[state.Manifest]
+		if !evaluated {
+			var err error
+			if v.runtimeCurrent != nil {
+				observed, err = v.runtimeCurrent(ctx, state.Manifest, v.moduleDir)
+			} else {
+				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.env)
+			}
+			if err != nil {
+				return err
+			}
+			observedByManifest[state.Manifest] = observed
 		}
 		if observed != state {
 			detail := ""

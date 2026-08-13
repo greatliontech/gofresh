@@ -174,8 +174,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@23" {
-		t.Fatalf("ObservationRTA = %q, want subject-determined dispatch admission semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@24" {
+		t.Fatalf("ObservationRTA = %q, want enumeration-pinned target semantics", ObservationRTA)
 	}
 }
 

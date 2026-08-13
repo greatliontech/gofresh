@@ -8202,3 +8202,61 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		}
 	})
 }
+
+// Producer validation evaluates each distinct attached manifest once
+// per pass: subjects sharing one encoded manifest cost one evaluation
+// before and one after the re-analysis, never one per subject - the
+// check window's amplification collapse on the producer path.
+func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":           "module example.com/observed\n\ngo 1.26\n",
+		"observed.go":      "package observed\n\nfunc Sibling() int { return 1 }\n",
+		"observed_test.go": "package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestReadA(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n\nfunc TestReadB(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n",
+		"fixture":          "one",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := []Subject{
+		{Package: "example.com/observed", Symbol: "TestReadA"},
+		{Package: "example.com/observed", Symbol: "TestReadB"},
+	}
+	producer, err := engine.NewView(context.Background(), subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range subjects {
+		fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	producer.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
+		calls++
+		return state, nil
+	}
+	if err := producer.Validate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("manifest evaluations = %d, want one per validation pass", calls)
+	}
+}

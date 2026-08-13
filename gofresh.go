@@ -186,8 +186,14 @@ const DynamicStateStrategy = "gofresh/dynamic-state@24"
 // dispatch - an unresolved invoke no longer widens when its operand's
 // dynamic types derive wholly from subject-attributed flow and every
 // enumerated target is an audited harness method or analyzed indexed
-// content, whose effects then classify on their own terms.
-const ObservationRTA = "gofresh/observation-rta@23"
+// content, whose effects then classify on their own terms; @24 narrows
+// an enumeration-closed subject's walk to its pinned operand set - an
+// init-parented anonymous closure of colliding signature outside the
+// enumerated values no longer drags initializer content into the
+// subject's scan (a subject-closed operand can hold an init-planted
+// value only through a shared-state load the closed-value walk
+// refuses).
+const ObservationRTA = "gofresh/observation-rta@24"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

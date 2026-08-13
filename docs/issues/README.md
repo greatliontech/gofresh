@@ -15,11 +15,6 @@ when its work lands (git holds history).
   ladders, wrapper-receiver provenance, parameter eligibility, body cuts, diagnostic
   selection); sketch for collapsing them onto one site classifier.
   *Lands: startup-effect-precision plan, per each doc.*
-- **[enumeration-targets-over-approximated](enumeration-targets-over-approximated.md)** — a
-  subject-closed dispatch pins its value set exactly, but the recorded target set is RTA's
-  whole-mask over-approximation; an init-flow closure of matching signature drags initializer
-  content into sibling subjects — spurious refusals, never false valids. *Lands: the next
-  gofresh plan, with the startup-effect precision family.*
 - **[explain-chain-unpinned-clauses](explain-chain-unpinned-clauses.md)** — REQ-explain-chain's
   link-order and edge-terminated-chain clauses have no pinning witness, and
   REQ-explain-bounded's deferral-arm bound is unexercised end-to-end; all are
@@ -41,8 +36,3 @@ when its work lands (git holds history).
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.
   *Lands: startup-effect-precision plan, per each doc.*
-- **[validation-manifest-evaluation-unshared](validation-manifest-evaluation-unshared.md)** —
-  producer validation evaluates each subject's manifest independently, twice, where the
-  check window now shares per phase; same amplification class, producer path, cost-only.
-  *Lands: when the producer validation path next changes, or a field measurement shows
-  validation-time digesting as a standing cost.*
