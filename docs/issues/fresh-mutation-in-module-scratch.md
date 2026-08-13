@@ -1,9 +1,16 @@
 # Fresh-mutation proof does not cover in-module scratch minting
 
-**Lands:** the fresh-mutation observability extension admits
-`os.MkdirTemp`/`os.CreateTemp` results rooted in the module tree as
-fresh capabilities, or the widening is settled infeasible in the
-runtime-inputs spec.
+**Lands:** a field measurement shows the flow discipline admits real
+bench scratch shapes.
+
+Settled at cross-tool-train chunk 35: the widening is feasible and
+sound in principle - MkdirTemp's EEXIST-retry guarantees novelty
+wherever dir points, and the endpoint-absence machinery extends
+mechanically - but it carries zero measured field mass and the
+motivating bench (tugboat node, below) is refused by the flow
+discipline regardless, so a recordless-read admission would ship with
+no consumer able to validate it. The admission returns as its own
+chunk once the trigger's measurement exists.
 
 The fresh-mutation extension (REQ-inputs-fresh-mutation) treats a
 `testing.TempDir` result as an opaque fresh directory capability and

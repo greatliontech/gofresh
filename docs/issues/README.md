@@ -30,8 +30,8 @@ when its work lands (git holds history).
   capability source to in-module `MkdirTemp`/`CreateTemp` would make disciplined
   in-module scratch recordless with no caller declaration, the declaration-free
   complement to the enforced scratch namespace.
-  *Lands: the extension admits in-module minting, or the widening is settled
-  infeasible in the runtime-inputs spec.*
+  *Lands: a field measurement shows the flow discipline admits real bench
+  scratch shapes.*
 - **[runtimeinput-producer-facade](runtimeinput-producer-facade.md)** — stipulator, gomutant,
   and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
   on env fidelity before review caught it; a runtimeinput facade would collapse all three.

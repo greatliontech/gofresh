@@ -192,13 +192,15 @@ its activation decision.
       disables the whole startup walk, and receiver-stored closures
       launder receiver writes through read-only proofs; both docs
       delete at close.
-- [ ] 35. gofresh: verdict precision and validation cost (gofresh
+- [x] 35. gofresh: verdict precision and validation cost (gofresh
       docs/issues: enumeration-targets-over-approximated,
       validation-manifest-evaluation-unshared,
       fresh-mutation-in-module-scratch) - dispatch target sets stop
-      dragging initializer content into siblings, producer validation
-      shares manifest evaluation, and disciplined in-module scratch
-      goes recordless; three docs delete at close.
+      dragging initializer content into siblings and producer
+      validation shares manifest evaluation; two docs delete at close,
+      and the in-module scratch widening redefers on a
+      field-measurement trigger - feasible and sound in principle,
+      zero measured mass, no consumer the flow discipline admits.
 - [ ] 36. gofresh: analysis-surface structure (gofresh docs/issues:
       one-dispatch-site-classifier, observation-facts-struct) - one
       call-site judgment and one observation-facts shape, collapsing
