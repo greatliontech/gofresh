@@ -30,14 +30,14 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.snapshot == nil {
+	if view.facts.snapshot == nil {
 		t.Fatal("view retained no construction snapshot")
 	}
 	if _, err := view.CaptureObserved(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
-	if seen != view.snapshot {
-		t.Fatalf("bracket snapshot = %p, want the construction snapshot %p", seen, view.snapshot)
+	if seen != view.facts.snapshot {
+		t.Fatalf("bracket snapshot = %p, want the construction snapshot %p", seen, view.facts.snapshot)
 	}
 }
 

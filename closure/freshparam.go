@@ -112,14 +112,22 @@ func (fp *freshParamAnalysis) resolve() {
 	}
 }
 
+// paramCrossingEligible is the one caller-boundary refusal set every
+// parameter crossing shares: the function must be attributed, not
+// dynamically targeted, capture-free, and non-variadic - the shapes no
+// caller enumeration can discipline (the one-site-classifier
+// collapse; a function with attributed callers is always attributed
+// itself, so the membership check is equivalent for the walks that
+// previously omitted it).
+func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
+	return fp != nil && fn != nil && fp.functions[fn] && !fp.dynamic[fn] && len(fn.FreeVars) == 0 && !fn.Signature.Variadic()
+}
+
 // paramEligible refuses every shape the boundary extension cannot
-// carry: unreachable or dynamically-targeted functions, closures,
-// variadic signatures, and non-string parameters.
+// carry: the shared crossing refusals plus out-of-range and non-string
+// parameters.
 func (fp *freshParamAnalysis) paramEligible(fn *ssa.Function, idx int) bool {
-	if fp == nil || fn == nil || !fp.functions[fn] || fp.dynamic[fn] {
-		return false
-	}
-	if len(fn.FreeVars) > 0 || fn.Signature.Variadic() {
+	if !fp.paramCrossingEligible(fn) {
 		return false
 	}
 	if idx < 0 || idx >= len(fn.Params) {

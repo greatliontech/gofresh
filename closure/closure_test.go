@@ -2316,8 +2316,8 @@ func TestTier2CgoExternalLibraryUnverifiable(t *testing.T) {
 				scanned:    map[*ssa.Function]bool{},
 			}
 			a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
-			if !a.unverifiable || !strings.Contains(a.reason, "cgo external library") {
-				t.Fatalf("cgo Class-B = %v/%q, want external library", a.unverifiable, a.reason)
+			if !a.unverifiable || !strings.Contains(a.selected.reason, "cgo external library") {
+				t.Fatalf("cgo Class-B = %v/%q, want external library", a.unverifiable, a.selected.reason)
 			}
 		})
 	}
@@ -2336,8 +2336,8 @@ func TestTier2CgoPkgConfigUnverifiable(t *testing.T) {
 	}
 
 	a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
-	if !a.unverifiable || !strings.Contains(a.reason, "cgo external library") {
-		t.Fatalf("pkg-config cgo Class-B = %v/%q, want external library", a.unverifiable, a.reason)
+	if !a.unverifiable || !strings.Contains(a.selected.reason, "cgo external library") {
+		t.Fatalf("pkg-config cgo Class-B = %v/%q, want external library", a.unverifiable, a.selected.reason)
 	}
 }
 
@@ -2362,8 +2362,8 @@ func TestTier2WasmImportUnverifiable(t *testing.T) {
 	a.scanned = map[*ssa.Function]bool{}
 
 	a.scanFunction(&ssa.Function{Pkg: &ssa.Package{Pkg: typesPkg}, Blocks: []*ssa.BasicBlock{{}}})
-	if !a.unverifiable || !strings.Contains(a.reason, "go:wasmimport") {
-		t.Fatalf("wasmimport Class-B = %v/%q, want go:wasmimport", a.unverifiable, a.reason)
+	if !a.unverifiable || !strings.Contains(a.selected.reason, "go:wasmimport") {
+		t.Fatalf("wasmimport Class-B = %v/%q, want go:wasmimport", a.unverifiable, a.selected.reason)
 	}
 }
 
@@ -2608,11 +2608,11 @@ func TestUnverifiableReasonSelectionIsDeterministic(t *testing.T) {
 	for i := len(effects) - 1; i >= 0; i-- {
 		second.recordExternalEffect(effects[i])
 	}
-	if first.reason != second.reason {
-		t.Fatalf("unverifiable reason depends on traversal order: %q != %q", first.reason, second.reason)
+	if first.selected.reason != second.selected.reason {
+		t.Fatalf("unverifiable reason depends on traversal order: %q != %q", first.selected.reason, second.selected.reason)
 	}
-	if !strings.Contains(first.reason, "network I/O") {
-		t.Fatalf("legacy reason = %q, want the top-ranked network cause", first.reason)
+	if !strings.Contains(first.selected.reason, "network I/O") {
+		t.Fatalf("legacy reason = %q, want the top-ranked network cause", first.selected.reason)
 	}
 }
 
@@ -2638,15 +2638,15 @@ func TestEffectCauseRankStrata(t *testing.T) {
 	for _, effect := range []externalEffect{unaudited, output, read} {
 		a.recordExternalEffect(effect)
 	}
-	if !strings.Contains(a.reason, "file I/O") {
-		t.Fatalf("legacy reason = %q, want the file I/O cause over output and unaudited", a.reason)
+	if !strings.Contains(a.selected.reason, "file I/O") {
+		t.Fatalf("legacy reason = %q, want the file I/O cause over output and unaudited", a.selected.reason)
 	}
 	b := &tier2Analyzer{}
 	for _, effect := range []externalEffect{unaudited, output} {
 		b.recordExternalEffect(effect)
 	}
-	if !strings.Contains(b.reason, "formatted output") {
-		t.Fatalf("legacy reason = %q, want the formatted-output cause over unaudited", b.reason)
+	if !strings.Contains(b.selected.reason, "formatted output") {
+		t.Fatalf("legacy reason = %q, want the formatted-output cause over unaudited", b.selected.reason)
 	}
 }
 
@@ -2664,8 +2664,8 @@ func TestTypedEffectsAreCompleteAndDiagnosticSelectionIsDeterministic(t *testing
 	for i := len(effects) - 1; i >= 0; i-- {
 		second.recordExternalEffect(effects[i])
 	}
-	if first.reason != second.reason {
-		t.Fatalf("typed effect diagnostic depends on traversal order: %q != %q", first.reason, second.reason)
+	if first.selected.reason != second.selected.reason {
+		t.Fatalf("typed effect diagnostic depends on traversal order: %q != %q", first.selected.reason, second.selected.reason)
 	}
 	if len(first.effects) != len(effects) || len(second.effects) != len(effects) {
 		t.Fatalf("typed effects lost: first=%+v second=%+v", first.effects, second.effects)
@@ -2690,8 +2690,8 @@ func TestPreferredDiagnosticProjectsAfterSecondaryEffectDeduplication(t *testing
 	analyzer.recordExternalEffect(rdtsc)
 	analyzer.collectExternalEffect(cpuid)
 	analyzer.recordExternalEffect(cpuid)
-	if analyzer.reason != cpuid.reason {
-		t.Fatalf("preferred diagnostic = %q, want later package preference %q", analyzer.reason, cpuid.reason)
+	if analyzer.selected.reason != cpuid.reason {
+		t.Fatalf("preferred diagnostic = %q, want later package preference %q", analyzer.selected.reason, cpuid.reason)
 	}
 	if len(analyzer.effects) != 2 {
 		t.Fatalf("deduplicated effects = %+v, want two", analyzer.effects)
@@ -2702,8 +2702,8 @@ func TestStandardLinknameTargetIsUnverifiable(t *testing.T) {
 	for _, target := range []string{"runtime.nanotime", "sync.runtime_procPin"} {
 		analyzer := &tier2Analyzer{objByName: map[string]types.Object{}}
 		analyzer.addLinknameTarget(target)
-		if !analyzer.unverifiable || !strings.Contains(analyzer.reason, target) {
-			t.Fatalf("standard linkname target %s disposition = %v/%q, want unverifiable", target, analyzer.unverifiable, analyzer.reason)
+		if !analyzer.unverifiable || !strings.Contains(analyzer.selected.reason, target) {
+			t.Fatalf("standard linkname target %s disposition = %v/%q, want unverifiable", target, analyzer.unverifiable, analyzer.selected.reason)
 		}
 	}
 }

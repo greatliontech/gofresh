@@ -248,8 +248,7 @@ type tier2Analyzer struct {
 	widen        bool
 	widenReason  string
 	unverifiable bool
-	reason       string
-	reasonRank   int
+	selected     externalEffect
 }
 
 func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
@@ -562,7 +561,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && (classifiedOK && classified.kind == externalEffectFileIO || atomicObservabilityOperation(fn) || harnessLoggingFunction(fn) || auditedHarnessSubtestDriver(fn) || harnessFuzzDriver(fn)) {
+	if idx.std && stdBodyCut(fn, classified, classifiedOK) {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -754,12 +753,9 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// over sibling-planted shared state refuses exactly as the direct
 	// invoke would, while a subject-closed receiver keeps the wrapped
 	// method's ordinary classification.
-	if !callerStd && syntheticInterfaceMethodWrapper(callee) {
-		receiver := wrapperReceiver(c, callee)
-		if receiver == nil || !subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), a.fresh) {
-			a.requestWiden("interface dispatch on unattributable state in " + caller.String())
-			return
-		}
+	if !callerStd && syntheticInterfaceMethodWrapper(callee) && !dispatchProvenanceClosed(site, a.fresh) {
+		a.requestWiden("interface dispatch on unattributable state in " + caller.String())
+		return
 	}
 	if auditedHarnessLogging(pkgPath, name) {
 		a.recordExternalEffect(harnessLoggingEffect(name))
@@ -792,28 +788,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		a.recordExternalEffect(symbolExternalEffect(externalEffectFileIO, "os", "File."+name, "reaches os.File."+name+" on an unattributed file handle (file I/O)"))
 		return
 	}
-	effect, classified := classBEffect(pkgPath, name)
-	calleeIdx := a.idxForFunction(callee)
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
-		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
-		classified = true
-	}
-	if osOpenFileMayMutate(callee, pkgPath, name, c) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
-		classified = true
-	}
-	if !classified && syscallOpenMayCreate(pkgPath, name, c) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
-		classified = true
-	}
-	if classified && fmtFprintFamily(pkgPath, name) && len(c.Args) != 0 &&
-		inMemoryFormattedSink(c.Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, a.fresh) {
-		// Sprint-equivalent: the writer provably pins an audited
-		// in-memory sink, so the formatted bytes never leave process
-		// memory (the writer-sink admission). Argument methods stay
-		// visible to reachability exactly as for the Sprint family.
-		classified = false
-	}
+	effect, classified := a.classifyCalleeEffect(callee, pkgPath, name, c, callerStd)
 	if classified {
 		effect.observable = observableCallEffect(effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
@@ -840,6 +815,55 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if !callerStd && pkgPath == "reflect" && (name == "Call" || name == "CallSlice" || name == "MakeFunc" || name == "MethodByName") {
 		a.requestWiden("reflect dispatch")
 	}
+}
+
+// classifyCalleeEffect is the one callee-classification ladder every
+// direct-call tier consults - the classB table, the unaudited-standard
+// fallback, the file-handle mutation arms, and the writer-sink
+// admission, in that order. Tier-specific consequences (observable
+// flags, suppressions, widens, harness admissions) stay at the call
+// sites, so the ladder can never drift one arm at a time between the
+// subject scan and the startup cascade (the one-site-classifier
+// collapse). The writer-sink leg applies to the static leg alone: a
+// dynamically reached Fprint's site arguments belong to the dynamic
+// signature, and only the fresh-analysis view in force decides which
+// writers close.
+func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, callerStd bool) (externalEffect, bool) {
+	effect, classified := classBEffect(pkgPath, name)
+	calleeIdx := a.idxForFunction(callee)
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
+		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+		classified = true
+	}
+	if osOpenFileMayMutate(callee, pkgPath, name, c) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
+		classified = true
+	}
+	if !classified && syscallOpenMayCreate(pkgPath, name, c) {
+		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
+		classified = true
+	}
+	if classified && fmtFprintFamily(pkgPath, name) && c.StaticCallee() == callee && len(c.Args) != 0 &&
+		inMemoryFormattedSink(c.Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, a.fresh) {
+		// Sprint-equivalent: the writer provably pins an audited
+		// in-memory sink, so the formatted bytes never leave process
+		// memory (the writer-sink admission). Argument methods stay
+		// visible to reachability exactly as for the Sprint family.
+		classified = false
+	}
+	return effect, classified
+}
+
+// stdBodyCut reports a standard-library body whose classification is
+// complete at its call sites, so the walk never descends: classified
+// file-I/O operations, atomic observability operations, and the
+// harness's logging, subtest-driver, and fuzz-driver families - one
+// membership list, so the category grows in one place
+// (the one-site-classifier collapse).
+func stdBodyCut(fn *ssa.Function, classified externalEffect, classifiedOK bool) bool {
+	return classifiedOK && classified.kind == externalEffectFileIO ||
+		atomicObservabilityOperation(fn) || harnessLoggingFunction(fn) ||
+		auditedHarnessSubtestDriver(fn) || harnessFuzzDriver(fn)
 }
 
 func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
@@ -1225,12 +1249,16 @@ func (a *tier2Analyzer) requestWiden(reason string) {
 	}
 }
 
+// recordExternalEffect collects the effect and keeps the legacy
+// single-reason projection's selection through the one shared
+// comparator - rank strata, lexicographic ties - so the projection can
+// never drift from the maximal instance's order
+// (the one-site-classifier collapse; REQ-closure-observability-
+// analysis's cause-preference order).
 func (a *tier2Analyzer) recordExternalEffect(effect externalEffect) {
 	a.collectExternalEffect(effect)
-	rank := effectCauseRank(effect)
-	if !a.unverifiable || rank > a.reasonRank || (rank == a.reasonRank && effect.reason < a.reason) {
-		a.reason = effect.reason
-		a.reasonRank = rank
+	if !a.unverifiable || preferEffectReason(effect, a.selected) {
+		a.selected = effect
 	}
 	a.unverifiable = true
 }
@@ -1290,7 +1318,7 @@ func (a *tier2Analyzer) result() tier2Result {
 	// byte-for-byte (the recorded-evidence stability
 	// REQ-closure-observability-memo binds).
 	sort.Slice(effects, func(i, j int) bool { return effectLess(effects[i], effects[j]) })
-	return tier2Result{effects: effects, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.reason}
+	return tier2Result{effects: effects, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.selected.reason}
 }
 
 // effectLess is a total order over effects: field-lexicographic. The

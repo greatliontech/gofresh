@@ -8166,7 +8166,7 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 	t.Run("test-main harness callback walked", func(t *testing.T) {
 		dir := t.TempDir()
 		for name, content := range map[string]string{
-			"go.mod":       "module probe\n\ngo 1.26\n",
+			"go.mod":  "module probe\n\ngo 1.26\n",
 			"view.go": "package probe\n\nfunc F() int { return 1 }\n",
 			// The external test package is the one unfallbacked
 			// module-facts population: its TestMain here pins that

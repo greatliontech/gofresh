@@ -1157,7 +1157,7 @@ func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool,
 // closes on.)
 func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ssa.Value, bool) {
 	fn := param.Parent()
-	if fn == nil || fp == nil || fp.dynamic[fn] || len(fn.FreeVars) > 0 || fn.Signature.Variadic() {
+	if !fp.paramCrossingEligible(fn) {
 		return nil, false
 	}
 	idx := -1

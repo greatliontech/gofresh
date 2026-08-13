@@ -64,7 +64,7 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       reach (gofresh docs/issues/func-value-self-capture.md).
 - [x] 7. dotless module paths classified standard (gofresh
       docs/issues/dotless-module-paths-classified-standard.md).
-- [ ] 8. one dispatch-site classifier (gofresh
+- [x] 8. one dispatch-site classifier (gofresh
       docs/issues/one-dispatch-site-classifier.md).
 - [ ] 9. runtimeinput producer facade (gofresh
       docs/issues/runtimeinput-producer-facade.md).

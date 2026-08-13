@@ -201,7 +201,7 @@ its activation decision.
       and the in-module scratch widening redefers on a
       field-measurement trigger - feasible and sound in principle,
       zero measured mass, no consumer the flow discipline admits.
-- [ ] 36. gofresh: analysis-surface structure (gofresh docs/issues:
+- [x] 36. gofresh: analysis-surface structure (gofresh docs/issues:
       one-dispatch-site-classifier, observation-facts-struct) - one
       call-site judgment and one observation-facts shape, collapsing
       the five partial classifier copies and the three hand-built View

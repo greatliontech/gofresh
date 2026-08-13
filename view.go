@@ -45,31 +45,8 @@ type View struct {
 	packages  []string
 	moduleDir string
 	kind      Kind
-	// snapshot is the construction pass's env snapshot. The process
-	// environment is immutable configuration (REQ-fresh-coherent-view);
-	// go env FILE values can still change on disk, so a bracket reusing
-	// this snapshot resolves only GOMODCACHE from it, revalidates GOFLAGS
-	// live before any load (the memo write precedes the closing compare),
-	// and relies on the closing pass's fresh snapshot to refuse any drift
-	// the guards cover.
-	snapshot             *gotool.EnvSnapshot
-	maximal              map[Subject]closure.Closure
+	facts                *observationFacts
 	observable           map[Subject]closure.Observability
-	guards               guard.Guards
-	purity               map[Subject]string
-	vouchDischarges      map[Subject]string
-	sourceFiles          []string
-	sourceFilesBySubject map[Subject][]string
-	// fileDigests: construction-time content digest per source identity,
-	// for naming moved files in validation refusals
-	// (REQ-fresh-producer-view's naming arm).
-	fileDigests map[string]string
-	// testVariantLedgers: per-package declaration ledgers over the
-	// test-variant compartment, derived at construction from the same file
-	// reads as the compartment hashes the agreement pair compares, so the
-	// served ledger describes exactly the observed bytes
-	// (REQ-closure-test-variant-compartment, REQ-fresh-coherent-view).
-	testVariantLedgers   map[string]closure.TestVariantLedger
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
@@ -187,23 +164,28 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
-		snapshot:             first.snapshot,
-		maximal:              first.maximal,
+		facts:                &first,
 		observable:           make(map[Subject]closure.Observability, len(unique)),
-		guards:               first.guards,
-		purity:               first.purity,
-		vouchDischarges:      first.vouchDischarges,
-		sourceFiles:          first.sourceFiles,
-		sourceFilesBySubject: first.sourceFilesBySubject,
-		fileDigests:          first.fileDigests,
-		testVariantLedgers:   first.testVariantLedgers,
 		capturedObserved:     make(map[Subject]bool, len(unique)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 	}
 	return v, nil
 }
 
-type viewObservation struct {
+// observationFacts is one generation's immutable observation: derived
+// by an observation pass (or assembled as a subject-scoped subset by
+// Sibling) and shared read-only by every View holding it. The struct
+// is mutex-free and setter-free, so read-only sharing is structural,
+// never conventional; the View keeps only transactional state (seal,
+// captured proofs, runtime attachments) beside it.
+type observationFacts struct {
+	// snapshot is the construction pass's env snapshot. The process
+	// environment is immutable configuration (REQ-fresh-coherent-view);
+	// go env FILE values can still change on disk, so a bracket reusing
+	// this snapshot resolves only GOMODCACHE from it, revalidates GOFLAGS
+	// live before any load (the memo write precedes the closing compare),
+	// and relies on the closing pass's fresh snapshot to refuse any drift
+	// the guards cover.
 	snapshot             *gotool.EnvSnapshot
 	maximal              map[Subject]closure.Closure
 	guards               guard.Guards
@@ -224,7 +206,7 @@ type viewObservation struct {
 	testVariantLedgers map[string]closure.TestVariantLedger
 }
 
-func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (viewObservation, error) {
+func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (observationFacts, error) {
 	if viewTestHooks.observe != nil {
 		viewTestHooks.observe()
 	}
@@ -239,15 +221,15 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// `go version` stays a live probe: it carries the host platform).
 	snapshot, err := gotool.TakeEnvSnapshot(ctx, e.dir, e.env)
 	if err != nil {
-		return viewObservation{}, err
+		return observationFacts{}, err
 	}
 	hasher, err := closure.NewAtContextEnvSnapshot(ctx, e.dir, e.env, snapshot, e.buildFlags...)
 	if err != nil {
-		return viewObservation{}, err
+		return observationFacts{}, err
 	}
 	guards, err := guard.CaptureForContextEnvSnapshot(ctx, moduleDir, e.env, kind, snapshot, e.guardInputs()...)
 	if err != nil {
-		return viewObservation{}, err
+		return observationFacts{}, err
 	}
 	// One typed load serves this whole observation pass: scanViewSubjects
 	// loads the view packages and every mutable-local graph package once,
@@ -259,14 +241,14 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
 	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, packages...)
 	if err != nil {
-		return viewObservation{}, err
+		return observationFacts{}, err
 	}
 	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
 	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
-		return viewObservation{}, err
+		return observationFacts{}, err
 	}
-	observation := viewObservation{
+	observation := observationFacts{
 		snapshot:             snapshot,
 		maximal:              make(map[Subject]closure.Closure, len(subjects)),
 		guards:               guards,
@@ -281,7 +263,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		// re-read that could straddle an edit.
 		ledger, err := hasher.TestVariantLedger(pkg)
 		if err != nil {
-			return viewObservation{}, err
+			return observationFacts{}, err
 		}
 		observation.testVariantLedgers[pkg] = ledger
 	}
@@ -293,7 +275,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	observation.fileDigests = make(map[string]string, len(observation.sourceFiles))
 	for _, path := range observation.sourceFiles {
 		if err := ctx.Err(); err != nil {
-			return viewObservation{}, err
+			return observationFacts{}, err
 		}
 		// The digest comes from the Hasher's own closure reads — the exact
 		// bytes the compared closure hash was built over — never a second
@@ -306,7 +288,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	}
 	for _, subject := range subjects {
 		if !known[subject] {
-			return viewObservation{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
+			return observationFacts{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
 		}
 		maximal := computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]
 		if openWorld[subject] {
@@ -375,11 +357,11 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if v.sealed {
 		return Fingerprint{}, ErrViewSealed
 	}
-	cl, ok := v.maximal[subject]
+	cl, ok := v.facts.maximal[subject]
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], DynamicStateVouches: v.vouchDischarges[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -387,7 +369,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 func (v *View) SourceFiles() []string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	return append([]string(nil), v.sourceFiles...)
+	return append([]string(nil), v.facts.sourceFiles...)
 }
 
 // SourceFilesFor returns the caller-owned mutable source paths contributing to
@@ -395,7 +377,7 @@ func (v *View) SourceFiles() []string {
 func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	files, ok := v.sourceFilesBySubject[subject]
+	files, ok := v.facts.sourceFilesBySubject[subject]
 	if !ok {
 		return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
@@ -413,13 +395,13 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	if _, ok := v.maximal[subject]; !ok {
+	if _, ok := v.facts.maximal[subject]; !ok {
 		return TestVariantLedger{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	// Clone, not a shallow struct copy: declarations carry reference-list
 	// slices, and a shallow copy would alias them into the view's internal
 	// ledger, breaking caller ownership.
-	return v.testVariantLedgers[subject.Package].Clone(), nil
+	return v.facts.testVariantLedgers[subject.Package].Clone(), nil
 }
 
 // CaptureBatch captures a fingerprint for every subject in the view,
@@ -435,8 +417,8 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
-		cl := v.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.guards, PurityAssertion: v.purity[subject], DynamicStateVouches: v.vouchDischarges[subject], ResultKind: v.kind}
+		cl := v.facts.maximal[subject]
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -444,7 +426,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 // CaptureObserved returns maximal closure evidence plus a caller-selected,
 // attributable observation proof for subject.
 func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprint, error) {
-	if _, ok := v.maximal[subject]; !ok {
+	if _, ok := v.facts.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
@@ -493,15 +475,15 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		Reason:     disposition.Reason,
 	}
 	const assertion = "caller assertion"
-	proof.Evidence = observationProofEvidence(v.maximal[subject].Hash, assertion, proof)
+	proof.Evidence = observationProofEvidence(v.facts.maximal[subject].Hash, assertion, proof)
 	return Fingerprint{
-		MaximalClosure:       v.maximal[subject].Hash,
-		TestVariantClosure:   v.maximal[subject].TestVariants,
+		MaximalClosure:       v.facts.maximal[subject].Hash,
+		TestVariantClosure:   v.facts.maximal[subject].TestVariants,
 		ObservationAssertion: assertion,
 		ObservationProof:     proof,
-		Guards:               v.guards,
-		PurityAssertion:      v.purity[subject],
-		DynamicStateVouches:  v.vouchDischarges[subject],
+		Guards:               v.facts.guards,
+		PurityAssertion:      v.facts.purity[subject],
+		DynamicStateVouches:  v.facts.vouchDischarges[subject],
 		ResultKind:           v.kind,
 	}
 }
@@ -535,7 +517,7 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 // result kind and the caller's context. Under a deferred-close engine the
 // verdict is provisional until the view validates (WithDeferredCheckClose).
 func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if _, ok := v.maximal[subject]; !ok {
+	if _, ok := v.facts.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	verdicts, err := v.checkBatch(ctx, map[Subject]Fingerprint{subject: recorded})
@@ -561,7 +543,7 @@ func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 // unverifiability. Under a deferred-close engine the verdict is
 // provisional until the view validates (WithDeferredCheckClose).
 func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if _, ok := v.maximal[subject]; !ok {
+	if _, ok := v.facts.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
 	verdicts, err := v.CheckObservedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
@@ -599,7 +581,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		if rec.ResultKind != v.kind {
 			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
 		}
-		cl, ok := v.maximal[subject]
+		cl, ok := v.facts.maximal[subject]
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
@@ -641,8 +623,8 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		return finished, nil
 	}
 	for subject, rec := range pending {
-		cl := v.maximal[subject]
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != ""), rec)
+		cl := v.facts.maximal[subject]
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != ""), rec)
 	}
 	return finish()
 }
@@ -665,7 +647,7 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		if rec.ResultKind != v.kind {
 			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
 		}
-		maximal, ok := v.maximal[subject]
+		maximal, ok := v.facts.maximal[subject]
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
@@ -706,14 +688,14 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		return finished, nil
 	}
 	for subject, rec := range pending {
-		maximal := v.maximal[subject]
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, maximal, v.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
+		maximal := v.facts.maximal[subject]
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosure(rec, maximal, v.facts.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject)), rec)
 	}
 	return finish()
 }
 
 func (v *View) purityMatches(recorded Fingerprint, subject Subject) bool {
-	assertion := v.purity[subject]
+	assertion := v.facts.purity[subject]
 	return validPurityAssertion(assertion) && validPurityAssertion(recorded.PurityAssertion)
 }
 
@@ -932,18 +914,18 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
 	for _, subject := range unique {
-		sourceFilesBySubject[subject] = v.sourceFilesBySubject[subject]
-		groups = append(groups, v.sourceFilesBySubject[subject])
-		if contribution, ok := v.maximal[subject]; ok {
+		sourceFilesBySubject[subject] = v.facts.sourceFilesBySubject[subject]
+		groups = append(groups, v.facts.sourceFilesBySubject[subject])
+		if contribution, ok := v.facts.maximal[subject]; ok {
 			maximal[subject] = contribution
 		}
 		if proof, ok := v.observable[subject]; ok {
 			observable[subject] = proof
 		}
-		if assertion, ok := v.purity[subject]; ok {
+		if assertion, ok := v.facts.purity[subject]; ok {
 			purity[subject] = assertion
 		}
-		if discharges, ok := v.vouchDischarges[subject]; ok {
+		if discharges, ok := v.facts.vouchDischarges[subject]; ok {
 			vouchDischarges[subject] = discharges
 		}
 		if v.capturedObserved[subject] {
@@ -952,27 +934,29 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	}
 	sourceFiles := sortedUniqueUnion(groups)
 	for _, pkg := range packages {
-		if ledger, ok := v.testVariantLedgers[pkg]; ok {
+		if ledger, ok := v.facts.testVariantLedgers[pkg]; ok {
 			ledgers[pkg] = ledger
 		}
 	}
 	return &View{
-		engine:               v.engine,
-		subjects:             unique,
-		requests:             requests,
-		packages:             packages,
-		moduleDir:            v.moduleDir,
-		kind:                 v.kind,
-		snapshot:             v.snapshot,
-		maximal:              maximal,
+		engine:    v.engine,
+		subjects:  unique,
+		requests:  requests,
+		packages:  packages,
+		moduleDir: v.moduleDir,
+		kind:      v.kind,
+		facts: &observationFacts{
+			snapshot:             v.facts.snapshot,
+			maximal:              maximal,
+			guards:               v.facts.guards,
+			purity:               purity,
+			vouchDischarges:      vouchDischarges,
+			sourceFiles:          sourceFiles,
+			sourceFilesBySubject: sourceFilesBySubject,
+			fileDigests:          v.facts.fileDigests,
+			testVariantLedgers:   ledgers,
+		},
 		observable:           observable,
-		guards:               v.guards,
-		purity:               purity,
-		vouchDischarges:      vouchDischarges,
-		sourceFiles:          sourceFiles,
-		sourceFilesBySubject: sourceFilesBySubject,
-		fileDigests:          v.fileDigests,
-		testVariantLedgers:   ledgers,
 		capturedObserved:     capturedObserved,
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 		runtimeCurrent:       v.runtimeCurrent,
@@ -1006,16 +990,8 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 		packages:             v.packages,
 		moduleDir:            v.moduleDir,
 		kind:                 v.kind,
-		snapshot:             v.snapshot,
-		maximal:              v.maximal,
+		facts:                v.facts,
 		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
-		guards:               v.guards,
-		purity:               v.purity,
-		vouchDischarges:      v.vouchDischarges,
-		sourceFiles:          v.sourceFiles,
-		sourceFilesBySubject: v.sourceFilesBySubject,
-		fileDigests:          v.fileDigests,
-		testVariantLedgers:   v.testVariantLedgers,
 		capturedObserved:     make(map[Subject]bool, len(v.subjects)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(v.subjects)),
 	}
@@ -1274,10 +1250,10 @@ func (v *View) reobserveBase(ctx context.Context) error {
 }
 
 func (v *View) compareBaseContext(ctx context.Context, current *View) error {
-	return v.compareFactsContext(ctx, current.guards, current.sourceFiles, current.maximal, current.purity, current.sourceFilesBySubject, current.fileDigests)
+	return v.compareFactsContext(ctx, current.facts.guards, current.facts.sourceFiles, current.facts.maximal, current.facts.purity, current.facts.sourceFilesBySubject, current.facts.fileDigests)
 }
 
-func (v *View) compareObservationContext(ctx context.Context, observation viewObservation) error {
+func (v *View) compareObservationContext(ctx context.Context, observation observationFacts) error {
 	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests)
 }
 
@@ -1295,38 +1271,38 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if guards != v.guards {
+	if guards != v.facts.guards {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: guards (%s)", ErrViewChanged, differingGuard(guards, v.guards))
+		return fmt.Errorf("%w: guards (%s)", ErrViewChanged, differingGuard(guards, v.facts.guards))
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !slices.Equal(sourceFiles, v.sourceFiles) {
+	if !slices.Equal(sourceFiles, v.facts.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(v.sourceFiles, sourceFiles, v.fileDigests, fileDigests))
+		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(v.facts.sourceFiles, sourceFiles, v.facts.fileDigests, fileDigests))
 	}
 	for _, subject := range v.subjects {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !slices.Equal(sourceFilesBySubject[subject], v.sourceFilesBySubject[subject]) {
+		if !slices.Equal(sourceFilesBySubject[subject], v.facts.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.fileDigests, fileDigests))
+			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
 		}
-		if maximal[subject] != v.maximal[subject] {
+		if maximal[subject] != v.facts.maximal[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.fileDigests, fileDigests))
+			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
 		}
-		if purity[subject] != v.purity[subject] {
+		if purity[subject] != v.facts.purity[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -1373,9 +1349,9 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
 	if viewTestHooks.snapshot != nil {
-		viewTestHooks.snapshot(v.snapshot)
+		viewTestHooks.snapshot(v.facts.snapshot)
 	}
-	hasher, err := closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.snapshot, v.engine.buildFlags...)
+	hasher, err := closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
 	if err != nil {
 		return err
 	}
@@ -1383,7 +1359,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	// source closure: the proof-strategy version plus the code guards.
 	// The memo key completes with the package test-binary closure hash
 	// inside the Hasher (REQ-closure-observability-memo).
-	hasher.SetMemoScope(ObservationRTA + "|" + v.guards.Toolchain + "|" + v.guards.BuildConfig)
+	hasher.SetMemoScope(ObservationRTA + "|" + v.facts.guards.Toolchain + "|" + v.facts.guards.BuildConfig)
 	if progress := v.engine.progress; progress != nil {
 		hasher.OnProgress(func(phase, pkgPath string) {
 			progress(Progress{Phase: phase, Package: pkgPath})

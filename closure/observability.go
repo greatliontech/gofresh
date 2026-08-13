@@ -374,7 +374,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if !ok || site.Common() == nil {
 					continue
 				}
-				if !testMainDispatchClosed(site) {
+				if !dispatchProvenanceClosed(site, nil) {
 					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
 				}
 				if callee := site.Common().StaticCallee(); callee != nil {
@@ -427,30 +427,10 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 	if pkgPath == "os" && name == "Exit" {
 		return
 	}
-	effect, classified := classBEffect(pkgPath, name)
-	calleeIdx := analyzer.idxForFunction(callee)
-	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
-		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
-		classified = true
-	}
-	if osOpenFileMayMutate(callee, pkgPath, name, site.Common()) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
-		classified = true
-	}
-	if !classified && syscallOpenMayCreate(pkgPath, name, site.Common()) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
-		classified = true
-	}
-	if classified && site.Common().StaticCallee() == callee && fmtFprintFamily(pkgPath, name) && len(site.Common().Args) != 0 &&
-		inMemoryFormattedSink(site.Common().Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, analyzer.fresh) {
-		// Static leg only: a dynamically reached Fprint's site arguments
-		// belong to the dynamic signature, not fmt's writer-first shape
-		// (REQ-closure-observability-analysis).
-		// The writer-sink admission holds here exactly as in the other
-		// tiers: a format into a provably in-memory sink is value
-		// computation (REQ-closure-observability-analysis).
-		classified = false
-	}
+	// The shared ladder, the test-main tier's sixth former copy folded:
+	// its os.Exit epilogue admission stays above, and the observable
+	// flag is this tier's own consequence.
+	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), false)
 	if classified {
 		effect.observable = observableCallEffect(effect, site.Common(), site, analyzer.fresh)
 		analyzer.recordExternalEffect(effect)
@@ -503,22 +483,23 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	return analyzer.result()
 }
 
-// testMainDispatchClosed reports whether a test-main call site's
-// dispatch provenance is the flow's own. A static call to a synthetic
-// interface-method wrapper judges the receiver (a thunk's first
-// argument, a bound wrapper's operand — whose bindings the closed-value
-// walk gates wherever the closure value derives); every other site
-// judges the operand. The wrapper family's toolchain-attributed bodies
-// perform the real dispatch and no walk scans them; a user-written
-// closure needs no such check — its body stays user-attributed and the
-// walk records its effects.
-func testMainDispatchClosed(site ssa.CallInstruction) bool {
+// dispatchProvenanceClosed is the one wrapper-aware dispatch-provenance
+// judgment: a static call to a synthetic interface-method wrapper is
+// judged by its extracted receiver (a thunk's first argument, a bound
+// wrapper's operand - the wrapper family's toolchain-attributed bodies
+// perform the real dispatch and no walk scans them), every other shape
+// by the dispatch operand itself, under the closed-value walk in
+// force - fp-aware for subject flow, the local projection (nil) for
+// test-main flow, where a user-written closure needs no such check
+// because its body stays user-attributed and the walk records its
+// effects (the one-site-classifier collapse).
+func dispatchProvenanceClosed(site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	c := site.Common()
 	if callee := c.StaticCallee(); callee != nil && syntheticInterfaceMethodWrapper(callee) {
 		receiver := wrapperReceiver(c, callee)
-		return receiver != nil && locallyClosedDynamicValue(receiver, make(map[ssa.Value]bool))
+		return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), fp)
 	}
-	return locallyClosedDynamicValue(c.Value, make(map[ssa.Value]bool))
+	return subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), fp)
 }
 
 func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.CallInstruction) {
@@ -545,34 +526,12 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 		}
 		return
 	}
-	effect, classified := classBEffect(pkgPath, name)
-	calleeIdx := analyzer.idxForFunction(callee)
-	if !classified && name != "init" && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
-		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
-		classified = true
-	}
-	if osOpenFileMayMutate(callee, pkgPath, name, site.Common()) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os.OpenFile (filesystem mutation)")
-		classified = true
-	}
-	if !classified && syscallOpenMayCreate(pkgPath, name, site.Common()) {
-		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
-		classified = true
-	}
-	// The writer-sink admission applies to the static leg only: a
-	// dynamically reached Fprint's site arguments belong to the dynamic
-	// signature, not to fmt's writer-first shape, so the writer is not
-	// judgeable there and the effect stays. Startup flow carries no
-	// subject-attributed parameter analysis, so only locally
-	// constructed writers close — an init formatting into its own
-	// buffer is pure value computation; anything crossing a boundary
-	// keeps the effect.
-	if classified && fmtFprintFamily(pkgPath, name) && site.Common().StaticCallee() == callee {
-		if args := site.Common().Args; len(args) != 0 &&
-			inMemoryFormattedSink(args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, analyzer.fresh) {
-			classified = false
-		}
-	}
+	// The shared ladder with callerStd=false: the startup walk's callers
+	// are user initializers by the non-standard filter. Startup flow
+	// carries no subject-attributed parameter analysis, so the ladder's
+	// writer-sink leg closes only locally constructed writers - an init
+	// formatting into its own buffer is pure value computation.
+	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), false)
 	if classified {
 		analyzer.recordExternalEffect(effect)
 	}

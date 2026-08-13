@@ -1270,14 +1270,14 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 		paramRetentionFree: map[string]bool{},
 		readOnly:           map[string]bool{},
 		receiverRetention:  map[string]bool{},
-		notOpaque:       map[string]bool{},
-		envFreeResolved: map[string]bool{},
-		envFreeDeps:     map[string]map[string]bool{},
-		fieldDeferAt:    map[string][]string{},
-		fieldPoisonAt:   map[string]bool{},
-		retDeferAt:      map[string][]string{},
-		retPoisonAt:     map[string]bool{},
-		ctorsOf:         map[string][]string{},
+		notOpaque:          map[string]bool{},
+		envFreeResolved:    map[string]bool{},
+		envFreeDeps:        map[string]map[string]bool{},
+		fieldDeferAt:       map[string][]string{},
+		fieldPoisonAt:      map[string]bool{},
+		retDeferAt:         map[string][]string{},
+		retPoisonAt:        map[string]bool{},
+		ctorsOf:            map[string][]string{},
 	}
 	if malformed == nil {
 		malformed = func(dynamicStateFact) {}

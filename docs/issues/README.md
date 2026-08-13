@@ -10,21 +10,11 @@ when its work lands (git holds history).
 - **[purity-bars-dynamic-and-fmt](purity-bars-dynamic-and-fmt.md)** — the caller-supplied-dynamic
   and fmt-taint bars refuse ~955 benign cerebro witnesses; narrow to escaping dynamism and
   sink-keyed fmt taint. *Lands: with the bracket item — the classifier half.*
-- **[one-dispatch-site-classifier](one-dispatch-site-classifier.md)** — the observability
-  walks grew five partial implementations of one call-site judgment (classification
-  ladders, wrapper-receiver provenance, parameter eligibility, body cuts, diagnostic
-  selection); sketch for collapsing them onto one site classifier.
-  *Lands: startup-effect-precision plan, per each doc.*
 - **[explain-chain-unpinned-clauses](explain-chain-unpinned-clauses.md)** — REQ-explain-chain's
   link-order and edge-terminated-chain clauses have no pinning witness, and
   REQ-explain-bounded's deferral-arm bound is unexercised end-to-end; all are
   example-pin extensions of the existing fixture family. *Lands: when the explain
   surface next changes, or with the chunk that extends the explain test surface.*
-- **[observation-facts-struct](observation-facts-struct.md)** — newView, View.Sibling, and
-  newSeededValidationView hand-build near-identical View literals around the same immutable
-  observation facts; extracting the facts into one mutex-free struct makes read-only sharing
-  structural and collapses the three literals (and possibly viewObservation) into one shape.
-  *Lands: user decision.*
 - **[fresh-mutation-in-module-scratch](fresh-mutation-in-module-scratch.md)** — the
   fresh-mutation proof admits only `testing.TempDir`-rooted scratch; widening the
   capability source to in-module `MkdirTemp`/`CreateTemp` would make disciplined
