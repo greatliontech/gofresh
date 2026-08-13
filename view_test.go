@@ -8070,3 +8070,114 @@ func TestRuntimeInputManifestEvaluationSharedPerPhase(t *testing.T) {
 		t.Fatalf("shared manifest evaluated %d times across two records and two phases, want 2", calls)
 	}
 }
+
+// A module legally named without a dot keeps its startup refusals: the
+// standard-library cut consults the listed package metadata, never the
+// import path's shape - the path heuristic classified every dotless
+// module standard and silently disabled the whole startup walk for it.
+func TestDotlessModuleKeepsStartupRefusals(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module probe\n\ngo 1.26\n",
+		"view.go": "package probe\n\nimport \"os\"\n\nvar boot = load()\n\nfunc load() int {\n\tdata, _ := os.ReadFile(\"boot.txt\")\n\treturn len(data)\n}\n\nfunc F() int { return boot }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "probe", Symbol: "F"}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.ObservationProof.Observable {
+		t.Fatal("dotless module's startup effect earned a proof - the startup walk was filtered out")
+	}
+	if !strings.Contains(fingerprint.ObservationProof.Reason, "startup effect") {
+		t.Fatalf("dotless refusal = %q, want the startup effect named", fingerprint.ObservationProof.Reason)
+	}
+}
+
+// The dotless-module soundness family's other two arms: package-level
+// flag registrations in a dotless module are judged (a subject reading
+// the registered storage refuses), and a dotless user callback
+// dispatched from a harness frame stays in the test-main walk (its
+// blocking effect refuses).
+func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
+	t.Run("flag registration judged", func(t *testing.T) {
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod":  "module probe\n\ngo 1.26\n",
+			"view.go": "package probe\n\nimport \"flag\"\n\nvar verbose = flag.Bool(\"probe-verbose\", false, \"\")\n\nfunc F() bool { return *verbose }\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		engine, err := New(WithDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "probe", Symbol: "F"}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.ObservationProof.Observable {
+			t.Fatal("dotless module's flag-backed read earned a proof - the registration was never judged")
+		}
+		if !strings.Contains(fingerprint.ObservationProof.Reason, "flag-registered") {
+			t.Fatalf("dotless flag refusal = %q, want the flag-registered state named", fingerprint.ObservationProof.Reason)
+		}
+	})
+	t.Run("test-main harness callback walked", func(t *testing.T) {
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod":       "module probe\n\ngo 1.26\n",
+			"view.go": "package probe\n\nfunc F() int { return 1 }\n",
+			// The external test package is the one unfallbacked
+			// module-facts population: its TestMain here pins that
+			// go/packages carries Module for probe_test too.
+			"main_test.go": "package probe_test\n\nimport (\n\t\"os\"\n\t\"testing\"\n\n\t\"probe\"\n)\n\nfunc TestMain(m *testing.M) {\n\ttesting.Benchmark(func(b *testing.B) {\n\t\t_ = os.WriteFile(\"probe.txt\", []byte(\"x\"), 0o600)\n\t})\n\tos.Exit(m.Run())\n}\n\nfunc TestF(t *testing.T) {\n\tif probe.F() != 1 {\n\t\tt.Fatal(\"wrong\")\n\t}\n}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		engine, err := New(WithDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "probe", Symbol: "TestF"}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.ObservationProof.Observable {
+			t.Fatal("dotless test-main callback's write earned a proof - the callback vanished from the walk")
+		}
+		// Tier-discriminating: the WALK classified the callback's write
+		// (the package-scan backstop's conservative dotless refusal
+		// carries the "package scan:" wording instead and must not
+		// stand in for the walk here).
+		if reason := fingerprint.ObservationProof.Reason; !strings.Contains(reason, "startup effect:") || strings.Contains(reason, "package scan:") {
+			t.Fatalf("refusal = %q, want the walk-tier classification of the callback's write", reason)
+		}
+	})
+}

@@ -230,7 +230,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		return Observability{}, err
 	}
 	startupReach := reach
-	startupReach.functions = nonStandardFunctions(startupReach.startupFunctions)
+	startupReach.functions = nonStandardFunctions(base, startupReach.startupFunctions)
 	startupResult := directExternalEffects(base, startupReach)
 	if startupResult.unverifiable {
 		reason := startupResult.reason
@@ -258,7 +258,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// (REQ-closure-observability-analysis).
 	if len(reach.testMainFunctions) > 0 {
 		testMainReach := reach
-		testMainReach.functions = nonStandardFunctions(reach.testMainFunctions)
+		testMainReach.functions = nonStandardFunctions(base, reach.testMainFunctions)
 		testMainResult := testMainObservedEffects(base, testMainReach)
 		if testMainResult.widen {
 			reason := testMainResult.widenReason
@@ -578,9 +578,21 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	}
 }
 
-func nonStandardFunctions(functions map[*ssa.Function]bool) map[*ssa.Function]bool {
+// nonStandardFunctions filters the walk to non-standard bodies by the
+// listed package metadata: a user module legally named without a dot
+// must never classify standard - the path-shape heuristic did, and
+// silently disabled every startup refusal for such modules. The
+// heuristic remains only for functions no package index covers
+// (synthetic and runtime bodies the metadata never lists).
+func nonStandardFunctions(base *tier2Base, functions map[*ssa.Function]bool) map[*ssa.Function]bool {
 	filtered := make(map[*ssa.Function]bool)
 	for function := range functions {
+		if idx := base.idxForFunction(function); idx != nil {
+			if !idx.std {
+				filtered[function] = true
+			}
+			continue
+		}
 		if !isStdImportPath(funcPkgPath(function)) {
 			filtered[function] = true
 		}
@@ -752,9 +764,15 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 			poisoned[pkgPath] = reason
 		}
 	}
+	userPaths := userModulePaths(b.prog.Pkgs)
 	for fn := range ssautil.AllFunctions(b.prog.Prog) {
 		pkgPath := funcPkgPath(fn)
-		if pkgPath == "" || isStdImportPath(pkgPath) {
+		// The skip keys on the load's module facts, never on path shape
+		// alone: a dotless user module skipped here would leave its flag
+		// registrations unjudged - no traced storage to refuse, no
+		// untraceable sink to poison - breaking the admission's stated
+		// soundness argument (the dotless-module soundness family).
+		if pkgPath == "" || (isStdImportPath(pkgPath) && !userPaths[pkgPath]) {
 			continue
 		}
 		for _, block := range fn.Blocks {

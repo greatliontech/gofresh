@@ -2017,7 +2017,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable = %v, want context.Canceled", err)
 	}
 	h, err := New()
@@ -2031,7 +2031,7 @@ func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	}
 	root := prog.Roots["TestReadFile"]
 	bounded := &cancelProvenanceContext{Context: context.Background(), remaining: 1}
-	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &rta.Result{Reachable: map[*ssa.Function]uint64{root: 1}}, false); !errors.Is(err, context.Canceled) {
+	if _, err := provenanceReachable(bounded, []*ssa.Function{root}, 1, &rta.Result{Reachable: map[*ssa.Function]uint64{root: 1}}, false, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable during traversal = %v, want context.Canceled", err)
 	}
 }

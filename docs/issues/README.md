@@ -10,11 +10,6 @@ when its work lands (git holds history).
 - **[purity-bars-dynamic-and-fmt](purity-bars-dynamic-and-fmt.md)** — the caller-supplied-dynamic
   and fmt-taint bars refuse ~955 benign cerebro witnesses; narrow to escaping dynamism and
   sink-keyed fmt taint. *Lands: with the bracket item — the classifier half.*
-- **[dotless-module-paths-classified-standard](dotless-module-paths-classified-standard.md)** — isStdImportPath
-  treats any dotless first path element as standard-library, so a module named without a
-  dot has its whole startup walk silently filtered out and every startup refusal
-  (effects and the test-main dispatch widen alike) disabled.
-  *Lands: startup-effect-precision plan, per each doc.*
 - **[one-dispatch-site-classifier](one-dispatch-site-classifier.md)** — the observability
   walks grew five partial implementations of one call-site judgment (classification
   ladders, wrapper-receiver provenance, parameter eligibility, body cuts, diagnostic

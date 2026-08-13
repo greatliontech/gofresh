@@ -1439,12 +1439,20 @@ func syscallOpenMayCreate(pkgPath, name string, c *ssa.CallCommon) bool {
 }
 
 func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
+	return idxForFunctionIn(a.idxByTypes, fn)
+}
+
+func (b *tier2Base) idxForFunction(fn *ssa.Function) *pkgIndex {
+	return idxForFunctionIn(b.idxByTypes, fn)
+}
+
+func idxForFunctionIn(idxByTypes map[*types.Package]*pkgIndex, fn *ssa.Function) *pkgIndex {
 	for f := fn; f != nil; f = f.Parent() {
 		if f.Pkg != nil && f.Pkg.Pkg != nil {
-			return a.idxByTypes[f.Pkg.Pkg]
+			return idxByTypes[f.Pkg.Pkg]
 		}
 		if obj := f.Object(); obj != nil && obj.Pkg() != nil {
-			return a.idxByTypes[obj.Pkg()]
+			return idxByTypes[obj.Pkg()]
 		}
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/rta"
+	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 )
@@ -164,6 +165,7 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 	}
 	reachable := make([]attributedReachability, len(subjects))
 	harnessAudited := propertyHarnessAuditedProg(prog)
+	userPaths := userModulePaths(prog.Pkgs)
 	for i := range reachable {
 		enc, enumerated := enumClosed[i]
 		reachable[i] = attributedReachability{
@@ -203,16 +205,16 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 				}
 			}
 		}
-		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited)
+		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths)
 		if err != nil {
 			return nil, err
 		}
-		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res, harnessAudited)
+		reachable[i].startupFunctions, err = provenanceReachable(ctx, startupRoots, mask, res, harnessAudited, userPaths)
 		if err != nil {
 			return nil, err
 		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited)
+			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths)
 			if err != nil {
 				return nil, err
 			}
@@ -659,7 +661,7 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 // tier2Reachable analyzes one attributed reachability set: effects,
 // widen, and verdict, with the cross-boundary fresh-path analysis always
 // in force (only the observability walk consults effect.observable).
-func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool) (map[*ssa.Function]bool, error) {
+func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool) (map[*ssa.Function]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -710,7 +712,13 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					}
 					targetPath := funcPkgPath(target)
 					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
-					if !harnessFrame || targetHarness || !isStdImportPath(targetPath) {
+					// User callbacks dispatched from harness frames stay
+					// in the walk by the load's module facts, never by
+					// path shape: a dotless user module's callback
+					// classified standard here silently vanished from
+					// the startup and test-main walks - the
+					// dotless-module soundness family.
+					if !harnessFrame || targetHarness || userPaths[targetPath] || !isStdImportPath(targetPath) {
 						queue = append(queue, target)
 					}
 				}
@@ -718,4 +726,20 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 		}
 	}
 	return reachable, nil
+}
+
+// userModulePaths collects every loaded package path the module graph
+// proves user code: both load configs request NeedModule, so in module
+// mode a nil Module is exactly the standard library, and these paths
+// are the code no path-shape heuristic may classify standard - a user
+// module is legally named without a dot (the dotless-module soundness
+// family).
+func userModulePaths(pkgs []*packages.Package) map[string]bool {
+	user := map[string]bool{}
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		if p.Module != nil {
+			user[p.PkgPath] = true
+		}
+	})
+	return user
 }
