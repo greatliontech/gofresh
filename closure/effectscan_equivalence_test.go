@@ -106,9 +106,14 @@ func effectScanCorpusFiles() map[string]string {
 	// The dot-testing potential-external overwrite fires after another
 	// dot import already set the fallback, and in the reverse order.
 	files["dot_os_then_dot_testing.go"] = "package corpus\n\nimport . \"os\"\nimport . \"testing\"\n\nfunc F() {}\n"
+	// A dot always-external import records the effect outright and
+	// feeds no candidate; in the dot+plain mix the plain alias adds
+	// the candidate beside the dot spelling's effect.
+	files["dot_net.go"] = "package corpus\n\nimport . \"net\"\n\nfunc F() { _ = IPv4len }\n"
+	files["dot_plus_plain_net.go"] = "package corpus\n\nimport . \"net\"\nimport nn \"net\"\n\nfunc F() { _ = nn.IPv4len }\n"
 	files["dot_testing_then_dot_os.go"] = "package corpus\n\nimport . \"testing\"\nimport . \"os\"\n\nfunc F() {}\n"
 	// Two test functions with distinct non-empty testing reasons pin the
-	// first-function gating of the folded reason.
+	// rank-and-lexicographic selection across function walks.
 	files["two_testing_reasons.go"] = "package corpus\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { t.Setenv(\"K\", \"V\") }\n\nfunc TestB(t *testing.T) { t.TempDir() }\n"
 	return files
 }

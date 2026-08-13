@@ -4,9 +4,11 @@ type externalEffectKind uint8
 
 // The enum ORDER is the effect projection's primary sort key; the proof's
 // refusal names the highest-ranked blocking effect under effectCauseRank
-// with this order as the tie-break — so inserting or reordering members
-// AND editing the rank table both move recorded diagnostic texts and owe
-// an ObservationRTA bump (the recorded-evidence versioning clause).
+// with this order as the tie-break — so inserting or reordering members,
+// and any rank-table edit that can move a RECORDED reason text, owe an
+// ObservationRTA bump (the recorded-evidence versioning clause); a
+// re-stratification provably touching no recorded class states that
+// exemption in its commit message instead.
 const (
 	externalEffectOpaque externalEffectKind = iota
 	externalEffectStandardInput
@@ -36,8 +38,14 @@ type externalEffect struct {
 }
 
 type maximalEffectScan struct {
-	effects   []externalEffect
-	preferred string
+	effects []externalEffect
+	// importCandidates are diagnostic-only candidates: a plain
+	// always-external import names its package as a preferred-reason
+	// candidate at its rank without contributing a verdict-bearing
+	// effect - an unused import blocks nothing
+	// (REQ-closure-observability-analysis's cause-preference order).
+	importCandidates []externalEffect
+	preferred        string
 }
 
 func (s *maximalEffectScan) add(effect externalEffect) {

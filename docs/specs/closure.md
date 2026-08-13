@@ -695,7 +695,14 @@ human diagnostic is derived afterward and can never select which facts
 participate: a refusal names the highest-ranked blocking effect under one
 cause-preference order shared with the legacy single-reason projection —
 the maximal tier's package diagnostic is an instance of that projection
-and owes the same order —
+and owes the same order, selecting over its blocking effects together
+with the plain always-external import candidates — an always-external
+package imported under any non-dot, non-blank spelling names its
+package reason at that
+class's rank even where no use blocks, because the import is the
+scan's strongest name for the dependence, while the unused import
+itself bears no verdict and never widens the effect set; the dot and
+blank spellings record the effect outright —
 structural findings, mutations, and every classification not expressly
 down-ranked (standard input, network, plugin, native, linkage included)
 rank top; then the generic file read; then ambient formatting and

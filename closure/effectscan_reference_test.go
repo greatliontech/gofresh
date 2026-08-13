@@ -124,12 +124,39 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	return "", nil
 }
 
-func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
-	preferred, err := referenceMaximalFileReason(filename)
-	if err != nil {
-		return maximalEffectScan{}, err
+// referencePreferredOverPool is the filter-style selection oracle: max
+// cause rank, lexicographic least within it - independent of
+// production's streaming compare.
+func referencePreferredOverPool(pool []externalEffect) string {
+	var reasoned []externalEffect
+	for _, effect := range pool {
+		if effect.reason != "" {
+			reasoned = append(reasoned, effect)
+		}
 	}
-	scan := maximalEffectScan{preferred: preferred}
+	if len(reasoned) == 0 {
+		return ""
+	}
+	bestRank := effectCauseRank(reasoned[0])
+	for _, effect := range reasoned[1:] {
+		if rank := effectCauseRank(effect); rank > bestRank {
+			bestRank = rank
+		}
+	}
+	want := ""
+	for _, effect := range reasoned {
+		if effectCauseRank(effect) != bestRank {
+			continue
+		}
+		if want == "" || effect.reason < want {
+			want = effect.reason
+		}
+	}
+	return want
+}
+
+func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
+	var scan maximalEffectScan
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		return maximalEffectScan{}, err
@@ -163,6 +190,9 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			}
 			continue
 		}
+		if isAlwaysExternalPackage(pkgPath) && alias != "." && alias != "_" {
+			scan.importCandidates = append(scan.importCandidates, trueExternalEffect(pkgPath))
+		}
 		if alias == "." || alias == "_" {
 			if isAlwaysExternalPackage(pkgPath) {
 				scan.add(trueExternalEffect(pkgPath))
@@ -195,6 +225,16 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 	})
 	for _, effect := range referenceTestingMethodEffects(file, aliases) {
 		scan.add(effect)
+	}
+	scan.preferred = referencePreferredOverPool(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
+	if scan.preferred == "" {
+		// An empty pool reduces the frozen reason ladder to its
+		// potential-external fallback, the one arm the selection keeps.
+		fallback, err := referenceMaximalFileReason(filename)
+		if err != nil {
+			return maximalEffectScan{}, err
+		}
+		scan.preferred = fallback
 	}
 	return scan, nil
 }

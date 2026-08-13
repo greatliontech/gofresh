@@ -1542,8 +1542,10 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	}
 }
 
-// An opaque system object is permanently unauditable: the subject checks
-// unverifiable with the system object named.
+// An opaque system object is permanently unauditable: the subject
+// checks unverifiable with a native cause named - the lexicographic
+// least of the package's native findings under the shared
+// cause-preference order.
 func TestSystemObjectRemainsOpaque(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "view.syso"), []byte("opaque system object"), 0o644); err != nil {
@@ -1566,8 +1568,8 @@ func TestSystemObjectRemainsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "system object") {
-		t.Fatalf("system-object verdict = %+v, want unverifiable naming the system object", verdict)
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "cgo or native source") {
+		t.Fatalf("system-object verdict = %+v, want unverifiable naming the native cause", verdict)
 	}
 	if fingerprint.ObservationProof.Observable {
 		t.Fatalf("system-object proof = %+v, want refused", fingerprint.ObservationProof)

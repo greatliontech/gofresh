@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -205,10 +206,15 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 			reason: "escapes analyzable receiver",
 		},
 		{
+			// The receiver escape is the structural finding and ranks
+			// top, so the diagnostic names it over the testing.N
+			// classification the escape also records
+			// (REQ-closure-observability-analysis's cause-preference
+			// order).
 			name:   "testing receiver in composite",
 			source: "package wrapper\n\nimport \"testing\"\n\nfunc BenchmarkComposite(b *testing.B) { handles := []*testing.B{b}; _ = handles[0].N }\n",
 			symbol: "BenchmarkComposite",
-			reason: "testing.N",
+			reason: "escapes analyzable receiver",
 		},
 		{
 			name:   "testing TempDir method value",
@@ -394,20 +400,27 @@ func TestMaximalPackageMarksImplicitCgoExternal(t *testing.T) {
 	}
 }
 
-func TestMaximalNativeReasonsAreUnrefinable(t *testing.T) {
-	for _, reason := range []string{
-		"reaches cgo external library",
-		"reaches system object",
-		"reaches go:wasmimport",
-	} {
-		if !maximalReasonUnrefinable(reason) {
-			t.Fatalf("native reason %q was refinable", reason)
-		}
+// The preferred-diagnostic comparator implements the shared
+// cause-preference order exactly as the legacy projection does: rank
+// strata first, lexicographic least within a rank - the unrefinable
+// bit earns no tie-break, so both instances of the one shared order
+// resolve every tie identically
+// (REQ-closure-observability-analysis).
+func TestPreferredReasonOrdersRankThenLexicographic(t *testing.T) {
+	native := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")
+	unaudited := symbolExternalEffect(externalEffectUnauditedStandard, "os", "Getpid", "reaches unaudited standard operation os.Getpid")
+	if !preferEffectReason(native, unaudited) || preferEffectReason(unaudited, native) {
+		t.Fatal("rank stratum did not dominate")
 	}
-	for _, reason := range []string{"reaches assembly", "reaches cgo or native source", "reaches go:linkname (opaque linkage)"} {
-		if maximalReasonUnrefinable(reason) {
-			t.Fatalf("resolvable native reason %q was permanently opaque", reason)
-		}
+	assembly := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")
+	syso := opaqueExternalEffect(externalEffectNative, "reaches non-standard system object")
+	if !preferEffectReason(assembly, syso) || preferEffectReason(syso, assembly) {
+		t.Fatal("equal rank did not fall to the lexicographic least")
+	}
+	object := opaqueExternalEffect(externalEffectNative, "reaches non-standard system object")
+	object.unrefinable = true
+	if !preferEffectReason(assembly, object) || preferEffectReason(object, assembly) {
+		t.Fatal("the unrefinable bit displaced the lexicographic tie-break")
 	}
 }
 
@@ -451,8 +464,8 @@ func F() {
 }
 
 // A file whose only external-capable content is an unaudited standard
-// operation names that operation in the preferred diagnostic — first in
-// walk order when several occur — instead of serving the name-free
+// operation names that operation in the preferred diagnostic — the
+// lexicographic least when several occur — instead of serving the name-free
 // import fallback; the fallback still covers a classified import with
 // no effect-bearing use (REQ-closure-observability-analysis's
 // cause-preference order).
@@ -489,8 +502,8 @@ type pair struct {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation fmt.State" {
-		t.Fatalf("preferred diagnostic = %q, want the first unaudited operation in walk order", scan.preferred)
+	if scan.preferred != "reaches unaudited standard operation fmt.Formatter" {
+		t.Fatalf("preferred diagnostic = %q, want the lexicographic least within the rank", scan.preferred)
 	}
 	fallback := write("pure_only.go", `package effects
 import "fmt"
@@ -517,33 +530,24 @@ func H(l labeled) string { return fmt.Sprint(l.s) }
 	}
 }
 
-// A sibling file with no effects offers only the import fallback; the
-// package fold must keep the effect-backed named reason regardless of
-// lexicographic order, else the verdict's cause is displaced by a file
-// that contributes no blocker
+// The package selection is one comparator argmax over the effect
+// union; an effect-less scan's import fallback names a dependence only
+// when no scan backed a real blocker, so a backed reason is never
+// displaced by a file contributing nothing
 // (REQ-closure-observability-analysis's cause-preference order).
-func TestMaximalPackageFoldPrefersEffectBackedReasons(t *testing.T) {
-	backed := maximalEffectScan{preferred: "reaches unaudited standard operation fmt.State"}
-	backed.add(symbolExternalEffect(externalEffectUnauditedStandard, "fmt", "State", "reaches unaudited standard operation fmt.State"))
-	fallback := maximalEffectScan{preferred: "reaches fmt (potential external dependence)"}
-
-	selected, isBacked := foldMaximalPreferred("", false, fallback)
-	if selected != "reaches fmt (potential external dependence)" || isBacked {
-		t.Fatalf("effectless-first fold = %q backed=%v, want the fallback held as effectless", selected, isBacked)
+func TestMaximalPackageSelectionRanksTheEffectUnion(t *testing.T) {
+	if selected := preferredEffectReason(nil); selected != "" {
+		t.Fatalf("empty union selected %q", selected)
 	}
-	selected, isBacked = foldMaximalPreferred(selected, isBacked, backed)
-	if selected != "reaches unaudited standard operation fmt.State" || !isBacked {
-		t.Fatalf("backed reason did not displace the effectless fallback: %q backed=%v", selected, isBacked)
+	union := []externalEffect{symbolExternalEffect(externalEffectUnauditedStandard, "fmt", "State", "reaches unaudited standard operation fmt.State")}
+	if selected := preferredEffectReason(union); selected != "reaches unaudited standard operation fmt.State" {
+		t.Fatalf("single-effect union selected %q", selected)
 	}
-	selected, isBacked = foldMaximalPreferred(selected, isBacked, fallback)
-	if selected != "reaches unaudited standard operation fmt.State" || !isBacked {
-		t.Fatalf("effectless fallback displaced the effect-backed cause: %q backed=%v", selected, isBacked)
-	}
-	stronger := maximalEffectScan{preferred: "reaches cgo external library"}
-	stronger.add(opaqueExternalEffect(externalEffectNative, "reaches cgo external library"))
-	selected, isBacked = foldMaximalPreferred(selected, isBacked, stronger)
-	if selected != "reaches cgo external library" || !isBacked {
-		t.Fatalf("within the backed class the unrefinable reason must win: %q backed=%v", selected, isBacked)
+	library := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
+	library.unrefinable = true
+	union = append(union, library)
+	if selected := preferredEffectReason(union); selected != "reaches cgo external library" {
+		t.Fatalf("the top-rank blocker was not selected: %q", selected)
 	}
 }
 
@@ -556,7 +560,7 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 	}
 	scan := maximalPackageExternalEffects(pkg)
 	if scan.preferred != "reaches cgo external library" {
-		t.Fatalf("preferred package diagnostic = %q", scan.preferred)
+		t.Fatalf("preferred package diagnostic = %q, want the lexicographic least of the native facts", scan.preferred)
 	}
 	if len(scan.effects) != 4 {
 		t.Fatalf("package effects = %+v, want four complete facts", scan.effects)
@@ -608,5 +612,106 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 	}
 	if before[subject].Hash == after[subject].Hash {
 		t.Fatal("editing embedded data did not move the maximal hash")
+	}
+}
+
+// Property pin for the preferred-diagnostic selection
+// (REQ-closure-observability-analysis's cause-preference order): over
+// generated effect sets the selection is total (any reasoned effect
+// yields a non-empty preferred), permutation-invariant, and names a
+// maximal-rank effect, lexicographic-least within the rank. The oracle
+// recomputes the expected
+// selection by filtering rather than the production streaming compare,
+// so a shared misunderstanding cannot pass both; the seed corpus runs
+// in every ordinary go test invocation.
+func FuzzPreferredReasonTotalAndRankMaximal(f *testing.F) {
+	f.Add(int64(1), uint8(4))
+	f.Add(int64(42), uint8(8))
+	f.Add(int64(7), uint8(0))
+	f.Add(int64(-3), uint8(2))
+	f.Fuzz(func(t *testing.T, seed int64, count uint8) {
+		rng := rand.New(rand.NewSource(seed))
+		kinds := []externalEffectKind{
+			externalEffectUnauditedStandard, externalEffectTestRuntime,
+			externalEffectFormattedOutput, externalEffectEnvironment,
+			externalEffectFileIO, externalEffectNative, externalEffectLinkage,
+		}
+		packagePaths := []string{"", "os", "fmt", "testing"}
+		reasons := []string{"", "reaches a", "reaches b", "reaches c"}
+		effects := make([]externalEffect, 0, count%9)
+		for i := 0; i < int(count%9); i++ {
+			effects = append(effects, externalEffect{
+				kind:        kinds[rng.Intn(len(kinds))],
+				packagePath: packagePaths[rng.Intn(len(packagePaths))],
+				reason:      reasons[rng.Intn(len(reasons))],
+				unrefinable: rng.Intn(2) == 0,
+				observable:  rng.Intn(2) == 0,
+			})
+		}
+		selected := preferredEffectReason(effects)
+		var reasoned []externalEffect
+		for _, effect := range effects {
+			if effect.reason != "" {
+				reasoned = append(reasoned, effect)
+			}
+		}
+		if len(reasoned) == 0 {
+			if selected != "" {
+				t.Fatalf("reasonless set selected %q", selected)
+			}
+			return
+		}
+		if selected == "" {
+			t.Fatalf("reasoned set selected nothing: %+v", reasoned)
+		}
+		bestRank := effectCauseRank(reasoned[0])
+		for _, effect := range reasoned[1:] {
+			if rank := effectCauseRank(effect); rank > bestRank {
+				bestRank = rank
+			}
+		}
+		var want string
+		for _, candidate := range reasoned {
+			if effectCauseRank(candidate) != bestRank {
+				continue
+			}
+			if want == "" || candidate.reason < want {
+				want = candidate.reason
+			}
+		}
+		if selected != want {
+			t.Fatalf("selected %q, want %q over %+v", selected, want, reasoned)
+		}
+		shuffled := append([]externalEffect(nil), effects...)
+		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		if again := preferredEffectReason(shuffled); again != selected {
+			t.Fatalf("selection is order-dependent: %q vs %q", selected, again)
+		}
+	})
+}
+
+// The shared rank table's symbol-free arms
+// (REQ-closure-observability-analysis): a symbol-free unaudited-import
+// effect ranks with the down-ranked unaudited classification - never as
+// a structural finding - while the receiver-escape structural finding
+// (test-runtime kind, no symbol) keeps the top stratum, and the
+// observable test-runtime classification stays last-resort.
+func TestEffectCauseRankSymbolFreeStrata(t *testing.T) {
+	if rank := effectCauseRank(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches os (potential external dependence)")); rank != 0 {
+		t.Fatalf("symbol-free unaudited import ranked %d, want the unaudited stratum", rank)
+	}
+	if rank := effectCauseRank(opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")); rank != 4 {
+		t.Fatalf("receiver-escape structural finding ranked %d, want the top stratum", rank)
+	}
+	observable := opaqueExternalEffect(externalEffectTestRuntime, "testing.Short")
+	observable.observable = true
+	if rank := effectCauseRank(observable); rank != -1 {
+		t.Fatalf("observable test-runtime effect ranked %d, want last resort", rank)
+	}
+	if rank := effectCauseRank(opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")); rank != 4 {
+		t.Fatalf("native finding ranked %d, want the top stratum", rank)
+	}
+	if rank := effectCauseRank(symbolExternalEffect(externalEffectUnauditedStandard, "os", "Getpid", "reaches unaudited standard operation os.Getpid")); rank != 0 {
+		t.Fatalf("unaudited symbol ranked %d, want the unaudited stratum", rank)
 	}
 }

@@ -14,7 +14,7 @@ import (
 // derivation. Any change that can move an effect set or a preferred
 // diagnostic bumps it, so persisted scans from the prior interpretation
 // refuse instead of serving (REQ-closure-effect-scan-memo).
-const effectScanStrategy = "gofresh/effect-scan@6"
+const effectScanStrategy = "gofresh/effect-scan@8"
 
 // effectScanScope is the memo's full scope: the strategy version plus the
 // toolchain identity. The per-file scan is a pure function of the file
@@ -29,7 +29,7 @@ func effectScanScope() string {
 // can move the scan's effect set or preferred diagnostic bumps it, so
 // persisted scans from the prior interpretation refuse instead of serving
 // (REQ-closure-testing-scan-memo).
-const testingScanStrategy = "gofresh/testing-scan@1"
+const testingScanStrategy = "gofresh/testing-scan@3"
 
 // testingScanScope completes the typed scan's analysis identity outside
 // the source closure: its own strategy version plus the caller-supplied
@@ -47,8 +47,11 @@ func (h *Hasher) testingScanScope() string {
 // effectScanPayload is one package's persisted effect scan — the shared
 // cache-file envelope carries the scope and key.
 type effectScanPayload struct {
-	Effects  []effectScanEffect `json:"effects"`
-	Selected string             `json:"selected"`
+	Effects []effectScanEffect `json:"effects"`
+	// ImportCandidates are the scan's diagnostic-only plain-import
+	// candidates: preferred-reason participants that bear no verdict.
+	ImportCandidates []effectScanEffect `json:"importCandidates,omitempty"`
+	Selected         string             `json:"selected"`
 }
 
 // effectScanEffect mirrors externalEffect for persistence; the memo owns
@@ -108,12 +111,12 @@ func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
 	if !cachefile.Load(dirName, scope, key, &payload) {
 		return maximalEffectScan{}, false
 	}
-	return maximalEffectScan{effects: decodeEffects(payload.Effects), preferred: payload.Selected}, true
+	return maximalEffectScan{effects: decodeEffects(payload.Effects), importCandidates: decodeEffects(payload.ImportCandidates), preferred: payload.Selected}, true
 }
 
 // storeEffectScan persists one package's scan in dirName with an atomic
 // replace; failures are silent — a lost store costs one recomputation,
 // never a wrong scan.
 func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
-	cachefile.Store(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), Selected: scan.preferred})
+	cachefile.Store(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
 }

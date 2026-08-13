@@ -161,7 +161,10 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkgDir, "more.go"), []byte("package eff\n\nimport \"os\"\n\nfunc F() { _, _ = os.Open(\"y\"); _, _ = os.ReadFile(\"x\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pkg.GoFiles = append(pkg.GoFiles, "more.go")
+	if err := os.WriteFile(filepath.Join(pkgDir, "netimp.go"), []byte("package eff\n\nimport \"net\"\n\nfunc G() { _ = net.Dial }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg.GoFiles = append(pkg.GoFiles, "more.go", "netimp.go")
 	pkg.SFiles = []string{"impl_asm.s"}
 
 	flat := maximalPackageExternalEffects(&pkg)
@@ -178,14 +181,20 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 		for _, effect := range scan.effects {
 			flat.effects = appendExternalEffect(flat.effects, effect)
 		}
-		if scan.preferred != "" && (flat.preferred == "" || preferMaximalReason(scan.preferred, flat.preferred)) {
+		for _, candidate := range scan.importCandidates {
+			flat.importCandidates = appendExternalEffect(flat.importCandidates, candidate)
+		}
+		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (flat.preferred == "" || scan.preferred < flat.preferred) {
 			flat.preferred = scan.preferred
 		}
+	}
+	if selected := preferredEffectReason(append(append([]externalEffect(nil), flat.effects...), flat.importCandidates...)); selected != "" {
+		flat.preferred = selected
 	}
 	if rawEffects <= len(flat.effects)-pkgFactCount {
 		t.Fatalf("fixture does not discriminate dedup: %d raw file effects, %d folded", rawEffects, len(flat.effects)-pkgFactCount)
 	}
-	if len(preferreds) != 2 || preferreds[0] == preferreds[1] {
+	if len(preferreds) != 3 || preferreds[0] == preferreds[1] || preferreds[1] == preferreds[2] || preferreds[0] == preferreds[2] {
 		t.Fatalf("fixture does not discriminate the preferred fold: %v", preferreds)
 	}
 
@@ -220,9 +229,15 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 		for _, effect := range scan.effects {
 			flatNoAsm.effects = appendExternalEffect(flatNoAsm.effects, effect)
 		}
-		if scan.preferred != "" && (flatNoAsm.preferred == "" || preferMaximalReason(scan.preferred, flatNoAsm.preferred)) {
+		for _, candidate := range scan.importCandidates {
+			flatNoAsm.importCandidates = appendExternalEffect(flatNoAsm.importCandidates, candidate)
+		}
+		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (flatNoAsm.preferred == "" || scan.preferred < flatNoAsm.preferred) {
 			flatNoAsm.preferred = scan.preferred
 		}
+	}
+	if selected := preferredEffectReason(append(append([]externalEffect(nil), flatNoAsm.effects...), flatNoAsm.importCandidates...)); selected != "" {
+		flatNoAsm.preferred = selected
 	}
 	noAsm := pkg
 	noAsm.SFiles = nil
@@ -241,7 +256,11 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 // recomputes silently.
 func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	scan := maximalEffectScan{preferred: "reaches os.ReadFile (file I/O)", effects: []externalEffect{{kind: externalEffectFileIO, reason: "reaches os.ReadFile (file I/O)"}}}
+	scan := maximalEffectScan{
+		preferred:        "reaches net (network I/O)",
+		effects:          []externalEffect{{kind: externalEffectFileIO, reason: "reaches os.ReadFile (file I/O)"}},
+		importCandidates: []externalEffect{{kind: externalEffectNetwork, packagePath: "net", reason: "reaches net (network I/O)"}},
+	}
 	key := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go"}, nil)
 	storeEffectScan(effectScanDirName, effectScanScope(), key, scan)
 	if got, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
@@ -273,5 +292,43 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	}
 	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
 		t.Fatal("a corrupt entry served")
+	}
+}
+
+// A package whose files carry only potential-external fallbacks - no
+// effects, no plain always-external candidates - selects the
+// lexicographically least fallback, package-wide
+// (REQ-closure-observability-analysis's cause-preference order).
+func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.modCache = filepath.Join(dir, "modcache")
+	pkg, pkgDir := pinnedFixture(t, h)
+	for name, source := range map[string]string{
+		"only_time.go": "package eff\n\nvar _ = timeJan\n",
+		"only_fmt.go":  "package eff\n\nimport \"fmt\"\n\nfunc S(v int) string { return fmt.Sprintf(\"%d\", v) }\n",
+		"decl_time.go": "package eff\n\nimport \"time\"\n\nvar timeJan = time.January\n",
+	} {
+		if err := os.WriteFile(filepath.Join(pkgDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg.GoFiles = []string{"decl_time.go", "only_fmt.go", "only_time.go"}
+	composite, handled, err := h.pinnedEffectScan(pkg)
+	if err != nil || !handled {
+		t.Fatalf("derivation = handled %v, err %v", handled, err)
+	}
+	if len(composite.effects) != 0 || len(composite.importCandidates) != 0 {
+		t.Fatalf("fallback fixture grew effects or candidates: %+v", composite)
+	}
+	if composite.preferred != "reaches fmt (potential external dependence)" {
+		t.Fatalf("fallback selection = %q, want the lexicographic least", composite.preferred)
 	}
 }

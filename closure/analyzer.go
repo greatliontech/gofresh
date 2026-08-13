@@ -1254,9 +1254,13 @@ func effectCauseRank(effect externalEffect) int {
 	if effect.kind == externalEffectTestRuntime && effect.observable {
 		return -1
 	}
-	if effect.packagePath == "" {
-		// Opaque structural findings (receiver escapes, wasm imports, cgo
-		// libraries) carry no symbol yet name the mechanism directly.
+	if effect.packagePath == "" && effect.kind == externalEffectTestRuntime {
+		// The receiver-escape structural finding carries the
+		// test-runtime kind but no symbol: it names the mechanism
+		// directly and ranks with the structural findings, never with
+		// the down-ranked test-runtime classification. Every other
+		// symbol-free structural finding (linkage, native, cgo) already
+		// ranks top through the kind default below.
 		return 4
 	}
 	switch effect.kind {

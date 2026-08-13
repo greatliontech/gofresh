@@ -86,15 +86,6 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 	return results, sources, nil
 }
 
-func maximalReasonUnrefinable(reason string) bool {
-	for _, marker := range []string{"external library", "system object", "go:wasmimport"} {
-		if strings.Contains(reason, marker) {
-			return true
-		}
-	}
-	return false
-}
-
 func maximalSubjectHash(packageHash string, subject Subject) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s", len(packageHash), packageHash, len(subject.Package), subject.Package, len(subject.Symbol), subject.Symbol))
 	return hex.EncodeToString(sum[:])[:32]
@@ -129,13 +120,24 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		return nil, "", err
 	}
 	var effects []externalEffect
-	var selected string
-	var selectedBacked bool
+	// candidates pools the diagnostic candidates - the effect union
+	// plus every scan's plain-import candidates; fallback carries the
+	// lexicographically least preferred among candidate-less scans
+	// (potential-external fallbacks), naming a dependence only when no
+	// scan backed a real blocker or candidate.
+	var candidates []externalEffect
+	var fallback string
 	record := func(scan maximalEffectScan) {
 		for _, effect := range scan.effects {
 			effects = appendExternalEffect(effects, effect)
+			candidates = appendExternalEffect(candidates, effect)
 		}
-		selected, selectedBacked = foldMaximalPreferred(selected, selectedBacked, scan)
+		for _, candidate := range scan.importCandidates {
+			candidates = appendExternalEffect(candidates, candidate)
+		}
+		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fallback == "" || scan.preferred < fallback) {
+			fallback = scan.preferred
+		}
 	}
 	testingEffects, err := h.maximalTestingTypeEffects(pkgPath)
 	if err != nil {
@@ -182,25 +184,13 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			record(scan)
 		}
 	}
-	// The maximal diagnostic owes the shared cause-preference order: when
-	// no arm fed an effect-BACKED reason but effects exist (a closure
-	// whose only finding is the audited property-harness fact, possibly
-	// beside unbacked import fallbacks), the diagnostic names the
-	// highest-ranked effect rather than going silent or naming a
-	// fallback that blocks nothing.
-	if !selectedBacked && len(effects) != 0 {
-		best, bestRank := "", 0
-		for _, effect := range effects {
-			if effect.reason == "" {
-				continue
-			}
-			if rank := effectCauseRank(effect); best == "" || rank > bestRank || rank == bestRank && effect.reason < best {
-				best, bestRank = effect.reason, rank
-			}
-		}
-		if best != "" {
-			selected = best
-		}
+	// The maximal diagnostic owes the shared cause-preference order:
+	// one selection over the whole candidate pool, rank strata with the
+	// lexicographic tie-break; the import fallback
+	// names a potential dependence only for a candidate-less closure.
+	selected := preferredEffectReason(candidates)
+	if selected == "" {
+		selected = fallback
 	}
 	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected}
 	return effects, selected, nil
@@ -220,38 +210,39 @@ func (h *Hasher) maximalFileEffectsCached(path string) (maximalEffectScan, error
 	return scan, nil
 }
 
-func preferMaximalReason(candidate, current string) bool {
-	candidateOpaque := maximalReasonUnrefinable(candidate)
-	currentOpaque := maximalReasonUnrefinable(current)
-	if candidateOpaque != currentOpaque {
-		return candidateOpaque
+// preferEffectReason reports whether candidate displaces current as the
+// preferred diagnostic: higher cause rank first, lexicographic least
+// within a rank - exactly the shared cause-preference order with the
+// legacy projection's tie-break, so the maximal instance and the
+// legacy projection order every tie identically
+// (REQ-closure-observability-analysis). The unrefinable bit takes no
+// tie-break leg: no consumer reads the selected reason's refinability,
+// so a privilege here would be an order this diagnostic alone obeys.
+func preferEffectReason(candidate, current externalEffect) bool {
+	candidateRank, currentRank := effectCauseRank(candidate), effectCauseRank(current)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
 	}
-	return candidate < current
+	return candidate.reason < current.reason
 }
 
-// foldMaximalPreferred folds one scan's preferred diagnostic into the
-// package-level selection. An effect-backed reason names a real blocker;
-// a scan with no effects offers only the import fallback, which must
-// never displace — or outrank — the cause of an actual refusal, so
-// backed reasons form a strictly stronger class and preferMaximalReason
-// orders only within a class
+// preferredEffectReason selects the diagnostic over an effect set under
+// preferEffectReason; empty when no effect carries a reason. An
+// effect-backed reason names a real blocker, so a caller with any
+// backed reason never consults an import fallback
 // (REQ-closure-observability-analysis's cause-preference order).
-func foldMaximalPreferred(selected string, selectedBacked bool, scan maximalEffectScan) (string, bool) {
-	reason := scan.preferred
-	if reason == "" {
-		return selected, selectedBacked
-	}
-	backed := len(scan.effects) != 0
-	if backed != selectedBacked {
-		if backed {
-			return reason, true
+func preferredEffectReason(effects []externalEffect) string {
+	var best externalEffect
+	found := false
+	for _, effect := range effects {
+		if effect.reason == "" {
+			continue
 		}
-		return selected, selectedBacked
+		if !found || preferEffectReason(effect, best) {
+			best, found = effect, true
+		}
 	}
-	if selected == "" || preferMaximalReason(reason, selected) {
-		return reason, selectedBacked
-	}
-	return selected, selectedBacked
+	return best.reason
 }
 
 func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
@@ -318,14 +309,12 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 				effect, ok := classBEffect("testing", object.Name())
 				if ok {
 					scan.add(effect)
-					if scan.preferred == "" || effect.reason < scan.preferred {
-						scan.preferred = effect.reason
-					}
 				}
 				return true
 			})
 		}
 	}
+	scan.preferred = preferredEffectReason(scan.effects)
 	if key != "" {
 		storeEffectScan(testingScanDirName, scope, key, scan)
 	}
@@ -358,30 +347,19 @@ func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
 		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
 		effect.unrefinable = true
 		scan.add(effect)
-		scan.preferred = effect.reason
 	}
 	if pkg != nil && len(pkg.SysoFiles) != 0 {
 		effect := opaqueExternalEffect(externalEffectNative, "reaches non-standard system object")
 		effect.unrefinable = true
 		scan.add(effect)
-		if scan.preferred == "" {
-			scan.preferred = effect.reason
-		}
 	}
 	if hasCgoCallbackBlindspot(pkg) {
-		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo or native source")
-		scan.add(effect)
-		if scan.preferred == "" {
-			scan.preferred = effect.reason
-		}
+		scan.add(opaqueExternalEffect(externalEffectNative, "reaches cgo or native source"))
 	}
 	if pkg != nil && len(pkg.SFiles) != 0 {
-		effect := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")
-		scan.add(effect)
-		if scan.preferred == "" {
-			scan.preferred = effect.reason
-		}
+		scan.add(opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly"))
 	}
+	scan.preferred = preferredEffectReason(scan.effects)
 	return scan
 }
 
@@ -426,22 +404,12 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
 	}
 	var scan maximalEffectScan
-	// The preferred diagnostic's precedence over the same single walk:
-	// directives, then the first always-external import, then the first
-	// classified selector or call, then the testing-method scan, then the
-	// first unaudited-standard effect, then the potential-external import
-	// fallback. Every effect-adding arm feeds a reason, so a subject
-	// refused solely by an unaudited operation names its symbol instead
-	// of serving the name-free fallback. This fixed stratum order
-	// predates the shared cause-preference order the spec requires of
-	// this diagnostic: within it a lower-ranked reason can be named over
-	// a higher-ranked sibling (a testing-method mutation vs an unaudited
-	// import and the reverse both occur) - deterministic and
-	// display-only, the verdict itself is unaffected
+	// The preferred diagnostic derives from the same single walk's
+	// effect set under the shared cause-preference order
+	// (preferredEffectReason); the potential-external import fallback
+	// names a dependence only for an effect-less file
 	// (REQ-closure-observability-analysis).
-	importReason := ""
 	potentialExternal := ""
-	unauditedReason := ""
 	if hasWasmImport {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
 		effect.unrefinable = true
@@ -455,14 +423,14 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 			if imp.alias == "." {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
 				potentialExternal = imp.pkgPath
-				if unauditedReason == "" {
-					unauditedReason = "reaches testing (potential external dependence)"
-				}
 			}
 			continue
 		}
-		if isAlwaysExternalPackage(imp.pkgPath) && importReason == "" {
-			importReason = trueReason(imp.pkgPath)
+		if isAlwaysExternalPackage(imp.pkgPath) && imp.alias != "." && imp.alias != "_" {
+			// A plain always-external import is a diagnostic candidate
+			// only: the dot and blank spellings record the effect
+			// itself below.
+			scan.importCandidates = appendExternalEffect(scan.importCandidates, trueExternalEffect(imp.pkgPath))
 		}
 		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
 			potentialExternal = imp.pkgPath
@@ -475,13 +443,9 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 				scan.add(trueExternalEffect(imp.pkgPath))
 			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
-				if unauditedReason == "" {
-					unauditedReason = "reaches " + imp.pkgPath + " (potential external dependence)"
-				}
 			}
 		}
 	}
-	bodyReason := ""
 	// The canonical test-main epilogue is harness protocol, not an
 	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
 	// declaration is admitted exactly as the observed test-main walk
@@ -497,9 +461,6 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 				pkgPath := aliases[ident.Name]
 				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
 					scan.add(effect)
-					if bodyReason == "" && pkgPath != "" {
-						bodyReason = effect.reason
-					}
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
 					// admitted test-main epilogue
 				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
@@ -512,32 +473,17 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					// (REQ-closure-observability-analysis).
 				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
-					if unauditedReason == "" {
-						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
-					}
 				}
 			}
 		}
 		return true
 	})
-	testingEffects, testingReason := testingMethodEffects(file, aliases)
+	testingEffects, _ := testingMethodEffects(file, aliases)
 	for _, effect := range testingEffects {
 		scan.add(effect)
 	}
-	switch {
-	case hasWasmImport:
-		scan.preferred = "reaches go:wasmimport"
-	case hasLinkname:
-		scan.preferred = "reaches go:linkname (opaque linkage)"
-	case importReason != "":
-		scan.preferred = importReason
-	case bodyReason != "":
-		scan.preferred = bodyReason
-	case testingReason != "":
-		scan.preferred = testingReason
-	case unauditedReason != "":
-		scan.preferred = unauditedReason
-	case potentialExternal != "":
+	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
+	if scan.preferred == "" && potentialExternal != "" {
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
 	return scan, nil
@@ -975,16 +921,28 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 	pin := h.modulePin(pkg.Module)
 	key := effectScanKey(pin, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
 	composite := maximalPackageExternalEffects(&pkg)
+	// A backed scan's preferred is ignored by the package selection
+	// (the union argmax re-derives it); only an effect-less scan's
+	// import fallback folds, lexicographic least.
 	fold := func(scan maximalEffectScan) {
 		for _, effect := range scan.effects {
 			composite.add(effect)
 		}
-		if scan.preferred != "" && (composite.preferred == "" || preferMaximalReason(scan.preferred, composite.preferred)) {
+		for _, candidate := range scan.importCandidates {
+			composite.importCandidates = appendExternalEffect(composite.importCandidates, candidate)
+		}
+		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (composite.preferred == "" || scan.preferred < composite.preferred) {
 			composite.preferred = scan.preferred
+		}
+	}
+	deriveComposite := func() {
+		if selected := preferredEffectReason(append(append([]externalEffect(nil), composite.effects...), composite.importCandidates...)); selected != "" {
+			composite.preferred = selected
 		}
 	}
 	if stored, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
 		fold(stored)
+		deriveComposite()
 		return composite, true, nil
 	}
 	var fileFold maximalEffectScan
@@ -1000,12 +958,19 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 		for _, effect := range scan.effects {
 			fileFold.add(effect)
 		}
-		if scan.preferred != "" && (fileFold.preferred == "" || preferMaximalReason(scan.preferred, fileFold.preferred)) {
+		for _, candidate := range scan.importCandidates {
+			fileFold.importCandidates = appendExternalEffect(fileFold.importCandidates, candidate)
+		}
+		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fileFold.preferred == "" || scan.preferred < fileFold.preferred) {
 			fileFold.preferred = scan.preferred
 		}
 	}
+	if selected := preferredEffectReason(append(append([]externalEffect(nil), fileFold.effects...), fileFold.importCandidates...)); selected != "" {
+		fileFold.preferred = selected
+	}
 	storeEffectScan(effectScanDirName, effectScanScope(), key, fileFold)
 	fold(fileFold)
+	deriveComposite()
 	return composite, true, nil
 }
 
