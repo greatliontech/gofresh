@@ -212,7 +212,7 @@ its activation decision.
       completed-observation conjunction across stipulator, gomutant,
       and pew, carrying the scratch-namespace declaration surface that
       stops union-equality churn; both docs delete at close.
-- [ ] 38. gomutant: hot-loop committable evidence (gomutant
+- [x] 38. gomutant: hot-loop committable evidence (gomutant
       docs/issues: staged-snapshot-run-mode, env-input-oracle-policy,
       runtime-input-provenance) - staged-index measurement collapses
       the attest-promote-commit trail, the reviewed exemption record
