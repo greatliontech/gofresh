@@ -1449,6 +1449,13 @@ func (c bracketStatCover) covers(id pathID) bool {
 		if root.Kind != id.Kind {
 			continue
 		}
+		// A module-root bracket root: cleaned rel identities never carry
+		// a "./" prefix, so "." covers by kind alone - the fingerprint
+		// spans the whole module, exactly as scratchNamespace.matches
+		// reads the same root.
+		if root.Kind == pathRel && root.Path == "." {
+			return true
+		}
 		sep := "/"
 		if id.Kind == pathAbs {
 			sep = string(filepath.Separator)

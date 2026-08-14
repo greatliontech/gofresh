@@ -503,16 +503,35 @@ func TestExternalDirectoryIsUnverifiable(t *testing.T) {
 
 func TestStatObservationIsUnverifiable(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	path := filepath.Join(packageDir, "fixture.txt")
+	// Only a stat outside every declared bracket root takes the
+	// metadata seal (REQ-inputs-unbounded): a covered stat records its
+	// identity (TestModuleRootBracketCoversInteriorStats). An uncovered
+	// existing file additionally takes the bracket-coverage seal, which
+	// wins reason precedence, so the metadata seal is pinned on the
+	// manifest's unverifiable list.
+	path := filepath.Join(t.TempDir(), "fixture.txt")
 	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nstat fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := FromTestLog([]byte("# test log\nstat "+path+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
-	if !st.Unverifiable || !strings.Contains(st.Reason, "stat metadata") {
-		t.Fatalf("got unverifiable=%v reason=%q, want stat metadata", st.Unverifiable, st.Reason)
+	if !st.Unverifiable {
+		t.Fatalf("got unverifiable=%v reason=%q, want the uncovered stat sealed", st.Unverifiable, st.Reason)
+	}
+	decoded, err := decode(st.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := false
+	for _, reason := range decoded.Unverifiable {
+		if strings.Contains(reason, "stat metadata") {
+			sealed = true
+		}
+	}
+	if !sealed {
+		t.Fatalf("unverifiable reasons %v carry no stat-metadata seal", decoded.Unverifiable)
 	}
 	paths, err := Paths(st.Manifest, moduleDir)
 	if err != nil {
