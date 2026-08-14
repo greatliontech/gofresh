@@ -28,7 +28,8 @@ oracle TMPDIR leaves every temp-touching oracle runtime-unverifiable
 in a reporting consumer's campaign), then the
 startup-effect-precision plan activation decision with 29-46 (80
 rides beside 39a - the same oversubscription mechanism, one repo
-each), then 16
+each; 38a follows that pair, inserted on the field-report band
+2026-08-14: the pre-commit consumer loop's persistence trust), then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
 design discussion). The startup-effect-precision plan is dormant until
 its activation decision.
@@ -226,6 +227,21 @@ its activation decision.
       sites (GOMAXPROCS and -p at max(1, NumCPU/jobs) in the oracle
       env) and run oracle processes at low scheduling priority; the
       jobs default stands.
+- [ ] 38a. gomutant: the pre-commit consumer loop's findings persist
+      (gomutant docs/issues: campaign-persists-zero-findings-on-dirty-trees,
+      campaign-lock-sits-beside-tracked-document) - field report
+      (ocifs): four dirty-tree campaigns completed with real measured
+      counts yet the repo document stayed empty at every version it
+      ever carried and every summary said 0 cached; verify the
+      chunk-38 staged line end-to-end against a pinned pre-commit
+      consumer loop (persistence plus later-run reuse), diagnose the
+      machine-local overlay's zero run-to-run reuse on the field
+      shape, make non-persistence loud (an empty repo document after a
+      measuring campaign states its cause in the summary), grow the
+      version surface the field report lacked (--version/version), and
+      stop the by-design .campaign lock from landing in consumer
+      commits (tool-minted ignore beside the tracked document plus the
+      lifecycle line in consumer docs); both docs delete at close.
 - [ ] 39. gomutant: campaign robustness and cost (gomutant
       docs/issues: decision-build-locality,
       ephemeral-replacement-outside-oracle-closure,
@@ -239,11 +255,17 @@ its activation decision.
       at close.
 - [ ] 41. cross-tool: the MCP surface contract (gomutant
       docs/issues/mcp-long-running-runs, stipulator
-      docs/issues/mcp-progress-not-observed) - the standing principle
+      docs/issues/mcp-progress-not-observed; folded 2026-08-14:
+      gomutant docs/issues/mcp-server-refuses-newer-cli-document -
+      a version-ahead refusal names its probable cause and the
+      restart/upgrade signal instead of a bare range error - and
+      gomutant docs/issues/killed-mutant-oracle-scratch-residue -
+      the consumer-hygiene paragraph rides the audited consumer
+      surfaces) - the standing principle
       lands in both MCP specs: the MCP surface outranks the CLI and
       serves an LLM in a harness - minimal output, maximal usefulness;
       both surfaces audited against it, cancellation propagation and
-      live progress included; both docs delete at close.
+      live progress included; the resolving docs delete at close.
 - [ ] 42. stipulator: correctness batch (stipulator docs/issues:
       term-matcher-ascii-boundaries, partitions-uncapped-seam-unpinned,
       scope-prefix-boundary-semantics, witness-store-gc,
