@@ -1673,6 +1673,104 @@ func TestBatchMarksRuntimeInputDriftStale(t *testing.T) {
 	}
 }
 
+// Runtime-input revalidation computes environment values from the
+// producer processes' environment when the caller declared one
+// (WithProducerEnv): a record digested under the env the producing
+// process actually saw stays valid though the analysis env differs,
+// while an engine without the declaration - the analysis-env stand-in -
+// reads the same record stale. The runtime-inputs contract's
+// same-environment-as-the-producing-process rule, made declarable.
+func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	producerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
+	state, err := runtimeinput.FromTestLogEnv([]byte("getenv GOFRESH_TEST_WIDTH\n"), dir, dir, producerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := func(opts ...Option) runtimeinput.State {
+		t.Helper()
+		e, err := New(append([]Option{WithDir(dir), WithEnv(os.Environ()...)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := &View{moduleDir: dir, engine: e}
+		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if got := current(WithProducerEnv(producerEnv...)); !got.OK || got.Digest != state.Digest {
+		t.Fatalf("producer-env recompute = %+v, want the recorded digest %s", got, state.Digest)
+	}
+	if got := current(); got.Digest == state.Digest {
+		t.Fatal("analysis-env stand-in reproduced the producer-env digest; the env divergence is invisible")
+	}
+
+	// The observed-producer validation path revalidates attached
+	// manifests under the same rule: an env-reading observation recorded
+	// under the producer env validates only when the engine knows that
+	// env.
+	obsDir := writeObservedViewModule(t)
+	sub := Subject{Package: "example.com/observed", Symbol: "TestRead"}
+	obsProducerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
+	validate := func(opts ...Option) error {
+		t.Helper()
+		e, err := New(append([]Option{WithDir(obsDir), WithEnv(os.Environ()...)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := e.NewView(context.Background(), []Subject{sub}, obsDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, err := v.CaptureObserved(context.Background(), sub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOFRESH_TEST_WIDTH\n"), obsDir, obsDir, obsProducerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, obsDir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := v.AttachObservation(sub, fp, obs); err != nil {
+			t.Fatal(err)
+		}
+		return v.Validate(context.Background())
+	}
+	if err := validate(WithProducerEnv(obsProducerEnv...)); err != nil {
+		t.Fatalf("producer-env observed validation = %v, want valid", err)
+	}
+	if err := validate(); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("analysis-env stand-in = %v, want the view-changed manifest refusal", err)
+	}
+}
+
+// The producer env may diverge from the analysis env only in keys the
+// closure and guard evidence does not consume: build-identity
+// disagreement and a declared-but-empty producer env both refuse at
+// construction instead of letting stale evidence serve against
+// artifacts the producer processes never ran with (WithProducerEnv).
+func TestProducerEnvConstructionRefusals(t *testing.T) {
+	dir := t.TempDir()
+	base := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOMODCACHE=") {
+			base = append(base, entry)
+		}
+	}
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv()); err == nil || !strings.Contains(err.Error(), "declared empty") {
+		t.Fatalf("empty producer env = %v, want the declared-empty refusal", err)
+	}
+	divergent := append(append([]string(nil), base...), "GOMODCACHE=/producer-only-cache")
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(divergent...)); err == nil || !strings.Contains(err.Error(), "GOMODCACHE") {
+		t.Fatalf("divergent build identity = %v, want the GOMODCACHE refusal", err)
+	}
+	agreeing := append(append([]string(nil), base...), "GOFRESH_TEST_WIDTH=2")
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(agreeing...)); err != nil {
+		t.Fatalf("resource-key-only divergence refused: %v", err)
+	}
+}
+
 func TestRuntimeInputDriftIsSubjectLocal(t *testing.T) {
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
 	for _, name := range []string{"a", "b"} {

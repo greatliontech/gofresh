@@ -763,7 +763,7 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 			current = runtimeinput.CurrentContext
 			if v.engine != nil {
 				current = func(ctx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
-					return runtimeinput.CurrentEnvContext(ctx, encoded, moduleDir, v.engine.env)
+					return runtimeinput.CurrentEnvContext(ctx, encoded, moduleDir, v.engine.evidenceEnv())
 				}
 			}
 		}
@@ -1166,7 +1166,7 @@ func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string,
 	if v.engine == nil {
 		return nil, nil
 	}
-	return runtimeinput.MovedInputsContext(ctx, encoded, v.moduleDir, v.engine.env)
+	return runtimeinput.MovedInputsContext(ctx, encoded, v.moduleDir, v.engine.evidenceEnv())
 }
 
 // withMovedInputs names the movers behind a stale runtime-inputs verdict
@@ -1204,7 +1204,7 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 			if v.runtimeCurrent != nil {
 				observed, err = v.runtimeCurrent(ctx, state.Manifest, v.moduleDir)
 			} else {
-				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.env)
+				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.evidenceEnv())
 			}
 			if err != nil {
 				return err
