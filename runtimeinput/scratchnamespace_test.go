@@ -506,3 +506,40 @@ func TestScratchNamespaceRejectsMalformedDeclarations(t *testing.T) {
 		}
 	}
 }
+
+// The exported grammar check and the ingest option agree arm for arm: a
+// declaration the validator accepts assembles, one it refuses fails the
+// ingest with the same error — a producer preflighting at its boundary
+// refuses exactly what ingest would degrade on.
+func TestValidateScratchNamespaceMatchesOptionValidation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		dir, pattern string
+		wantErr      string
+	}{
+		"valid":              {dir: "pkg", pattern: "scratch-*"},
+		"multi-component":    {dir: "x", pattern: "a/b", wantErr: "single path component"},
+		"empty pattern":      {dir: "x", pattern: "", wantErr: "single path component"},
+		"absolute dir":       {dir: "/abs", pattern: "p", wantErr: "module-relative"},
+		"empty dir":          {dir: "", pattern: "p", wantErr: "module-relative"},
+		"escaping dir":       {dir: "../out", pattern: "p", wantErr: "escapes module"},
+		"newline in pattern": {dir: "x", pattern: "a\nb", wantErr: "single path component"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateScratchNamespace(tc.dir, tc.pattern)
+			var cfg testLogConfig
+			WithScratchNamespace(tc.dir, tc.pattern)(&cfg)
+			if tc.wantErr == "" {
+				if err != nil || cfg.err != nil {
+					t.Fatalf("valid declaration refused: validator %v, option %v", err, cfg.err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validator error = %v, want %q", err, tc.wantErr)
+			}
+			if cfg.err == nil || cfg.err.Error() != err.Error() {
+				t.Fatalf("option and validator disagree: option %v, validator %v", cfg.err, err)
+			}
+		})
+	}
+}

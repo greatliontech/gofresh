@@ -481,25 +481,36 @@ func WithStaticInputRoot(root string) TestLogOption {
 // observed.
 func WithScratchNamespace(dir, pattern string) TestLogOption {
 	return func(c *testLogConfig) {
-		if pattern == "" || !utf8.ValidString(pattern) || strings.ContainsAny(pattern, "\x00\r\n") || strings.ContainsAny(pattern, `/\`) {
-			c.err = fmt.Errorf("runtimeinputs: scratch namespace pattern must be a non-empty single path component, got %q", pattern)
-			return
-		}
-		if dir == "" || filepath.IsAbs(dir) || !utf8.ValidString(dir) || strings.ContainsAny(dir, "\x00\r\n") {
-			c.err = fmt.Errorf("runtimeinputs: scratch namespace dir must be a module-relative path, got %q", dir)
+		if err := ValidateScratchNamespace(dir, pattern); err != nil {
+			c.err = err
 			return
 		}
 		clean := path.Clean(filepath.ToSlash(dir))
-		if clean == ".." || strings.HasPrefix(clean, "../") {
-			c.err = fmt.Errorf("runtimeinputs: scratch namespace dir escapes module: %q", dir)
-			return
-		}
 		prefix, suffix := pattern, ""
 		if i := strings.LastIndex(pattern, "*"); i >= 0 {
 			prefix, suffix = pattern[:i], pattern[i+1:]
 		}
 		c.scratchNamespaces = append(c.scratchNamespaces, scratchNamespace{dir: pathID{Kind: pathRel, Path: clean}, prefix: prefix, suffix: suffix})
 	}
+}
+
+// ValidateScratchNamespace is the scratch-namespace grammar
+// (REQ-inputs-scratch-namespace) as a standalone check, so a producer
+// taking declarations at its own boundary can refuse a malformed one up
+// front — before a measurement whose every observation would otherwise
+// degrade at ingest.
+func ValidateScratchNamespace(dir, pattern string) error {
+	if pattern == "" || !utf8.ValidString(pattern) || strings.ContainsAny(pattern, "\x00\r\n") || strings.ContainsAny(pattern, `/\`) {
+		return fmt.Errorf("runtimeinputs: scratch namespace pattern must be a non-empty single path component, got %q", pattern)
+	}
+	if dir == "" || filepath.IsAbs(dir) || !utf8.ValidString(dir) || strings.ContainsAny(dir, "\x00\r\n") {
+		return fmt.Errorf("runtimeinputs: scratch namespace dir must be a module-relative path, got %q", dir)
+	}
+	clean := path.Clean(filepath.ToSlash(dir))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("runtimeinputs: scratch namespace dir escapes module: %q", dir)
+	}
+	return nil
 }
 
 // WithExcludedPaths declares path exclusions (REQ-inputs-exclusions):
