@@ -22,7 +22,3 @@ when its work lands (git holds history).
   complement to the enforced scratch namespace.
   *Lands: a field measurement shows the flow discipline admits real bench
   scratch shapes.*
-- **[runtimeinput-producer-facade](runtimeinput-producer-facade.md)** — stipulator, gomutant,
-  and pew hand-assemble the same completed-observation conjunction; pew's first copy diverged
-  on env fidelity before review caught it; a runtimeinput facade would collapse all three.
-  *Lands: startup-effect-precision plan, per each doc.*

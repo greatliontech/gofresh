@@ -206,7 +206,7 @@ its activation decision.
       call-site judgment and one observation-facts shape, collapsing
       the five partial classifier copies and the three hand-built View
       literals; two docs delete at close.
-- [ ] 37. cross-tool: runtimeinput producer facade (gofresh
+- [x] 37. cross-tool: runtimeinput producer facade (gofresh
       docs/issues/runtimeinput-producer-facade, gomutant
       docs/issues/oracle-scratch-namespaces) - one facade for the
       completed-observation conjunction across stipulator, gomutant,
