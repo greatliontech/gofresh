@@ -220,7 +220,7 @@ its activation decision.
       unblocks the repo-root idiom, and producer-output provenance
       stops re-measures the evidence already covers; three docs delete
       at close.
-- [ ] 39a. gomutant: oracle-process CPU oversubscription - concurrent
+- [x] 39a. gomutant: oracle-process CPU oversubscription - concurrent
       mutant jobs each spawn full-width go toolchain children
       (jobs x NumCPU runnable threads, quadratic in cores at the
       default), starving the host; cap inner parallelism at the spawn
