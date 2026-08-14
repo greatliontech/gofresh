@@ -714,7 +714,7 @@ its activation decision.
       and literal detection must include the elided spelling; the
       admission legs (returned literal constructor, bind-position
       literal without a callee) must stay admissible.
-- [ ] 84. stipulator: build-tagged symbols bind (stipulator
+- [x] 84. stipulator: build-tagged symbols bind (stipulator
       docs/issues/build-tagged-symbol-binding.md) - binding-side
       resolution loads one package view per distinct build selection
       in the accepted policy (execution discovery is already
