@@ -1089,3 +1089,57 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "836fc4123d3938a13f8f666ab928623dc47686e2c69a69e0abced03b57791c17"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.CaptureProducerFrame"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "526012260d158b4e21396a80715c86bf2181c650dff7a4d7a70400be1475278d"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.ProducerFrame.Observe"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "280740c8e58d02150e1a1e51daf9c2c97afc0b38c7db725ec2a4ffa2004a3234"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeMatchesHandAssembly"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "98e5e7b8e0c29dfae8936463df6fff6c15df539ae6598effc1df020e70b0a92f"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeFailsClosed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b482c963c1a7a79c039b1f339fc93a3ff711799773a7249535ef09bbdcd07c04"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeAssemblesDeclarations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dea42a873c2f91bcc672ac2b3476622acb783b609cf8e0ac422b83e0c4e22a5f"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "d84f6c686ccad8fe74e24ccc2b9a5bb1551c1dbe4bf222a9714568d2eaf4395b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFrameResolvesSymlinkedRoot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "758fb1b0b9a922079983446a54a937edc03be7fa0175054c9c6958a668028c0d"
+}

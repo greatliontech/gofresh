@@ -550,6 +550,36 @@ prove a read's target freshly created, that proof remains the
 declaration-free instrument; the namespace is the enforced fallback for
 scratch disciplines no sound flow analysis can follow.
 
+**REQ-inputs-producer-facade** (behavior): The library MUST expose one
+producer facade owning the completed-observation conjunction every
+external producer previously hand-assembled: frame capture resolves the
+tree root and package directory through symlinks before the containment
+check and before framing, declares the package directory
+module-relative beside the caller's reviewed bracket paths under the
+VCS exclusion and the caller's tool-bookkeeping exclusions, and fails
+closed to a named reason for an unresolvable directory, an
+out-of-tree package, or a capture error; ingest proves the test-log
+header before believing a capture (a healthy process that never opened
+its capture file never seals the no-inputs assertion), excludes the
+module-root listing and the VCS tree from every ingest (the bracket
+never covers the root's own listing, so its identity moves under
+unrelated tooling) beside the caller's tool-bookkeeping exclusions,
+requires the process environment's PWD to name the frame's package
+directory (producers spawn in the package directory; a
+parent-inherited PWD silently misclassifies every cwd-anchored read),
+assembles the completed-process, bracket, exclusion,
+classification-root, and scratch-namespace options from the caller's
+declarations, and ingests the process environment verbatim (a rebuilt
+environment loses fidelity the classification depends on). Every
+non-completing shape fails closed to an incomplete observation
+carrying its reason in one canonical order - the caller's
+process-health verdict, an unattached, unreadable or missing capture,
+a headerless capture, a bracketless frame, a PWD that does not name
+the package directory, an ingestion failure - never a lost
+observation. The caller owns identity, environment, health, and the
+declaration vocabulary; the facade owns everything else, so the next
+producer is correct by construction.
+
 **REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
 the unix contentless sink device; on platforms whose sink is not an absolute
 path (windows `NUL`) nothing is admitted and the reads stay observed,

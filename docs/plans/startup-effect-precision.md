@@ -66,7 +66,7 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       docs/issues/dotless-module-paths-classified-standard.md).
 - [x] 8. one dispatch-site classifier (gofresh
       docs/issues/one-dispatch-site-classifier.md).
-- [ ] 9. runtimeinput producer facade (gofresh
+- [x] 9. runtimeinput producer facade (gofresh
       docs/issues/runtimeinput-producer-facade.md).
 - [ ] 10. enumeration targets tightened (gofresh
       docs/issues/enumeration-targets-over-approximated.md).
