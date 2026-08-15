@@ -785,7 +785,21 @@ both plans.
       gofresh's deferred-close contract is stipulator's closing-cost
       lever, and gomutant's serve path needs the closing-validate
       discipline before adopting it - a design pass, then the
-      adoption; ordered after 90.
+      adoption; ordered after 90; history: `git log --all --
+      docs/issues/post-completion-cpu-tail.md` (gomutant - cost-center
+      evidence: ~25% of in-process CPU under repeated packages.Load,
+      GC a third of samples).
+- [ ] 92. gomutant: fold the decision batch (maximal captures) and the
+      observed proof union - two back-to-back full observation passes
+      over the identical symbol set with the same engines; one
+      observed union view set serving both roles halves the warm
+      campaign's observation floor. Decision-failure locality already
+      landed (39), so the fold is now a pure consolidation; it also
+      dispositions the strict/union view-build-loop duplication in
+      gomutant freshness.go (the back halves of the two constructors,
+      parallel except fault routing). Ordered after 91; history:
+      `git log --all -- docs/issues/decision-build-locality.md`
+      (gomutant).
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
