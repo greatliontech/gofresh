@@ -39,8 +39,13 @@ startup-effect-precision activation decision's vehicle carrying the
 demonstrated zero-reuse chain, and 87 the backlog re-slot sweep the
 same-day deferral doctrine requires), then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
-design discussion). The startup-effect-precision plan is dormant until
-its activation decision.
+design discussion). The startup-effect-precision plan ACTIVATED
+2026-08-15 at chunk 86 (in-authority: its charter names the startup
+tier as the field corpus's binding constraint, and the demonstrated
+zero-reuse observability chain - chunk 86's doc - is stronger
+activating evidence than the chartering histogram); its open chunks
+execute interleaved with this order's remaining block, WIP=1 across
+both plans.
 
 - [x] 1. gomutant: overlay commit cost + quarantine
       (gomutant docs/issues/store-update-reparses-whole-overlay.md) —
