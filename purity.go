@@ -216,13 +216,24 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 					sym := fd.Name.Name
 					if recv := recvTypeName(fd); recv != "" {
 						sym = recv + "." + sym
-					} else if sym == "init" && p.Fset != nil {
+					} else if sym == "init" && fd.Recv == nil {
 						// Unaddressable by name: init subjects carry the
 						// declaration ledger's positional identity,
 						// init#<file>#<ordinal> (file base name, 0-based
 						// ordinal within the file in declaration order),
 						// so multiple inits stay distinct subjects instead
-						// of collapsing onto one ambiguous name.
+						// of collapsing onto one ambiguous name. The gate
+						// is the receiver's absence, not its nameability -
+						// a method named init under an unnameable receiver
+						// is never an init declaration and must not skew a
+						// sibling's ordinal.
+						if p.Fset == nil {
+							// Cannot mint the positional identity; skip the
+							// declaration rather than resurrect the bare
+							// colliding name. Unreachable under the loader
+							// modes in use (Syntax implies Fset).
+							continue
+						}
 						sym = fmt.Sprintf("init#%s#%d", filepath.Base(p.Fset.PositionFor(f.Pos(), false).Filename), initOrdinal)
 						initOrdinal++
 					}

@@ -15,11 +15,13 @@ reachable as an analysis root, such as a benchmark, a test, or any callable a
 caller keys a cached result on. The unit of freshness. An `init` function,
 which Go keeps unaddressable by name, is a subject under the declaration
 ledger's positional identity — the symbol `init#<file>#<ordinal>`, where
-`<file>` is the declaring file's base name and `<ordinal>` is the 0-based
-ordinal of the init declaration within that file in declaration order,
-advancing on every init declaration so a resolution gap never shifts a
-sibling's identity. The identity is file-scoped: inits elsewhere in the
-package neither shift it nor make it unresolvable.
+`<file>` is the declaring file's base name in the pure-Go compilation and
+`<ordinal>` counts the file's receiverless init declarations in declaration
+order, 0-based, independent of whether analysis resolves each one. The
+identity is file-scoped: inits elsewhere in the package neither shift it nor
+make it unresolvable. An init declared in a cgo-processed file is not
+addressable — the compilation's file names there are cache artifacts, not
+the declaring file.
 
 **source closure** (term): the set of source declarations whose change could alter
 a subject's runtime behavior — the functions its body transitively reaches, the

@@ -219,3 +219,52 @@ func TestN(t *testing.T) {
 		t.Fatalf("added file's first init failed capture under its own 0-based ordinal: %v", err)
 	}
 }
+
+// A method named init under a receiver the naming grammar cannot reduce
+// (the parenthesized form) is still a method, never an init
+// declaration: it must not skew a sibling init's ordinal. The real
+// init keeps ordinal 0; the ordinal the skew would have produced does
+// not exist.
+func TestInitOrdinalIgnoresUnnameableReceiverMethod(t *testing.T) {
+	dir := t.TempDir()
+	writeInitFixture(t, dir, map[string]string{
+		"go.mod": "module example.com/initrecv\n\ngo 1.26\n",
+		"a.go": `package initrecv
+
+type T struct{}
+
+var n int
+
+func ((T)) init() {}
+
+func init() { n++ }
+`,
+		"a_test.go": `package initrecv
+
+import "testing"
+
+func TestN(t *testing.T) {
+	if n == 0 {
+		t.Fatal("n zero")
+	}
+}
+`,
+	})
+	ctx := context.Background()
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	real := Subject{Package: "example.com/initrecv", Symbol: "init#a.go#0"}
+	view, err := engine.NewView(ctx, []Subject{real}, dir)
+	if err != nil {
+		t.Fatalf("real init not addressable at ordinal 0: %v", err)
+	}
+	if _, err := view.Capture(ctx, real); err != nil {
+		t.Fatal(err)
+	}
+	skewed := Subject{Package: "example.com/initrecv", Symbol: "init#a.go#1"}
+	if _, err := engine.NewView(ctx, []Subject{skewed}, dir); err == nil {
+		t.Fatal("ordinal 1 resolved: the method skewed the init count")
+	}
+}
