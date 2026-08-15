@@ -778,6 +778,14 @@ both plans.
       structural mutants for analyzer-shaped oracles and recipe-shaped
       classes for generator drift, parser guards, and resolver seams;
       both docs delete at close.
+- [ ] 91. gomutant: deferred-check-close adoption - the run-end and
+      per-window producer validations run full in-process gofresh
+      analysis (the chunk-39-diagnosed CPU tail; its visibility half -
+      the CLI analysis heartbeat and the pprof handle - landed there);
+      gofresh's deferred-close contract is stipulator's closing-cost
+      lever, and gomutant's serve path needs the closing-validate
+      discipline before adopting it - a design pass, then the
+      adoption; ordered after 90.
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
