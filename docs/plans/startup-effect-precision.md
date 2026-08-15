@@ -37,6 +37,12 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       reached was not visible to dependents pre-0b and can newly
       poison them - that widening is the fail-closed price of 0b's
       admission, and this chunk is where it narrows.
+- [ ] 0e. scalar-global cross-test mutation coverage - the carrier
+      net prices alias-handing carriers ("any use at all marks"), and
+      unsafe-mediated mutation of a NON-carrier scalar global evades
+      it; the direct-write equivalent was always unblocked, so verify
+      how the class is covered (or price it) - the chunk-86 review's
+      recorded adjacent residual.
 - [ ] 0d. benchmark-loop package-scan audit - testing.Loop in the
       maximal package scan blocks every subject in a benchmark-bearing
       package; startup masking hid it until the test-main flow moved

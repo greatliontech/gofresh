@@ -714,7 +714,17 @@ lexicographically on the reason text, so both diagnostics are
 deterministic and causal-first. A complete maximal-tier negative scan
 may reject opaque linkage, native code, process execution, dot imports, unaudited
 standard-library access, or other unclassified external-capable syntax, but can never
-grant the proof on its own. The audited-pure standard set — packages and named
+grant the proof on its own. The unsafe reference class is narrowed out
+of the scan's blocking set: an in-scope `unsafe.Pointer` reference is
+diagnostic only, because the subject walk prices every attributed
+unsafe-typed value and a subject world the walk cannot close refuses
+independently — a subject reaching unsafe-typed state still refuses at
+its own tier, while a sibling declaration's unsafe (an
+operator-grammar fixture, a low-level helper file) no longer blocks a
+clean subject's proof; the package's other operations (unsafe.Slice,
+unsafe.String, and kin) keep the scan block, because their call sites
+carry no unsafe-typed value the walk can price and a fabricated slice
+or string is a testlog-invisible read. The audited-pure standard set — packages and named
 operations through which every ambient effect must enter via a flagged
 constructor or global of an effect-bearing package, adding no
 testlog-invisible input channel of their own and no machine-variant

@@ -611,6 +611,24 @@ func maximalObservabilityBlocker(effect externalEffect) bool {
 			return false
 		}
 	}
+	// The unsafe.Pointer reference class narrows to subject
+	// attribution: the subject walk prices every attributed
+	// unsafe-typed value (the analyzer's type-graph arm fires on any
+	// value whose type carries unsafe.Pointer), and a subject world the
+	// walk cannot close refuses on its own - so for this class the
+	// package backstop pre-blocked only what the subject tiers already
+	// judge, and a sibling declaration touching unsafe.Pointer (an
+	// operator-grammar fixture, a low-level helper file) was blocking
+	// every clean subject's observability in the package. The carve is
+	// symbol-exact: unsafe.Slice, unsafe.String, and the rest of the
+	// package have call sites with no unsafe.Pointer-typed value for
+	// the type-graph arm to price (a *byte and a length in, a slice
+	// out), so they keep the scan block - carving them would grant
+	// proofs over testlog-invisible out-of-bounds reads
+	// (REQ-closure-observability-analysis).
+	if effect.packagePath == "unsafe" && effect.symbol == "Pointer" {
+		return false
+	}
 	return true
 }
 

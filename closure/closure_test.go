@@ -1547,6 +1547,18 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "harnesssetenv", subject: "TestCleanRead", reason: "package scan: reaches testing.Setenv"},
 		{fixture: "observablefresh", subject: "TestTempDirWriteReadCleanup", observable: true},
 		{fixture: "observablefresh", subject: "TestTempDirOpenFile", observable: true},
+		// A sibling file's unsafe declarations no longer pre-block a
+		// clean subject at the package scan; a subject carrying an
+		// unsafe-typed value through its own walk still refuses, on the
+		// widen path (REQ-closure-observability-analysis's narrowed
+		// unsafe class).
+		{fixture: "unsafesibling", subject: "TestCleanRead", observable: true},
+		{fixture: "unsafesibling", subject: "TestReachesUnsafe", reason: "unsafe pointer reachable", absent: "package scan:"},
+		// The carve is symbol-exact: unsafe.Slice's call site carries
+		// no unsafe.Pointer-typed value for the type-graph arm to
+		// price, so it must keep the scan block - the row that pins
+		// the carve's breadth.
+		{fixture: "unsafeslice", subject: "TestSliceHeader", reason: "package scan: reaches unaudited standard operation unsafe.Slice"},
 		{fixture: "observablestat", subject: "TestStat"},
 		{fixture: "observablemutation", subject: "TestRemove"},
 		{fixture: "observableprocess", subject: "TestCommand"},
