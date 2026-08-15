@@ -824,6 +824,16 @@ both plans.
       directive fixture demonstrated its failing path. Audit and
       convert the remaining sites, with directive fixtures. Surfaced
       by chunk 40's review; ordered after 93.
+- [ ] 95. gomutant: MCP Tasks adoption - protocol-level operation
+      identity, polling, result retrieval after a client deadline, and
+      explicit cancellation for long-running runs (the
+      mcp-long-running-runs residue; dead-transport detection landed
+      long ago). Opens by re-auditing the prerequisites that block it
+      at chunk-41 time: the io.modelcontextprotocol/tasks extension
+      (SEP-2663) stable in go-sdk (v1.6.1 in use; tasks landed v1.7.0
+      beta) AND a consuming agent client that speaks it - neither held
+      at charter time; history: `git log --all --
+      docs/issues/mcp-long-running-runs.md` (gomutant). Ordered last.
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
