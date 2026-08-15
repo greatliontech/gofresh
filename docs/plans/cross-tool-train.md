@@ -269,7 +269,7 @@ both plans.
       docs/issues/init-functions-as-subjects) - the classic
       silent-fault carrier becomes measurable end-to-end; doc deletes
       at close.
-- [ ] 41. cross-tool: the MCP surface contract (gomutant
+- [x] 41. cross-tool: the MCP surface contract (gomutant
       docs/issues/mcp-long-running-runs, stipulator
       docs/issues/mcp-progress-not-observed; folded 2026-08-14:
       gomutant docs/issues/mcp-server-refuses-newer-cli-document -
