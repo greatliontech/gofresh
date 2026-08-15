@@ -749,7 +749,7 @@ both plans.
       and literal detection must include the elided spelling; the
       admission legs (returned literal constructor, bind-position
       literal without a callee) must stay admissible.
-- [ ] 86. gofresh: oracle-serving observability precision (gofresh
+- [x] 86. gofresh: oracle-serving observability precision (gofresh
       docs/issues/observability-package-scan-blocks-oracle-serving.md)
       - the demonstrated ocifs zero-reuse chain: the package-scan
       refusal breadth (unsafe.Pointer anywhere in scope) blocks the
