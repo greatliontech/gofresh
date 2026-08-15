@@ -235,7 +235,7 @@ its activation decision.
       sites (GOMAXPROCS and -p at max(1, NumCPU/jobs) in the oracle
       env) and run oracle processes at low scheduling priority; the
       jobs default stands.
-- [ ] 38a. gomutant: the pre-commit consumer loop's findings persist
+- [x] 38a. gomutant: the pre-commit consumer loop's findings persist
       (gomutant docs/issues: campaign-persists-zero-findings-on-dirty-trees,
       campaign-lock-sits-beside-tracked-document) - field report
       (ocifs): four dirty-tree campaigns completed with real measured
