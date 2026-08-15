@@ -582,7 +582,7 @@ its activation decision.
       split deterministic kills from draw luck - the distinction
       caught a real defect in the field), and name oracle_timeout_sec
       in the timeout error.
-- [ ] 80. stipulator: witness-process CPU oversubscription - field
+- [x] 80. stipulator: witness-process CPU oversubscription - field
       report (user, interactive check): the witness spawn bound caps
       package units (witness_concurrency, else GOMAXPROCS/2) but each
       unit is a full-width process tree (go test internal t.Parallel
