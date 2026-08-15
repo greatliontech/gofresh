@@ -10,7 +10,11 @@ its checkbox but never inserts into the order - insertion is a
 deliberate edit of this list, stated in the chartering commit. Incoming
 field reports triage into three bands: blocking-a-user (defects
 stopping another agent's loop now), current-arc (serves the measured
-floor), and tail (ergonomics, refactors).
+floor), and tail (ergonomics, refactors). Every deferral slots into a
+chunk of this order (user direction 2026-08-15): condition-parked
+`Lands:` lines are retired as a practice - new deferrals charter or
+fold into a numbered chunk, and the existing condition-parked backlog
+re-slots at its sweep chunk.
 
 Execution order (user-confirmed 2026-08-09; explain family pulled
 together per user direction same day): 69, 73, then 70, 71, 72 as one
@@ -29,7 +33,11 @@ in a reporting consumer's campaign), then the
 startup-effect-precision plan activation decision with 29-46 (80
 rides beside 39a - the same oversubscription mechanism, one repo
 each; 38a follows that pair, inserted on the field-report band
-2026-08-14: the pre-commit consumer loop's persistence trust), then 16
+2026-08-14: the pre-commit consumer loop's persistence trust; 86 and
+87 follow 38a, inserted 2026-08-15 - 86 is the
+startup-effect-precision activation decision's vehicle carrying the
+demonstrated zero-reuse chain, and 87 the backlog re-slot sweep the
+same-day deferral doctrine requires), then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
 design discussion). The startup-effect-precision plan is dormant until
 its activation decision.
@@ -736,6 +744,21 @@ its activation decision.
       and literal detection must include the elided spelling; the
       admission legs (returned literal constructor, bind-position
       literal without a callee) must stay admissible.
+- [ ] 86. gofresh: oracle-serving observability precision (gofresh
+      docs/issues/observability-package-scan-blocks-oracle-serving.md)
+      - the demonstrated ocifs zero-reuse chain: the package-scan
+      refusal breadth (unsafe.Pointer anywhere in scope) blocks the
+      observed-discharge gate for every non-pure oracle in real
+      dependency graphs, so consumer evidence never serves; opens with
+      the startup-effect-precision plan's activation decision, this
+      chain as the activating evidence, and the design pass over the
+      precision ladder versus an observability-assertion surface; the
+      doc deletes at close.
+- [ ] 87. cross-tool: deferral backlog re-slot - walk every
+      condition-parked issue doc across gofresh, gomutant, stipulator,
+      and pew and slot each into a numbered chunk of this order
+      (fold, charter, or close-as-obsolete; the 2026-08-15 deferral
+      doctrine's sweep); no condition-parked Lands survives the pass.
 - [x] 84. stipulator: build-tagged symbols bind (stipulator
       docs/issues/build-tagged-symbol-binding.md) - binding-side
       resolution loads one package view per distinct build selection

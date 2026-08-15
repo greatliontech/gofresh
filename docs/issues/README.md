@@ -22,3 +22,9 @@ when its work lands (git holds history).
   complement to the enforced scratch namespace.
   *Lands: a field measurement shows the flow discipline admits real bench
   scratch shapes.*
+- **[observability-package-scan-blocks-oracle-serving](observability-package-scan-blocks-oracle-serving.md)** —
+  the package-scan observability refusal (unsafe.Pointer breadth) blocks the
+  observed-discharge gate for every non-pure oracle in real dependency graphs,
+  so consumer evidence never serves; the demonstrated chain is the
+  startup-effect-precision activation decision's evidence.
+  *Lands: cross-tool train chunk 86.*
