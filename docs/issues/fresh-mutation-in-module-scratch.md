@@ -1,7 +1,7 @@
 # Fresh-mutation proof does not cover in-module scratch minting
 
-**Lands:** a field measurement shows the flow discipline admits real
-bench scratch shapes.
+**Lands:** cross-tool train chunk 16 (the field re-measure is the
+measurement its old trigger named).
 
 Settled at cross-tool-train chunk 35: the widening is feasible and
 sound in principle - MkdirTemp's EEXIST-retry guarantees novelty

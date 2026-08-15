@@ -37,7 +37,10 @@ each; 38a follows that pair, inserted on the field-report band
 87 follow 38a, inserted 2026-08-15 - 86 is the
 startup-effect-precision activation decision's vehicle carrying the
 demonstrated zero-reuse chain, and 87 the backlog re-slot sweep the
-same-day deferral doctrine requires), then 16
+same-day deferral doctrine requires; 88 and 90 ride together at the
+tail after 46 - the build-dimension pair, one repo each per the
+39a/80 precedent - with 89 after them, all three chartered at 87's
+sweep), then 16
 (floor re-measure and close-outs), then 15 (pew, opens with a user
 design discussion). The startup-effect-precision plan ACTIVATED
 2026-08-15 at chunk 86 (in-authority: its charter names the startup
@@ -764,6 +767,22 @@ both plans.
       and pew and slot each into a numbered chunk of this order
       (fold, charter, or close-as-obsolete; the 2026-08-15 deferral
       doctrine's sweep); no condition-parked Lands survives the pass.
+- [ ] 88. gomutant: build-selection oracles (gomutant
+      docs/issues/build-selection-oracles.md) - tag-gated and
+      toolchain'd oracles become visible end to end: per-selection
+      oracle views mirroring stipulator's build-selection resolution,
+      the capability boundary the chunk-84 audit recorded; doc deletes
+      at close.
+- [ ] 89. gomutant: mutation-class extensions (gomutant docs/issues:
+      structural-mutation-class, integration-mutation-recipes) -
+      structural mutants for analyzer-shaped oracles and recipe-shaped
+      classes for generator drift, parser guards, and resolver seams;
+      both docs delete at close.
+- [ ] 90. stipulator: goos/race build dimensions bind (stipulator
+      docs/issues/goos-race-build-dimensions.md) - the resolution-view
+      identity extends past the tags/toolchain pair to the
+      GOOS/GOARCH/race dimensions, symmetric with discovery; rides
+      beside 88 as the build-dimension pair; doc deletes at close.
 - [x] 84. stipulator: build-tagged symbols bind (stipulator
       docs/issues/build-tagged-symbol-binding.md) - binding-side
       resolution loads one package view per distinct build selection

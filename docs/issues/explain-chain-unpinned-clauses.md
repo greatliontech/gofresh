@@ -1,7 +1,6 @@
 # REQ-explain-chain: two clauses have no pinning witness
 
-**Lands: when the explain surface next changes, or with the chunk that
-extends the explain test surface.**
+**Lands: cross-tool train chunk 16.**
 
 The bound witnesses (`TestExplainChains`, `TestExplainDeferralChains`)
 exercise the arms, link kinds, foreign-package registration, test
