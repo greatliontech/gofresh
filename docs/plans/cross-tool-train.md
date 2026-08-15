@@ -810,6 +810,20 @@ both plans.
       ParenExpr unwrap in all three tools in lockstep, or record the
       unnameable form as contract; surfaced by chunk 40's review.
       Ordered after 92.
+- [ ] 94. gomutant: line-directive position hazards - pre-existing
+      sites read //line-adjusted positions where on-disk identity is
+      meant: the _test.go suffix gates (enumerate, surface), the
+      candidate catalog's source read (catalog.go fileOf +
+      os.ReadFile - measuring ANY target in a //line file fails
+      ENOENT on HEAD) and the survivor position anchors minted from
+      adjusted names (candidate_edit.go); a //line directive can
+      misclassify a file, fail a measurement, or mis-anchor a
+      disposition. The init identity, the source-byte read
+      (sourceOfContext), and the changed-surface path key landed
+      immune in chunk 40 - each pulled forward when the chunk's own
+      directive fixture demonstrated its failing path. Audit and
+      convert the remaining sites, with directive fixtures. Surfaced
+      by chunk 40's review; ordered after 93.
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
