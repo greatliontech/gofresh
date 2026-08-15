@@ -762,7 +762,7 @@ both plans.
       chain as the activating evidence, and the design pass over the
       precision ladder versus an observability-assertion surface; the
       doc deletes at close.
-- [ ] 87. cross-tool: deferral backlog re-slot - walk every
+- [x] 87. cross-tool: deferral backlog re-slot - walk every
       condition-parked issue doc across gofresh, gomutant, stipulator,
       and pew and slot each into a numbered chunk of this order
       (fold, charter, or close-as-obsolete; the 2026-08-15 deferral
