@@ -834,6 +834,14 @@ both plans.
       beta) AND a consuming agent client that speaks it - neither held
       at charter time; history: `git log --all --
       docs/issues/mcp-long-running-runs.md` (gomutant). Ordered last.
+- [ ] 96. gomutant: concurrent ephemeral probe overrides - two
+      concurrent probes' width/ceiling snapshot-restores can
+      interleave (bounded, self-healing: results never persist, the
+      next install resets; the probe-vs-campaign window closed at 41).
+      Either the probe claim goes exclusive (serializing concurrent
+      probes - a surface-semantics call) or the interleaving is
+      recorded as accepted; surfaced by chunk 41's review. Ordered
+      after 95.
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
