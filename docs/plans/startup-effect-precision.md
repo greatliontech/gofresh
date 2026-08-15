@@ -37,6 +37,16 @@ changes each carry their own source audit and strategy bump. WIP = 1.
       reached was not visible to dependents pre-0b and can newly
       poison them - that widening is the fail-closed price of 0b's
       admission, and this chunk is where it narrows.
+- [ ] 0f. call-shaped unaudited-std scan classes narrow per audit -
+      the rung after unsafe.Pointer: a sibling's crypto/rand.Read (the
+      consumer-fixture nonce idiom) still scan-blocks every clean
+      subject's proof, and the collapse candidate is that the subject
+      walk prices every REACHED std call while closure refusals guard
+      the walk's blindspots - but each class needs its own audit
+      (crypto/rand first; the general retirement of the
+      unaudited-std scan arm is this plan's endgame, not one chunk).
+      The gomutant fixture's width oracle carries the purity
+      workaround until this lands.
 - [ ] 0e. scalar-global cross-test mutation coverage - the carrier
       net prices alias-handing carriers ("any use at all marks"), and
       unsafe-mediated mutation of a NON-carrier scalar global evades
