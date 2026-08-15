@@ -800,6 +800,16 @@ both plans.
       parallel except fault routing). Ordered after 91; history:
       `git log --all -- docs/issues/decision-build-locality.md`
       (gomutant).
+- [ ] 93. cross-tool: parenthesized-receiver naming grammar - the
+      shared receiver-naming convention (gofresh recvTypeName,
+      gomutant's twin, stipulator's Go backend) cannot reduce the
+      legal parenthesized receiver form, so such methods are
+      unnameable everywhere; gofresh's purity scan additionally minted
+      them as plain-function subjects (misattribution risk, loud in
+      practice via known/root mismatch). Extend the grammar with the
+      ParenExpr unwrap in all three tools in lockstep, or record the
+      unnameable form as contract; surfaced by chunk 40's review.
+      Ordered after 92.
 - [ ] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the

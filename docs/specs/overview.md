@@ -12,7 +12,14 @@ and leaves measuring and storing to the caller.
 
 **subject** (term): the named Go symbol whose freshness is tracked — a function
 reachable as an analysis root, such as a benchmark, a test, or any callable a
-caller keys a cached result on. The unit of freshness.
+caller keys a cached result on. The unit of freshness. An `init` function,
+which Go keeps unaddressable by name, is a subject under the declaration
+ledger's positional identity — the symbol `init#<file>#<ordinal>`, where
+`<file>` is the declaring file's base name and `<ordinal>` is the 0-based
+ordinal of the init declaration within that file in declaration order,
+advancing on every init declaration so a resolution gap never shifts a
+sibling's identity. The identity is file-scoped: inits elsewhere in the
+package neither shift it nor make it unresolvable.
 
 **source closure** (term): the set of source declarations whose change could alter
 a subject's runtime behavior — the functions its body transitively reaches, the

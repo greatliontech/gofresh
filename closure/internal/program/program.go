@@ -5,7 +5,9 @@ package program
 import (
 	"context"
 	"fmt"
+	"go/ast"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -190,6 +192,39 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 						addRoot(name+"."+m.Name(), f)
 					}
 				}
+			}
+		}
+	}
+	// Init functions are unaddressable by name - package scope omits them -
+	// so they root positionally: init#<file>#<ordinal>, the declaration
+	// ledger's init identity (file base name, 0-based ordinal within the
+	// file in declaration order). The ordinal advances on every init
+	// declaration whether or not the object resolves, so a resolution gap
+	// never shifts a sibling's identity. Filenames are unique within the
+	// package directory, so the key cannot collide across the in-package
+	// and external test variants; addRoot's tombstone still guards.
+	for _, p := range rootPkgs {
+		if p.Types == nil || p.TypesInfo == nil || p.Fset == nil {
+			continue
+		}
+		for _, f := range p.Syntax {
+			ordinal := 0
+			for _, decl := range f.Decls {
+				fd, ok := decl.(*ast.FuncDecl)
+				if !ok || fd.Recv != nil || fd.Name.Name != "init" {
+					continue
+				}
+				key := fmt.Sprintf("init#%s#%d", filepath.Base(p.Fset.PositionFor(f.Pos(), false).Filename), ordinal)
+				ordinal++
+				obj, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
+				if !ok {
+					continue
+				}
+				fn := prog.FuncValue(obj)
+				if fn == nil {
+					continue
+				}
+				addRoot(key, fn)
 			}
 		}
 	}

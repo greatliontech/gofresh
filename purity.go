@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -206,6 +207,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		}
 		if requestedPackages[pkgPath] {
 			for _, f := range p.Syntax {
+				initOrdinal := 0
 				for _, decl := range f.Decls {
 					fd, ok := decl.(*ast.FuncDecl)
 					if !ok {
@@ -214,6 +216,15 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 					sym := fd.Name.Name
 					if recv := recvTypeName(fd); recv != "" {
 						sym = recv + "." + sym
+					} else if sym == "init" && p.Fset != nil {
+						// Unaddressable by name: init subjects carry the
+						// declaration ledger's positional identity,
+						// init#<file>#<ordinal> (file base name, 0-based
+						// ordinal within the file in declaration order),
+						// so multiple inits stay distinct subjects instead
+						// of collapsing onto one ambiguous name.
+						sym = fmt.Sprintf("init#%s#%d", filepath.Base(p.Fset.PositionFor(f.Pos(), false).Filename), initOrdinal)
+						initOrdinal++
 					}
 					subject := Subject{Package: pkgPath, Symbol: sym}
 					record(subject, nodeDeclarationKey(p, fd.Name))
