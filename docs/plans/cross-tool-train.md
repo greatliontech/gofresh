@@ -265,7 +265,7 @@ both plans.
       campaign, out-of-closure overlays stop reading as survivors, and
       the post-completion spin is profiled and closed; three docs
       delete at close.
-- [ ] 40. gomutant: init bodies as measured subjects (gomutant
+- [x] 40. gomutant: init bodies as measured subjects (gomutant
       docs/issues/init-functions-as-subjects) - the classic
       silent-fault carrier becomes measurable end-to-end; doc deletes
       at close.
