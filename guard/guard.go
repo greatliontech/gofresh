@@ -92,11 +92,30 @@ func CaptureForContextEnv(ctx context.Context, moduleDir string, env []string, k
 // string carries the HOST platform, which `go env`'s target GOOS/GOARCH
 // does not describe.
 func CaptureForContextEnvSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
+	return CaptureForContextEnvSnapshotRuntime(ctx, moduleDir, env, env, kind, snapshot, buildInputs...)
+}
+
+// CaptureForContextEnvSnapshotRuntime is CaptureForContextEnvSnapshot
+// with the measurement guard's runtime-config digest computed from
+// runtimeEnv - the environment the measured processes actually run
+// under, when it differs from the analysis env (a caller injecting a
+// GOMAXPROCS cap into the processes it spawns). The runtime reads
+// these keys before execution, so they move scheduling behavior with
+// no other guard moving: digesting them from a stand-in environment
+// would let evidence serve across a width the measured process never
+// saw. Toolchain and build-config guards stay on env - they describe
+// the analysis identity, which the caller keeps agreeing on
+// build-identity keys.
+func CaptureForContextEnvSnapshotRuntime(ctx context.Context, moduleDir string, env, runtimeEnv []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
 	normalized, err := processenv.Normalize(env)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: %w", err)
 	}
-	return captureForContextEnvSnapshot(ctx, moduleDir, normalized, kind, snapshot, buildInputs, gatherFacts, runtimeConfigEnv)
+	normalizedRuntime, err := processenv.Normalize(runtimeEnv)
+	if err != nil {
+		return Guards{}, fmt.Errorf("guard: runtime env: %w", err)
+	}
+	return captureForContextEnvSnapshot(ctx, moduleDir, normalized, kind, snapshot, buildInputs, gatherFacts, func([]string) string { return runtimeConfigEnv(normalizedRuntime) })
 }
 
 func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {

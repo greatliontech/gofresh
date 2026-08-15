@@ -1745,6 +1745,53 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	}
 }
 
+// The measurement guard's runtime-config digest describes the
+// environment the measured processes actually run under: a producer
+// env moving its GOMAXPROCS stales every fingerprint captured under
+// the prior width - the runtime reads the key before execution, so
+// scheduling behavior moves with no other guard moving - while an
+// equal producer env checks valid (WithProducerEnv).
+func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	base := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOMAXPROCS=") {
+			base = append(base, entry)
+		}
+	}
+	view := func(width string) *View {
+		t.Helper()
+		e, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(append(append([]string(nil), base...), "GOMAXPROCS="+width)...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := e.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	fingerprint, err := view("2").Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view("4").Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Stale || verdict.Reason != "runtimeconfig" {
+		t.Fatalf("moved producer width = %+v, want stale runtimeconfig", verdict)
+	}
+	verdict, err = view("2").Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("equal producer width = %+v, want valid", verdict)
+	}
+}
+
 // The producer env may diverge from the analysis env only in keys the
 // closure and guard evidence does not consume: build-identity
 // disagreement and a declared-but-empty producer env both refuse at

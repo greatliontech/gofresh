@@ -227,7 +227,12 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return observationFacts{}, err
 	}
-	guards, err := guard.CaptureForContextEnvSnapshot(ctx, moduleDir, e.env, kind, snapshot, e.guardInputs()...)
+	// The runtime-config guard digests the environment the measured
+	// processes run under (the producer env when declared): the runtime
+	// reads those keys before execution, so a moved delivered width
+	// stales the evidence instead of hiding behind an analysis-env
+	// stand-in.
+	guards, err := guard.CaptureForContextEnvSnapshotRuntime(ctx, moduleDir, e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
 	if err != nil {
 		return observationFacts{}, err
 	}
