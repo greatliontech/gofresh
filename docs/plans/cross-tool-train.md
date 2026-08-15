@@ -258,7 +258,7 @@ both plans.
       stop the by-design .campaign lock from landing in consumer
       commits (tool-minted ignore beside the tracked document plus the
       lifecycle line in consumer docs); both docs delete at close.
-- [ ] 39. gomutant: campaign robustness and cost (gomutant
+- [x] 39. gomutant: campaign robustness and cost (gomutant
       docs/issues: decision-build-locality,
       ephemeral-replacement-outside-oracle-closure,
       post-completion-cpu-tail) - one broken target stops aborting the
