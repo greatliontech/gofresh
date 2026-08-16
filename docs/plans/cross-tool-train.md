@@ -301,7 +301,7 @@ both plans.
       docs/issues/slice-frontier-uncertainty) - typed frontiers gain
       the closure model's sound floor and dispositions over
       reflection, build tags, and init effects; doc deletes at close.
-- [ ] 46. stipulator: witness fingerprints bind closure content to the
+- [x] 46. stipulator: witness fingerprints bind closure content to the
       consuming compile (stipulator
       docs/issues/closure-edit-revert-inside-run-span) - the
       edit-revert-inside-span residual closes with the record
@@ -688,6 +688,14 @@ both plans.
       the spec-doc tree; closes stipulator
       docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
       8, and 9 fixes) and the two gofresh docs at their close-outs.
+      Also carries the tugboat majority-serve target the record
+      redesign unmasked: with multiply-selected eliminated, tugboat
+      reads 967/967 uncacheable on attributed per-test reasons - 552
+      external directory input "/", 285 raft.DiscardLogger mutated, 21
+      volatile somaxconn (TCP listeners), testify/rapid dynamic state -
+      wanting corpus vouches/exclusions and any classifier fixes this
+      chunk's measurement justifies; verified when a tugboat warm-tree
+      check serves a nonzero witness majority.
 - [x] 17. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
@@ -852,6 +860,10 @@ both plans.
       identity extends past the tags/toolchain pair to the
       GOOS/GOARCH/race dimensions, symmetric with discovery; rides
       beside 88 as the build-dimension pair; doc deletes at close.
+      Also folds: the witness capture-group key's missing
+      build-selection dimensions (module mode, PGO profile, extra
+      binary arguments) - two invocations differing only there share
+      one analysis view today.
 - [x] 84. stipulator: build-tagged symbols bind (stipulator
       docs/issues/build-tagged-symbol-binding.md) - binding-side
       resolution loads one package view per distinct build selection
