@@ -43,6 +43,14 @@ type dynamicStateFact struct {
 	// immutable constructions, so no holder of the value can mutate the
 	// shared object.
 	Opaque []string `json:"opaque,omitempty"`
+	// PoolDischarges holds the package-level sync.Pool variable keys
+	// whose Get/Put calls in this package's syntax the caller's
+	// single-subject-process attestation discharged at recording —
+	// present only in facts derived under the attestation. At
+	// composition the keys reachable from a subject ride its evidence,
+	// so the load-bearing attestation is auditable and never silent —
+	// the vouch-recording discipline (REQ-vouch-recorded).
+	PoolDischarges []string `json:"poolDischarges,omitempty"`
 	// ReceiverReadOnly holds the full method keys (package path,
 	// receiver type, method) this package declares and proves unable to
 	// write receiver-reachable state.
@@ -195,8 +203,12 @@ type dynamicStateFact struct {
 }
 
 // dynamicStateFactOf derives one typed package's fact. Pure function of the
-// package's selected syntax and type environment.
-func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
+// package's selected syntax and type environment plus the caller-attested
+// single-subject-process execution model — the attestation changes what the
+// fact records (the audited pooling set's discharge), so it is part of every
+// fact-cache identity the fact is stored under
+// (REQ-closure-dynamic-state-memo).
+func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFact {
 	var fact dynamicStateFact
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	initOnly := initOnlyReachableHelpers(p)
@@ -210,7 +222,15 @@ func dynamicStateFactOf(p *packages.Package) dynamicStateFact {
 	var attributedUses []attributedUse
 	funcRefs := map[string]map[string]bool{}
 	envCarrying := map[string]bool{}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses)
+	var poolDischarged map[string]bool
+	if singleSubject {
+		poolDischarged = map[string]bool{}
+	}
+	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged)
+	for key := range poolDischarged {
+		fact.PoolDischarges = append(fact.PoolDischarges, key)
+	}
+	sort.Strings(fact.PoolDischarges)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	recordOpaqueDynamicVars(p, opaque, breaks)
 	envCalls := map[string]map[string]bool{}
@@ -443,6 +463,13 @@ type viewDynamicState struct {
 	// culprits reachable from it (REQ-vouch-recorded); absent when no
 	// vouch was load-bearing for the package.
 	vouchDischarges map[string]string
+	// poolAttestations maps each view package to the canonical sorted
+	// comma-joined sync.Pool variable keys whose Get/Put discharge —
+	// fired under the caller's single-subject-process attestation — is
+	// reachable from it; absent when the attestation was not
+	// load-bearing for the package. Recorded on subject evidence like a
+	// vouch discharge, auditable and never silent (REQ-vouch-recorded).
+	poolAttestations map[string]string
 }
 
 // methodDirectives resolves a promoted method's purity and externality
@@ -477,7 +504,7 @@ func (s *viewDynamicState) methodDirectives(m *types.Func) (pureKey, externalKey
 	return pureKey, externalKey
 }
 
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool) (*viewDynamicState, error) {
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject bool) (*viewDynamicState, error) {
 	meta, err := hasher.GraphMetadata(viewPackages...)
 	if err != nil {
 		return nil, err
@@ -508,7 +535,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			continue
 		}
 		matched[listing] = true
-		state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg))
+		state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg, singleSubject))
 	}
 	// An intermediate recompilation ("r [a.test]") exists only inside a test
 	// binary's graph: it is scanned from its own compilation — test-added
@@ -545,7 +572,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				return
 			}
 			matched[listing] = true
-			state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg))
+			state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg, singleSubject))
 		})
 	}
 	for _, node := range meta {
@@ -630,7 +657,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			for _, loadErr := range pkg.Errors {
 				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
 			}
-			derived[pkg.PkgPath] = dynamicStateFactOf(pkg)
+			derived[pkg.PkgPath] = dynamicStateFactOf(pkg, singleSubject)
 		}
 		store := map[string]map[string]json.RawMessage{}
 		for _, node := range missing {
@@ -1092,13 +1119,13 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			state.downgraded[root] = culprit
 		}
 	}
-	if len(vouchDischarged) > 0 {
-		// The discharge record is per view package: every vouch that
-		// suppressed a culprit in a package the subject's graph reaches
-		// rides its evidence, so acceptance is auditable and never silent
-		// (REQ-vouch-recorded). Unlike the culprit walk this one never
-		// short-circuits — the record carries every load-bearing vouch.
-		state.vouchDischarges = map[string]string{}
+	// collectReachable builds a per-view-package record from per-owning-
+	// package acceptance keys: every key in a package the view package's
+	// graph reaches joins its canonical sorted comma-joined record.
+	// Unlike the culprit walk this one never short-circuits — the record
+	// carries every load-bearing acceptance (REQ-vouch-recorded).
+	collectReachable := func(source map[string][]string) map[string]string {
+		result := map[string]string{}
 		perRoot := map[string]map[string]bool{}
 		var collect func(listing string, seen, acc map[string]bool)
 		collect = func(listing string, seen, acc map[string]bool) {
@@ -1109,7 +1136,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			if classes[listing] == closure.StandardPackage {
 				return
 			}
-			for _, key := range vouchDischarged[pkgPathOf[listing]] {
+			for _, key := range source[pkgPathOf[listing]] {
 				acc[key] = true
 			}
 			for _, imported := range imports[listing] {
@@ -1145,8 +1172,37 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				keys = append(keys, key)
 			}
 			sort.Strings(keys)
-			state.vouchDischarges[root] = strings.Join(keys, ",")
+			result[root] = strings.Join(keys, ",")
 		}
+		return result
+	}
+	if len(vouchDischarged) > 0 {
+		// The discharge record is per view package: every vouch that
+		// suppressed a culprit in a package the subject's graph reaches
+		// rides its evidence, so acceptance is auditable and never silent
+		// (REQ-vouch-recorded).
+		state.vouchDischarges = collectReachable(vouchDischarged)
+	}
+	// The single-subject attestation's audit record is the vouch
+	// discipline's parallel: every pool variable whose admitted Get/Put
+	// the attestation discharged, in a package the view package's graph
+	// reaches, rides subject evidence (REQ-vouch-recorded). The fired
+	// discharges live in the facts (recorded at derivation time), so
+	// the composition only unions and attributes them.
+	poolDischarged := map[string][]string{}
+	poolSeen := map[string]bool{}
+	for _, pkgPath := range pkgPaths {
+		for _, fact := range state.facts[pkgPath] {
+			for _, key := range fact.PoolDischarges {
+				if seen := pkgPath + "\x00" + key; !poolSeen[seen] {
+					poolSeen[seen] = true
+					poolDischarged[pkgPath] = append(poolDischarged[pkgPath], key)
+				}
+			}
+		}
+	}
+	if len(poolDischarged) > 0 {
+		state.poolAttestations = collectReachable(poolDischarged)
 	}
 	return state, nil
 }

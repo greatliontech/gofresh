@@ -66,7 +66,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, vouches, pkgPaths...)
+	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, vouches, false, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,17 @@ func TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives(t *testing
 		"go.mod": "module example.com/factsrc\n\ngo 1.26\n",
 		"lib.go": `package factsrc
 
-import "errors"
+import (
+	"errors"
+	"sync"
+)
+
+var pool sync.Pool
+
+func Recycle() {
+	v := pool.Get()
+	pool.Put(v)
+}
 
 var Hook func()
 
@@ -195,7 +205,7 @@ func (Widget) External() int { return 2 }
 	var fact dynamicStateFact
 	for _, p := range load.Packages() {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			fact = dynamicStateFactOf(p)
+			fact = dynamicStateFactOf(p, false)
 			plain = p.Types
 		}
 	}
@@ -261,6 +271,31 @@ func (Widget) External() int { return 2 }
 	}
 	if pureKey == "" || externalKey == "" {
 		t.Fatalf("promoted-method directive lookup failed: pure=%q external=%q", pureKey, externalKey)
+	}
+
+	// The pooling-discharge audit record: absent from an unattested
+	// fact, present in an attested one, and surviving serialization —
+	// a dropped record silently hides the load-bearing attestation
+	// (REQ-vouch-recorded, REQ-closure-shared-dynamic-state).
+	if len(restored.PoolDischarges) != 0 {
+		t.Fatalf("unattested fact carries pool discharges: %+v", restored.PoolDischarges)
+	}
+	var attested dynamicStateFact
+	for _, p := range load.Packages() {
+		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
+			attested = dynamicStateFactOf(p, true)
+		}
+	}
+	rawAttested, err := json.Marshal(attested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restoredAttested dynamicStateFact
+	if err := json.Unmarshal(rawAttested, &restoredAttested); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(restoredAttested.PoolDischarges, "example.com/factsrc.pool") {
+		t.Fatalf("attested fact lost the pooling-discharge record: %+v", restoredAttested.PoolDischarges)
 	}
 }
 
@@ -818,7 +853,7 @@ func TestCarrierAliasLinkRecorded(t *testing.T) {
 	if err != nil || len(pkgs) != 1 {
 		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
 	}
-	fact := dynamicStateFactOf(pkgs[0])
+	fact := dynamicStateFactOf(pkgs[0], false)
 	want := "example.com/xesc/reg.Alias\x01example.com/xesc/reg.Hooks"
 	found := false
 	for _, link := range fact.CarrierLinks {
@@ -846,7 +881,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 	if err != nil || len(pkgs) != 1 {
 		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
 	}
-	fact := dynamicStateFactOf(pkgs[0])
+	fact := dynamicStateFactOf(pkgs[0], false)
 	wantStore := "example.com/xesc/reg.Hooks\x01example.com/xesc/reg.Inner"
 	foundStore := false
 	for _, link := range fact.CarrierLinks {

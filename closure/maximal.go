@@ -471,7 +471,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-analysis).
-				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedPoolSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 				}
 			}
@@ -865,6 +865,31 @@ func auditedSyncSymbol(pkgPath, name string) bool {
 	}
 	switch name {
 	case "Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock":
+		return true
+	default:
+		return false
+	}
+}
+
+// auditedPoolSymbol reports whether a sync-package symbol is in the
+// audited pooling set: the pool type and its Get and Put operations.
+// This admission is UNCONDITIONAL — it concerns runtime-input
+// observability alone: Get and Put touch only process memory fed by the
+// analyzed program, so they introduce no external input channel
+// whatever the execution schedule. Cross-subject state through pool
+// contents (sibling subjects sharing a process) is a different hazard,
+// priced by the shared-dynamic-state judgment, whose pooling discharge
+// is gated on the caller's single-subject-process attestation
+// (WithSingleSubjectExecution) — not here. The values passed and
+// produced keep their own classifications. sync exports no top-level
+// functions by these names, so the method names are unambiguous. Grows
+// only by source audit (REQ-closure-shared-dynamic-state).
+func auditedPoolSymbol(pkgPath, name string) bool {
+	if pkgPath != "sync" {
+		return false
+	}
+	switch name {
+	case "Pool", "Get", "Put":
 		return true
 	default:
 		return false

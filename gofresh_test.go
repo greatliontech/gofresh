@@ -158,7 +158,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectPools", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
@@ -174,8 +174,14 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@24" {
-		t.Fatalf("ObservationRTA = %q, want enumeration-pinned target semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@25" {
+		t.Fatalf("ObservationRTA = %q, want audited-pooling admission semantics", ObservationRTA)
+	}
+}
+
+func TestDynamicStateStrategyVersion(t *testing.T) {
+	if DynamicStateStrategy != "gofresh/dynamic-state@25" {
+		t.Fatalf("DynamicStateStrategy = %q, want audited-pooling and TypeOf-construction fact semantics", DynamicStateStrategy)
 	}
 }
 

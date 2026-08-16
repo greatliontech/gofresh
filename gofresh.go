@@ -79,7 +79,7 @@ func DisableMemos() { closure.DisableMemos() }
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@24"
+const DynamicStateStrategy = "gofresh/dynamic-state@25"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or
@@ -192,8 +192,18 @@ const DynamicStateStrategy = "gofresh/dynamic-state@24"
 // enumerated values no longer drags initializer content into the
 // subject's scan (a subject-closed operand can hold an init-planted
 // value only through a shared-state load the closed-value walk
-// refuses).
-const ObservationRTA = "gofresh/observation-rta@24"
+// refuses); @25 admits the audited pooling set at the symbol tier -
+// sync.Pool and its Get and Put operations no longer classify as
+// unaudited standard operations (they touch only process memory fed by
+// the analyzed program - no external input channel whatever the
+// execution schedule), while in the shared-dynamic-state judgment a Get
+// or Put call on a package-level pool carrier discharges only under the
+// caller's single-subject-process attestation
+// (WithSingleSubjectExecution) - there every in-process Put site lies
+// in the subject's own rooted flow - the values passed and produced
+// keeping their own pricing and every other pool use its
+// classification.
+const ObservationRTA = "gofresh/observation-rta@25"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
@@ -237,9 +247,21 @@ type Fingerprint struct {
 	// resurfaces the culprit in the current derivation and the verdict
 	// refuses on its own.
 	DynamicStateVouches string
-	RuntimeInputs       string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest       string // digest of the manifest at capture
-	ResultKind          Kind   // guard policy captured with this recording; zero is invalid
+	// SingleSubjectPools names the package-level sync.Pool variables
+	// whose Get/Put discharge rested on the caller's
+	// single-subject-process attestation (WithSingleSubjectExecution) and
+	// is reachable from this subject at capture: sorted canonical
+	// "<import path>.<Variable>" identities, comma-joined. Empty means
+	// the attestation was not load-bearing for this subject (or not
+	// given). Recorded for audit exactly as a vouch discharge is — the
+	// acceptance is visible in the evidence, never silent
+	// (REQ-vouch-recorded); validity needs no comparison over it, because
+	// a session without the attestation re-marks the pool in the current
+	// derivation and the verdict refuses on its own.
+	SingleSubjectPools string
+	RuntimeInputs      string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest      string // digest of the manifest at capture
+	ResultKind         Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -263,12 +285,12 @@ type Verdict struct {
 // generations (REQ-fresh-coherent-view); within one generation, sibling views
 // derived from a parent share its recorded facts by contract.
 type Engine struct {
-	assumePure         func(Subject) bool
-	buildFlags         []string
-	buildInputs        []string
-	dir                string
-	env                []string
-	envSet             bool
+	assumePure  func(Subject) bool
+	buildFlags  []string
+	buildInputs []string
+	dir         string
+	env         []string
+	envSet      bool
 	// producerEnv, when declared, is the producer processes' environment:
 	// runtime-input revalidation computes environment values from it
 	// instead of env, so checks stay coherent with recorded evidence when
@@ -283,6 +305,11 @@ type Engine struct {
 	// variables the caller accepts as stable after initialization
 	// (REQ-vouch-input). Empty means no vouches.
 	dynamicStateVouches map[string]bool
+	// singleSubjectExecution is the caller's attestation that every
+	// subject is measured in a process of its own
+	// (WithSingleSubjectExecution); it arms the audited pooling set's
+	// shared-dynamic-state discharge (REQ-closure-shared-dynamic-state).
+	singleSubjectExecution bool
 }
 
 // viewTestHooks is the package's one test-observation surface: each field
@@ -390,6 +417,25 @@ func WithDynamicStateVouches(identities ...string) Option {
 			}
 		}
 	}
+}
+
+// WithSingleSubjectExecution attests the caller's execution model: every
+// subject is measured in a process of its own, so no sibling subject's
+// execution precedes a subject in the same process. The attestation arms
+// the audited pooling set's shared-dynamic-state discharge — under it
+// every in-process sync.Pool Put site lies in the subject's own rooted
+// flow, so pool contents are a function of the analyzed source and the
+// subject alone (REQ-closure-shared-dynamic-state). Without the
+// attestation, sibling subjects sharing a process can communicate
+// through pool contents (a prior subject's Put plants a value a later
+// subject's Get dispatches on), so pool Get/Put on a package-level
+// carrier keeps the fail-closed shared-dynamic-state judgment. The
+// attestation is the caller's responsibility; it changes what the
+// derived dynamic-state facts record, so it is part of the persisted
+// fact identity and option-on and option-off sessions never serve each
+// other's facts.
+func WithSingleSubjectExecution() Option {
+	return func(e *Engine) { e.singleSubjectExecution = true }
 }
 
 // WithDeferredCheckClose defers each check's closing base observation —

@@ -70,7 +70,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, false, pkgPaths...)
 	return scan, err
 }
 
@@ -81,7 +81,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, singleSubject bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
 		return nil, nil, err
@@ -113,7 +113,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		return nil, nil, err
 	}
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths, vouches)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths, vouches, singleSubject)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,6 +137,12 @@ type subjectScan struct {
 	// comma-joined caller-vouch identities that discharged would-be
 	// culprits reachable from its package (REQ-vouch-recorded).
 	vouchDischarges map[Subject]string
+	// poolAttestations maps each subject to the canonical sorted
+	// comma-joined sync.Pool variable keys whose Get/Put discharge —
+	// fired under the caller's single-subject-process attestation — is
+	// reachable from its package; the vouch-recording discipline's
+	// parallel (REQ-vouch-recorded).
+	poolAttestations map[Subject]string
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -154,13 +160,14 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:            map[Subject]bool{},
-		known:           map[Subject]bool{},
-		openWorld:       map[Subject]bool{},
-		external:        map[Subject]bool{},
-		downgradeReason: map[Subject]string{},
-		vouchDischarges: map[Subject]string{},
-		ambiguous:       map[Subject]string{},
+		pure:             map[Subject]bool{},
+		known:            map[Subject]bool{},
+		openWorld:        map[Subject]bool{},
+		external:         map[Subject]bool{},
+		downgradeReason:  map[Subject]string{},
+		vouchDischarges:  map[Subject]string{},
+		poolAttestations: map[Subject]string{},
+		ambiguous:        map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -324,6 +331,9 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		}
 		if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
 			scan.vouchDischarges[subject] = discharges
+		}
+		if attested := state.poolAttestations[subject.Package]; attested != "" {
+			scan.poolAttestations[subject] = attested
 		}
 	}
 	return scan, nil
@@ -520,7 +530,7 @@ func dynamicVarKey(variable *types.Var) string {
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
 func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil)
+	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil, false, nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -618,7 +628,14 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 	}
 }
 
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks map[string]map[string]bool, attributed *[]attributedUse) {
+// singleSubject is the engine's caller-attested single-subject-process
+// execution model: it arms the audited pooling set's discharge — off,
+// every pool use keeps the fail-closed judgment
+// (REQ-closure-shared-dynamic-state). poolDischarged, when non-nil,
+// collects the pool variable keys whose admitted Get/Put calls the
+// attestation discharged, for the subject-evidence audit record
+// (REQ-vouch-recorded).
+func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks map[string]map[string]bool, attributed *[]attributedUse, singleSubject bool, poolDischarged map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -1158,6 +1175,65 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			}
 		}
 	}
+	// poolCarrierIdent resolves an audited pooling call's receiver
+	// expression to the package-level sync.Pool carrier it names — the
+	// pool variable itself, or an element of a package-level array or
+	// slice of sync.Pool indexed directly on the variable — returning
+	// the receiver ident and the carrier variable. Any other receiver
+	// shape — a local, an alias, a qualified or computed base — names no
+	// admitted carrier and keeps the fail-closed judgment
+	// (REQ-closure-shared-dynamic-state).
+	poolCarrierIdent := func(recv ast.Expr) (*ast.Ident, *types.Var) {
+		ident, isIdent := recv.(*ast.Ident)
+		element := false
+		if !isIdent {
+			index, isIndex := recv.(*ast.IndexExpr)
+			if !isIndex {
+				return nil, nil
+			}
+			ident, isIdent = index.X.(*ast.Ident)
+			if !isIdent {
+				return nil, nil
+			}
+			element = true
+		}
+		obj, ok := resolve(ident)
+		if !ok {
+			return nil, nil
+		}
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, nil
+		}
+		t := types.Unalias(variable.Type())
+		if element {
+			switch sequence := t.(type) {
+			case *types.Array:
+				t = types.Unalias(sequence.Elem())
+			case *types.Slice:
+				t = types.Unalias(sequence.Elem())
+			default:
+				return nil, nil
+			}
+		}
+		named, ok := t.(*types.Named)
+		if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+			return nil, nil
+		}
+		if named.Obj().Pkg().Path() != "sync" || named.Obj().Name() != "Pool" {
+			return nil, nil
+		}
+		return ident, variable
+	}
+	// dischargePool records one fired pooling admission for the audit
+	// record: a load-bearing attestation must be visible on the evidence
+	// of every subject reaching the pool, never silent — the
+	// vouch-recording discipline (REQ-vouch-recorded).
+	dischargePool := func(variable *types.Var) {
+		if poolDischarged != nil {
+			poolDischarged[dynamicVarKey(variable)] = true
+		}
+	}
 	// scanExemptCalls covers the call arguments of the init-exempt
 	// regions - init bodies, init-only helpers, initializer expressions -
 	// whose stores and calls the use walk exempts: a carrier argument to
@@ -1228,7 +1304,27 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// (REQ-closure-shared-dynamic-state).
 					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
 						deferred := false
-						if fn, fnOK := selection.Obj().(*types.Func); fnOK && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+						var poolVar *types.Var
+						if fn, fnOK := selection.Obj().(*types.Func); fnOK && singleSubject && auditedPooling(fn) {
+							_, poolVar = poolCarrierIdent(sel.X)
+						}
+						if poolVar != nil {
+							// The audited pooling set: under the
+							// caller-attested single-subject-process
+							// execution model, a Get or Put CALL on a
+							// package-level sync.Pool carrier marks
+							// nothing for the pool in init flow exactly
+							// as in program code; the call's arguments
+							// keep the region's own pricing below, and an
+							// indexed receiver's index expression keeps
+							// the escape sweep
+							// (REQ-closure-shared-dynamic-state).
+							dischargePool(poolVar)
+							if index, isIndex := sel.X.(*ast.IndexExpr); isIndex {
+								markExemptEscapes(index.Index)
+							}
+							deferred = true
+						} else if fn, fnOK := selection.Obj().(*types.Func); fnOK && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
 							if ident, idOK := sel.X.(*ast.Ident); idOK {
 								if obj, rOK := resolve(ident); rOK {
 									if variable, vOK := dynamicPackageVar(obj); vOK {
@@ -1555,6 +1651,32 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				// (REQ-closure-shared-dynamic-state).
 				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 					if fn, ok := selection.Obj().(*types.Func); ok {
+						// The audited pooling set: under the
+						// caller-attested single-subject-process
+						// execution model, a Get or Put CALL on a
+						// package-level sync.Pool carrier — the pool
+						// variable itself or an element of a
+						// package-level array or slice of sync.Pool —
+						// marks nothing for the pool: every in-process
+						// Put site lies in the subject's own rooted
+						// flow, so pool contents are a function of the
+						// analyzed source and the subject alone, and
+						// their contractual removability is why the
+						// values need no per-item pricing at the call.
+						// The values passed and produced keep their own
+						// full pricing; without the attestation, and for
+						// every other use — a write, a rebinding, an
+						// address capture, an escape, a method-value
+						// bind, a New-field access outside init flow —
+						// the fail-closed judgment stands
+						// (REQ-closure-shared-dynamic-state).
+						if singleSubject && calledSelectors[n] && auditedPooling(fn) {
+							if ident, variable := poolCarrierIdent(n.X); variable != nil {
+								dischargePool(variable)
+								readContext[ident] = true
+								return true
+							}
+						}
 						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
 							if ident, ok := n.X.(*ast.Ident); ok {
 								if obj, ok := resolve(ident); ok {
@@ -6298,6 +6420,42 @@ func auditedSynchronization(fn *types.Func) bool {
 	}
 }
 
+// auditedPooling reports whether the method is in the audited pooling
+// set: sync.Pool's Get and Put. Under the caller-attested
+// single-subject-process execution model (WithSingleSubjectExecution)
+// every in-process Put site lies in the subject's own rooted flow, so
+// pool contents are a function of the analyzed source and the subject
+// alone, and their contractual removability is why the values need no
+// per-item pricing at the call — a Get or Put CALL on a package-level
+// pool carrier is then not mutation of the carrier, while the values
+// passed and produced keep their own full pricing. Without the
+// attestation, sibling subjects sharing a process communicate through
+// pool contents, and every pool use keeps the fail-closed judgment.
+// Grows only by source audit (REQ-closure-shared-dynamic-state).
+func auditedPooling(fn *types.Func) bool {
+	if fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+		return false
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if pointer, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(pointer.Elem())
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Name() != "Pool" {
+		return false
+	}
+	switch fn.Name() {
+	case "Get", "Put":
+		return true
+	default:
+		return false
+	}
+}
+
 // recvTypeNameOf resolves the receiver type name of a selection's
 // method through its declaring type, mirroring recvTypeName's shape.
 func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
@@ -6446,8 +6604,9 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 // recordOpaqueDynamicVars judges which interface-typed package-level
 // variables — own or foreign — are object-closed: the initializer and
 // every init-flow store are provably-immutable audited constructions
-// (errors.New; the nil zero value), so no holder of the value can
-// mutate the shared object and escapes of it are not mutation. Every
+// (errors.New; a direct reflect.TypeOf call; the nil zero value), so no
+// holder of the value can mutate the shared object and escapes of it
+// are not mutation. Every
 // plain named function's direct body is audited, not just init bodies
 // and package-locally-proven helpers: whether a function is init flow
 // is settled only at composition (the graph-wide fixed point), and a
@@ -6470,7 +6629,24 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 				return false
 			}
 			fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func)
-			return ok && fn.Pkg() != nil && fn.Pkg().Path() == "errors" && fn.Name() == "New"
+			if !ok || fn.Pkg() == nil {
+				return false
+			}
+			if fn.Pkg().Path() == "errors" && fn.Name() == "New" {
+				return true
+			}
+			// A direct reflect.TypeOf call constructs nothing: its result
+			// is the runtime's canonical, immutable type descriptor, never
+			// written after construction, so no holder of the stored value
+			// can mutate the shared object. The admission is the direct
+			// call only — a chained method result (Elem, Key, ...) stays
+			// unaudited — and the argument keeps its own pricing at the
+			// init-flow call walks (REQ-closure-shared-dynamic-state).
+			if fn.Pkg().Path() == "reflect" && fn.Name() == "TypeOf" {
+				sig, ok := fn.Type().(*types.Signature)
+				return ok && sig.Recv() == nil
+			}
+			return false
 		default:
 			return false
 		}

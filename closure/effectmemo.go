@@ -14,7 +14,7 @@ import (
 // derivation. Any change that can move an effect set or a preferred
 // diagnostic bumps it, so persisted scans from the prior interpretation
 // refuse instead of serving (REQ-closure-effect-scan-memo).
-const effectScanStrategy = "gofresh/effect-scan@8"
+const effectScanStrategy = "gofresh/effect-scan@9"
 
 // effectScanScope is the memo's full scope: the strategy version plus the
 // toolchain identity. The per-file scan is a pure function of the file

@@ -109,7 +109,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				// admission is a property of the operation, not of the
 				// call form (REQ-closure-observability-analysis).
 				name := functionSymbolName(target)
-				if !classBPureStandard(idx.path, name) && !auditedSyncSymbol(idx.path, name) && !auditedRuntimeTypeSymbol(idx.path, name) {
+				if !classBPureStandard(idx.path, name) && !auditedSyncSymbol(idx.path, name) && !auditedPoolSymbol(idx.path, name) && !auditedRuntimeTypeSymbol(idx.path, name) {
 					effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
 					ok = true
 				}
@@ -831,7 +831,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, callerStd bool) (externalEffect, bool) {
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(pkgPath) && !classBPureStandard(pkgPath, name) && !auditedSyncSymbol(pkgPath, name) && !auditedPoolSymbol(pkgPath, name) && !auditedRuntimeTypeSymbol(pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}

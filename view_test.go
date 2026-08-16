@@ -1279,7 +1279,10 @@ func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
 }
 
 func TestRuntimeBackedSyncOperationIsUnverifiable(t *testing.T) {
-	dir := writeViewModule(t, "package view\n\nimport \"sync\"\n\nfunc F() any { var pool sync.Pool; pool.Put(1); return pool.Get() }\n")
+	// sync.Map stands outside the audited synchronization and pooling
+	// sets, so its runtime-backed operations keep the
+	// unaudited-standard refusal (REQ-closure-shared-dynamic-state).
+	dir := writeViewModule(t, "package view\n\nimport \"sync\"\n\nfunc F() any { var m sync.Map; m.Store(\"k\", 1); v, _ := m.Load(\"k\"); return v }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -7416,9 +7419,9 @@ func writeModuleTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-func captureCheck(t *testing.T, dir string, subject Subject) Verdict {
+func captureCheck(t *testing.T, dir string, subject Subject, opts ...Option) Verdict {
 	t.Helper()
-	engine, err := New(WithDir(dir))
+	engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7761,6 +7764,221 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
+				t.Fatalf("verdict = %+v, want the downgrade naming %q", verdict, tc.culprit)
+			}
+		})
+	}
+}
+
+// Sibling subjects sharing one process communicate through pool
+// contents — a subject unreachable from F can Put a value F's Get
+// dispatches on — so the audited pooling set's shared-dynamic-state
+// discharge holds only under the caller's single-subject-process
+// attestation: option on, the canonical idiom is Valid; option off,
+// the pool keeps the fail-closed judgment
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestPoolingDischargeRequiresSingleSubjectAttestation(t *testing.T) {
+	source := "package view\n\nimport \"sync\"\n\nvar pool sync.Pool\n\ntype fast struct{}\n\nfunc (fast) Work() int { return 1 }\n\ntype slow struct{}\n\nfunc (slow) Work() int { return 2 }\n\nfunc Plant() { pool.Put(slow{}) }\n\nfunc F() int {\n\tpool.Put(fast{})\n\tif w, ok := pool.Get().(interface{ Work() int }); ok {\n\t\treturn w.Work()\n\t}\n\treturn 0\n}\n"
+	dir := writeViewModule(t, source)
+	attested := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+	if attested.Status != Valid {
+		t.Fatalf("attested verdict = %+v, want Valid - the single-subject model roots every Put in the subject's own flow", attested)
+	}
+	unattested := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+	if unattested.Status != Unverifiable || !strings.Contains(unattested.Reason, "shares mutated dynamic state") || !strings.Contains(unattested.Reason, "example.com/view.pool is mutated") {
+		t.Fatalf("unattested verdict = %+v, want the fail-closed downgrade naming the pool - sibling subjects communicate through pool contents", unattested)
+	}
+}
+
+// A load-bearing single-subject attestation rides the subject's
+// evidence exactly as a vouch discharge does: option on with a fired
+// pool discharge, the fingerprint names the discharged pool
+// canonically; option on with no pool reachable, the record is empty —
+// an inert attestation records nothing; option off, nothing is
+// recorded and the pool keeps the downgrade (REQ-vouch-recorded,
+// REQ-closure-shared-dynamic-state).
+func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
+	ctx := context.Background()
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	pooled := "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n"
+	capture := func(t *testing.T, source string, opts ...Option) (Fingerprint, Verdict) {
+		t.Helper()
+		dir := writeViewModule(t, source)
+		engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fingerprint, verdict
+	}
+
+	loadBearing, verdict := capture(t, pooled, WithSingleSubjectExecution())
+	if verdict.Status != Valid {
+		t.Fatalf("attested pooled verdict = %+v, want Valid", verdict)
+	}
+	if loadBearing.SingleSubjectPools != "example.com/view.bufs" {
+		t.Fatalf("attested pooled evidence = %q, want the discharged pool named canonically", loadBearing.SingleSubjectPools)
+	}
+
+	inert, inertVerdict := capture(t, "package view\n\nfunc F() int { return 1 }\n", WithSingleSubjectExecution())
+	if inertVerdict.Status != Valid {
+		t.Fatalf("attested pool-free verdict = %+v, want Valid", inertVerdict)
+	}
+	if inert.SingleSubjectPools != "" {
+		t.Fatalf("inert attestation recorded %q, want nothing - no pool discharge is reachable from the subject", inert.SingleSubjectPools)
+	}
+
+	unattested, offVerdict := capture(t, pooled)
+	if offVerdict.Status != Unverifiable || !strings.Contains(offVerdict.Reason, "example.com/view.bufs is mutated") {
+		t.Fatalf("unattested pooled verdict = %+v, want the fail-closed downgrade naming the pool", offVerdict)
+	}
+	if unattested.SingleSubjectPools != "" {
+		t.Fatalf("unattested evidence recorded %q, want nothing", unattested.SingleSubjectPools)
+	}
+}
+
+// The audited pooling set under the single-subject-process attestation:
+// a Get or Put CALL on a package-level sync.Pool carrier — the pool
+// variable itself, or an element of a package-level array or slice of
+// sync.Pool — is not mutation of the pool variable, so the canonical
+// pooling idiom leaves the package closed and the subject verifiable
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedPoolingGetPutDoesNotDowngrade(t *testing.T) {
+	for name, source := range map[string]string{
+		"pool var get and put":           "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\t*b = (*b)[:0]\n\tn := cap(*b)\n\tbufs.Put(b)\n\treturn n\n}\n",
+		"deferred put":                   "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+		"pool array element get and put": "package view\n\nimport \"sync\"\n\nvar pools [4]sync.Pool\n\nfunc F() int {\n\ti := 1\n\tv := pools[i].Get()\n\tpools[i].Put(v)\n\treturn i\n}\n",
+		"pool slice element get and put": "package view\n\nimport \"sync\"\n\nvar pools = make([]sync.Pool, 4)\n\nfunc F() int {\n\ti := 1\n\tv := pools[i].Get()\n\tpools[i].Put(v)\n\treturn i\n}\n",
+		"init-flow warm-up put":          "package view\n\nimport \"sync\"\n\nvar bufs sync.Pool\n\nfunc init() {\n\tb := make([]byte, 0, 64)\n\tbufs.Put(&b)\n}\n\nfunc F() bool { return bufs.Get() != nil }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - an audited pooling call downgraded", verdict)
+			}
+		})
+	}
+}
+
+// The pooling admission covers exactly the Get and Put CALL on the
+// package-level carrier, even with the single-subject attestation
+// armed: a rebinding, an address capture, a method-value bind, and a
+// New-field store stay mutation; an unaudited function value
+// registered as New keeps the environment-audit refusal, and a New
+// closure's body stays program code, so its writes to dynamic package
+// state mark the written carrier; a package-level value handed to Put
+// keeps its own escape — the admission never leaks into argument
+// pricing (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestAuditedPoolingEveryOtherUseKeepsFailClosed(t *testing.T) {
+	for name, tc := range map[string]struct{ source, culprit string }{
+		"pool rebinding": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { return new(int) }}\n\nfunc F() { bufs = sync.Pool{} }\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"pool address capture": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { return new(int) }}\n\nfunc take(p *sync.Pool) {}\n\nfunc F() { take(&bufs) }\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"method value bind": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { return new(int) }}\n\nfunc F() any {\n\tget := bufs.Get\n\treturn get()\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"embedded pool keeps the mark": {
+			// The admitted carrier is exactly a sync.Pool variable or an
+			// element of an array or slice of sync.Pool: a struct
+			// embedding a pool can carry sibling dynamic state, so its
+			// implicit Get promotion keeps the pointer-receiver capture.
+			source:  "package view\n\nimport \"sync\"\n\ntype holder struct {\n\tsync.Pool\n\thooks []func()\n}\n\nvar bufs holder\n\nfunc F() any {\n\tv := bufs.Get()\n\tbufs.Put(v)\n\treturn nil\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"new-field store outside init flow": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs sync.Pool\n\nfunc F() { bufs.New = func() any { return new(int) } }\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"unaudited new value registration": {
+			source:  "package view\n\nimport \"sync\"\n\nvar newFn func() any\n\nvar bufs = sync.Pool{New: newFn}\n\nfunc F() any {\n\tv := bufs.Get()\n\tbufs.Put(v)\n\treturn nil\n}\n",
+			culprit: "example.com/view.bufs registers function values outside the environment-free audit",
+		},
+		"new closure mutating dynamic package state": {
+			source:  "package view\n\nimport \"sync\"\n\nvar seen = map[string]func(){}\n\nvar bufs = sync.Pool{New: func() any { seen[\"boot\"] = func() {}; return new(int) }}\n\nfunc F() any {\n\tv := bufs.Get()\n\tbufs.Put(v)\n\treturn v\n}\n",
+			culprit: "example.com/view.seen is mutated",
+		},
+		"pooled package-level value keeps its own escape": {
+			source:  "package view\n\nimport \"sync\"\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nvar bufs sync.Pool\n\nfunc F() { bufs.Put(ErrX) }\n",
+			culprit: "example.com/view.ErrX escapes writable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, tc.source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
+				t.Fatalf("verdict = %+v, want the downgrade naming %q", verdict, tc.culprit)
+			}
+		})
+	}
+}
+
+// A direct reflect.TypeOf call is an audited construction for the
+// object-closed narrowing: its result is the runtime's canonical,
+// immutable type descriptor, so a reflect.Type package var initialized
+// by it stays object-closed and its escapes are not mutation — the
+// canonical type-cache idiom leaves the package closed
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedTypeOfConstructionKeepsObjectClosed(t *testing.T) {
+	for name, source := range map[string]string{
+		"type-cache var escape discharges": "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(bytesType) != nil }\n",
+		"type-cache block discharges":      "package view\n\nimport \"reflect\"\n\nvar (\n\tbytesType  = reflect.TypeOf([]byte{})\n\tintType    = reflect.TypeOf(int(1))\n\tstringType = reflect.TypeOf(\"\")\n\tstructType = reflect.TypeOf(struct{ n int }{})\n)\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool {\n\treturn use(bytesType) != use(intType) && stringType != nil && structType != nil\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - an audited reflect.TypeOf construction downgraded", verdict)
+			}
+		})
+	}
+}
+
+// The reflect.TypeOf admission covers exactly the direct call as a
+// stored construction: rebinding the variable remains mutation
+// everywhere, a chained method result stays non-audited so the store
+// keeps the escape refusal, and the call's argument keeps its own
+// pricing — a package-level carrier handed to TypeOf still refuses
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestAuditedTypeOfConstructionBounds(t *testing.T) {
+	for name, tc := range map[string]struct{ source, culprit string }{
+		"rebinding stays mutation": {
+			source:  "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc F() { bytesType = reflect.TypeOf(\"\") }\n",
+			culprit: "example.com/view.bytesType is mutated",
+		},
+		"chained method result stays non-audited": {
+			source:  "package view\n\nimport \"reflect\"\n\nvar elemType = reflect.TypeOf([]byte{}).Elem()\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(elemType) != nil }\n",
+			culprit: "example.com/view.elemType escapes writable",
+		},
+		"carrier argument keeps its own pricing": {
+			source:  "package view\n\nimport \"reflect\"\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nvar errType = reflect.TypeOf(ErrX)\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(errType) != nil }\n",
+			culprit: "example.com/view.ErrX escapes writable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, tc.source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
 			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
 				t.Fatalf("verdict = %+v, want the downgrade naming %q", verdict, tc.culprit)
 			}

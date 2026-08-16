@@ -38,13 +38,13 @@ var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailab
 // one generation, Sibling derives subset views sharing this view's observation
 // while owning their producer transactions.
 type View struct {
-	mu        sync.RWMutex
-	engine    *Engine
-	subjects  []Subject
-	requests  []closure.Subject
-	packages  []string
-	moduleDir string
-	kind      Kind
+	mu                   sync.RWMutex
+	engine               *Engine
+	subjects             []Subject
+	requests             []closure.Subject
+	packages             []string
+	moduleDir            string
+	kind                 Kind
 	facts                *observationFacts
 	observable           map[Subject]closure.Observability
 	capturedObserved     map[Subject]bool
@@ -138,6 +138,12 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
+		if first.poolAttestations[subject] != second.poolAttestations[subject] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: single-subject pool attestations for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+		}
 		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -191,6 +197,7 @@ type observationFacts struct {
 	guards               guard.Guards
 	purity               map[Subject]string
 	vouchDischarges      map[Subject]string
+	poolAttestations     map[Subject]string
 	sourceFiles          []string
 	sourceFilesBySubject map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
@@ -244,7 +251,16 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
-	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, packages...)
+	if e.singleSubjectExecution {
+		// The single-subject attestation changes what the derived facts
+		// RECORD — the audited pooling set's discharge happens at fact
+		// recording time — so the option is part of the fact identity:
+		// option-on and option-off sessions must never serve each
+		// other's persisted or in-process facts
+		// (REQ-closure-dynamic-state-memo).
+		factScope += "|single-subject-execution"
+	}
+	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, e.singleSubjectExecution, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -259,6 +275,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		guards:               guards,
 		purity:               make(map[Subject]string, len(subjects)),
 		vouchDischarges:      make(map[Subject]string, len(subjects)),
+		poolAttestations:     make(map[Subject]string, len(subjects)),
 		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
 		testVariantLedgers:   make(map[string]closure.TestVariantLedger, len(packages)),
 	}
@@ -306,6 +323,9 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
+		}
+		if attested := scan.poolAttestations[subject]; attested != "" {
+			observation.poolAttestations[subject] = attested
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
@@ -366,7 +386,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectPools: v.facts.poolAttestations[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -423,7 +443,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectPools: v.facts.poolAttestations[subject], ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -489,6 +509,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		Guards:               v.facts.guards,
 		PurityAssertion:      v.facts.purity[subject],
 		DynamicStateVouches:  v.facts.vouchDischarges[subject],
+		SingleSubjectPools:   v.facts.poolAttestations[subject],
 		ResultKind:           v.kind,
 	}
 }
@@ -915,6 +936,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	observable := make(map[Subject]closure.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
+	poolAttestations := make(map[Subject]string, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
@@ -932,6 +954,9 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		}
 		if discharges, ok := v.facts.vouchDischarges[subject]; ok {
 			vouchDischarges[subject] = discharges
+		}
+		if attested, ok := v.facts.poolAttestations[subject]; ok {
+			poolAttestations[subject] = attested
 		}
 		if v.capturedObserved[subject] {
 			capturedObserved[subject] = true
@@ -956,6 +981,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 			guards:               v.facts.guards,
 			purity:               purity,
 			vouchDischarges:      vouchDischarges,
+			poolAttestations:     poolAttestations,
 			sourceFiles:          sourceFiles,
 			sourceFilesBySubject: sourceFilesBySubject,
 			fileDigests:          v.facts.fileDigests,

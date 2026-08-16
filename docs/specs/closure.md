@@ -280,11 +280,43 @@ the fail-closed mark. The audited synchronization set — sync.Mutex and
 sync.RWMutex with their lock operations, receiver-neutral and never
 process-external because lock state cannot change dispatch — is admitted
 identically at the effect classification tiers, and grows only by source
-audit. One narrowing applies to the escape class alone: an
+audit. The audited pooling set — `sync.Pool` with its `Get` and `Put`
+operations — is admitted by source audit at two tiers with two
+distinct grounds. At the effect classification tiers the admission is
+unconditional and receiver-neutral exactly as lock state's: `Get` and
+`Put` touch only process memory fed by the analyzed program, so they
+introduce no external input channel whatever the execution schedule.
+The shared-dynamic-state discharge holds only under the
+caller-attested single-subject-process execution model — each subject
+measured in a process of its own — where every in-process `Put` site
+lies in the subject's own rooted flow, so pool contents are a function
+of the analyzed source and the subject alone (without the attestation,
+sibling subjects sharing a process communicate through pool contents —
+a prior subject's `Put` plants a value a later subject's `Get`
+dispatches on — and every pool use keeps the fail-closed judgment);
+the contents' contractual removability at any time is why the values
+need no per-item pricing at the call. Under the attestation, a `Get`
+or `Put` method call on a pool-typed carrier, the carrier being a
+package-level `sync.Pool` variable or an element of a package-level
+array or slice of `sync.Pool` indexed directly on the variable, is not
+mutation of the pool variable, while the values passed and produced
+keep their own full pricing, and every other use — a write, a
+rebinding, an address capture, an escape of the pool value, or a
+`New`-field access outside `init` flow — keeps the fail-closed
+judgment. The attestation is part of the persisted fact identity, so
+attested and unattested sessions never serve each other's facts, and a
+load-bearing attestation is recorded on the subject's evidence exactly
+as a vouch discharge is — naming the discharged pool variables,
+auditable and never silent (REQ-vouch-recorded in
+[purity.md](purity.md)). The set grows only by source audit. One narrowing applies to
+the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
-package — is a provably-immutable audited construction (`errors.New`; the nil
-zero value), the initializer included; an init-flow appearance the audit cannot
+package — is a provably-immutable audited construction (`errors.New`; a direct
+`reflect.TypeOf` call, its result the runtime's canonical type descriptor,
+never written after construction — the direct call only, a chained method
+result staying non-audited, and the call's argument keeping its own pricing;
+the nil zero value), the initializer included; an init-flow appearance the audit cannot
 attribute — an indirect or range-bound store, an address capture, or a
 non-audited value — breaks the closure from whichever package performs it. No holder of
 an object-closed value can mutate the shared object, so escapes of the value are
