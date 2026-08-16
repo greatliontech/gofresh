@@ -780,7 +780,7 @@ both plans.
       and pew and slot each into a numbered chunk of this order
       (fold, charter, or close-as-obsolete; the 2026-08-15 deferral
       doctrine's sweep); no condition-parked Lands survives the pass.
-- [ ] 88. gomutant: build-selection oracles (gomutant
+- [x] 88. gomutant: build-selection oracles (gomutant
       docs/issues/build-selection-oracles.md) - tag-gated and
       toolchain'd oracles become visible end to end: per-selection
       oracle views mirroring stipulator's build-selection resolution,
