@@ -855,7 +855,13 @@ both plans.
       probes - a surface-semantics call) or the interleaving is
       recorded as accepted; surfaced by chunk 41's review. Ordered
       after 95.
-- [ ] 90. stipulator: goos/race build dimensions bind (stipulator
+- [ ] 97. stipulator: cross-platform resolution views - a selection
+      declaring GOOS/GOARCH off the host today refuses by name (chunk
+      90's boundary); the design question is an on-host resolution-only
+      view for cross-platform selections whose witnesses no on-host run
+      can grant - what binding/witnessing means there is the chunk's
+      charter question.
+- [x] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
       GOOS/GOARCH/race dimensions, symmetric with discovery; rides
