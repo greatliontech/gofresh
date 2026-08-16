@@ -282,7 +282,7 @@ both plans.
       serves an LLM in a harness - minimal output, maximal usefulness;
       both surfaces audited against it, cancellation propagation and
       live progress included; the resolving docs delete at close.
-- [ ] 42. stipulator: correctness batch (stipulator docs/issues:
+- [x] 42. stipulator: correctness batch (stipulator docs/issues:
       term-matcher-ascii-boundaries, partitions-uncapped-seam-unpinned,
       scope-prefix-boundary-semantics, witness-store-gc,
       gopter-property-recognition) - rune-boundary term matching, the
