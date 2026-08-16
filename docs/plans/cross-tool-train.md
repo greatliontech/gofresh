@@ -292,7 +292,7 @@ both plans.
 - [x] 43. stipulator: publication ladder collapse (stipulator
       docs/issues/publication-ladder-collapse) - one publication
       ladder, one closing validation; doc deletes at close.
-- [ ] 44. pew: trust, cost, and the derivation loop (pew docs/issues:
+- [x] 44. pew: trust, cost, and the derivation loop (pew docs/issues:
       recorded-config-trust, per-benchmark-view-builds,
       derivation-ab-mode) - read-side recording validation, per-package
       view sharing, and pew ab replacing the hand stash cycle; three
