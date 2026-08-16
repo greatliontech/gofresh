@@ -297,7 +297,7 @@ both plans.
       derivation-ab-mode) - read-side recording validation, per-package
       view sharing, and pew ab replacing the hand stash cycle; three
       docs delete at close.
-- [ ] 45. stipulator: slice frontier soundness (stipulator
+- [x] 45. stipulator: slice frontier soundness (stipulator
       docs/issues/slice-frontier-uncertainty) - typed frontiers gain
       the closure model's sound floor and dispositions over
       reflection, build tags, and init effects; doc deletes at close.
@@ -305,7 +305,12 @@ both plans.
       consuming compile (stipulator
       docs/issues/closure-edit-revert-inside-run-span) - the
       edit-revert-inside-span residual closes with the record
-      redesign; doc deletes at close.
+      redesign; doc deletes at close. Also folds: dedup the facts
+      context path's double slice (Slice then SliceFloor re-slicing
+      internally) behind one shared frontier; retire the unconditional
+      "_test" path trims in ReachedPackages and splitSymbol
+      (misfold/no-resolve for a real package path ending "_test") in
+      favor of the floor walk's build-identity fold.
 - [x] 47. gofresh: func-field calls discharge under the
       environment-free registration audit - the second re-measure's
       unchanged 979 escapes-writable refusals: the leak-free engine
