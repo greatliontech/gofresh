@@ -289,7 +289,7 @@ both plans.
       seam pin, boundary-aware scoping with the dropped-diagnostic
       fix, store eviction for departed identities, and gopter witness
       classification; five docs delete at close.
-- [ ] 43. stipulator: publication ladder collapse (stipulator
+- [x] 43. stipulator: publication ladder collapse (stipulator
       docs/issues/publication-ladder-collapse) - one publication
       ladder, one closing validation; doc deletes at close.
 - [ ] 44. pew: trust, cost, and the derivation loop (pew docs/issues:
