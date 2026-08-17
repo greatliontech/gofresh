@@ -684,20 +684,23 @@ both plans.
       copied from another in init flow) links the aliased keys so a
       mutation of either refuses both - today the shared backing
       splits across keys unlinked.
-- [ ] 16. re-measure the cerebro check against the warm floor (requires
+- [x] 16. re-measure the cerebro check against the warm floor (requires
       the machine with cerebro checked out): policy gains
       excluded_paths [".claude"] and bracket_paths for go.mod, cmd, and
       the spec-doc tree; closes stipulator
       docs/issues/cerebro-uncacheable-mass-measured.md (the chunk-5, 7,
       8, and 9 fixes) and the two gofresh docs at their close-outs.
-      Also carries the tugboat majority-serve target the record
-      redesign unmasked: with multiply-selected eliminated, tugboat
-      reads 967/967 uncacheable on attributed per-test reasons - 552
-      external directory input "/", 285 raft.DiscardLogger mutated, 21
-      volatile somaxconn (TCP listeners), testify/rapid dynamic state -
-      wanting corpus vouches/exclusions and any classifier fixes this
-      chunk's measurement justifies; verified when a tugboat warm-tree
-      check serves a nonzero witness majority.
+      Also carried the tugboat measurement leg: the exclusion-ordering
+      fix (gofresh v0.71.1), reviewed exclusions ("/", somaxconn, the
+      sim-bubble roots, .realseam-tmp) and the source-audited vouch
+      set landed and every addressed class discharges (tugboat
+      728a186); the majority-serve verification MOVED off this chunk -
+      the measurement disproved its premise, the residual being
+      in-tree dynamic state (ErrCompacted 713, coldBufPool 129,
+      frameAccounting 74, ErrSealed 20 - 96% of the corpus) outside
+      this train's scope plus the chunk-101 discharge families -
+      re-verified when 101 (and the in-tree sentinel/pool line) land:
+      a tugboat warm-tree check serves a nonzero witness majority.
 - [x] 17. gofresh: open the startup-effect-precision plan
       (charter gofresh docs/issues/startup-effect-precision.md;
       dotless-module-paths, one-dispatch-site-classifier, and
