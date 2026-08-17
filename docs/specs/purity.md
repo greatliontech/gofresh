@@ -128,7 +128,8 @@ REQ-closure-shared-dynamic-state in [closure.md](closure.md)) is the same kind o
 unverifiable caller assertion and records under exactly this requirement's
 discipline: the variables whose discharge the attestation
 carried — a pool carrier's admitted `Get`/`Put`, the audited mapping set's
-named bookkeeping — reachable from the subject, ride that subject's evidence
+named bookkeeping, a `//gofresh:single-subject`-directed subject-own
+variable — reachable from the subject, ride that subject's evidence
 canonically
 (sorted identities), an inert attestation (no attested discharge reachable from
 the subject) recording nothing, and validity likewise needing no comparison — an

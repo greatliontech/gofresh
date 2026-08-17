@@ -327,6 +327,47 @@ mark, every other variable of the module keeps its own judgment, and
 the mapping syscalls' external effects keep their own classification
 at the observability tiers — and a load-bearing discharge is recorded
 on the subject's evidence exactly as the pooling set's. The set grows
+only by source audit. The `//gofresh:single-subject` variable
+directive is the mapping set's own-code dual: a durable in-source
+directive on a package-level variable declaration — discovered under
+the same build-flag-selected source discipline as `//gofresh:pure`
+(REQ-purity-directive in [purity.md](purity.md)) — declaring, on the
+author's authority, that the variable's state is subject-own under
+the single-subject-process execution model: process-local, fed only
+by the program's own rooted flow, no cross-subject channel when each
+subject owns its process. Both legs are required — the directive is
+the author's half and the caller's attestation the protocol's half;
+either alone confers nothing. The discharge covers the variable's
+mutation, escape, and environment-audit refusals alike (the
+declaration covers the variable's state wholesale), applies in
+mutable-local packages only — the exact inverse of the vouch
+boundary: a vouch crosses the version-pinned line because dependency
+code cannot be edited, the directive covers exactly the code its
+author edits and reviews, and a dependency's directive confers
+nothing — is honored only when every build-flag-selected compilation
+variant declaring the variable carries it (a variant without the
+directive keeps every mark, fail-closed), and a load-bearing
+discharge is recorded on the subject's evidence with the
+attestation's other discharges (REQ-vouch-recorded in
+[purity.md](purity.md)). The audited memoization set —
+`gopkg.in/yaml.v3`'s `structMap`, a mutex-guarded type-to-structInfo
+cache filled at exactly one site by a pure function of the type
+(field ordering by struct index, no map-iteration order in stored
+data, no options input, values never rewritten after the store) — is
+admitted by source audit for the version-pinned module, exactly
+the audited variable, and exactly the audited versions (v3.0.0 and
+v3.0.1): the audit is a property of those versions' source that no
+other version inherits, so an unaudited version — later or earlier —
+refuses fail-closed until its source is audited. The derivation is
+content-invariant, so a prior
+subject's population changes timing and internal pointer identity
+that never leave the package's unexported internals, never a
+looked-up value — which is why, unlike the pooling and mapping sets
+whose contents are subject-planted values, the discharge needs no
+execution attestation and rides no evidence record (it is the
+engine's own source-audited verdict, not a caller assertion). The set
+is the source-audited precursor of a structural get-or-compute
+discharge; its entries retire to that proof when it lands. It grows
 only by source audit. One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow

@@ -89,8 +89,13 @@ func DisableMemos() { closure.DisableMemos() }
 // value as an audited construction (the interface is sealed by
 // unexported methods, every referent runtime-canonical), and extends
 // the object-closed reference chain across packages (the re-export
-// idiom), an undeclared referent refusing fail-closed.
-const DynamicStateStrategy = "gofresh/dynamic-state@27"
+// idiom), an undeclared referent refusing fail-closed. @28 adds the
+// //gofresh:single-subject variable directive (author-declared
+// subject-own state, discharged only under the caller's attestation,
+// mutable-local packages only — the vouch boundary's inverse) and the
+// audited memoization set (gopkg.in/yaml.v3.structMap: content-
+// invariant derivation, admitted without the attestation).
+const DynamicStateStrategy = "gofresh/dynamic-state@28"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

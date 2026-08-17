@@ -675,6 +675,171 @@ func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	}
 }
 
+// The audited memoization set: the structMap-shaped cache of the
+// version-pinned gopkg.in/yaml.v3 discharges WITHOUT any execution
+// attestation (content-invariant derivation — its values are never
+// subject-planted), while a ghost variable of the same module keeps its
+// own judgment — the discharge covers exactly the audited variable
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMODCACHE", modCache)
+	t.Cleanup(func() {
+		clean := exec.Command("go", "clean", "-modcache")
+		clean.Env = append(os.Environ(), "GOMODCACHE="+modCache)
+		_ = clean.Run()
+		os.RemoveAll(modCache)
+	})
+	proxy := t.TempDir()
+	memoSource := "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n"
+	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.0.1", map[string]string{
+		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+		"yaml.go": memoSource,
+	})
+	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.0.2", map[string]string{
+		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+		"yaml.go": memoSource + "\nvar Ghost = map[string]func(){}\n\nfunc ArmGhost() { Ghost[\"k\"] = func() {} }\n",
+	})
+	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.0.3", map[string]string{
+		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+		"yaml.go": memoSource,
+	})
+	t.Setenv("GOPROXY", "file://"+proxy)
+	t.Setenv("GOSUMDB", "off")
+
+	host := func(t *testing.T, version string) string {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod": "module example.com/memohost\n\ngo 1.26\n\nrequire gopkg.in/yaml.v3 " + version + "\n",
+			"lib.go": "package memohost\n\nimport (\n\t\"reflect\"\n\n\tyaml \"gopkg.in/yaml.v3\"\n)\n\ntype rec struct{ A, B int }\n\nfunc Use() int { return yaml.FieldCount(reflect.TypeOf(rec{})) }\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = dir
+		tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		if out, err := tidy.CombinedOutput(); err != nil {
+			t.Fatalf("go mod tidy: %v\n%s", err, out)
+		}
+		return dir
+	}
+	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
+
+	processFactCache = sync.Map{}
+	clean := runScan(t, DynamicStateStrategy+"|memo-clean|cfg", host(t, "v3.0.1"), "example.com/memohost")
+	if reason := clean.downgradeReason[subject]; reason != "" {
+		t.Fatalf("unattested structMap-shaped cache downgraded the subject: %q - the memoization discharge needs no attestation", reason)
+	}
+
+	processFactCache = sync.Map{}
+	ghosted := runScan(t, DynamicStateStrategy+"|memo-ghost|cfg", host(t, "v3.0.2"), "example.com/memohost")
+	if reason := ghosted.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.Ghost is mutated") {
+		t.Fatalf("ghost verdict reason = %q, want the downgrade naming Ghost - the discharge covers exactly the audited variable", reason)
+	}
+
+	// The audit is a property of the audited versions' source: an
+	// unaudited version with the identical shape refuses fail-closed
+	// until its source is audited.
+	processFactCache = sync.Map{}
+	unaudited := runScan(t, DynamicStateStrategy+"|memo-unaudited|cfg", host(t, "v3.0.3"), "example.com/memohost")
+	if reason := unaudited.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
+		t.Fatalf("unaudited-version reason = %q, want the downgrade naming structMap - no version inherits the audit", reason)
+	}
+}
+
+// The audited memoization set confers nothing on a mutable-local
+// checkout: the audit holds for the version-pinned source alone, so a
+// replace-directed gopkg.in/yaml.v3 keeps the structMap downgrade —
+// code the caller can edit is fixed, not audited
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":             "module example.com/memohost\n\ngo 1.26\n\nrequire gopkg.in/yaml.v3 v3.0.0\n\nreplace gopkg.in/yaml.v3 => ./local-yaml\n",
+		"lib.go":             "package memohost\n\nimport (\n\t\"reflect\"\n\n\tyaml \"gopkg.in/yaml.v3\"\n)\n\ntype rec struct{ A, B int }\n\nfunc Use() int { return yaml.FieldCount(reflect.TypeOf(rec{})) }\n",
+		"local-yaml/go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+		"local-yaml/yaml.go": "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	processFactCache = sync.Map{}
+	scan := runScan(t, DynamicStateStrategy+"|memo-local|cfg", dir, "example.com/memohost")
+	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
+		t.Fatalf("mutable-local checkout reason = %q, want the downgrade naming structMap - the audit covers only the version-pinned line", reason)
+	}
+}
+
+// The //gofresh:single-subject directive confers nothing on a
+// dependency's variable even under the attestation: the directive
+// covers exactly the code its author edits and reviews — the inverse of
+// the vouch boundary (REQ-closure-shared-dynamic-state).
+func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMODCACHE", modCache)
+	t.Cleanup(func() {
+		clean := exec.Command("go", "clean", "-modcache")
+		clean.Env = append(os.Environ(), "GOMODCACHE="+modCache)
+		_ = clean.Run()
+		os.RemoveAll(modCache)
+	})
+	proxy := t.TempDir()
+	writeFileProxyModule(t, proxy, "example.com/depdir", "v1.0.0", map[string]string{
+		"go.mod": "module example.com/depdir\n\ngo 1.26\n",
+		"x.go":   "package depdir\n\n//gofresh:single-subject\nvar Hook func()\n\nfunc Rebind() { Hook = nil }\n",
+	})
+	t.Setenv("GOPROXY", "file://"+proxy)
+	t.Setenv("GOSUMDB", "off")
+
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/dirhost\n\ngo 1.26\n\nrequire example.com/depdir v1.0.0\n",
+		"lib.go": "package dirhost\n\nimport \"example.com/depdir\"\n\nfunc Use() { depdir.Rebind() }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, DynamicStateStrategy+"|dep-directive|cfg", dir, os.Environ(), nil, nil, nil, true, "example.com/dirhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/dirhost", Symbol: "Use"}
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/depdir.Hook is mutated") {
+		t.Fatalf("attested dep-directive reason = %q, want the downgrade naming Hook - a dependency's directive confers nothing", reason)
+	}
+}
+
 // writeSemverDepModule mirrors writePinnedDepModule over
 // golang.org/x/mod/semver: a pinned dependency whose real source is
 // benign enough to pass the observability scan, so observed-surface

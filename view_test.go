@@ -8186,6 +8186,70 @@ func TestObjectClosedReExportCrossesPackages(t *testing.T) {
 	})
 }
 
+// The //gofresh:single-subject variable directive discharges a
+// subject-own variable's marks only with both legs present — the
+// author's in-source directive and the caller's single-subject
+// attestation — and records the load-bearing discharge on the
+// subject's evidence; either leg alone confers nothing
+// (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
+func TestSingleSubjectDirectiveDischarges(t *testing.T) {
+	directed := "package view\n\n//gofresh:single-subject\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
+	undirected := "package view\n\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
+	blockDirected := "package view\n\nvar (\n\t//gofresh:single-subject\n\tframeAccounting func(int)\n)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
+	ctx := context.Background()
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	capture := func(t *testing.T, source string, opts ...Option) (Fingerprint, Verdict) {
+		t.Helper()
+		dir := writeViewModule(t, source)
+		engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fingerprint, verdict
+	}
+
+	fingerprint, verdict := capture(t, directed, WithSingleSubjectExecution())
+	if verdict.Status != Valid {
+		t.Fatalf("directed attested verdict = %+v, want Valid", verdict)
+	}
+	if fingerprint.SingleSubjectDischarges != "example.com/view.frameAccounting" {
+		t.Fatalf("directed attested evidence = %q, want the discharged variable named canonically", fingerprint.SingleSubjectDischarges)
+	}
+
+	blockFP, blockVerdict := capture(t, blockDirected, WithSingleSubjectExecution())
+	if blockVerdict.Status != Valid || blockFP.SingleSubjectDischarges != "example.com/view.frameAccounting" {
+		t.Fatalf("block-form directive: verdict = %+v evidence = %q, want Valid with the discharge recorded", blockVerdict, blockFP.SingleSubjectDischarges)
+	}
+
+	bare, bareVerdict := capture(t, undirected, WithSingleSubjectExecution())
+	if bareVerdict.Status != Unverifiable || !strings.Contains(bareVerdict.Reason, "example.com/view.frameAccounting is mutated") {
+		t.Fatalf("attestation-only verdict = %+v, want the downgrade - the attestation alone confers nothing", bareVerdict)
+	}
+	if bare.SingleSubjectDischarges != "" {
+		t.Fatalf("attestation-only evidence recorded %q, want nothing", bare.SingleSubjectDischarges)
+	}
+
+	unattested, unattestedVerdict := capture(t, directed)
+	if unattestedVerdict.Status != Unverifiable || !strings.Contains(unattestedVerdict.Reason, "example.com/view.frameAccounting is mutated") {
+		t.Fatalf("directive-only verdict = %+v, want the downgrade - the directive alone confers nothing", unattestedVerdict)
+	}
+	if unattested.SingleSubjectDischarges != "" {
+		t.Fatalf("directive-only evidence recorded %q, want nothing", unattested.SingleSubjectDischarges)
+	}
+}
+
 // A package with assembly sources stays downgraded through the closure
 // tier's native-code and linkage dispositions - the mutation analysis
 // needs no foreign-code rule of its own

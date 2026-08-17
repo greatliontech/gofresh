@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"sort"
 	"strconv"
@@ -51,6 +52,17 @@ type dynamicStateFact struct {
 	// so the load-bearing attestation is auditable and never silent —
 	// the vouch-recording discipline (REQ-vouch-recorded).
 	PoolDischarges []string `json:"poolDischarges,omitempty"`
+	// SingleSubjectVars holds the package-level dynamic-capable
+	// variable keys whose declarations carry the
+	// //gofresh:single-subject directive — the author's durable
+	// in-source declaration that the variable's state is subject-own
+	// under the single-subject-process execution model. Read from the
+	// same build-flag-selected source as every other directive; the
+	// discharge itself is decided at composition, both legs required
+	// (the directive is the author's half, the caller's attestation
+	// the protocol's half) and mutable-local packages only
+	// (REQ-closure-shared-dynamic-state).
+	SingleSubjectVars []string `json:"singleSubjectVars,omitempty"`
 	// ReceiverReadOnly holds the full method keys (package path,
 	// receiver type, method) this package declares and proves unable to
 	// write receiver-reachable state.
@@ -450,6 +462,46 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 				fact.ExternalMethods[key] = nodeDeclarationKey(p, fd.Name)
 			}
 		}
+	}
+	if p.Types != nil && p.Module != nil {
+		// The //gofresh:single-subject variable directive: recorded for
+		// exactly the declared dynamic-capable keys, from the ValueSpec's
+		// own doc or a single-spec declaration's — the same
+		// build-flag-selected source discipline as //gofresh:pure
+		// (REQ-closure-shared-dynamic-state, REQ-purity-directive's
+		// discovery discipline).
+		for _, file := range p.Syntax {
+			for _, decl := range file.Decls {
+				gd, ok := decl.(*ast.GenDecl)
+				if !ok || gd.Tok != token.VAR {
+					continue
+				}
+				for _, spec := range gd.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					doc := vs.Doc
+					if doc == nil && len(gd.Specs) == 1 {
+						doc = gd.Doc
+					}
+					if !hasDirective(doc, "//gofresh:single-subject") {
+						continue
+					}
+					for _, name := range vs.Names {
+						variable, ok := p.TypesInfo.Defs[name].(*types.Var)
+						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+							continue
+						}
+						if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+							continue
+						}
+						fact.SingleSubjectVars = append(fact.SingleSubjectVars, dynamicVarKey(variable))
+					}
+				}
+			}
+		}
+		sort.Strings(fact.SingleSubjectVars)
 	}
 	return fact
 }
@@ -1018,9 +1070,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// nothing — code the caller can edit is fixed, not vouched
 	// (REQ-vouch-dependency-boundary).
 	pinnedPkg := map[string]bool{}
+	pinOf := map[string]string{}
 	for _, node := range meta {
 		if node.Class == closure.PinnedPackage {
 			pinnedPkg[node.PkgPath] = true
+			pinOf[node.PkgPath] = node.Pin
 		}
 	}
 	vouchDischarged := map[string][]string{}
@@ -1056,7 +1110,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// classification. Load-bearing discharges ride subject evidence
 	// with the pooling set's (REQ-closure-shared-dynamic-state,
 	// REQ-vouch-recorded). Grows only by source audit.
-	mappingDischarged := map[string][]string{}
+	// attestedDischarged carries every attestation-gated
+	// composition-time discharge — the audited mapping set's and the
+	// //gofresh:single-subject directive's — for the evidence fold.
+	attestedDischarged := map[string][]string{}
 	auditedMappingOut := func(pkgPath, key string) bool {
 		if !singleSubject || !pinnedPkg[pkgPath] {
 			return false
@@ -1066,7 +1123,102 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		if seen := "mapping\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
 			dischargedSeen[seen] = true
-			mappingDischarged[pkgPath] = append(mappingDischarged[pkgPath], key)
+			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
+		}
+		return true
+	}
+	// The audited memoization set: gopkg.in/yaml.v3's structMap — a
+	// mutex-guarded reflect.Type-to-structInfo cache filled at exactly
+	// one site by getStructInfo, a pure function of the type (field
+	// ordering by struct index, no map-iteration order in stored data,
+	// no options input, values never rewritten after the store; audited
+	// at the version-pinned source). Content-invariant derivation: a
+	// prior subject's population changes timing and internal pointer
+	// identity that never leave the package's unexported internals,
+	// never a looked-up value — so the discharge needs NO execution
+	// attestation, unlike the pooling and mapping sets whose contents
+	// are subject-planted values, and rides no evidence record: it is
+	// the engine's own source-audited verdict, not a caller assertion
+	// (the vouch-recording discipline covers only unverifiable caller
+	// assertions). Version-pinned module only, exactly the audited
+	// variable; the source-audited precursor of the structural
+	// get-or-compute discharge, whose entries retire to that proof when
+	// it lands. Grows only by source audit
+	// (REQ-closure-shared-dynamic-state).
+	auditedMemoOut := func(pkgPath, key string) bool {
+		if !pinnedPkg[pkgPath] {
+			return false
+		}
+		if pkgPath != "gopkg.in/yaml.v3" || key != "gopkg.in/yaml.v3.structMap" {
+			return false
+		}
+		// The audit is a property of the audited versions' source, not
+		// of the module name: content-invariance was proven against the
+		// v3.0.0/v3.0.1 getStructInfo, and no other version inherits it
+		// - an unaudited version, later or earlier, refuses fail-closed
+		// until its source is audited (REQ-closure-shared-dynamic-state).
+		switch pinOf[pkgPath] {
+		case "gopkg.in/yaml.v3@v3.0.0", "gopkg.in/yaml.v3@v3.0.1":
+			return true
+		default:
+			return false
+		}
+	}
+	// The //gofresh:single-subject variable directive discharge: the
+	// author's in-source declaration that the variable's state is
+	// subject-own under the single-subject-process execution model —
+	// process-local, fed only by the program's own rooted flow, no
+	// cross-subject channel when each subject owns its process. Both
+	// legs are required: the directive alone (no attested protocol) and
+	// the attestation alone (no author audit of the variable) each
+	// confer nothing. Mutable-local packages only — the exact inverse
+	// of the vouch boundary: a vouch crosses the version-pinned line
+	// because dependency code cannot be edited, while the directive
+	// covers exactly the code its author edits and reviews, and a
+	// dependency's directive confers nothing here. The directive is
+	// honored only when every fact of the declaring package that
+	// declares the key records it — the variant-collapse fail-close: a
+	// build-flag-selected variant without the directive keeps every
+	// mark. The discharge covers the mutation, escape, and
+	// environment-audit ranks alike (the declaration covers the
+	// variable's state wholesale) and rides subject evidence with the
+	// attestation's other discharges (REQ-closure-shared-dynamic-state,
+	// REQ-vouch-recorded).
+	directiveCovered := map[string]bool{}
+	for _, pkgFacts := range state.facts {
+		perKey := map[string]bool{}
+		for _, fact := range pkgFacts {
+			directed := make(map[string]bool, len(fact.SingleSubjectVars))
+			for _, key := range fact.SingleSubjectVars {
+				directed[key] = true
+			}
+			for _, key := range fact.Declares {
+				if covered, seen := perKey[key]; seen {
+					perKey[key] = covered && directed[key]
+				} else {
+					perKey[key] = directed[key]
+				}
+			}
+		}
+		for key, covered := range perKey {
+			if covered {
+				directiveCovered[key] = true
+			}
+		}
+	}
+	mutableLocalPkg := map[string]bool{}
+	for _, node := range meta {
+		if node.Class == closure.MutableLocalPackage {
+			mutableLocalPkg[node.PkgPath] = true
+		}
+	}
+	directiveDischargedOut := func(pkgPath, key string) bool {
+		if !singleSubject || !mutableLocalPkg[pkgPath] || !directiveCovered[key] {
+			return false
+		}
+		if seen := "directive\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
+			dischargedSeen[seen] = true
+			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
 		}
 		return true
 	}
@@ -1088,7 +1240,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// unvouched hit per rank order still names the culprit.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
+				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " is mutated"
 					}
@@ -1097,7 +1249,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
+				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " escapes writable"
 					}
@@ -1110,7 +1262,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// write state the settled verdict assumed stable.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
+				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
 					}
@@ -1233,32 +1385,33 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// The single-subject attestation's audit record is the vouch
 	// discipline's parallel: every variable whose discharge the
 	// attestation carried — a pool variable's admitted Get/Put
-	// (recorded in the facts at derivation time) or the audited mapping
-	// set's composition-time discharge — in a package the view
-	// package's graph reaches, rides subject evidence
+	// (recorded in the facts at derivation time), the audited mapping
+	// set's composition-time discharge, or a
+	// //gofresh:single-subject-directed variable's — in a package the
+	// view package's graph reaches, rides subject evidence
 	// (REQ-vouch-recorded).
-	attestationDischarged := map[string][]string{}
-	attestationSeen := map[string]bool{}
+	evidenceDischarged := map[string][]string{}
+	evidenceSeen := map[string]bool{}
 	for _, pkgPath := range pkgPaths {
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.PoolDischarges {
-				if seen := pkgPath + "\x00" + key; !attestationSeen[seen] {
-					attestationSeen[seen] = true
-					attestationDischarged[pkgPath] = append(attestationDischarged[pkgPath], key)
+				if seen := pkgPath + "\x00" + key; !evidenceSeen[seen] {
+					evidenceSeen[seen] = true
+					evidenceDischarged[pkgPath] = append(evidenceDischarged[pkgPath], key)
 				}
 			}
 		}
 	}
-	for pkgPath, keys := range mappingDischarged {
+	for pkgPath, keys := range attestedDischarged {
 		for _, key := range keys {
-			if seen := pkgPath + "\x00" + key; !attestationSeen[seen] {
-				attestationSeen[seen] = true
-				attestationDischarged[pkgPath] = append(attestationDischarged[pkgPath], key)
+			if seen := pkgPath + "\x00" + key; !evidenceSeen[seen] {
+				evidenceSeen[seen] = true
+				evidenceDischarged[pkgPath] = append(evidenceDischarged[pkgPath], key)
 			}
 		}
 	}
-	if len(attestationDischarged) > 0 {
-		state.attestationDischarges = collectReachable(attestationDischarged)
+	if len(evidenceDischarged) > 0 {
+		state.attestationDischarges = collectReachable(evidenceDischarged)
 	}
 	return state, nil
 }
