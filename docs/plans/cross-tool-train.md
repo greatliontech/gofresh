@@ -217,7 +217,9 @@ both plans.
       validation shares manifest evaluation; two docs delete at close,
       and the in-module scratch widening redefers on a
       field-measurement trigger - feasible and sound in principle,
-      zero measured mass, no consumer the flow discipline admits.
+      zero measured mass, no consumer the flow discipline admits
+      (closed at chunk 16 on that measurement; doc deleted,
+      git-history only).
 - [x] 36. gofresh: analysis-surface structure (gofresh docs/issues:
       one-dispatch-site-classifier, observation-facts-struct) - one
       call-site judgment and one observation-facts shape, collapsing
@@ -855,6 +857,15 @@ both plans.
       probes - a surface-semantics call) or the interleaving is
       recorded as accepted; surfaced by chunk 41's review. Ordered
       after 95.
+- [ ] 98. gofresh: stateless-value escape discharge - a package-level
+      variable whose initializer is a zero-field struct value cannot be
+      observably mutated through any escaped alias (no state to
+      mutate; rebinding stays the mutation arm's), so its
+      writable-escape refusal proves nothing and discharges;
+      reproduced from the field: tugboat's raft.DiscardLogger
+      (var L Logger = nopLogger{}) accounts for 285 of 967 uncacheable
+      witnesses, the largest in-tree dynamic-state class. Release,
+      then the consumer bumps ride.
 - [ ] 97. stipulator: cross-platform resolution views - a selection
       declaring GOOS/GOARCH off the host today refuses by name (chunk
       90's boundary); the design question is an on-host resolution-only

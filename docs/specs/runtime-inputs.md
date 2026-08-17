@@ -383,6 +383,19 @@ the subject: it carries the same soundness responsibility as attaching no
 manifest, and it is how a caller meets observation coherence for volatile
 paths it cannot hold still — a VCS bookkeeping directory mutated by unrelated
 tooling makes every digest over it environmental noise rather than evidence.
+The exclusion outranks every per-path disposition the observation could
+otherwise earn: classification refusals of any kind (an external directory, a
+volatile OS object, an unrepresentable or unhashable path), existence-binding
+of an external stat, and the identity a chdir target would record all
+discharge silently when the raw observed identity is excluded — because a
+disposition-first ordering would make exactly the surfaces the exclusion
+exists to cover unexcludable (a root listing opened by a parent-directory
+fsync walk is the field case). The exclusion consult matches the raw observed
+identity with the same module-relative-else-absolute normalization
+classification itself applies, so declaring and matching agree with or
+without a refusal. Observation-kind seals that are not per-path dispositions
+— a chdir's working-directory seal — are never discharged by excluding the
+path they ride with.
 Environment identities are never excludable through path exclusions.
 
 **REQ-inputs-guard-covered** (behavior): Observation construction from a test-harness

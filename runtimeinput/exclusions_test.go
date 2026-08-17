@@ -197,3 +197,136 @@ func TestEmptyExclusionPatternRefused(t *testing.T) {
 		t.Fatal("empty exclusion pattern accepted")
 	}
 }
+
+// An exclusion outranks classification: a path the classifier would
+// refuse — an external directory, a volatile OS object — discharges
+// silently when excluded, never sealing the observation unverifiable
+// (REQ-inputs-exclusions' ordering clause; the field case is a WAL's
+// parent-directory fsync walk opening "/").
+func TestExcludedPathsOutrankClassificationRefusals(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(packageDir, "fixture.txt"), []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := []byte(
+		"open /\n" +
+			"open /proc/sys/net/core/somaxconn\n" +
+			"open fixture.txt\n")
+
+	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
+		WithExcludedPaths("/", "/proc/sys/net/core/somaxconn"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, "external directory input") || strings.Contains(reason, "volatile OS input") {
+			t.Fatalf("excluded path left a classification refusal: %q", reason)
+		}
+	}
+	for _, id := range m.Paths {
+		if id.Path == "/" || strings.Contains(id.Path, "somaxconn") {
+			t.Fatalf("excluded identity recorded: %+v", id)
+		}
+	}
+
+	// Without the exclusion, the same observations refuse — the pin
+	// that the discharge comes from the declaration, not from a
+	// classifier change.
+	state, err = FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err = decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawRefusal := false
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, "external directory input: /") || strings.Contains(reason, "volatile OS input") {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatal("undeclared classifier-refused paths did not refuse")
+	}
+}
+
+// The exclusion outranks every per-path disposition, not only
+// classification refusals: the existence-binding of an external stat,
+// the absence-binding of an absent external stat, and a
+// classifier-refused chdir target all discharge when the raw identity
+// is excluded — while the chdir's working-directory seal (an
+// observation-kind seal, never a per-path disposition) stays
+// (REQ-inputs-exclusions' ordering clause).
+func TestExclusionOutranksExistenceBindingAndChdir(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(packageDir, "fixture.txt"), []byte("f"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := []byte(
+		"open fixture.txt\n" +
+			"stat " + outside + "\n" +
+			"stat " + filepath.Join(outside, "missing") + "\n" +
+			"chdir /\n")
+
+	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
+		WithExcludedPaths(outside, "/"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range m.Paths {
+		if strings.Contains(id.Path, outside) || id.Path == "/" {
+			t.Fatalf("excluded identity recorded (existence-binding or chdir target): %+v", id)
+		}
+	}
+	sawWdSeal := false
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, "external directory input") {
+			t.Fatalf("excluded chdir target left a classification refusal: %q", reason)
+		}
+		if reason == "working-directory change" {
+			sawWdSeal = true
+		}
+	}
+	if !sawWdSeal {
+		t.Fatal("excluding the chdir target discharged the working-directory seal itself")
+	}
+	if len(m.Paths) != 1 || !strings.HasSuffix(m.Paths[0].Path, "fixture.txt") {
+		t.Fatalf("non-excluded observation lost: %+v", m.Paths)
+	}
+
+	// Without the exclusions the same stats record and the chdir target
+	// refuses — the discharge comes from the declaration.
+	state, err = FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err = decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawBound := false
+	for _, id := range m.Paths {
+		if strings.Contains(id.Path, outside) {
+			sawBound = true
+		}
+	}
+	sawRefusal := false
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, "external directory input: /") {
+			sawRefusal = true
+		}
+	}
+	if !sawBound || !sawRefusal {
+		t.Fatalf("undeclared arms did not bind/refuse (bound=%v refusal=%v): %+v / %+v", sawBound, sawRefusal, m.Paths, m.Unverifiable)
+	}
+}

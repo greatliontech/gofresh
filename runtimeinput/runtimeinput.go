@@ -562,6 +562,26 @@ func (c *testLogConfig) excludes(id pathID) bool {
 	return excludesIdentity(c.excluded, id)
 }
 
+// excludesRaw consults the exclusions for an observed path BEFORE
+// classification: a classification refusal (an external directory, a
+// volatile-OS object) must not outrank the caller's exclusion — the
+// exclusion is precisely the assertion that the surface is no input,
+// and a refusal-first ordering would make classifier-refused paths
+// unexcludable, defeating the contract for exactly the surfaces it
+// exists to cover (REQ-inputs-exclusions).
+func (c *testLogConfig) excludesRaw(moduleDir, p string) bool {
+	if len(c.excluded) == 0 {
+		return false
+	}
+	if rel, ok := relUnder(moduleDir, p); ok {
+		return c.excludes(pathID{Kind: pathRel, Path: filepath.ToSlash(rel)})
+	}
+	if filepath.IsAbs(p) {
+		return c.excludes(pathID{Kind: pathAbs, Path: filepath.Clean(p)})
+	}
+	return false
+}
+
 // excludesIdentity reports whether id falls under any declared exclusion:
 // equal, or extending it past a separator. Relative identities are
 // slash-separated; absolute identities carry the host separator.
@@ -744,6 +764,9 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || guardCovered(p, staticRoots, staticMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
 				continue
 			}
+			if cfg.excludesRaw(moduleDir, p) {
+				continue
+			}
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
@@ -767,6 +790,12 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)
 			p := resolvePath(cwd, name)
 			if !ambiguousParent && !relativeAfterChdir && (guardCovered(p, guardRoots, guardMemo) || guardCovered(p, staticRoots, staticMemo) || (!moduleInterior(p) && (ephemeralRoot(p, ephemeralRoots) || ephemeralScratch(p, ephemeralRoots, resolvedModule, scratchMemo))) || ephemera.admits(p, ephemeraMemo) || nullSink(p)) {
+				continue
+			}
+			// The exclusion consult precedes existence-binding as well as
+			// classification: an excluded stat contributes nothing — not
+			// even a revalidatable existence identity.
+			if cfg.excludesRaw(moduleDir, p) {
 				continue
 			}
 			// An external directory's stat binds existence alone — an
@@ -839,16 +868,24 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 		case "chdir":
 			ambiguousParent := ambiguousTraversal(cwd, name, traversalMemo)
 			p := resolvePath(cwd, name)
-			id, reason := classifyPath(moduleDir, p)
-			if reason != "" {
-				addUnverifiable(&m, unverifiableSeen, reason)
-			} else if !cfg.excludes(id) && !pathSeen[id] {
-				pathSeen[id] = true
-				m.Paths = append(m.Paths, pathInput{pathID: id})
-			}
-			addUnverifiable(&m, unverifiableSeen, "working-directory change")
-			if reason == "" && !cfg.excludes(id) && ambiguousParent {
-				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
+			// An excluded chdir target leaves no per-path disposition —
+			// no identity, no classification refusal — but the
+			// working-directory seal below and the cwd tracking are the
+			// chdir's own observation, never the target path's, and stay.
+			if excluded := cfg.excludesRaw(moduleDir, p); excluded {
+				addUnverifiable(&m, unverifiableSeen, "working-directory change")
+			} else {
+				id, reason := classifyPath(moduleDir, p)
+				if reason != "" {
+					addUnverifiable(&m, unverifiableSeen, reason)
+				} else if !cfg.excludes(id) && !pathSeen[id] {
+					pathSeen[id] = true
+					m.Paths = append(m.Paths, pathInput{pathID: id})
+				}
+				addUnverifiable(&m, unverifiableSeen, "working-directory change")
+				if reason == "" && !cfg.excludes(id) && ambiguousParent {
+					addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
+				}
 			}
 			cwd = p
 			cwdChanged = true
