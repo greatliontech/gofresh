@@ -872,6 +872,27 @@ both plans.
       view for cross-platform selections whose witnesses no on-host run
       can grant - what binding/witnessing means there is the chunk's
       charter question.
+- [ ] 99. gofresh: guarded deterministic memoization discharge - a
+      package-level cache mutated only through a get-or-compute idiom
+      (every write path checks-then-fills under a guard: mutex,
+      sync.Once, or sync.Map), whose fill derives the value from the
+      key alone through functions the env-free proof machinery already
+      proves, and from which no cross-key observable escapes (no
+      iteration, no len, no deletion, no rebinding, no writable alias
+      of keys or values) is observationally warm/cold-equivalent: no
+      admitted observation can distinguish a populated cache from an
+      empty one, so its mutated-dynamic-state refusal proves nothing
+      and discharges structurally. The proof rides the existing fact
+      derivation, which already spans module-cache dependency packages
+      (the field class is third-party: pgregory.net/rapid's
+      charClassGens/compiledRegexps/regexpNames/expandedTables memo
+      maps, vouched at chunk 16 as the interim); close-out trims the
+      then-redundant rapid vouches from the tugboat policy and
+      re-measures. The idiom is a pattern with an adversarial
+      complement - a fill pure but unprovably so stays a vouch - so
+      the chunk narrows the vouch surface, never claims to empty it.
+      Sequenced after 98 (same discharge family; 98's is the larger
+      measured mass). Release, then the consumer bumps ride.
 - [x] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
