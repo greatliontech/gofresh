@@ -250,7 +250,10 @@ receives); a write through the carrier, growth or deletion, a send or receive, a
 address capture, or a rebinding is mutation; every other use — escaping the value
 into a call argument, a store, a return, a binding, a method call on it, or a
 type assertion — is mutation-equivalent, because the receiving code may write
-what it was handed. A direct method CALL on a statically-typed non-interface
+what it was handed. An address capture reaches the variable's own cell or a
+chain into it; taking the address of a composite literal captures the fresh
+object alone, its element references remaining escapes, while a capture
+nested inside the literal marks through its own shape. A direct method CALL on a statically-typed non-interface
 carrier is judged by the method's own receiver-effect proof instead: the
 declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, values read
@@ -328,24 +331,40 @@ only by source audit. One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
-package — is a provably-immutable audited construction (`errors.New`; a direct
-`reflect.TypeOf` call, its result the runtime's canonical type descriptor,
-never written after construction — the direct call only, a chained method
-result staying non-audited, and the call's argument keeping its own pricing;
+package — is a provably-immutable audited construction (`errors.New`; any
+value of static type `reflect.Type` whatever expression produced it — the
+interface is sealed by unexported methods, so its every referent is the
+runtime's canonical type descriptor, never written after construction, a
+`reflect.TypeOf` result, a chained view method's result, and a rebind from
+another descriptor alike, the producing expression's operands keeping their
+own pricing at the use walks;
 a direct `fmt.Errorf` call whose every argument is audited — a constant, a
-nested audited construction, or a reference to a sibling package-level
-variable itself object-closed, the chained admission recorded as a dependency
-edge and falling with the sibling's closure at composition whatever the
+nested audited construction, or a variable reference as below, the chained
+admission recorded as a dependency
+edge and falling with the referent's closure at composition whatever the
 declaration or store order, any other argument shape refusing fail-closed, the
 judgment structural over all arguments and never a reading of the format
 string; a constant-valued expression — a literal, a named constant, a folded
 expression — whose boxed basic-kind value carries no mutable reach at all, so
-no holder of the stored value can write through it;
+no holder of the stored value can write through it; a reference to a
+package-level interface-typed variable — sibling or imported, a bare
+identifier or a qualified selector, resolved semantically by the type checker
+(a dot-imported name resolves to its one object; no textual ambiguity
+survives type checking) — itself object-closed, the re-export idiom's shape,
+recorded as a dependency edge falling with the referent's closure at
+composition, a referent no fact declares (a module-less package's variable,
+which no audit covers) refusing fail-closed there;
 the nil zero value), the initializer included; an init-flow appearance the audit cannot
 attribute — an indirect or range-bound store, an address capture, or a
 non-audited value — breaks the closure from whichever package performs it. No holder of
 an object-closed value can mutate the shared object, so escapes of the value are
-not mutation, while rebinding the variable remains mutation everywhere. The
+not mutation, while rebinding the variable remains mutation everywhere; the
+discharge extends to method calls and method-value binds through the
+variable, because every admissible referent's method set is read-only over
+immutable data by the same source audit (`errorString` and the fmt wrap
+errors' `Error` and `Unwrap`, the runtime type descriptors' view methods), a
+constant-boxed referent dispatches value-receiver copies that cannot reach
+the box, and a nil referent panics before writing. The
 audited-construction set grows only by source audit. An escape never
 discharges by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape

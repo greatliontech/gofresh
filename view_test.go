@@ -7934,15 +7934,18 @@ func TestAuditedPoolingEveryOtherUseKeepsFailClosed(t *testing.T) {
 	}
 }
 
-// A direct reflect.TypeOf call is an audited construction for the
-// object-closed narrowing: its result is the runtime's canonical,
-// immutable type descriptor, so a reflect.Type package var initialized
-// by it stays object-closed and its escapes are not mutation — the
-// canonical type-cache idiom leaves the package closed
+// A value of static type reflect.Type is an audited construction for
+// the object-closed narrowing whatever expression produced it — a
+// direct reflect.TypeOf call or a chained view method alike — because
+// the interface is sealed by unexported methods and every referent is
+// the runtime's canonical, immutable type descriptor: the type-cache
+// idiom leaves the package closed and its escapes are not mutation
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedTypeOfConstructionKeepsObjectClosed(t *testing.T) {
 	for name, source := range map[string]string{
 		"type-cache var escape discharges": "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(bytesType) != nil }\n",
+		"chained view method discharges":   "package view\n\nimport \"reflect\"\n\nvar elemType = reflect.TypeOf([]byte{}).Elem()\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(elemType) != nil }\n",
+		"yaml decoder shape discharges":    "package view\n\nimport \"reflect\"\n\nvar (\n\tstringMapType  = reflect.TypeOf(map[string]any{})\n\tgeneralMapType = reflect.TypeOf(map[any]any{})\n\tifaceType      = generalMapType.Elem()\n)\n\ntype decoder struct{ stringMapType, generalMapType reflect.Type }\n\nfunc F() *decoder {\n\tif ifaceType.String() == \"\" {\n\t\treturn nil\n\t}\n\treturn &decoder{stringMapType: stringMapType, generalMapType: generalMapType}\n}\n",
 		"type-cache block discharges":      "package view\n\nimport \"reflect\"\n\nvar (\n\tbytesType  = reflect.TypeOf([]byte{})\n\tintType    = reflect.TypeOf(int(1))\n\tstringType = reflect.TypeOf(\"\")\n\tstructType = reflect.TypeOf(struct{ n int }{})\n)\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool {\n\treturn use(bytesType) != use(intType) && stringType != nil && structType != nil\n}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -7955,22 +7958,16 @@ func TestAuditedTypeOfConstructionKeepsObjectClosed(t *testing.T) {
 	}
 }
 
-// The reflect.TypeOf admission covers exactly the direct call as a
-// stored construction: rebinding the variable remains mutation
-// everywhere, a chained method result stays non-audited so the store
-// keeps the escape refusal, and the call's argument keeps its own
-// pricing — a package-level carrier handed to TypeOf still refuses
-// (REQ-closure-shared-dynamic-state,
+// The reflect.Type admissions keep their bounds: rebinding the
+// variable remains mutation everywhere, and a construction's argument
+// keeps its own pricing — a package-level carrier handed to TypeOf
+// still refuses (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestAuditedTypeOfConstructionBounds(t *testing.T) {
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"rebinding stays mutation": {
 			source:  "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc F() { bytesType = reflect.TypeOf(\"\") }\n",
 			culprit: "example.com/view.bytesType is mutated",
-		},
-		"chained method result stays non-audited": {
-			source:  "package view\n\nimport \"reflect\"\n\nvar elemType = reflect.TypeOf([]byte{}).Elem()\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(elemType) != nil }\n",
-			culprit: "example.com/view.elemType escapes writable",
 		},
 		"carrier argument keeps its own pricing": {
 			source:  "package view\n\nimport \"reflect\"\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nvar errType = reflect.TypeOf(ErrX)\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(errType) != nil }\n",
@@ -8045,6 +8042,148 @@ func TestAuditedErrorfConstructionBounds(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Taking the address of a composite literal captures the fresh object
+// alone: an object-closed element reference discharges as an escape, a
+// non-closed element keeps the escape refusal (never a spurious
+// mutation), and a capture nested inside the literal still marks
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestCompositeAddressCapturesFreshObjectOnly(t *testing.T) {
+	t.Run("closed element discharges", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\ntype box struct{ err error }\n\nfunc F() *box { return &box{err: E} }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the composite's address is the fresh object's", verdict)
+		}
+	})
+	t.Run("non-closed element keeps the escape refusal", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\ntype box struct{ err error }\n\nfunc F() *box { return &box{err: ErrX} }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.ErrX escapes writable") {
+			t.Fatalf("verdict = %+v, want the escape refusal naming ErrX - an element reference is an escape, never a capture", verdict)
+		}
+	})
+	t.Run("nested capture still marks", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\ntype box struct{ p *error }\n\nfunc F() *box { return &box{p: &E} }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.E is mutated") {
+			t.Fatalf("verdict = %+v, want the capture refusal naming E - a nested address capture reaches the variable's cell", verdict)
+		}
+	})
+}
+
+// The object-closed discharge extends to method calls and method-value
+// binds through the variable: every admissible referent's method set is
+// read-only over immutable data by the same source audit, so the
+// canonical sentinel uses stay verifiable, while a non-closed variable's
+// method call keeps the fail-closed escape
+// (REQ-closure-shared-dynamic-state).
+func TestObjectClosedMethodCallDischarges(t *testing.T) {
+	for name, source := range map[string]string{
+		"errors.New var method call":   "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\nfunc F() string { return E.Error() }\n",
+		"wrapped var method call":      "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"x\")\n\nvar Wrapped = fmt.Errorf(\"%w: y\", Base)\n\nfunc F() string { return Wrapped.Error() }\n",
+		"constant-boxed method call":   "package view\n\ntype code int\n\nfunc (c code) Error() string { return \"code\" }\n\nconst c0 code = 1\n\nvar ErrX error = c0\n\nfunc F() string { return ErrX.Error() }\n",
+		"method value bind discharges": "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\nfunc F() func() string { return E.Error }\n",
+		"nil referent discharges":      "package view\n\nvar E error = nil\n\nfunc F() string { return E.Error() }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - a read-only method use of a closed referent downgraded", verdict)
+			}
+		})
+	}
+	t.Run("non-closed var method call keeps the mark", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() string { return ErrX.Error() }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.ErrX escapes writable") {
+			t.Fatalf("verdict = %+v, want the fail-closed refusal naming ErrX", verdict)
+		}
+	})
+	t.Run("non-closed var method value bind keeps the mark", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() func() string { return ErrX.Error }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.ErrX escapes writable") {
+			t.Fatalf("verdict = %+v, want the fail-closed refusal naming ErrX - the bound value retains the writable receiver", verdict)
+		}
+	})
+}
+
+// A re-export — a package-level interface variable bound from an
+// imported package's variable — chains the object-closed judgment
+// across packages: closed origin, closed re-export; a non-closed or
+// mutated origin fells the re-export; and a referent no fact declares
+// (a standard-library variable) refuses fail-closed
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestObjectClosedReExportCrossesPackages(t *testing.T) {
+	check := func(t *testing.T, files map[string]string) Verdict {
+		t.Helper()
+		dir := writeModuleTree(t, files)
+		return captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+	}
+	t.Run("closed origin closes the re-export", func(t *testing.T) {
+		verdict := check(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"wal/wal.go": "package wal\n\nimport \"errors\"\n\nvar ErrSealed = errors.New(\"wal: sealed\")\n",
+			"view.go":    "package view\n\nimport \"example.com/view/wal\"\n\nvar ErrSealed = wal.ErrSealed\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrSealed) != nil }\n",
+		})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the re-export chains the closed origin", verdict)
+		}
+	})
+	t.Run("transitive re-export chains the closed origin", func(t *testing.T) {
+		verdict := check(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"wal/wal.go": "package wal\n\nimport \"errors\"\n\nvar ErrSealed = errors.New(\"wal: sealed\")\n",
+			"mid/mid.go": "package mid\n\nimport \"example.com/view/wal\"\n\nvar ErrSealed = wal.ErrSealed\n",
+			"view.go":    "package view\n\nimport \"example.com/view/mid\"\n\nvar ErrSealed = mid.ErrSealed\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrSealed) != nil }\n",
+		})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the chain closes transitively", verdict)
+		}
+	})
+	t.Run("felled origin reaches the transitive re-export", func(t *testing.T) {
+		verdict := check(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"wal/wal.go": "package wal\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrSealed error = &impl{}\n",
+			"mid/mid.go": "package mid\n\nimport \"example.com/view/wal\"\n\nvar ErrSealed = wal.ErrSealed\n",
+			"view.go":    "package view\n\nimport \"example.com/view/mid\"\n\nvar ErrSealed = mid.ErrSealed\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrSealed) != nil }\n",
+		})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.ErrSealed escapes writable") {
+			t.Fatalf("verdict = %+v, want the refusal naming the outermost re-export - the break propagates the whole chain", verdict)
+		}
+	})
+	t.Run("non-closed origin fells the re-export", func(t *testing.T) {
+		verdict := check(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"wal/wal.go": "package wal\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrSealed error = &impl{}\n",
+			"view.go":    "package view\n\nimport \"example.com/view/wal\"\n\nvar ErrSealed = wal.ErrSealed\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrSealed) != nil }\n",
+		})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.ErrSealed escapes writable") {
+			t.Fatalf("verdict = %+v, want the refusal naming the re-export - the cross-package edge fell with the origin", verdict)
+		}
+	})
+	t.Run("mutated origin fells the re-export", func(t *testing.T) {
+		verdict := check(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"wal/wal.go": "package wal\n\nimport \"errors\"\n\nvar ErrSealed = errors.New(\"wal: sealed\")\n\nfunc Reseal() { ErrSealed = errors.New(\"resealed\") }\n",
+			"view.go":    "package view\n\nimport \"example.com/view/wal\"\n\nvar ErrSealed = wal.ErrSealed\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrSealed) != nil }\n",
+		})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "is mutated") {
+			t.Fatalf("verdict = %+v, want the mutation refusal - marks cross the linked pair", verdict)
+		}
+	})
+	t.Run("undeclared referent refuses", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nimport \"io\"\n\nvar E = io.EOF\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(E) != nil }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.E escapes writable") {
+			t.Fatalf("verdict = %+v, want the fail-closed refusal - a module-less referent has no audited closure", verdict)
+		}
+	})
 }
 
 // A package with assembly sources stays downgraded through the closure

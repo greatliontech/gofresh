@@ -83,8 +83,14 @@ func DisableMemos() { closure.DisableMemos() }
 // break-propagated at composition), the constant-valued audited
 // construction (a boxed basic-kind value carries no mutable reach; the
 // syscall.Errno sentinel shape), and the attestation-gated audited
-// mapping set discharge (golang.org/x/sys/unix.mapper).
-const DynamicStateStrategy = "gofresh/dynamic-state@26"
+// mapping set discharge (golang.org/x/sys/unix.mapper). @27 makes the
+// address of a composite literal capture the fresh object alone (its
+// element references stay escapes), admits any static reflect.Type
+// value as an audited construction (the interface is sealed by
+// unexported methods, every referent runtime-canonical), and extends
+// the object-closed reference chain across packages (the re-export
+// idiom), an undeclared referent refusing fail-closed.
+const DynamicStateStrategy = "gofresh/dynamic-state@27"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

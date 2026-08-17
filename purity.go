@@ -1540,7 +1540,18 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				markTargets(n.Chan)
 			case *ast.UnaryExpr:
 				if n.Op == token.AND || n.Op == token.ARROW {
-					markTargets(n.X)
+					// Taking the address of a composite literal captures
+					// the fresh object alone — no existing variable's cell
+					// is reachable through the pointer. The literal's
+					// element references stay escapes (the fresh object's
+					// holder may write what it was handed), judged by the
+					// ident arm exactly as an un-addressed composite's;
+					// a nested address capture inside the literal marks
+					// through its own visit
+					// (REQ-closure-shared-dynamic-state).
+					if _, composite := unparenExpr(n.X).(*ast.CompositeLit); !composite || n.Op == token.ARROW {
+						markTargets(n.X)
+					}
 				}
 			case *ast.IndexExpr:
 				// The discharge holds only when the produced element is
@@ -6635,27 +6646,44 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		return variable, isInterface
 	}
 	// auditedImmutable judges a stored value; storeDeps, when non-nil,
-	// collects the sibling object-closed variables the admission is
-	// conditional on. auditedArgument judges a value in a retained
-	// argument position, where a sibling object-closed variable
-	// reference additionally admits as a dependency edge.
+	// collects the object-closed variables the admission is conditional
+	// on. auditedArgument judges a value in a retained argument or
+	// store position, where a reference to another package-level
+	// interface variable additionally admits as a dependency edge.
 	var auditedImmutable func(expr ast.Expr, storeDeps map[string]bool) bool
 	auditedArgument := func(expr ast.Expr, storeDeps map[string]bool) bool {
 		if auditedImmutable(expr, storeDeps) {
 			return true
 		}
-		// A reference to a sibling interface-typed package-level
-		// variable chains the judgment: the construction is closed
-		// exactly when the sibling stays object-closed, recorded as a
-		// dependency edge and resolved at composition against the
-		// unioned break set. Same-package bare identifiers only — a
-		// qualified or aliased reference keeps the fail-closed refusal
+		// A reference to a package-level interface-typed variable —
+		// sibling or imported, a bare identifier or a pkg-qualified
+		// selector, resolved semantically by the type checker (a
+		// dot-imported name resolves to its one object; no textual
+		// ambiguity survives type checking) — chains the judgment: the
+		// construction is closed exactly when the referent stays
+		// object-closed, recorded as a dependency edge and resolved at
+		// composition against every fact's break set, an undeclared
+		// referent (a module-less package's variable, which no fact
+		// audits) refusing fail-closed there
 		// (REQ-closure-shared-dynamic-state).
-		if ident, ok := expr.(*ast.Ident); ok && storeDeps != nil {
-			if obj, ok := p.TypesInfo.Uses[ident]; ok {
-				if variable, ok := interfacePackageVar(obj); ok && variable.Pkg() == p.Types {
-					storeDeps[dynamicVarKey(variable)] = true
-					return true
+		if storeDeps != nil {
+			var target *ast.Ident
+			switch e := unparenExpr(expr).(type) {
+			case *ast.Ident:
+				target = e
+			case *ast.SelectorExpr:
+				if x, ok := e.X.(*ast.Ident); ok {
+					if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+						target = e.Sel
+					}
+				}
+			}
+			if target != nil {
+				if obj, ok := p.TypesInfo.Uses[target]; ok {
+					if variable, ok := interfacePackageVar(obj); ok {
+						storeDeps[dynamicVarKey(variable)] = true
+						return true
+					}
 				}
 			}
 		}
@@ -6672,6 +6700,22 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Value != nil {
 			return true
 		}
+		// A value of static type reflect.Type is runtime-canonical
+		// whatever expression produced it: the interface is sealed by
+		// unexported methods, so its every referent is the runtime's
+		// immutable type descriptor (or nil) — reflect.TypeOf results,
+		// chained view methods (Elem, Key, ...), and rebinds from other
+		// descriptors alike. The object-closed mirror of the effect
+		// tiers' audited-immutable ruling; the producing expression's
+		// own operands keep their own pricing at the use walks
+		// (REQ-closure-shared-dynamic-state).
+		if t := p.TypesInfo.TypeOf(expr); t != nil {
+			if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
+				if named.Obj().Pkg().Path() == "reflect" && named.Obj().Name() == "Type" {
+					return true
+				}
+			}
+		}
 		switch expr := expr.(type) {
 		case *ast.Ident:
 			return expr.Name == "nil" && p.TypesInfo.Uses[expr] == types.Universe.Lookup("nil")
@@ -6686,17 +6730,6 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			}
 			if fn.Pkg().Path() == "errors" && fn.Name() == "New" {
 				return true
-			}
-			// A direct reflect.TypeOf call constructs nothing: its result
-			// is the runtime's canonical, immutable type descriptor, never
-			// written after construction, so no holder of the stored value
-			// can mutate the shared object. The admission is the direct
-			// call only — a chained method result (Elem, Key, ...) stays
-			// unaudited — and the argument keeps its own pricing at the
-			// init-flow call walks (REQ-closure-shared-dynamic-state).
-			if fn.Pkg().Path() == "reflect" && fn.Name() == "TypeOf" {
-				sig, ok := fn.Type().(*types.Signature)
-				return ok && sig.Recv() == nil
 			}
 			// A direct fmt.Errorf call retains at most its argument
 			// objects (the %w-wrapped errors; every other argument is
@@ -6744,7 +6777,12 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		if variable, ok := interfacePackageVar(obj); ok {
 			key := dynamicVarKey(variable)
 			storeDeps := map[string]bool{}
-			if value == nil || !auditedImmutable(value, storeDeps) {
+			// The store value judges under the argument shapes: audited
+			// constructions plus references to other package-level
+			// interface variables (the re-export idiom), the latter as
+			// dependency edges falling with the referent's closure
+			// (REQ-closure-shared-dynamic-state).
+			if value == nil || !auditedArgument(value, storeDeps) {
 				failed[key] = true
 				return
 			}
@@ -6822,8 +6860,16 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			case *ast.FuncLit:
 				return false
 			case *ast.UnaryExpr:
+				// The address of a composite literal is the fresh
+				// object's — it licenses stores into that object only,
+				// never an unattributable store into a variable its
+				// elements reference; a nested capture inside the
+				// literal breaks through its own visit
+				// (REQ-closure-shared-dynamic-state).
 				if n.Op == token.AND {
-					failTargets(n.X)
+					if _, composite := unparenExpr(n.X).(*ast.CompositeLit); !composite {
+						failTargets(n.X)
+					}
 				}
 			}
 			return true
@@ -6901,8 +6947,14 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 					case *ast.UnaryExpr:
 						if n.Op == token.AND {
 							// An init-flow address capture licenses later
-							// unattributable stores - fail-close.
-							failTargets(n.X)
+							// unattributable stores - fail-close. A
+							// composite literal's address is the fresh
+							// object's alone; nested captures break
+							// through their own visit
+							// (REQ-closure-shared-dynamic-state).
+							if _, composite := unparenExpr(n.X).(*ast.CompositeLit); !composite {
+								failTargets(n.X)
+							}
 						}
 					case *ast.RangeStmt:
 						// A range binding is an init store of a value that

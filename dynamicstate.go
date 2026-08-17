@@ -1395,6 +1395,7 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 		malformed = func(dynamicStateFact) {}
 	}
 	envFreeDeclared := map[string]bool{}
+	declaredKeys := map[string]bool{}
 	opaqueDeps := map[string]map[string]bool{}
 	paramDeps := map[string]map[string]bool{}
 	retentionDeps := map[string]map[string]bool{}
@@ -1439,6 +1440,7 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				opaque[key] = true
 			}
 			for _, key := range fact.Declares {
+				declaredKeys[key] = true
 				if !opaque[key] {
 					r.notOpaque[key] = true
 				}
@@ -1535,7 +1537,10 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				continue
 			}
 			for dep := range edges {
-				if r.notOpaque[dep] {
+				// An undeclared referent - a module-less package's
+				// variable, which no fact audits - refuses fail-closed
+				// exactly as a broken one (REQ-closure-shared-dynamic-state).
+				if r.notOpaque[dep] || !declaredKeys[dep] {
 					r.notOpaque[own] = true
 					changed = true
 					break
