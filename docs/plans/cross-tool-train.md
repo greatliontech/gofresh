@@ -786,7 +786,7 @@ both plans.
       oracle views mirroring stipulator's build-selection resolution,
       the capability boundary the chunk-84 audit recorded; doc deletes
       at close.
-- [ ] 89. gomutant: mutation-class extensions (gomutant docs/issues:
+- [x] 89. gomutant: mutation-class extensions (gomutant docs/issues:
       structural-mutation-class, integration-mutation-recipes) -
       structural mutants for analyzer-shaped oracles and recipe-shaped
       classes for generator drift, parser guards, and resolver seams;
