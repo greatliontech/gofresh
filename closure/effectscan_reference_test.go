@@ -25,7 +25,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	if strings.Contains(string(content), "//go:wasmimport") {
 		return "reaches go:wasmimport", nil
 	}
-	if strings.Contains(string(content), "//go:linkname") {
+	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(string(content)) {
 		return "reaches go:linkname (opaque linkage)", nil
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.ImportsOnly)
@@ -166,7 +166,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		effect.unrefinable = true
 		scan.add(effect)
 	}
-	if strings.Contains(string(content), "//go:linkname") {
+	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(string(content)) {
 		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)

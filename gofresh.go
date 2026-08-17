@@ -100,7 +100,12 @@ func DisableMemos() { closure.DisableMemos() }
 // execute (attributed-RTA-proven, fail-closed on open-world widening
 // and on every unattributed mark) is init-determined state covered by
 // the closure hash, and the downgrade lifts for that subject alone.
-const DynamicStateStrategy = "gofresh/dynamic-state@29"
+// @30 adds the generated-proto descriptor-cluster discharge
+// (protoc-generated files' variables under the attestation, the
+// directive's two-leg trust model) and, at the effect-scan floor, the
+// audited linkname-target set (audited-only linkname files drop
+// exactly the opaque-linkage effect).
+const DynamicStateStrategy = "gofresh/dynamic-state@30"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

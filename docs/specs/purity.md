@@ -129,7 +129,8 @@ unverifiable caller assertion and records under exactly this requirement's
 discipline: the variables whose discharge the attestation
 carried — a pool carrier's admitted `Get`/`Put`, the audited mapping set's
 named bookkeeping, a `//gofresh:single-subject`-directed subject-own
-variable, a culprit scoped out by the per-subject reachability judgment —
+variable, a generated-proto descriptor-cluster variable, a culprit scoped
+out by the per-subject reachability judgment —
 reachable from the subject, ride that subject's evidence
 canonically
 (sorted identities), an inert attestation (no attested discharge reachable from

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -8381,6 +8382,187 @@ func TestReachabilityScopedDischarge(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade naming oracle - TestMain runs in the subject's process", verdict)
 		}
 	})
+}
+
+// The audited linkname-target floor names the true reason: a file
+// whose every linkname names an audited target no longer masks the
+// closure's remaining effects behind the opaque-linkage rank, while an
+// unaudited linkname keeps the opaque floor
+// (REQ-closure-blindspot).
+func TestAuditedLinknameFloorNamesTrueReason(t *testing.T) {
+	t.Run("audited linkname unmasks the remaining effects", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nimport \"unsafe\"\n\n//go:linkname runtimeGetAuxv runtime.getAuxv\nfunc runtimeGetAuxv() []uintptr\n\nfunc F() int {\n\tp := unsafe.Pointer(&struct{}{})\n\t_ = p\n\treturn len(runtimeGetAuxv())\n}\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || strings.Contains(verdict.Reason, "go:linkname") {
+			t.Fatalf("verdict = %+v, want the remaining effects named without the opaque-linkage mask", verdict)
+		}
+	})
+	t.Run("unaudited linkname keeps the opaque floor", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nimport _ \"unsafe\"\n\n//go:linkname runtimeRand runtime.rand\nfunc runtimeRand() uint64\n\nfunc F() uint64 { return runtimeRand() }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reaches go:linkname (opaque linkage)") {
+			t.Fatalf("verdict = %+v, want the opaque-linkage floor", verdict)
+		}
+	})
+}
+
+// The generated-proto descriptor cluster: variables declared in a
+// protoc-gen-go generated file discharge under the single-subject
+// attestation with the audited pinned protobuf runtime (header +
+// attestation, the directive's two-leg model), the discharge on
+// evidence; without the attestation, with an unaudited runtime
+// version, under a sibling generator's header (protoc-gen-gogo — an
+// unaudited runtime), and for hand-written sibling variables, every
+// mark stands (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
+func TestGeneratedProtoClusterDischarges(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMODCACHE", modCache)
+	t.Cleanup(func() {
+		clean := exec.Command("go", "clean", "-modcache")
+		clean.Env = append(os.Environ(), "GOMODCACHE="+modCache)
+		_ = clean.Run()
+		os.RemoveAll(modCache)
+	})
+	proxy := t.TempDir()
+	stub := map[string]string{
+		"go.mod":                    "module google.golang.org/protobuf\n\ngo 1.26\n",
+		"runtime/protoimpl/impl.go": "package protoimpl\n\ntype TypeBuilder struct{ N int }\n",
+	}
+	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.11", stub)
+	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.12", stub)
+	writeFileProxyModule(t, proxy, "google.golang.org/grpc", "v1.82.1", map[string]string{
+		"go.mod":         "module google.golang.org/grpc\n\ngo 1.26\n",
+		"codes/codes.go": "package codes\n\ntype Code uint32\n",
+	})
+	t.Setenv("GOPROXY", "file://"+proxy)
+	t.Setenv("GOSUMDB", "off")
+
+	genFile := func(header string) string {
+		return header + "\n// versions:\n// \tprotoc-gen-go v1.36.11\n\npackage view\n\nimport _ \"google.golang.org/protobuf/runtime/protoimpl\"\n\nvar File_x_proto any\n\nvar file_x_proto_msgTypes = []func(){func() {}}\n\nfunc file_x_proto_init() {\n\tif File_x_proto != nil {\n\t\treturn\n\t}\n\tFile_x_proto = struct{}{}\n}\n\nfunc init() { file_x_proto_init() }\n"
+	}
+	ctx := context.Background()
+	capture := func(t *testing.T, version, header, symbol string, opts ...Option) (Fingerprint, Verdict) {
+		t.Helper()
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":    "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/protobuf " + version + "\n",
+			"gen.pb.go": genFile(header),
+			"view.go":   "package view\n\nfunc F() *func() { return &file_x_proto_msgTypes[0] }\n\nvar handHooks = map[string]func(){}\n\nfunc F2() int {\n\thandHooks[\"k\"] = func() {}\n\treturn len(handHooks)\n}\n",
+		})
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = dir
+		tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		if out, err := tidy.CombinedOutput(); err != nil {
+			t.Fatalf("go mod tidy: %v\n%s", err, out)
+		}
+		processFactCache = sync.Map{}
+		subject := Subject{Package: "example.com/view", Symbol: symbol}
+		engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fingerprint, verdict
+	}
+	const goHeader = "// Code generated by protoc-gen-go. DO NOT EDIT."
+
+	fingerprint, verdict := capture(t, "v1.36.11", goHeader, "F", WithSingleSubjectExecution())
+	if verdict.Status != Valid {
+		t.Fatalf("attested verdict = %+v, want Valid - the generated cluster discharges under the audited runtime", verdict)
+	}
+	if !strings.Contains(fingerprint.SingleSubjectDischarges, "example.com/view.file_x_proto_msgTypes") {
+		t.Fatalf("evidence = %q, want the discharged generated variable recorded", fingerprint.SingleSubjectDischarges)
+	}
+
+	_, unattested := capture(t, "v1.36.11", goHeader, "F")
+	if unattested.Status != Unverifiable || !strings.Contains(unattested.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
+		t.Fatalf("unattested verdict = %+v, want the downgrade - the header alone confers nothing", unattested)
+	}
+
+	_, unaudited := capture(t, "v1.36.12", goHeader, "F", WithSingleSubjectExecution())
+	if unaudited.Status != Unverifiable || !strings.Contains(unaudited.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
+		t.Fatalf("unaudited-runtime verdict = %+v, want the downgrade - no version inherits the audit", unaudited)
+	}
+
+	_, gogo := capture(t, "v1.36.11", "// Code generated by protoc-gen-gogo. DO NOT EDIT.", "F", WithSingleSubjectExecution())
+	if gogo.Status != Unverifiable || !strings.Contains(gogo.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
+		t.Fatalf("gogo-header verdict = %+v, want the downgrade - a sibling generator's header never matches", gogo)
+	}
+
+	// The second audited generator: a protoc-gen-go-grpc header
+	// discharges under the audited pinned grpc runtime.
+	grpcDir := writeModuleTree(t, map[string]string{
+		"go.mod":         "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/grpc v1.82.1\n",
+		"gen_grpc.pb.go": "// Code generated by protoc-gen-go-grpc. DO NOT EDIT.\n\npackage view\n\nimport _ \"google.golang.org/grpc/codes\"\n\nvar Svc_ServiceDesc = []func(){func() {}}\n",
+		"view.go":        "package view\n\nfunc F() *func() { return &Svc_ServiceDesc[0] }\n",
+	})
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = grpcDir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	processFactCache = sync.Map{}
+	grpcSubject := Subject{Package: "example.com/view", Symbol: "F"}
+	grpcEngine, err := New(WithDir(grpcDir), WithSingleSubjectExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcView, err := grpcEngine.NewView(ctx, []Subject{grpcSubject}, grpcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcFP, err := grpcView.Capture(ctx, grpcSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcVerdict, err := grpcView.Check(ctx, grpcFP, grpcSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grpcVerdict.Status != Valid || !strings.Contains(grpcFP.SingleSubjectDischarges, "example.com/view.Svc_ServiceDesc") {
+		t.Fatalf("go-grpc verdict = %+v evidence = %q, want Valid with the discharge recorded", grpcVerdict, grpcFP.SingleSubjectDischarges)
+	}
+
+	_, hand := capture(t, "v1.36.11", goHeader, "F2", WithSingleSubjectExecution())
+	if hand.Status != Unverifiable || !strings.Contains(hand.Reason, "example.com/view.handHooks is mutated") {
+		t.Fatalf("hand-written verdict = %+v, want the downgrade - the discharge covers generated files only", hand)
+	}
+}
+
+// generatedProtoHeader is token-bound over the generator name: the
+// canonical protoc-gen-go marker matches with a period or whitespace
+// after the token, and every prefix-sharing sibling generator refuses
+// (REQ-closure-shared-dynamic-state).
+func TestGeneratedProtoHeaderTokenBound(t *testing.T) {
+	for text, want := range map[string]string{
+		"// Code generated by protoc-gen-go. DO NOT EDIT.":             "protoc-gen-go",
+		"// Code generated by protoc-gen-go v1.34.1. DO NOT EDIT.":     "protoc-gen-go",
+		"// Code generated by protoc-gen-go-grpc. DO NOT EDIT.":        "protoc-gen-go-grpc",
+		"// Code generated by protoc-gen-go-grpc v1.5.1. DO NOT EDIT.": "protoc-gen-go-grpc",
+		"// Code generated by protoc-gen-gogo. DO NOT EDIT.":           "",
+		"// Code generated by protoc-gen-govalidators. DO NOT EDIT.":   "",
+		"// Code generated by protoc-gen-go. KEEP EDITING.":            "",
+		"// Code generated by protoc-gen-go":                           "",
+	} {
+		if got := generatedProtoHeader(text); got != want {
+			t.Errorf("generatedProtoHeader(%q) = %q, want %q", text, got, want)
+		}
+	}
 }
 
 // A package with assembly sources stays downgraded through the closure

@@ -382,7 +382,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 	}
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
-	hasLinkname := strings.Contains(text, "//go:linkname")
+	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(text)
 	// The walks read identifiers by name and imports from file.Imports;
 	// object resolution is unused, so skipping it saves its allocations.
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
@@ -850,6 +850,51 @@ func auditedRuntimeTypeSymbol(pkgPath, name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// auditedLinknameTargets is the audited linkname-target set: standard
+// symbols whose pull-style linkname is a read-only trampoline, each
+// audited at the source of its version-pinned importer
+// (golang.org/x/sys/unix on linux) — runtime.getAuxv (a read-only
+// accessor of the runtime's startup-captured auxiliary vector),
+// runtime.vgetrandom (the kernel entropy read the Getrandom surface
+// already classifies), and syscall.prlimit (a standard syscall the
+// calling surface's own syscall classifications already carry). The
+// trampoline adds no effect its file's remaining classifications do
+// not price, so an audited-only linkname file drops exactly the
+// OPAQUE-linkage effect and keeps every other effect it carries —
+// REQ-closure-blindspot's "resolved" disposition applied at the
+// tier-1 floor, per target and by source audit only.
+var auditedLinknameTargets = map[string]bool{
+	"runtime.getAuxv":    true,
+	"runtime.vgetrandom": true,
+	"syscall.prlimit":    true,
+}
+
+// auditedLinknamesOnly reports whether every //go:linkname directive in
+// the file is the two-argument pull form naming an audited target: any
+// one-argument form (an export marker whose counterpart lives in
+// assembly or another package), any unparsable directive, and any
+// unaudited target keeps the opaque-linkage floor, fail-closed.
+func auditedLinknamesOnly(text string) bool {
+	rest := text
+	for {
+		i := strings.Index(rest, "//go:linkname")
+		if i < 0 {
+			return true
+		}
+		line := rest[i:]
+		if j := strings.IndexByte(line, '\n'); j >= 0 {
+			rest = line[j:]
+			line = line[:j]
+		} else {
+			rest = ""
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, "//go:linkname"))
+		if len(fields) != 2 || !auditedLinknameTargets[fields[1]] {
+			return false
+		}
 	}
 }
 

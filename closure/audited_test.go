@@ -529,3 +529,35 @@ func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
 		}
 	}
 }
+
+// The audited linkname-target floor: a file whose every //go:linkname
+// is the two-argument pull form naming an audited target drops exactly
+// the opaque-linkage effect; one-argument forms, unaudited targets, and
+// mixed files keep the fail-closed floor
+// (REQ-closure-blindspot's resolved disposition at the file-scan floor).
+func TestAuditedLinknameFloorBounds(t *testing.T) {
+	for name, tc := range map[string]struct {
+		text string
+		want bool
+	}{
+		"audited pull form": {"//go:linkname runtime_getAuxv runtime.getAuxv\n", true},
+		"all three audited": {"//go:linkname a runtime.getAuxv\n//go:linkname b runtime.vgetrandom\n//go:linkname c syscall.prlimit\n", true},
+		"no linkname":       {"package x\n", true},
+		"one-argument form": {"//go:linkname exported\n", false},
+		"unaudited target":  {"//go:linkname a runtime.rand\n", false},
+		"mixed":             {"//go:linkname a runtime.getAuxv\n//go:linkname b runtime.rand\n", false},
+		"unparsable":        {"//go:linkname\n", false},
+		// Text-scan occurrences outside real directives stay fail-safe:
+		// a string literal's closing quote and a block comment's
+		// terminator stick to the parsed target token, so neither can
+		// match an audited target — the floor is kept (a spurious
+		// floor, never a lost one).
+		"string literal unaudited": {"var s = \"//go:linkname a runtime.rand\"\n", false},
+		"block comment unaudited":  {"/* //go:linkname a runtime.rand */\n", false},
+		"string literal audited":   {"var s = \"//go:linkname a runtime.getAuxv\"\n", false},
+	} {
+		if got := auditedLinknamesOnly(tc.text); got != tc.want {
+			t.Errorf("%s: auditedLinknamesOnly = %v, want %v", name, got, tc.want)
+		}
+	}
+}
