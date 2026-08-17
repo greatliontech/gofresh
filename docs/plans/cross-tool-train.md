@@ -933,6 +933,27 @@ both plans.
       as the interim) and the in-tree sentinel classes. Coordinates
       with the audited-pooling-set owner's line of work before
       touching the discharge. Release, then the consumer bumps ride.
+- [ ] 102. gofresh: per-subject sliced closures - Fingerprint gains
+      SlicedClosure, a declaration-level hash over the subject's
+      tier-2 attributed-reachable set (subjectFunctions + startup
+      provenance + the reference graph's consts/types/vars + reached
+      embeds, pew spec 7.1 semantics), derived from the existing
+      attribution machinery (closure/attribution.go) - hashing decl
+      source spans plus the file-level ambient context (build
+      constraints, embed directives) of files carrying reached
+      declarations; any subject attribution cannot bound WIDENS to
+      the maximal hash, the sound coarser identity, so slice-equal is
+      never claimable where reachability is not proven. Contract:
+      slice is a subset of closure - closure-equal implies
+      slice-equal - which is what lets consumers treat closure
+      equality as a sufficient same-code condition at any age.
+      Consumer: pew records pew-slice per arm; the noise-floor
+      lineage (chunk 15) keys on it, classifying
+      unreached-declaration commits in the measured package - the
+      dominant field class of false regression flags - as layout-only
+      neighbors. Sequenced inside 15: the floor's spec is written to
+      slice semantics and lands against this primitive, not an
+      interim. Release, then the pew bump rides.
 - [x] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
