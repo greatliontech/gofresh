@@ -180,8 +180,8 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@28" {
-		t.Fatalf("DynamicStateStrategy = %q, want single-subject-directive and audited-memoization fact semantics", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@29" {
+		t.Fatalf("DynamicStateStrategy = %q, want reachability-scoped judgment semantics", DynamicStateStrategy)
 	}
 }
 

@@ -118,7 +118,19 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		return nil, nil, err
 	}
 	scan, err := scanSubjectsFromLoaded(load.Packages(), state, pkgPaths...)
-	return scan, load, err
+	if err != nil {
+		return nil, nil, err
+	}
+	if singleSubject {
+		// The attestation-gated reachability scoping: per downgraded
+		// subject, a culprit whose every marking site is provably
+		// outside the subject's rooted flow discharges — no proof, no
+		// discharge (REQ-closure-shared-dynamic-state).
+		if err := dischargeUnreachableCulprits(hasher, state, scan); err != nil {
+			return nil, nil, err
+		}
+	}
+	return scan, load, nil
 }
 
 // subjectScan is one observation pass's subject-walk result: enumeration,
@@ -1768,6 +1780,68 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
+				methodKey := ""
+				if decl.Recv != nil && decl.Name != nil && attributed != nil && decl.Body != nil && p.Types != nil {
+					// The key derives from the SEMANTIC receiver — the
+					// method-fact spelling over the unaliased defined
+					// type — never the written (possibly alias) receiver
+					// name: the rooted-flow inventory keys the same way,
+					// and a spelling mismatch would let a rooted marking
+					// site discharge (REQ-closure-shared-dynamic-state).
+					if fn, ok := p.TypesInfo.Defs[decl.Name].(*types.Func); ok && fn != nil {
+						if key := methodFactKey(fn); !strings.Contains(key, "\x00.") {
+							methodKey = key
+						}
+					}
+				}
+				if methodKey != "" {
+					// A method's carrier uses attribute to it under the
+					// type-qualified key ("pkg\x00Type.Method", the
+					// method-fact spelling): a method is never init flow,
+					// so composition promotes the marks unconditionally —
+					// the same final marks the immediate maps produced —
+					// while the per-subject reachability scoping gains
+					// the site. Literals and go statements inside stay
+					// program code with unattributed (never dischargeable)
+					// marks (REQ-closure-shared-dynamic-state).
+					fnKey := methodKey
+					interiors := map[ast.Node]bool{}
+					ast.Inspect(decl.Body, func(n ast.Node) bool {
+						switch n := n.(type) {
+						case *ast.FuncLit:
+							if n.Body != nil {
+								walkBody(n.Body)
+								interiors[n] = true
+							}
+							return false
+						case *ast.GoStmt:
+							walkBody(n)
+							interiors[n] = true
+							return false
+						}
+						return true
+					})
+					localMutated, localEscaped := map[string]bool{}, map[string]bool{}
+					localMethods := map[string]map[string]bool{}
+					saveM, saveE, saveMU := mutated, escaped, methodUses
+					mutated, escaped, methodUses = localMutated, localEscaped, localMethods
+					skipInteriors = interiors
+					walkBody(decl.Body)
+					skipInteriors = nil
+					mutated, escaped, methodUses = saveM, saveE, saveMU
+					for key := range localMutated {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key})
+					}
+					for key := range localEscaped {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, escape: true})
+					}
+					for key, methods := range localMethods {
+						for method := range methods {
+							*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, method: method})
+						}
+					}
+					continue
+				}
 				if decl.Recv == nil && decl.Name != nil && attributed != nil && !initOnly[decl.Name.Name] && decl.Name.Name != "init" && decl.Body != nil {
 					// A plain named function's carrier uses attribute to
 					// it: the cross-package fixed point decides at

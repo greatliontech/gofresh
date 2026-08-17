@@ -30,7 +30,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-vouch-recorded"
-  content_hash: "ed29b28959fd7ef8d89800de6371289b4ff39c929bbe4b9f37284981b4028d4c"
+  content_hash: "06b69c28bb378261b5c6031ea6518e9ca4940cfb7e4dcefd9c6643f5617725df"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVouchedFingerprintRecordsDischarge"
   role: BINDING_ROLE_TESTS
@@ -39,7 +39,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-vouch-recorded"
-  content_hash: "ed29b28959fd7ef8d89800de6371289b4ff39c929bbe4b9f37284981b4028d4c"
+  content_hash: "06b69c28bb378261b5c6031ea6518e9ca4940cfb7e4dcefd9c6643f5617725df"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVouchWithdrawalRefusesObservedServe"
   role: BINDING_ROLE_TESTS
@@ -57,7 +57,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-vouch-recorded"
-  content_hash: "ed29b28959fd7ef8d89800de6371289b4ff39c929bbe4b9f37284981b4028d4c"
+  content_hash: "06b69c28bb378261b5c6031ea6518e9ca4940cfb7e4dcefd9c6643f5617725df"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVouchDischargesPinnedCulprit"
   role: BINDING_ROLE_TESTS
@@ -66,7 +66,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-vouch-recorded"
-  content_hash: "ed29b28959fd7ef8d89800de6371289b4ff39c929bbe4b9f37284981b4028d4c"
+  content_hash: "06b69c28bb378261b5c6031ea6518e9ca4940cfb7e4dcefd9c6643f5617725df"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVouchConfersNothingOnMutableLocalState"
   role: BINDING_ROLE_TESTS

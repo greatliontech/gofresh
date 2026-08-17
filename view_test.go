@@ -8193,9 +8193,13 @@ func TestObjectClosedReExportCrossesPackages(t *testing.T) {
 // subject's evidence; either leg alone confers nothing
 // (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
 func TestSingleSubjectDirectiveDischarges(t *testing.T) {
-	directed := "package view\n\n//gofresh:single-subject\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
-	undirected := "package view\n\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
-	blockDirected := "package view\n\nvar (\n\t//gofresh:single-subject\n\tframeAccounting func(int)\n)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool { return frameAccounting == nil }\n"
+	// The arming call is rooted in the subject: the directive's
+	// remaining role after the reachability scoping is exactly
+	// rooted-but-subject-own state (an unrooted armer discharges by
+	// reachability with no directive at all).
+	directed := "package view\n\n//gofresh:single-subject\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool {\n\tArm(func(int) {})\n\treturn frameAccounting == nil\n}\n"
+	undirected := "package view\n\nvar frameAccounting func(int)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool {\n\tArm(func(int) {})\n\treturn frameAccounting == nil\n}\n"
+	blockDirected := "package view\n\nvar (\n\t//gofresh:single-subject\n\tframeAccounting func(int)\n)\n\nfunc Arm(f func(int)) { frameAccounting = f }\n\nfunc F() bool {\n\tArm(func(int) {})\n\treturn frameAccounting == nil\n}\n"
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	capture := func(t *testing.T, source string, opts ...Option) (Fingerprint, Verdict) {
@@ -8248,6 +8252,135 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 	if unattested.SingleSubjectDischarges != "" {
 		t.Fatalf("directive-only evidence recorded %q, want nothing", unattested.SingleSubjectDischarges)
 	}
+}
+
+// Under the single-subject attestation the shared-dynamic-state
+// judgment scopes per subject: a culprit whose every marking site is
+// provably outside the subject's rooted flow is init-determined state
+// and discharges; a rooted site, a closure-carried (unattributed)
+// mark, and a TestMain-armed oracle keep the downgrade; and without
+// the attestation nothing changes
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestReachabilityScopedDischarge(t *testing.T) {
+	memoTree := map[string]string{
+		"go.mod":     "module example.com/view\n\ngo 1.26\n",
+		"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
+		"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+	}
+	ctx := context.Background()
+	captureFP := func(t *testing.T, dir string, subject Subject, opts ...Option) (Fingerprint, Verdict) {
+		t.Helper()
+		engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fingerprint, verdict
+	}
+	t.Run("sibling-only mutator discharges attested", func(t *testing.T) {
+		dir := writeModuleTree(t, memoTree)
+		fingerprint, verdict := captureFP(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - no marking site of gen.memo is in F's rooted flow", verdict)
+		}
+		if fingerprint.SingleSubjectDischarges != "example.com/view/gen.memo" {
+			t.Fatalf("evidence = %q, want the scoped-out culprit recorded - a load-bearing scoping is never silent", fingerprint.SingleSubjectDischarges)
+		}
+	})
+	t.Run("unattested keeps the downgrade", func(t *testing.T) {
+		dir := writeModuleTree(t, memoTree)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming gen.memo - the scoping is attestation-gated", verdict)
+		}
+	})
+	t.Run("rooted mutator keeps the downgrade attested", func(t *testing.T) {
+		dir := writeModuleTree(t, memoTree)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "Property"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - the subject's own flow reaches the mutator", verdict)
+		}
+	})
+	t.Run("closure-carried mark never discharges", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\nfunc Register() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming hooks - a mark inside a stored function literal has no attribution and never discharges", verdict)
+		}
+	})
+	t.Run("method-site mutator discharges attested", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar memo = map[string]func(){}\n\ntype filler struct{ n int }\n\nfunc (f *filler) Fill() { memo[\"k\"] = func() {} }\n\nfunc Property() {\n\tvar f filler\n\tf.Fill()\n}\n\nfunc F() int { return len(memo) }\n")
+		fingerprint, verdict := captureFP(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the method-attributed site is outside F's rooted flow", verdict)
+		}
+		if fingerprint.SingleSubjectDischarges != "example.com/view.memo" {
+			t.Fatalf("evidence = %q, want the scoped-out culprit recorded", fingerprint.SingleSubjectDischarges)
+		}
+	})
+	t.Run("rooted method site keeps the downgrade attested", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar memo = map[string]func(){}\n\ntype filler struct{ n int }\n\nfunc (f *filler) Fill() { memo[\"k\"] = func() {} }\n\nfunc F() int {\n\tvar f filler\n\tf.Fill()\n\treturn len(memo)\n}\n")
+		fingerprint, verdict := captureFP(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.memo is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - the subject's flow executes the method site", verdict)
+		}
+		if fingerprint.SingleSubjectDischarges != "" {
+			t.Fatalf("evidence = %q, want nothing - no culprit was scoped out", fingerprint.SingleSubjectDischarges)
+		}
+	})
+	t.Run("alias-receiver rooted method site keeps the downgrade", func(t *testing.T) {
+		// The site key derives from the semantic unaliased receiver on
+		// both sides: an alias-spelled receiver must not slip the
+		// rooted-set match and discharge a site the subject executes.
+		dir := writeViewModule(t, "package view\n\nvar memo = map[string]func(){}\n\ntype impl struct{ n int }\n\ntype alias = impl\n\nfunc (a *alias) Fill() { memo[\"k\"] = func() {} }\n\nfunc F() int {\n\tvar a alias\n\ta.Fill()\n\treturn len(memo)\n}\n")
+		_, verdict := captureFP(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.memo is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - the alias-spelled site is the subject's own", verdict)
+		}
+	})
+	t.Run("callable env-carrying var never discharges", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar hook func()\n\nfunc Register() {\n\tn := 0\n\thook = func() { n++ }\n}\n\nfunc F() bool { return hook == nil }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		// The inventory is per-variable and class-blind: the callable
+		// env hazard forecloses every discharge for hook, so the
+		// first-rank culprit text (the mutation's) survives.
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hook is mutated") {
+			t.Fatalf("verdict = %+v, want the refusal naming hook - a callable variable has a markless execution channel", verdict)
+		}
+	})
+	t.Run("non-callable env-carrying discharges with its use sites", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\ntype holder struct{ fn func() }\n\nvar reg = &holder{}\n\nfunc Register() {\n\tn := 0\n\treg.fn = func() { n++ }\n}\n\nfunc F() int { return 1 }\n")
+		fingerprint, verdict := captureFP(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the hazard executes only through marked sites, all outside F's rooted flow", verdict)
+		}
+		if fingerprint.SingleSubjectDischarges != "example.com/view.reg" {
+			t.Fatalf("evidence = %q, want the scoped-out culprit recorded", fingerprint.SingleSubjectDischarges)
+		}
+	})
+	t.Run("TestMain-armed oracle keeps the downgrade", func(t *testing.T) {
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":       "module example.com/view\n\ngo 1.26\n",
+			"view.go":      "package view\n\nvar oracle func()\n\nfunc Touch() bool { return oracle == nil }\n",
+			"view_test.go": "package view\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestMain(m *testing.M) {\n\toracle = func() {}\n\tos.Exit(m.Run())\n}\n\nfunc BenchmarkTouch(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tTouch()\n\t}\n}\n",
+		})
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "BenchmarkTouch"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.oracle is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming oracle - TestMain runs in the subject's process", verdict)
+		}
+	})
 }
 
 // A package with assembly sources stays downgraded through the closure

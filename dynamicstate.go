@@ -198,6 +198,16 @@ type dynamicStateFact struct {
 	// a registered closure's environment can write state the settled
 	// verdict assumed stable.
 	EnvCarrying []string `json:"envCarrying,omitempty"`
+	// EnvCallable marks the env-carrying subset whose variable type is
+	// directly callable (an underlying function type): calling such a
+	// variable is a tolerated, markless use, so its environment hazard
+	// cannot ride the use-site inventory and the reachability scoping
+	// fails closed on it; every other env-carrying variable's hazard
+	// executes only through a marked handout read (the value-plane rule
+	// refuses signature-carrying extraction), so it discharges with the
+	// variable's use sites. A key the deriving package cannot resolve
+	// counts callable, fail-closed (REQ-closure-shared-dynamic-state).
+	EnvCallable []string `json:"envCallable,omitempty"`
 	// EnvCallUses holds deferred constructor-registration marks:
 	// variable key and callee function key (package path, function name
 	// NUL-joined) joined by \x01. At composition the store is admitted
@@ -297,6 +307,26 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		fact.EnvCarrying = append(fact.EnvCarrying, key)
 	}
 	sort.Strings(fact.EnvCarrying)
+	ownPrefix := ""
+	if p.Types != nil {
+		ownPrefix = p.Types.Path() + "."
+	}
+	for key := range envCarrying {
+		callable := true
+		// ownPrefix is empty exactly when p.Types is nil — the guard
+		// keeps the scope lookup off the nil package.
+		if ownPrefix != "" && strings.HasPrefix(key, ownPrefix) {
+			if variable, ok := p.Types.Scope().Lookup(strings.TrimPrefix(key, ownPrefix)).(*types.Var); ok {
+				if _, isFunc := types.Unalias(variable.Type()).Underlying().(*types.Signature); !isFunc {
+					callable = false
+				}
+			}
+		}
+		if callable {
+			fact.EnvCallable = append(fact.EnvCallable, key)
+		}
+	}
+	sort.Strings(fact.EnvCallable)
 	for varKey, callees := range envCalls {
 		for callee := range callees {
 			fact.EnvCallUses = append(fact.EnvCallUses, varKey+"\x01"+callee)
@@ -539,6 +569,123 @@ type viewDynamicState struct {
 	// load-bearing for the package. Recorded on subject evidence like a
 	// vouch discharge, auditable and never silent (REQ-vouch-recorded).
 	attestationDischarges map[string]string
+	// rootCulprits maps each view package to the ordered
+	// shared-dynamic-state culprits its whole graph carries, in the
+	// downgrade walk's own naming order — the inventory the per-subject
+	// reachability re-judgment filters under the single-subject
+	// attestation (REQ-closure-shared-dynamic-state).
+	rootCulprits map[string][]dynCulprit
+	// culpritSites maps each culprit variable key to its marking-site
+	// inventory: the attributed function and method sites, and whether
+	// any mark lacks attribution — nested literals, init-flow refusals,
+	// deferral failures, malformed arms, crossed links, callable
+	// env-carrying registrations — an unattributed mark foreclosing the
+	// reachability discharge fail-closed.
+	culpritSites map[string]culpritSiteSet
+}
+
+// dischargeUnreachableCulprits applies the single-subject reachability
+// scoping of the shared-dynamic-state judgment: under the caller's
+// attestation there is no prior subject in the process, so a culprit
+// none of whose marking sites the subject's rooted flow can execute is
+// init-determined state covered by the closure hash like every other
+// startup effect. Per downgraded subject: obtain the rooted-flow
+// inventory from the same attributed RTA the observability proof
+// rides; with a complete inventory (no open-world widening, the
+// subject symbol rooted), keep the first culprit carrying an
+// unattributed mark or a rooted site — the downgrade then names that
+// culprit — and lift the downgrade when none survives. No proof, no
+// discharge: an incomplete inventory keeps current behavior whole,
+// and the audited channels (pooling, mapping, memoization, the
+// variable directive, vouches) already discharged at composition, so
+// nothing here can weaken them (REQ-closure-shared-dynamic-state).
+func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) error {
+	var downgraded []Subject
+	for subject := range scan.known {
+		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
+			downgraded = append(downgraded, subject)
+		}
+	}
+	if len(downgraded) == 0 {
+		return nil
+	}
+	requests := make([]closure.Subject, len(downgraded))
+	for i, subject := range downgraded {
+		requests[i] = closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
+	}
+	rooted, err := hasher.ComputeRootedFunctions(requests)
+	if err != nil {
+		return err
+	}
+	for i, subject := range downgraded {
+		proof := rooted[requests[i]]
+		if !proof.Complete {
+			continue
+		}
+		surviving := ""
+		dischargedKeys := map[string]bool{}
+		for _, culprit := range state.rootCulprits[subject.Package] {
+			sites := state.culpritSites[culprit.key]
+			if sites.unattributed {
+				surviving = culprit.text
+				break
+			}
+			sited := false
+			for fn := range sites.fns {
+				if proof.Fns[fn] {
+					sited = true
+					break
+				}
+			}
+			if sited {
+				surviving = culprit.text
+				break
+			}
+			dischargedKeys[culprit.key] = true
+		}
+		if surviving == "" {
+			delete(scan.downgradeReason, subject)
+		} else {
+			scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+		}
+		// A load-bearing scoping — one that discharged a culprit for
+		// this subject — rides the subject's evidence with the
+		// attestation's other discharges: the discharged variables are
+		// attestation-borne acceptances exactly as the audited sets'
+		// (REQ-vouch-recorded).
+		if len(dischargedKeys) > 0 {
+			for _, key := range strings.Split(scan.attestationDischarges[subject], ",") {
+				if key != "" {
+					dischargedKeys[key] = true
+				}
+			}
+			keys := make([]string, 0, len(dischargedKeys))
+			for key := range dischargedKeys {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			scan.attestationDischarges[subject] = strings.Join(keys, ",")
+		}
+	}
+	return nil
+}
+
+// dynCulprit is one open package's named culprit in the downgrade
+// walk's order: the variable key and the full reason body ("pkg: key
+// <verb>") the refusal would name (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+type dynCulprit struct {
+	key  string
+	text string
+}
+
+// culpritSiteSet is one culprit variable's marking-site inventory for
+// the per-subject reachability re-judgment: fns holds the attributed
+// plain-function sites ("path\x00name"); unattributed reports a mark
+// no function attribution covers (REQ-closure-shared-dynamic-state).
+type culpritSiteSet struct {
+	fns          map[string]bool
+	unattributed bool
 }
 
 // methodDirectives resolves a promoted method's purity and externality
@@ -977,6 +1124,45 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
+	// Site inventory for the per-subject reachability re-judgment
+	// (REQ-closure-shared-dynamic-state's reachability scoping): every
+	// mark present BEFORE the attributed promotion carries no function
+	// attribution — fact-immediate marks from method bodies and nested
+	// literals, init-flow refusals, deferral failures, malformed arms —
+	// and marks the link crossing adds later are crossed; either
+	// forecloses the discharge fail-closed. Only the attributed
+	// promotion below contributes named sites.
+	unattributedMark := map[string]bool{}
+	for key := range mutated {
+		unattributedMark[key] = true
+	}
+	for key := range escaped {
+		unattributedMark[key] = true
+	}
+	envCallable := map[string]bool{}
+	for _, facts := range state.facts {
+		for _, fact := range facts {
+			for _, key := range fact.EnvCallable {
+				envCallable[key] = true
+			}
+		}
+	}
+	for key := range envCarrying {
+		// A non-callable env-carrying variable's hazard executes only
+		// through a marked handout read, so it rides the use-site
+		// inventory; a callable one has a tolerated markless execution
+		// channel and never discharges (REQ-closure-shared-dynamic-state).
+		if envCallable[key] {
+			unattributedMark[key] = true
+		}
+	}
+	siteFns := map[string]map[string]bool{}
+	attributeSite := func(key, fn string) {
+		if siteFns[key] == nil {
+			siteFns[key] = map[string]bool{}
+		}
+		siteFns[key][fn] = true
+	}
 	for _, facts := range state.facts {
 		for _, fact := range facts {
 			for _, use := range fact.AttributedUses {
@@ -987,6 +1173,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					// exactly as the malformed method-use arm.
 					for _, key := range fact.Declares {
 						mutated[key] = true
+						unattributedMark[key] = true
 					}
 					continue
 				}
@@ -999,6 +1186,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					// escape, and those uses defer as ParamUses instead
 					// of attributing (REQ-closure-shared-dynamic-state).
 					escaped[key] = true
+					attributeSite(key, fn)
 					continue
 				}
 				if refRegions[fn] != nil && initOnlyFn[fn] {
@@ -1008,9 +1196,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				case class == "d" && len(parts) >= 6:
 					if !readOnly[parts[4]+"\x00"+parts[5]] {
 						mutated[key] = true
+						attributeSite(key, fn)
 					}
 				default:
 					mutated[key] = true
+					attributeSite(key, fn)
 				}
 			}
 		}
@@ -1048,14 +1238,17 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			for b := range others {
 				if mutated[a] && !mutated[b] {
 					mutated[b] = true
+					unattributedMark[b] = true
 					changed = true
 				}
 				if escaped[a] && !escaped[b] {
 					escaped[b] = true
+					unattributedMark[b] = true
 					changed = true
 				}
 				if envCarrying[a] && !envCarrying[b] {
 					envCarrying[b] = true
+					unattributedMark[b] = true
 					changed = true
 				}
 			}
@@ -1224,7 +1417,18 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	}
 	// openWorld maps each open package to one culprit description — the
 	// downgrade's refusal must name the owning package and variable.
+	// pkgCulprits additionally keeps EVERY culprit per package in rank
+	// order, for the per-subject reachability re-judgment under the
+	// single-subject attestation (REQ-closure-shared-dynamic-state).
 	openWorld := map[string]string{}
+	pkgCulprits := map[string][]dynCulprit{}
+	culpritSeen := map[string]bool{}
+	recordCulprit := func(pkgPath, key, verb string) {
+		if seen := pkgPath + "\x00" + key; !culpritSeen[seen] {
+			culpritSeen[seen] = true
+			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{key: key, text: pkgPath + ": " + key + verb})
+		}
+	}
 	pkgPaths := make([]string, 0, len(state.facts))
 	for pkgPath := range state.facts {
 		pkgPaths = append(pkgPaths, pkgPath)
@@ -1241,6 +1445,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
+					recordCulprit(pkgPath, key, " is mutated")
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " is mutated"
 					}
@@ -1250,6 +1455,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
+					recordCulprit(pkgPath, key, " escapes writable")
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " escapes writable"
 					}
@@ -1263,6 +1469,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) {
+					recordCulprit(pkgPath, key, " registers function values outside the environment-free audit")
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
 					}
@@ -1316,6 +1523,68 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		if culprit := walk(node.ImportPath, map[string]bool{}); culprit != "" {
 			state.downgraded[root] = culprit
+		}
+	}
+	// The per-subject reachability inventory: for every downgraded view
+	// package, the ordered culprit list over its whole graph (the same
+	// DFS the naming walk runs, never short-circuiting) plus each
+	// culprit's marking-site set. The re-judgment filters this list per
+	// subject under the single-subject attestation; the first surviving
+	// culprit keeps the downgrade with its own name, and an empty
+	// survivor set lifts it (REQ-closure-shared-dynamic-state).
+	if len(pkgCulprits) > 0 {
+		state.rootCulprits = map[string][]dynCulprit{}
+		state.culpritSites = map[string]culpritSiteSet{}
+		var collectOrdered func(listing string, seen map[string]bool, acc *[]dynCulprit)
+		collectOrdered = func(listing string, seen map[string]bool, acc *[]dynCulprit) {
+			if seen[listing] {
+				return
+			}
+			seen[listing] = true
+			if classes[listing] == closure.StandardPackage {
+				return
+			}
+			*acc = append(*acc, pkgCulprits[pkgPathOf[listing]]...)
+			for _, imported := range imports[listing] {
+				if _, ok := pkgPathOf[imported]; !ok {
+					continue
+				}
+				collectOrdered(imported, seen, acc)
+			}
+		}
+		rootSeen := map[string]map[string]bool{}
+		for _, node := range meta {
+			root := node.PkgPath
+			if node.ForTest != "" {
+				root = node.ForTest
+			} else if node.TestMain {
+				continue
+			}
+			if !isView[root] || state.downgraded[root] == "" {
+				continue
+			}
+			seen := rootSeen[root]
+			if seen == nil {
+				seen = map[string]bool{}
+				rootSeen[root] = seen
+			}
+			var acc []dynCulprit
+			collectOrdered(node.ImportPath, seen, &acc)
+			state.rootCulprits[root] = append(state.rootCulprits[root], acc...)
+		}
+		for _, culprits := range state.rootCulprits {
+			for _, culprit := range culprits {
+				if _, done := state.culpritSites[culprit.key]; done {
+					continue
+				}
+				fns := siteFns[culprit.key]
+				state.culpritSites[culprit.key] = culpritSiteSet{
+					fns: fns,
+					// A siteless mark is a bookkeeping hole, never a
+					// discharge: fail-closed with the unattributed class.
+					unattributed: unattributedMark[culprit.key] || len(fns) == 0,
+				}
+			}
 		}
 	}
 	// collectReachable builds a per-view-package record from per-owning-

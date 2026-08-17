@@ -219,10 +219,16 @@ or an unsafe pointer anywhere in its type — that the analyzed program can muta
 after initialization is
 process-shared dynamic state no per-subject closure can attribute, because a prior
 subject's execution in the same process can have changed it: every subject whose
-package graph links the owning package MUST be unverifiable — unless the caller
-vouches for the specific variable (REQ-vouch-discharge in
-[purity.md](purity.md); version-pinned dependencies only, the acceptance recorded
-on the evidence). Mutation is judged
+package graph links the owning package MUST be unverifiable — unless a
+recorded discharge channel of this requirement lifts it: a caller vouch for
+the specific variable (REQ-vouch-discharge in
+[purity.md](purity.md); version-pinned dependencies only, the acceptance
+recorded on the evidence), an audited-set admission (the synchronization,
+pooling, mapping, and memoization sets below), the author's
+`//gofresh:single-subject` variable directive under the caller's attestation,
+or the attestation-scoped per-subject reachability judgment — each defined
+below with its own bounds and recording discipline, and nothing else.
+Mutation is judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
 array, or tuple of by-value carriers) is mutated exactly by a write, an address
 capture, or a pointer-receiver method use outside `init` flow anywhere in the
@@ -368,7 +374,61 @@ execution attestation and rides no evidence record (it is the
 engine's own source-audited verdict, not a caller assertion). The set
 is the source-audited precursor of a structural get-or-compute
 discharge; its entries retire to that proof when it lands. It grows
-only by source audit. One narrowing applies to
+only by source audit. Under the caller-attested single-subject-process
+execution model the judgment additionally scopes per subject: the
+hazard is a prior subject's execution in the same process, and under
+the attestation there is none — the only code that executes is the
+subject's own rooted flow: the subject flow and, where the subject
+runs through the harness, the user TestMain flow. Package
+initialization is deliberately outside the rooted set, on the model's
+own ground: with no prior subject in the process, the whole
+subject-owned process's state — initialization, init-spawned
+goroutines, and all — is a function of the hashed source, the priced
+inputs, and scheduling noise alone, so a marking site the
+post-initialization rooted flow cannot execute adds no channel the
+closure hash and the input pricing do not already cover (a
+goroutine LITERAL spawned at init leaves unattributed marks that never
+discharge; a NAMED go-callee's marks attribute and ride this
+whole-process ground itself — the racing writer is source-determined
+state plus scheduling noise, exactly what the ground prices). A culprit none of
+whose marking sites the rooted flow can execute cannot have been
+perturbed by anything but initialization: its state is an
+init-determined constant for the subject's execution, and the
+downgrade lifts for that subject
+alone — the next reachable culprit, if any, names the refusal instead.
+The reachability proof is the attributed RTA the observability proof
+rides, at least as wide as that tier's dispatch and reflection
+widenings, and the discharge is fail-closed on every gap: an
+open-world widening or an unrooted subject symbol grants nothing (no
+proof, no discharge — the judgment then stands whole), a mark without
+function attribution — a nested function literal's
+(so a mutation carried by a stored function value can never discharge,
+whatever the RTA resolves), an init-flow refusal's, a deferral
+failure's, a malformed fact's, or one crossed over a carrier link —
+forecloses the discharge for its variable, and a variable with any
+rooted marking site keeps every mark. Named functions and methods
+alike are attributable sites (a method's under its type-qualified
+name). An environment-audit refusal rides the variable's use-site
+inventory when the variable's type is not directly callable — the
+value-plane rule already marks every extraction able to execute the
+carried value — while a callable variable keeps a markless execution
+channel (its call is a tolerated read) and its environment refusal
+never discharges. The inventory is per variable and class-blind: any
+foreclosing mark keeps every rank's refusal for that
+variable. The audited discharge channels
+— pooling, mapping, memoization, the vouches, and the
+`//gofresh:single-subject` directive — decide before this scoping and
+are never weakened by it: they remain the channels for state the
+subject's own rooted flow DOES write, while the reachability scoping
+covers the sibling-only state no channel needed to name (the
+oracle-shaped directive use — an arming site unreachable from the
+subject — is subsumed by it; the directive remains for rooted
+subject-own state). A load-bearing scoping — one that discharged a
+culprit for the subject — records the discharged variables on that
+subject's evidence with the attestation's other discharges,
+canonically and never silently (REQ-vouch-recorded in
+[purity.md](purity.md)): the discharges are attestation-borne exactly
+as the audited sets' are. One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any

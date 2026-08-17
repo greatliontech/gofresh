@@ -94,8 +94,13 @@ func DisableMemos() { closure.DisableMemos() }
 // subject-own state, discharged only under the caller's attestation,
 // mutable-local packages only — the vouch boundary's inverse) and the
 // audited memoization set (gopkg.in/yaml.v3.structMap: content-
-// invariant derivation, admitted without the attestation).
-const DynamicStateStrategy = "gofresh/dynamic-state@28"
+// invariant derivation, admitted without the attestation). @29 scopes
+// the shared-dynamic-state judgment per subject under the attestation:
+// a culprit none of whose marking sites the subject's rooted flow can
+// execute (attributed-RTA-proven, fail-closed on open-world widening
+// and on every unattributed mark) is init-determined state covered by
+// the closure hash, and the downgrade lifts for that subject alone.
+const DynamicStateStrategy = "gofresh/dynamic-state@29"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or
