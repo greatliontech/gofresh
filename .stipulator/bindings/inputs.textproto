@@ -813,7 +813,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-exclusions"
-  content_hash: "14ca9ee3042c6399a8c944bcc517a6376e134b4acd3a1a75ce3840946f8dc18b"
+  content_hash: "f05f9699362bc9ecb395a1215fca642fc677d46b327d15c869557a60d3d20d27"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestExcludedPathsAreNeverRecorded"
   role: BINDING_ROLE_TESTS
@@ -822,7 +822,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-exclusions"
-  content_hash: "14ca9ee3042c6399a8c944bcc517a6376e134b4acd3a1a75ce3840946f8dc18b"
+  content_hash: "f05f9699362bc9ecb395a1215fca642fc677d46b327d15c869557a60d3d20d27"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS

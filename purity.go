@@ -137,12 +137,13 @@ type subjectScan struct {
 	// comma-joined caller-vouch identities that discharged would-be
 	// culprits reachable from its package (REQ-vouch-recorded).
 	vouchDischarges map[Subject]string
-	// poolAttestations maps each subject to the canonical sorted
-	// comma-joined sync.Pool variable keys whose Get/Put discharge —
-	// fired under the caller's single-subject-process attestation — is
+	// attestationDischarges maps each subject to the canonical sorted
+	// comma-joined variable keys whose discharge the caller's
+	// single-subject-process attestation carried — a pool variable's
+	// admitted Get/Put, the audited mapping set's named bookkeeping —
 	// reachable from its package; the vouch-recording discipline's
 	// parallel (REQ-vouch-recorded).
-	poolAttestations map[Subject]string
+	attestationDischarges map[Subject]string
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -160,14 +161,14 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:             map[Subject]bool{},
-		known:            map[Subject]bool{},
-		openWorld:        map[Subject]bool{},
-		external:         map[Subject]bool{},
-		downgradeReason:  map[Subject]string{},
-		vouchDischarges:  map[Subject]string{},
-		poolAttestations: map[Subject]string{},
-		ambiguous:        map[Subject]string{},
+		pure:                  map[Subject]bool{},
+		known:                 map[Subject]bool{},
+		openWorld:             map[Subject]bool{},
+		external:              map[Subject]bool{},
+		downgradeReason:       map[Subject]string{},
+		vouchDischarges:       map[Subject]string{},
+		attestationDischarges: map[Subject]string{},
+		ambiguous:             map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -332,8 +333,8 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 		if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
 			scan.vouchDischarges[subject] = discharges
 		}
-		if attested := state.poolAttestations[subject.Package]; attested != "" {
-			scan.poolAttestations[subject] = attested
+		if attested := state.attestationDischarges[subject.Package]; attested != "" {
+			scan.attestationDischarges[subject] = attested
 		}
 	}
 	return scan, nil
@@ -6604,7 +6605,8 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 // recordOpaqueDynamicVars judges which interface-typed package-level
 // variables — own or foreign — are object-closed: the initializer and
 // every init-flow store are provably-immutable audited constructions
-// (errors.New; a direct reflect.TypeOf call; the nil zero value), so no
+// (errors.New; a direct reflect.TypeOf call; a fmt.Errorf call chained
+// through audited arguments; the nil zero value), so no
 // holder of the value can mutate the shared object and escapes of it
 // are not mutation. Every
 // plain named function's direct body is audited, not just init bodies
@@ -6612,14 +6614,64 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 // is settled only at composition (the graph-wide fixed point), and a
 // store the composition discharges as init flow must have passed this
 // audit — for a function that stays program code the store marks
-// mutation anyway, so the extra break is unobservable. The
+// mutation anyway, so the extra break is unobservable. deps collects
+// conditional dependency edges: a store admitted through a sibling
+// object-closed variable reference (the wrapped-sentinel idiom) is
+// closed exactly when the sibling stays closed, resolved at
+// composition against the unioned break set — declaration and store
+// order never decide (REQ-closure-shared-dynamic-state). The
 // audited-construction set grows only by source audit
 // (REQ-closure-shared-dynamic-state).
-func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool) {
+func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool, deps map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
 	}
-	auditedImmutable := func(expr ast.Expr) bool {
+	interfacePackageVar := func(obj types.Object) (*types.Var, bool) {
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, false
+		}
+		_, isInterface := types.Unalias(variable.Type()).Underlying().(*types.Interface)
+		return variable, isInterface
+	}
+	// auditedImmutable judges a stored value; storeDeps, when non-nil,
+	// collects the sibling object-closed variables the admission is
+	// conditional on. auditedArgument judges a value in a retained
+	// argument position, where a sibling object-closed variable
+	// reference additionally admits as a dependency edge.
+	var auditedImmutable func(expr ast.Expr, storeDeps map[string]bool) bool
+	auditedArgument := func(expr ast.Expr, storeDeps map[string]bool) bool {
+		if auditedImmutable(expr, storeDeps) {
+			return true
+		}
+		// A reference to a sibling interface-typed package-level
+		// variable chains the judgment: the construction is closed
+		// exactly when the sibling stays object-closed, recorded as a
+		// dependency edge and resolved at composition against the
+		// unioned break set. Same-package bare identifiers only — a
+		// qualified or aliased reference keeps the fail-closed refusal
+		// (REQ-closure-shared-dynamic-state).
+		if ident, ok := expr.(*ast.Ident); ok && storeDeps != nil {
+			if obj, ok := p.TypesInfo.Uses[ident]; ok {
+				if variable, ok := interfacePackageVar(obj); ok && variable.Pkg() == p.Types {
+					storeDeps[dynamicVarKey(variable)] = true
+					return true
+				}
+			}
+		}
+		return false
+	}
+	auditedImmutable = func(expr ast.Expr, storeDeps map[string]bool) bool {
+		// A constant-valued expression (a literal, a typed or untyped
+		// named constant, a folded expression — the syscall.Errno
+		// sentinel shape included) boxes a basic-kind value: the boxed
+		// object carries no mutable reach at all, so no holder of the
+		// stored interface value can write through it — audited exactly
+		// as the nil zero value is, while rebinding the variable remains
+		// mutation everywhere (REQ-closure-shared-dynamic-state).
+		if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Value != nil {
+			return true
+		}
 		switch expr := expr.(type) {
 		case *ast.Ident:
 			return expr.Name == "nil" && p.TypesInfo.Uses[expr] == types.Universe.Lookup("nil")
@@ -6646,18 +6698,30 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 				sig, ok := fn.Type().(*types.Signature)
 				return ok && sig.Recv() == nil
 			}
+			// A direct fmt.Errorf call retains at most its argument
+			// objects (the %w-wrapped errors; every other argument is
+			// rendered into the immutable message), so the construction
+			// is object-closed exactly when every argument is audited —
+			// judged structurally over ALL arguments, never by parsing
+			// the format string: a constant, a nested audited
+			// construction, or a sibling object-closed variable
+			// reference admits; any other argument shape refuses
+			// fail-closed (REQ-closure-shared-dynamic-state).
+			if fn.Pkg().Path() == "fmt" && fn.Name() == "Errorf" {
+				if sig, ok := fn.Type().(*types.Signature); !ok || sig.Recv() != nil {
+					return false
+				}
+				for _, arg := range expr.Args {
+					if !auditedArgument(arg, storeDeps) {
+						return false
+					}
+				}
+				return true
+			}
 			return false
 		default:
 			return false
 		}
-	}
-	interfacePackageVar := func(obj types.Object) (*types.Var, bool) {
-		variable, ok := obj.(*types.Var)
-		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
-			return nil, false
-		}
-		_, isInterface := types.Unalias(variable.Type()).Underlying().(*types.Interface)
-		return variable, isInterface
 	}
 	failed := map[string]bool{}
 	scope := p.Types.Scope()
@@ -6678,8 +6742,20 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			}
 		}
 		if variable, ok := interfacePackageVar(obj); ok {
-			if value == nil || !auditedImmutable(value) {
-				failed[dynamicVarKey(variable)] = true
+			key := dynamicVarKey(variable)
+			storeDeps := map[string]bool{}
+			if value == nil || !auditedImmutable(value, storeDeps) {
+				failed[key] = true
+				return
+			}
+			for dep := range storeDeps {
+				if deps == nil {
+					break
+				}
+				if deps[key] == nil {
+					deps[key] = map[string]bool{}
+				}
+				deps[key][dep] = true
 			}
 		}
 	}

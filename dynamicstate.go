@@ -170,6 +170,15 @@ type dynamicStateFact struct {
 	// composition so a cross-package init store fails the declaring
 	// package's opacity.
 	OpacityBreaks []string `json:"opacityBreaks,omitempty"`
+	// OpaqueDeps holds conditional object-closed edges: the owning
+	// interface variable key and one sibling variable key \x01-joined.
+	// The owner's audited construction chains through the sibling (the
+	// wrapped-sentinel idiom: fmt.Errorf over an object-closed
+	// variable), so the owner stays opaque exactly while the sibling
+	// does — resolved at composition by break propagation over the
+	// unioned edge set, whatever the declaration or store order
+	// (REQ-closure-shared-dynamic-state).
+	OpaqueDeps []string `json:"opaqueDeps,omitempty"`
 	// EnvCarrying holds the variable keys - own or foreign - into which
 	// this package's direct code stores a function-carrying value that is
 	// not provably environment-free. Unioned at composition: a carrier
@@ -232,7 +241,14 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 	}
 	sort.Strings(fact.PoolDischarges)
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
-	recordOpaqueDynamicVars(p, opaque, breaks)
+	opaqueDeps := map[string]map[string]bool{}
+	recordOpaqueDynamicVars(p, opaque, breaks, opaqueDeps)
+	for own, ownDeps := range opaqueDeps {
+		for dep := range ownDeps {
+			fact.OpaqueDeps = append(fact.OpaqueDeps, own+"\x01"+dep)
+		}
+	}
+	sort.Strings(fact.OpaqueDeps)
 	envCalls := map[string]map[string]bool{}
 	fieldDefer := map[string]map[string]bool{}
 	fieldPoison := map[string]map[string]bool{}
@@ -463,13 +479,14 @@ type viewDynamicState struct {
 	// culprits reachable from it (REQ-vouch-recorded); absent when no
 	// vouch was load-bearing for the package.
 	vouchDischarges map[string]string
-	// poolAttestations maps each view package to the canonical sorted
-	// comma-joined sync.Pool variable keys whose Get/Put discharge —
-	// fired under the caller's single-subject-process attestation — is
+	// attestationDischarges maps each view package to the canonical
+	// sorted comma-joined variable keys whose discharge the caller's
+	// single-subject-process attestation carried — a pool variable's
+	// admitted Get/Put, the audited mapping set's named bookkeeping —
 	// reachable from it; absent when the attestation was not
 	// load-bearing for the package. Recorded on subject evidence like a
 	// vouch discharge, auditable and never silent (REQ-vouch-recorded).
-	poolAttestations map[string]string
+	attestationDischarges map[string]string
 }
 
 // methodDirectives resolves a promoted method's purity and externality
@@ -1023,6 +1040,36 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		return true
 	}
+	// The audited mapping set: golang.org/x/sys/unix's package-level
+	// mapper — a Mutex-guarded address-to-length map with mmap/munmap
+	// function fields, written by every Mmap/Munmap call as pure
+	// process-local bookkeeping fed only by the analyzed program's own
+	// mapping calls (audited at the version-pinned source). Under the
+	// caller-attested single-subject-process execution model every
+	// write site lies in the subject's own rooted flow, so mapper
+	// contents are a function of the analyzed source and the subject
+	// alone and the marks discharge exactly like a vouch — grounded in
+	// source audit plus the attestation instead of a caller claim, the
+	// version-pinned module only (a mutable-local checkout keeps every
+	// mark), every other variable keeping its own judgment, and the
+	// mapping syscalls' external effects keeping their observability
+	// classification. Load-bearing discharges ride subject evidence
+	// with the pooling set's (REQ-closure-shared-dynamic-state,
+	// REQ-vouch-recorded). Grows only by source audit.
+	mappingDischarged := map[string][]string{}
+	auditedMappingOut := func(pkgPath, key string) bool {
+		if !singleSubject || !pinnedPkg[pkgPath] {
+			return false
+		}
+		if pkgPath != "golang.org/x/sys/unix" || key != "golang.org/x/sys/unix.mapper" {
+			return false
+		}
+		if seen := "mapping\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
+			dischargedSeen[seen] = true
+			mappingDischarged[pkgPath] = append(mappingDischarged[pkgPath], key)
+		}
+		return true
+	}
 	// openWorld maps each open package to one culprit description — the
 	// downgrade's refusal must name the owning package and variable.
 	openWorld := map[string]string{}
@@ -1041,7 +1088,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// unvouched hit per rank order still names the culprit.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if mutated[key] && !vouchedOut(pkgPath, key) {
+				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " is mutated"
 					}
@@ -1050,7 +1097,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) {
+				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " escapes writable"
 					}
@@ -1063,7 +1110,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// write state the settled verdict assumed stable.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if envCarrying[key] && !vouchedOut(pkgPath, key) {
+				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) {
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
 					}
@@ -1184,25 +1231,34 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		state.vouchDischarges = collectReachable(vouchDischarged)
 	}
 	// The single-subject attestation's audit record is the vouch
-	// discipline's parallel: every pool variable whose admitted Get/Put
-	// the attestation discharged, in a package the view package's graph
-	// reaches, rides subject evidence (REQ-vouch-recorded). The fired
-	// discharges live in the facts (recorded at derivation time), so
-	// the composition only unions and attributes them.
-	poolDischarged := map[string][]string{}
-	poolSeen := map[string]bool{}
+	// discipline's parallel: every variable whose discharge the
+	// attestation carried — a pool variable's admitted Get/Put
+	// (recorded in the facts at derivation time) or the audited mapping
+	// set's composition-time discharge — in a package the view
+	// package's graph reaches, rides subject evidence
+	// (REQ-vouch-recorded).
+	attestationDischarged := map[string][]string{}
+	attestationSeen := map[string]bool{}
 	for _, pkgPath := range pkgPaths {
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.PoolDischarges {
-				if seen := pkgPath + "\x00" + key; !poolSeen[seen] {
-					poolSeen[seen] = true
-					poolDischarged[pkgPath] = append(poolDischarged[pkgPath], key)
+				if seen := pkgPath + "\x00" + key; !attestationSeen[seen] {
+					attestationSeen[seen] = true
+					attestationDischarged[pkgPath] = append(attestationDischarged[pkgPath], key)
 				}
 			}
 		}
 	}
-	if len(poolDischarged) > 0 {
-		state.poolAttestations = collectReachable(poolDischarged)
+	for pkgPath, keys := range mappingDischarged {
+		for _, key := range keys {
+			if seen := pkgPath + "\x00" + key; !attestationSeen[seen] {
+				attestationSeen[seen] = true
+				attestationDischarged[pkgPath] = append(attestationDischarged[pkgPath], key)
+			}
+		}
+	}
+	if len(attestationDischarged) > 0 {
+		state.attestationDischarges = collectReachable(attestationDischarged)
 	}
 	return state, nil
 }
@@ -1339,6 +1395,7 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 		malformed = func(dynamicStateFact) {}
 	}
 	envFreeDeclared := map[string]bool{}
+	opaqueDeps := map[string]map[string]bool{}
 	paramDeps := map[string]map[string]bool{}
 	retentionDeps := map[string]map[string]bool{}
 	for _, facts := range allFacts {
@@ -1388,6 +1445,17 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 			}
 			for _, key := range fact.OpacityBreaks {
 				r.notOpaque[key] = true
+			}
+			for _, edge := range fact.OpaqueDeps {
+				own, dep, ok := strings.Cut(edge, "\x01")
+				if !ok || own == "" || dep == "" || strings.Contains(own, "\x00") || strings.Contains(dep, "\x00") {
+					malformed(fact)
+					continue
+				}
+				if opaqueDeps[own] == nil {
+					opaqueDeps[own] = map[string]bool{}
+				}
+				opaqueDeps[own][dep] = true
 			}
 			for _, key := range fact.ReturnEnvFree {
 				envFreeDeclared[key] = true
@@ -1447,6 +1515,31 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 			if ok {
 				r.paramRetentionFree[own] = true
 				changed = true
+			}
+		}
+	}
+	// Opacity break propagation over the conditional object-closed
+	// edges: a variable whose audited construction chains through a
+	// sibling (the wrapped-sentinel idiom) falls exactly when the
+	// sibling falls, to a fixed point over the unioned edge set — so
+	// declaration and store order never decide, a break recorded by ANY
+	// fact fells the whole chain, and a cycle of mutually chained
+	// stores with no break stays closed: every store into the cycle
+	// passed the audit, so every reachable object is an audited
+	// construction whatever order the stores ran in
+	// (REQ-closure-shared-dynamic-state).
+	for changed := true; changed; {
+		changed = false
+		for own, edges := range opaqueDeps {
+			if r.notOpaque[own] {
+				continue
+			}
+			for dep := range edges {
+				if r.notOpaque[dep] {
+					r.notOpaque[own] = true
+					changed = true
+					break
+				}
 			}
 		}
 	}

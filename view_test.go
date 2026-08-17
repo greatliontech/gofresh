@@ -7486,6 +7486,7 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"sentinel comparison":                         "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\nvar ErrY = errors.New(\"y\")\n\nfunc F() bool { return ErrX == ErrY }\n",
 		"registry map read shapes":                    "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int {\n\tif len(Hooks) > 0 {\n\t\tHooks[\"k\"]()\n\t}\n\tn := 0\n\tfor range Hooks {\n\t\tn++\n\t}\n\treturn n\n}\n",
 		"non-opaque sentinel comparison":              "package view\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nfunc F() bool { return ErrX == nil }\n",
+		"constant-boxed sentinel escape discharges":   "package view\n\ntype code int\n\nfunc (c code) Error() string { return \"code\" }\n\nconst c0 code = 1\n\nvar ErrX error = c0\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(ErrX) != nil }\n",
 		"exported initializer-only helper discharges": "package view\n\nvar Hooks = map[string]func(){}\n\nvar _ = Declare(\"k\")\n\nfunc Declare(name string) bool {\n\tHooks[name] = func() {}\n\treturn true\n}\n\nfunc F() int { return len(Hooks) }\n",
 		"slice capacity read":                         "package view\n\nvar Hooks = make([]func(), 0, 4)\n\nfunc F() int { return cap(Hooks) }\n",
 		"read-only method call discharges":            "package view\n\ntype reg struct {\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int { return r.n }\n\nfunc F() int { return R.Count() }\n",
@@ -7829,24 +7830,24 @@ func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
 	if verdict.Status != Valid {
 		t.Fatalf("attested pooled verdict = %+v, want Valid", verdict)
 	}
-	if loadBearing.SingleSubjectPools != "example.com/view.bufs" {
-		t.Fatalf("attested pooled evidence = %q, want the discharged pool named canonically", loadBearing.SingleSubjectPools)
+	if loadBearing.SingleSubjectDischarges != "example.com/view.bufs" {
+		t.Fatalf("attested pooled evidence = %q, want the discharged pool named canonically", loadBearing.SingleSubjectDischarges)
 	}
 
 	inert, inertVerdict := capture(t, "package view\n\nfunc F() int { return 1 }\n", WithSingleSubjectExecution())
 	if inertVerdict.Status != Valid {
 		t.Fatalf("attested pool-free verdict = %+v, want Valid", inertVerdict)
 	}
-	if inert.SingleSubjectPools != "" {
-		t.Fatalf("inert attestation recorded %q, want nothing - no pool discharge is reachable from the subject", inert.SingleSubjectPools)
+	if inert.SingleSubjectDischarges != "" {
+		t.Fatalf("inert attestation recorded %q, want nothing - no pool discharge is reachable from the subject", inert.SingleSubjectDischarges)
 	}
 
 	unattested, offVerdict := capture(t, pooled)
 	if offVerdict.Status != Unverifiable || !strings.Contains(offVerdict.Reason, "example.com/view.bufs is mutated") {
 		t.Fatalf("unattested pooled verdict = %+v, want the fail-closed downgrade naming the pool", offVerdict)
 	}
-	if unattested.SingleSubjectPools != "" {
-		t.Fatalf("unattested evidence recorded %q, want nothing", unattested.SingleSubjectPools)
+	if unattested.SingleSubjectDischarges != "" {
+		t.Fatalf("unattested evidence recorded %q, want nothing", unattested.SingleSubjectDischarges)
 	}
 }
 
@@ -7974,6 +7975,66 @@ func TestAuditedTypeOfConstructionBounds(t *testing.T) {
 		"carrier argument keeps its own pricing": {
 			source:  "package view\n\nimport \"reflect\"\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar ErrX error = &impl{}\n\nvar errType = reflect.TypeOf(ErrX)\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(errType) != nil }\n",
 			culprit: "example.com/view.ErrX escapes writable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, tc.source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
+				t.Fatalf("verdict = %+v, want the downgrade naming %q", verdict, tc.culprit)
+			}
+		})
+	}
+}
+
+// A direct fmt.Errorf call chained through audited arguments is an
+// audited construction: the result retains at most its argument
+// objects, so the canonical wrapped-sentinel idiom stays object-closed
+// when every argument is a constant, a nested audited construction, or
+// a sibling object-closed variable — whatever the declaration order
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedErrorfConstructionKeepsObjectClosed(t *testing.T) {
+	for name, source := range map[string]string{
+		"wrapped sentinel discharges": "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"base\")\n\nvar Wrapped = fmt.Errorf(\"%w: bound\", Base)\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Wrapped) != nil }\n",
+		"sentinel family discharges":  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar ErrProposalDropped = errors.New(\"raft proposal dropped\")\n\nvar ErrProposalDroppedLogBound = fmt.Errorf(\"%w: log bound\", ErrProposalDropped)\n\nvar ErrProposalDroppedQuorumGate = fmt.Errorf(\"%w: quorum gate\", ErrProposalDropped)\n\nfunc use(err error) error { return err }\n\nfunc F() bool {\n\treturn use(ErrProposalDroppedLogBound) != use(ErrProposalDroppedQuorumGate)\n}\n",
+		"chained wrap discharges":     "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"base\")\n\nvar Mid = fmt.Errorf(\"%w: mid\", Base)\n\nvar Top = fmt.Errorf(\"%w: top\", Mid)\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Top) != nil }\n",
+		"reversed declaration order":  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Wrapped = fmt.Errorf(\"%w: bound\", Base)\n\nvar Base = errors.New(\"base\")\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Wrapped) != nil }\n",
+		"constant-only errorf":        "package view\n\nimport \"fmt\"\n\nvar Sentinel = fmt.Errorf(\"code %d: %s\", 7, \"gate\")\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Sentinel) != nil }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - an audited fmt.Errorf construction downgraded", verdict)
+			}
+		})
+	}
+}
+
+// The fmt.Errorf admission covers exactly the direct call over audited
+// arguments: a local-variable argument refuses, a wrap over a
+// non-closed sibling falls with the sibling at composition (the
+// chained judgment, not the declaration order), and rebinding a
+// wrapped variable remains mutation everywhere
+// (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestAuditedErrorfConstructionBounds(t *testing.T) {
+	for name, tc := range map[string]struct{ source, culprit string }{
+		"local argument refuses": {
+			source:  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Wrapped error\n\nfunc init() {\n\te := errors.New(\"base\")\n\tWrapped = fmt.Errorf(\"%w: bound\", e)\n}\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Wrapped) != nil }\n",
+			culprit: "example.com/view.Wrapped escapes writable",
+		},
+		"non-closed sibling fells the wrap": {
+			// Alpha sorts before Zeta: the culprit naming Alpha pins that
+			// the wrap itself fell through the dependency edge — with the
+			// chain ignored, Alpha would stay opaque and only Zeta could
+			// be named.
+			source:  "package view\n\nimport \"fmt\"\n\ntype impl struct{ n int }\n\nfunc (i *impl) Error() string { return \"\" }\n\nvar Alpha = fmt.Errorf(\"%w: bound\", Zeta)\n\nvar Zeta error = &impl{}\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Alpha) != nil }\n",
+			culprit: "example.com/view.Alpha escapes writable",
+		},
+		"rebinding a wrapped var stays mutation": {
+			source:  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"base\")\n\nvar Wrapped = fmt.Errorf(\"%w: bound\", Base)\n\nfunc F() { Wrapped = fmt.Errorf(\"%w: again\", Base) }\n",
+			culprit: "example.com/view.Wrapped is mutated",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

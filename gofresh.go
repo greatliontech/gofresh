@@ -78,8 +78,13 @@ func DisableMemos() { closure.DisableMemos() }
 // DynamicStateStrategy identifies the shared-dynamic-state fact derivation
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
-// this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@25"
+// this version like any other strategy change. @26 adds the chained
+// fmt.Errorf audited construction (conditional object-closed edges,
+// break-propagated at composition), the constant-valued audited
+// construction (a boxed basic-kind value carries no mutable reach; the
+// syscall.Errno sentinel shape), and the attestation-gated audited
+// mapping set discharge (golang.org/x/sys/unix.mapper).
+const DynamicStateStrategy = "gofresh/dynamic-state@26"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or
@@ -247,21 +252,23 @@ type Fingerprint struct {
 	// resurfaces the culprit in the current derivation and the verdict
 	// refuses on its own.
 	DynamicStateVouches string
-	// SingleSubjectPools names the package-level sync.Pool variables
-	// whose Get/Put discharge rested on the caller's
-	// single-subject-process attestation (WithSingleSubjectExecution) and
-	// is reachable from this subject at capture: sorted canonical
+	// SingleSubjectDischarges names the package-level variables whose
+	// shared-dynamic-state discharge rested on the caller's
+	// single-subject-process attestation (WithSingleSubjectExecution)
+	// and is reachable from this subject at capture — the audited
+	// pooling set's sync.Pool carriers and the audited mapping set's
+	// named bookkeeping alike: sorted canonical
 	// "<import path>.<Variable>" identities, comma-joined. Empty means
 	// the attestation was not load-bearing for this subject (or not
 	// given). Recorded for audit exactly as a vouch discharge is — the
 	// acceptance is visible in the evidence, never silent
 	// (REQ-vouch-recorded); validity needs no comparison over it, because
-	// a session without the attestation re-marks the pool in the current
-	// derivation and the verdict refuses on its own.
-	SingleSubjectPools string
-	RuntimeInputs      string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest      string // digest of the manifest at capture
-	ResultKind         Kind   // guard policy captured with this recording; zero is invalid
+	// a session without the attestation re-marks the variable in the
+	// current derivation and the verdict refuses on its own.
+	SingleSubjectDischarges string
+	RuntimeInputs           string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest           string // digest of the manifest at capture
+	ResultKind              Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -430,6 +437,9 @@ func WithDynamicStateVouches(identities ...string) Option {
 // through pool contents (a prior subject's Put plants a value a later
 // subject's Get dispatches on), so pool Get/Put on a package-level
 // carrier keeps the fail-closed shared-dynamic-state judgment. The
+// attestation likewise arms the audited mapping set's discharge —
+// golang.org/x/sys/unix's mapper bookkeeping, written only by the
+// program's own Mmap/Munmap calls, version-pinned module only. The
 // attestation is the caller's responsibility; it changes what the
 // derived dynamic-state facts record, so it is part of the persisted
 // fact identity and option-on and option-off sessions never serve each

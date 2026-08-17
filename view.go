@@ -138,11 +138,11 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if first.poolAttestations[subject] != second.poolAttestations[subject] {
+		if first.attestationDischarges[subject] != second.attestationDischarges[subject] {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("%w: single-subject pool attestations for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			return nil, fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
@@ -192,14 +192,14 @@ type observationFacts struct {
 	// live before any load (the memo write precedes the closing compare),
 	// and relies on the closing pass's fresh snapshot to refuse any drift
 	// the guards cover.
-	snapshot             *gotool.EnvSnapshot
-	maximal              map[Subject]closure.Closure
-	guards               guard.Guards
-	purity               map[Subject]string
-	vouchDischarges      map[Subject]string
-	poolAttestations     map[Subject]string
-	sourceFiles          []string
-	sourceFilesBySubject map[Subject][]string
+	snapshot              *gotool.EnvSnapshot
+	maximal               map[Subject]closure.Closure
+	guards                guard.Guards
+	purity                map[Subject]string
+	vouchDischarges       map[Subject]string
+	attestationDischarges map[Subject]string
+	sourceFiles           []string
+	sourceFilesBySubject  map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
 	// identity, so a later validation failure can name the moved file
 	// (REQ-fresh-producer-view's naming arm). Best-effort attribution:
@@ -270,14 +270,14 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return observationFacts{}, err
 	}
 	observation := observationFacts{
-		snapshot:             snapshot,
-		maximal:              make(map[Subject]closure.Closure, len(subjects)),
-		guards:               guards,
-		purity:               make(map[Subject]string, len(subjects)),
-		vouchDischarges:      make(map[Subject]string, len(subjects)),
-		poolAttestations:     make(map[Subject]string, len(subjects)),
-		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
-		testVariantLedgers:   make(map[string]closure.TestVariantLedger, len(packages)),
+		snapshot:              snapshot,
+		maximal:               make(map[Subject]closure.Closure, len(subjects)),
+		guards:                guards,
+		purity:                make(map[Subject]string, len(subjects)),
+		vouchDischarges:       make(map[Subject]string, len(subjects)),
+		attestationDischarges: make(map[Subject]string, len(subjects)),
+		sourceFilesBySubject:  make(map[Subject][]string, len(subjects)),
+		testVariantLedgers:    make(map[string]closure.TestVariantLedger, len(packages)),
 	}
 	for _, pkg := range packages {
 		// Served from the hasher's compartment memo: the ledger was derived
@@ -324,8 +324,8 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
 		}
-		if attested := scan.poolAttestations[subject]; attested != "" {
-			observation.poolAttestations[subject] = attested
+		if attested := scan.attestationDischarges[subject]; attested != "" {
+			observation.attestationDischarges[subject] = attested
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
@@ -386,7 +386,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectPools: v.facts.poolAttestations[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -443,7 +443,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectPools: v.facts.poolAttestations[subject], ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -502,15 +502,15 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 	const assertion = "caller assertion"
 	proof.Evidence = observationProofEvidence(v.facts.maximal[subject].Hash, assertion, proof)
 	return Fingerprint{
-		MaximalClosure:       v.facts.maximal[subject].Hash,
-		TestVariantClosure:   v.facts.maximal[subject].TestVariants,
-		ObservationAssertion: assertion,
-		ObservationProof:     proof,
-		Guards:               v.facts.guards,
-		PurityAssertion:      v.facts.purity[subject],
-		DynamicStateVouches:  v.facts.vouchDischarges[subject],
-		SingleSubjectPools:   v.facts.poolAttestations[subject],
-		ResultKind:           v.kind,
+		MaximalClosure:          v.facts.maximal[subject].Hash,
+		TestVariantClosure:      v.facts.maximal[subject].TestVariants,
+		ObservationAssertion:    assertion,
+		ObservationProof:        proof,
+		Guards:                  v.facts.guards,
+		PurityAssertion:         v.facts.purity[subject],
+		DynamicStateVouches:     v.facts.vouchDischarges[subject],
+		SingleSubjectDischarges: v.facts.attestationDischarges[subject],
+		ResultKind:              v.kind,
 	}
 }
 
@@ -936,7 +936,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	observable := make(map[Subject]closure.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
-	poolAttestations := make(map[Subject]string, len(unique))
+	attestationDischarges := make(map[Subject]string, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
@@ -955,8 +955,8 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		if discharges, ok := v.facts.vouchDischarges[subject]; ok {
 			vouchDischarges[subject] = discharges
 		}
-		if attested, ok := v.facts.poolAttestations[subject]; ok {
-			poolAttestations[subject] = attested
+		if attested, ok := v.facts.attestationDischarges[subject]; ok {
+			attestationDischarges[subject] = attested
 		}
 		if v.capturedObserved[subject] {
 			capturedObserved[subject] = true
@@ -976,16 +976,16 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		moduleDir: v.moduleDir,
 		kind:      v.kind,
 		facts: &observationFacts{
-			snapshot:             v.facts.snapshot,
-			maximal:              maximal,
-			guards:               v.facts.guards,
-			purity:               purity,
-			vouchDischarges:      vouchDischarges,
-			poolAttestations:     poolAttestations,
-			sourceFiles:          sourceFiles,
-			sourceFilesBySubject: sourceFilesBySubject,
-			fileDigests:          v.facts.fileDigests,
-			testVariantLedgers:   ledgers,
+			snapshot:              v.facts.snapshot,
+			maximal:               maximal,
+			guards:                v.facts.guards,
+			purity:                purity,
+			vouchDischarges:       vouchDischarges,
+			attestationDischarges: attestationDischarges,
+			sourceFiles:           sourceFiles,
+			sourceFilesBySubject:  sourceFilesBySubject,
+			fileDigests:           v.facts.fileDigests,
+			testVariantLedgers:    ledgers,
 		},
 		observable:           observable,
 		capturedObserved:     capturedObserved,

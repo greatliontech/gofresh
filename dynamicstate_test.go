@@ -495,6 +495,186 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 	}
 }
 
+// writeMappedDepModule writes a module depending on golang.org/x/sys at
+// the parent module's own pinned version, whose one function round-trips
+// an anonymous mapping through unix.Mmap/Munmap — the shape whose only
+// shared-dynamic-state culprit is the mapper bookkeeping.
+func writeMappedDepModule(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}", "golang.org/x/sys").Output()
+	if err != nil {
+		t.Fatalf("resolve parent x/sys version: %v", err)
+	}
+	version := strings.TrimSpace(string(out))
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys " + version + "\n",
+		"lib.go": "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(-1, 0, 4096, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// The audited mapping set: under the single-subject attestation the
+// mapper bookkeeping's marks discharge for the version-pinned module and
+// the discharge rides the subject's evidence; without the attestation
+// the downgrade stands naming mapper; and a different variable of the
+// same module keeps its own judgment even attested — the discharge
+// covers exactly the audited name (REQ-closure-shared-dynamic-state,
+// REQ-vouch-recorded).
+func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeMappedDepModule(t)
+	const mapper = "golang.org/x/sys/unix.mapper"
+	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+
+	control, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlView, err := control.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFP, err := controlView.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlVerdict.Status != Unverifiable || !strings.Contains(controlVerdict.Reason, mapper+" is mutated") {
+		t.Fatalf("unattested verdict = %+v, want the downgrade naming %s", controlVerdict, mapper)
+	}
+	if controlFP.SingleSubjectDischarges != "" {
+		t.Fatalf("unattested evidence recorded %q, want nothing", controlFP.SingleSubjectDischarges)
+	}
+
+	attested, err := New(WithDir(dir), WithSingleSubjectExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := attested.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.SingleSubjectDischarges != mapper {
+		t.Fatalf("attested evidence = %q, want %q", fingerprint.SingleSubjectDischarges, mapper)
+	}
+	verdict, err := view.Check(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+		t.Fatalf("attested verdict still downgraded: %+v", verdict)
+	}
+
+	// A ghost variable of the same module stays refused under the
+	// attestation: the discharge names exactly the audited variable.
+	const ghost = "golang.org/x/sys/unix.Ghost"
+	var hit bool
+	processFactCache.Range(func(k, v any) bool {
+		if strings.HasSuffix(k.(string), "\x00golang.org/x/sys/unix") {
+			fact := v.(dynamicStateFact)
+			fact.Declares = append(fact.Declares, ghost)
+			fact.Mutates = append(fact.Mutates, ghost)
+			processFactCache.Store(k, fact)
+			hit = true
+		}
+		return true
+	})
+	if !hit {
+		t.Fatal("no unix fact in the process cache")
+	}
+	poisonedEngine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	poisonedView, err := poisonedEngine.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poisonedFP, err := poisonedView.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poisonedVerdict, err := poisonedView.Check(ctx, poisonedFP, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if poisonedVerdict.Status != Unverifiable || !strings.Contains(poisonedVerdict.Reason, ghost+" is mutated") {
+		t.Fatalf("attested ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
+	}
+}
+
+// The audited mapping set confers nothing on a mutable-local checkout:
+// the discharge crosses exactly the version-pinned dependency line, so
+// a replace-directed golang.org/x/sys keeps the mapper downgrade under
+// the attestation and records no discharge — code the caller can edit
+// is fixed, not audited (REQ-closure-shared-dynamic-state, the
+// vouch-dependency-boundary discipline). The local stub carries the
+// audited shape (a bookkeeping map plus function fields, written
+// through a pointer-receiver mapping call) at the audited import path.
+func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":                 "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys v0.0.0\n\nreplace golang.org/x/sys => ./local-sys\n",
+		"lib.go":                 "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
+		"local-sys/go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
+		"local-sys/unix/mmap.go": "package unix\n\nimport \"errors\"\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   rawMmap,\n\tmunmap: rawMunmap,\n}\n\nfunc rawMmap(length int) ([]byte, error) { return make([]byte, length), nil }\n\nfunc rawMunmap(b []byte) error { return nil }\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tif len(b) == 0 {\n\t\treturn errors.New(\"empty\")\n\t}\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
+	engine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.Check(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "golang.org/x/sys/unix.mapper is mutated") {
+		t.Fatalf("mutable-local checkout verdict = %+v, want the downgrade naming the mapper - the discharge crosses only the version-pinned line", verdict)
+	}
+	if fingerprint.SingleSubjectDischarges != "" {
+		t.Fatalf("mutable-local checkout recorded a discharge: %q", fingerprint.SingleSubjectDischarges)
+	}
+}
+
 // writeSemverDepModule mirrors writePinnedDepModule over
 // golang.org/x/mod/semver: a pinned dependency whose real source is
 // benign enough to pass the observability scan, so observed-surface

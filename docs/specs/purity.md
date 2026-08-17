@@ -122,15 +122,18 @@ Validity needs no comparison over the record: a withdrawn vouch resurfaces the
 culprit in the current derivation and the verdict refuses on its own, while the
 explain surface still derives a vouched variable's chain on request — the vouch
 suppresses the verdict's downgrade, never the derivation a caller audits. The
-single-subject-process attestation (the audited pooling set's discharge condition,
+single-subject-process attestation (the audited pooling and mapping sets'
+discharge condition,
 REQ-closure-shared-dynamic-state in [closure.md](closure.md)) is the same kind of
 unverifiable caller assertion and records under exactly this requirement's
-discipline: the pool variables whose `Get`/`Put` discharge the attestation
-carried, reachable from the subject, ride that subject's evidence canonically
-(sorted identities), an inert attestation (no pool discharge reachable from the
-subject) recording nothing, and validity likewise needing no comparison — an
-unattested session re-marks the pool in the current derivation and refuses on
-its own.
+discipline: the variables whose discharge the attestation
+carried — a pool carrier's admitted `Get`/`Put`, the audited mapping set's
+named bookkeeping — reachable from the subject, ride that subject's evidence
+canonically
+(sorted identities), an inert attestation (no attested discharge reachable from
+the subject) recording nothing, and validity likewise needing no comparison — an
+unattested session re-marks the variable in the current derivation and refuses
+on its own.
 
 REQ-vouch-input, REQ-vouch-discharge, REQ-vouch-dependency-boundary,
 REQ-vouch-recorded: enforced by
@@ -138,7 +141,8 @@ REQ-vouch-recorded: enforced by
 `TestVouchConfersNothingOnMutableLocalState`,
 `TestObservedEvidenceNeverSuppressesSharedDynamicState`,
 `TestVouchWithdrawalRefusesObservedServe`, and (the attestation-recording arm)
-`TestSingleSubjectAttestationRecordedOnEvidence`.
+`TestSingleSubjectAttestationRecordedOnEvidence` and
+`TestAuditedMappingDischargeRequiresAttestation`.
 
 REQ-purity-observation-separation (shared-dynamic-state arm — completed
 observation evidence never substitutes for the downgrade): enforced by

@@ -308,7 +308,23 @@ attested and unattested sessions never serve each other's facts, and a
 load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
 auditable and never silent (REQ-vouch-recorded in
-[purity.md](purity.md)). The set grows only by source audit. One narrowing applies to
+[purity.md](purity.md)). The set grows only by source audit. The
+audited mapping set — `golang.org/x/sys/unix`'s package-level `mapper`
+bookkeeping, written by the mapping calls (`Mmap`, `Munmap`, and their
+variants) — is admitted
+under the same caller-attested single-subject-process execution model
+and only for the version-pinned module: mapper's state is
+process-local, fed exclusively by the analyzed program's own mapping
+calls, and consulted only as address-to-length bookkeeping, so under
+the attestation every write site lies in the subject's own rooted flow
+and mapper contents are a function of the analyzed source and the
+subject alone. The discharge covers exactly the named variable in the
+shared-dynamic-state judgment — a mutable-local checkout keeps every
+mark, every other variable of the module keeps its own judgment, and
+the mapping syscalls' external effects keep their own classification
+at the observability tiers — and a load-bearing discharge is recorded
+on the subject's evidence exactly as the pooling set's. The set grows
+only by source audit. One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
@@ -316,6 +332,15 @@ package — is a provably-immutable audited construction (`errors.New`; a direct
 `reflect.TypeOf` call, its result the runtime's canonical type descriptor,
 never written after construction — the direct call only, a chained method
 result staying non-audited, and the call's argument keeping its own pricing;
+a direct `fmt.Errorf` call whose every argument is audited — a constant, a
+nested audited construction, or a reference to a sibling package-level
+variable itself object-closed, the chained admission recorded as a dependency
+edge and falling with the sibling's closure at composition whatever the
+declaration or store order, any other argument shape refusing fail-closed, the
+judgment structural over all arguments and never a reading of the format
+string; a constant-valued expression — a literal, a named constant, a folded
+expression — whose boxed basic-kind value carries no mutable reach at all, so
+no holder of the stored value can write through it;
 the nil zero value), the initializer included; an init-flow appearance the audit cannot
 attribute — an indirect or range-bound store, an address capture, or a
 non-audited value — breaks the closure from whichever package performs it. No holder of
