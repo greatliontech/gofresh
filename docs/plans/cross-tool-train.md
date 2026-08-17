@@ -863,8 +863,12 @@ both plans.
       mutate; rebinding stays the mutation arm's), so its
       writable-escape refusal proves nothing and discharges;
       reproduced from the field: tugboat's raft.DiscardLogger
-      (var L Logger = nopLogger{}) accounts for 285 of 967 uncacheable
-      witnesses, the largest in-tree dynamic-state class. Release,
+      (var L Logger = nopLogger{}) accounted for 285 of 967 uncacheable
+      witnesses, the largest in-tree dynamic-state class - discharged
+      in-tree meanwhile (tugboat 8968554 makes it a concrete-typed
+      var), so the chunk's justification re-bases at triage on
+      whatever zero-field-value mass the then-current measure shows;
+      zero measured mass closes the chunk unbuilt. Release,
       then the consumer bumps ride.
 - [ ] 97. stipulator: cross-platform resolution views - a selection
       declaring GOOS/GOARCH off the host today refuses by name (chunk
@@ -893,6 +897,39 @@ both plans.
       the chunk narrows the vouch surface, never claims to empty it.
       Sequenced after 98 (same discharge family; 98's is the larger
       measured mass). Release, then the consumer bumps ride.
+- [ ] 100. gofresh: in-module scratch discharge - reads of a
+      module-interior directory the test itself mints, writes, and
+      removes (self-generated feedback, no environment input) classify
+      as runtime inputs no bracket can cover and seal the observation;
+      the chunk-35 close of this widening rested on "zero measured
+      mass in either corpus", and the chunk-16 exclusion-ordering fix
+      unmasked that the mass was hidden behind the "/" refusal all
+      along: tugboat's .realseam-tmp WAL smoke tier is 129 of 972
+      witnesses (excluded at chunk 16 as the interim caller
+      assertion). Design reasoning recoverable via
+      git log --all -- docs/issues/fresh-mutation-in-module-scratch.md;
+      triage re-derives against the then-current measure. Release,
+      then the consumer bumps ride.
+- [ ] 101. gofresh: audited-construction discharge reaches carrier
+      stores, and errors.New joins the audited set - storing an
+      audited-construction carrier (a reflect.TypeOf constant) into a
+      struct field marks the SOURCE package variable "is mutated" even
+      though the store copies the interface value and no write through
+      the copy can reach the shared object (reproduced: a yaml.v3-shaped
+      fixture fires the mutation arm at the composite-literal store
+      with the field never written and differently named; the plain
+      var-binding shape discharges) - the discharge must consult the
+      same audited-construction proof on the mutation arm's
+      store/capture shapes it already consults on bindings and
+      escapes. Same family: var Err = errors.New("...") sentinels
+      (never assigned, pointee unexported and unwritable from outside
+      the errors package) refuse as "escapes writable"/"is mutated" -
+      tugboat's ErrCompacted/ErrSealed class - and errors.New is as
+      auditable a construction as reflect.TypeOf. Field mass at
+      chunk 16: yaml.v3's seven type constants (15 witnesses, vouched
+      as the interim) and the in-tree sentinel classes. Coordinates
+      with the audited-pooling-set owner's line of work before
+      touching the discharge. Release, then the consumer bumps ride.
 - [x] 90. stipulator: goos/race build dimensions bind (stipulator
       docs/issues/goos-race-build-dimensions.md) - the resolution-view
       identity extends past the tags/toolchain pair to the
