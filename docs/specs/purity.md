@@ -124,12 +124,13 @@ explain surface still derives a vouched variable's chain on request — the vouc
 suppresses the verdict's downgrade, never the derivation a caller audits. The
 single-subject-process attestation (the audited pooling set's discharge condition,
 REQ-closure-shared-dynamic-state in [closure.md](closure.md)) is the same kind of
-unverifiable caller assertion and records under the same discipline: the
-pool variables whose `Get`/`Put` discharge the attestation carried, reachable
-from the subject, MUST ride that subject's evidence canonically (sorted
-identities), an inert attestation (no pool discharge reachable from the subject)
-recording nothing, and validity likewise needing no comparison — an unattested
-session re-marks the pool in the current derivation and refuses on its own.
+unverifiable caller assertion and records under exactly this requirement's
+discipline: the pool variables whose `Get`/`Put` discharge the attestation
+carried, reachable from the subject, ride that subject's evidence canonically
+(sorted identities), an inert attestation (no pool discharge reachable from the
+subject) recording nothing, and validity likewise needing no comparison — an
+unattested session re-marks the pool in the current derivation and refuses on
+its own.
 
 REQ-vouch-input, REQ-vouch-discharge, REQ-vouch-dependency-boundary,
 REQ-vouch-recorded: enforced by
