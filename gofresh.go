@@ -104,8 +104,16 @@ func DisableMemos() { closure.DisableMemos() }
 // (protoc-generated files' variables under the attestation, the
 // directive's two-leg trust model) and, at the effect-scan floor, the
 // audited linkname-target set (audited-only linkname files drop
-// exactly the opaque-linkage effect).
-const DynamicStateStrategy = "gofresh/dynamic-state@30"
+// exactly the opaque-linkage effect). @31 adds the pooling set's
+// content-proven discharge: an unexported package-level sync.Pool
+// whose declaration alone could ever type its contents — a New
+// function literal returning one identical concrete
+// dynamic-carrier-free type, every other appearance exactly a Get or
+// Put receiver, every admitted Put argument statically that type —
+// is discharged in any execution model, the engine's own verdict
+// (no attestation, no evidence record); every non-conforming shape
+// keeps the attestation requirement.
+const DynamicStateStrategy = "gofresh/dynamic-state@31"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. The version pins the engine's interpretation: any admission or

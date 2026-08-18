@@ -7794,12 +7794,159 @@ func TestPoolingDischargeRequiresSingleSubjectAttestation(t *testing.T) {
 	}
 }
 
+// The content-proven discharge admits the canonical pooling idiom in
+// any execution model — no attestation: an unexported package-level
+// sync.Pool declared with a New function literal returning one
+// identical concrete dynamic-carrier-free type, every appearance a
+// Get or Put receiver, every Put argument statically that type. Pool
+// contents are then non-nil T under every schedule, so no dispatch
+// outcome can distinguish subject orders
+// (REQ-closure-shared-dynamic-state).
+func TestContentProvenPoolDischargesWithoutAttestation(t *testing.T) {
+	for name, source := range map[string]string{
+		"get and put":         "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\t*b = (*b)[:0]\n\tn := cap(*b)\n\tbufs.Put(b)\n\treturn n\n}\n",
+		"deferred put":        "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+		"uses across helpers": "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc borrow() *[]byte { return bufs.Get().(*[]byte) }\n\nfunc give(b *[]byte) { bufs.Put(b) }\n\nfunc F() int {\n\tb := borrow()\n\tdefer give(b)\n\treturn cap(*b)\n}\n",
+		"struct content":      "package view\n\nimport \"sync\"\n\ntype scratch struct{ n int }\n\nvar scratches = sync.Pool{New: func() any { return new(scratch) }}\n\nfunc F() int {\n\ts := scratches.Get().(*scratch)\n\ts.n++\n\tn := s.n\n\tscratches.Put(s)\n\treturn n\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Valid {
+				t.Fatalf("verdict = %+v, want Valid - a content-proven pool downgraded without the attestation", verdict)
+			}
+		})
+	}
+}
+
+// Every shape the content proof cannot see keeps the attestation
+// requirement, fail-closed: the declaration must be the only content
+// source (a conforming New function literal), the content type one
+// identical concrete dynamic-carrier-free type, every appearance a
+// Get or Put receiver — an initializer-flow write or address capture
+// included, since init regions exempt writes from the mutation marks
+// the proof would otherwise lean on — and every Put argument
+// statically exactly T (REQ-closure-shared-dynamic-state,
+// REQ-closure-shared-dynamic-state-reason).
+func TestContentProvenPoolNonConformingShapesKeepAttestationRequirement(t *testing.T) {
+	conformingDecl := "var bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n"
+	for name, tc := range map[string]struct{ source, culprit string }{
+		"exported pool": {
+			source:  "package view\n\nimport \"sync\"\n\nvar Bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := Bufs.Get().(*[]byte)\n\tdefer Bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.Bufs is mutated",
+		},
+		"no New field": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs sync.Pool\n\nfunc F() int {\n\tb, ok := bufs.Get().(*[]byte)\n\tif !ok {\n\t\tn := make([]byte, 0, 64)\n\t\tb = &n\n\t}\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"named-function New": {
+			source:  "package view\n\nimport \"sync\"\n\nfunc newBuf() any { b := make([]byte, 0, 64); return &b }\n\nvar bufs = sync.Pool{New: newBuf}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"named-result New with deferred rewrite": {
+			// The deferred closure retypes the named result after the
+			// return expression the derivation reads — the content is
+			// *int at runtime while the returns say *[]byte. Both the
+			// named-result rule and the defer rule refuse this shape.
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() (v any) {\n\tdefer func() { v = new(int) }()\n\tb := make([]byte, 0, 64)\n\treturn &b\n}}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"named result without defer": {
+			// Sound in fact, refused by the signature rule alone — the
+			// case that isolates the named-results check from the defer
+			// check.
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() (v any) {\n\tb := make([]byte, 0, 64)\n\treturn &b\n}}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"recovering New": {
+			// A recovered panic returns the zero value of the unnamed
+			// any result — a nil interface — so Get yields nil exactly
+			// when no sibling planted first: nil-vs-T is type-plane and
+			// subject-order-steered. The defer rule refuses the shape.
+			source:  "package view\n\nimport \"sync\"\n\nvar cold = true\n\nvar bufs = sync.Pool{New: func() any {\n\tdefer func() { _ = recover() }()\n\tif cold {\n\t\tpanic(\"cold\")\n\t}\n\tb := make([]byte, 0, 64)\n\treturn &b\n}}\n\nfunc F() int {\n\tv := bufs.Get()\n\tif v == nil {\n\t\treturn 0\n\t}\n\tb := v.(*[]byte)\n\tbufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"deferred side effect in New": {
+			// A plain defer with no recover is sound today, but the
+			// bound is the statement shape, fail-closed — post-return
+			// channels are closed wholesale, not judged by what the
+			// deferred call happens to do.
+			source:  "package view\n\nimport \"sync\"\n\nfunc noop() {}\n\nvar bufs = sync.Pool{New: func() any {\n\tdefer noop()\n\tb := make([]byte, 0, 64)\n\treturn &b\n}}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"multi-name declaration": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs, spare = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}, 0\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b) + spare\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"empty composite literal": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{}\n\nfunc F() int {\n\tb, ok := bufs.Get().(*[]byte)\n\tif !ok {\n\t\tn := make([]byte, 0, 64)\n\t\tb = &n\n\t}\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"interface-typed New return": {
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { var v any = new(int); return v }}\n\nfunc F() int {\n\tp := bufs.Get().(*int)\n\tdefer bufs.Put(p)\n\treturn *p\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"two content types": {
+			source:  "package view\n\nimport \"sync\"\n\nvar cold bool\n\nvar bufs = sync.Pool{New: func() any {\n\tif cold {\n\t\treturn new(int)\n\t}\n\tb := make([]byte, 0, 64)\n\treturn &b\n}}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"untyped nil New return": {
+			// The Put is nil too, so every site would conform to an
+			// untyped content type — the untyped rejection alone is
+			// what keeps this pool unproven.
+			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { return nil }}\n\nfunc F() int {\n\tv := bufs.Get()\n\tbufs.Put(nil)\n\tif v == nil {\n\t\treturn 0\n\t}\n\treturn 1\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"dispatch-carrying content": {
+			source:  "package view\n\nimport \"sync\"\n\nvar hooks = sync.Pool{New: func() any { return func() int { return 1 } }}\n\nfunc F() int {\n\th := hooks.Get().(func() int)\n\tdefer hooks.Put(h)\n\treturn h()\n}\n",
+			culprit: "example.com/view.hooks is mutated",
+		},
+		"put of the any-typed Get result": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc F() int {\n\tv := bufs.Get()\n\tdefer bufs.Put(v)\n\treturn 0\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"put of a different concrete type": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\t_ = b\n\tbufs.Put(new(int))\n\treturn 0\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"New-field store elsewhere evicts wholesale": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc rearm() { bufs.New = func() any { return new(int) } }\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"initializer-flow rebind evicts": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc init() {\n\tbufs = sync.Pool{New: func() any { return new(int) }}\n}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"initializer-flow address capture evicts": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc warm(p *sync.Pool) {}\n\nfunc init() { warm(&bufs) }\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"method-value bind evicts": {
+			source:  "package view\n\nimport \"sync\"\n\n" + conformingDecl + "\nfunc F() int {\n\tget := bufs.Get\n\tb := get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
+			culprit: "example.com/view.bufs is mutated",
+		},
+		"array element carrier stays attestation-gated": {
+			source:  "package view\n\nimport \"sync\"\n\nvar pools [4]sync.Pool\n\nfunc F() int {\n\ti := 1\n\tv := pools[i].Get()\n\tpools[i].Put(v)\n\treturn i\n}\n",
+			culprit: "example.com/view.pools is mutated",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeViewModule(t, tc.source)
+			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
+				t.Fatalf("verdict = %+v, want the fail-closed downgrade naming %q", verdict, tc.culprit)
+			}
+		})
+	}
+}
+
 // A load-bearing single-subject attestation rides the subject's
 // evidence exactly as a vouch discharge does: option on with a fired
 // pool discharge, the fingerprint names the discharged pool
 // canonically; option on with no pool reachable, the record is empty —
-// an inert attestation records nothing; option off, nothing is
-// recorded and the pool keeps the downgrade (REQ-vouch-recorded,
+// an inert attestation records nothing; option off, a content-proven
+// pool stands with nothing recorded (the engine's own verdict) and an
+// unproven pool keeps the downgrade (REQ-vouch-recorded,
 // REQ-closure-shared-dynamic-state).
 func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
 	ctx := context.Background()
@@ -7843,12 +7990,28 @@ func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
 		t.Fatalf("inert attestation recorded %q, want nothing - no pool discharge is reachable from the subject", inert.SingleSubjectDischarges)
 	}
 
+	// The conforming pool is content-proven, so the unattested leg
+	// pins the proven discharge's recording discipline instead: the
+	// verdict stands without the attestation and the discharge rides
+	// no evidence record — the engine's own verdict, not a caller
+	// assertion (REQ-closure-shared-dynamic-state).
 	unattested, offVerdict := capture(t, pooled)
-	if offVerdict.Status != Unverifiable || !strings.Contains(offVerdict.Reason, "example.com/view.bufs is mutated") {
-		t.Fatalf("unattested pooled verdict = %+v, want the fail-closed downgrade naming the pool", offVerdict)
+	if offVerdict.Status != Valid {
+		t.Fatalf("unattested content-proven pooled verdict = %+v, want Valid", offVerdict)
 	}
 	if unattested.SingleSubjectDischarges != "" {
-		t.Fatalf("unattested evidence recorded %q, want nothing", unattested.SingleSubjectDischarges)
+		t.Fatalf("unattested evidence recorded %q, want nothing - the content-proven discharge is not an attestation", unattested.SingleSubjectDischarges)
+	}
+
+	// A pool the content proof does not cover — contents typed by a
+	// planted struct, no New — keeps the downgrade and records nothing.
+	unproven := "package view\n\nimport \"sync\"\n\nvar pool sync.Pool\n\ntype item struct{}\n\nfunc F() int {\n\tpool.Put(item{})\n\tif _, ok := pool.Get().(item); ok {\n\t\treturn 1\n\t}\n\treturn 0\n}\n"
+	offEvidence, offUnproven := capture(t, unproven)
+	if offUnproven.Status != Unverifiable || !strings.Contains(offUnproven.Reason, "example.com/view.pool is mutated") {
+		t.Fatalf("unattested unproven pooled verdict = %+v, want the fail-closed downgrade naming the pool", offUnproven)
+	}
+	if offEvidence.SingleSubjectDischarges != "" {
+		t.Fatalf("unattested evidence recorded %q, want nothing", offEvidence.SingleSubjectDischarges)
 	}
 }
 

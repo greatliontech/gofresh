@@ -1241,11 +1241,26 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 	// dischargePool records one fired pooling admission for the audit
 	// record: a load-bearing attestation must be visible on the evidence
 	// of every subject reaching the pool, never silent — the
-	// vouch-recording discipline (REQ-vouch-recorded).
+	// vouch-recording discipline (REQ-vouch-recorded). The content-proven
+	// discharge fires through the same gates but records nothing here:
+	// it is the engine's own verdict, not a caller assertion
+	// (REQ-closure-shared-dynamic-state), and poolDischarged is nil
+	// without the attestation.
 	dischargePool := func(variable *types.Var) {
 		if poolDischarged != nil {
 			poolDischarged[dynamicVarKey(variable)] = true
 		}
+	}
+	// provenCalls marks each Get/Put call selector that the
+	// content-proven discharge admits without the attestation: a
+	// conforming call on a surviving proven pool, derived in one place
+	// (provenSharedPools) so both admission gates — program code and
+	// the init-exempt regions — and the eviction judge one shape
+	// (REQ-closure-shared-dynamic-state). Skipped under the
+	// attestation, whose admission is broader.
+	provenCalls := map[*ast.SelectorExpr]bool{}
+	if !singleSubject {
+		_, provenCalls = provenSharedPools(p)
 	}
 	// scanExemptCalls covers the call arguments of the init-exempt
 	// regions - init bodies, init-only helpers, initializer expressions -
@@ -1318,13 +1333,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
 						deferred := false
 						var poolVar *types.Var
-						if fn, fnOK := selection.Obj().(*types.Func); fnOK && singleSubject && auditedPooling(fn) {
+						if fn, fnOK := selection.Obj().(*types.Func); fnOK && (singleSubject || provenCalls[sel]) && auditedPooling(fn) {
 							_, poolVar = poolCarrierIdent(sel.X)
 						}
 						if poolVar != nil {
 							// The audited pooling set: under the
 							// caller-attested single-subject-process
-							// execution model, a Get or Put CALL on a
+							// execution model — or, without it, under
+							// the content-proven discharge for a
+							// conforming call on a proven pool — a Get
+							// or Put CALL on a
 							// package-level sync.Pool carrier marks
 							// nothing for the pool in init flow exactly
 							// as in program code; the call's arguments
@@ -1688,13 +1706,16 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						// their contractual removability is why the
 						// values need no per-item pricing at the call.
 						// The values passed and produced keep their own
-						// full pricing; without the attestation, and for
+						// full pricing; without the attestation a call
+						// is admitted only through the content-proven
+						// discharge (a conforming call on a proven
+						// pool), and for
 						// every other use — a write, a rebinding, an
 						// address capture, an escape, a method-value
 						// bind, a New-field access outside init flow —
 						// the fail-closed judgment stands
 						// (REQ-closure-shared-dynamic-state).
-						if singleSubject && calledSelectors[n] && auditedPooling(fn) {
+						if (singleSubject || provenCalls[n]) && calledSelectors[n] && auditedPooling(fn) {
 							if ident, variable := poolCarrierIdent(n.X); variable != nil {
 								dischargePool(variable)
 								readContext[ident] = true
@@ -6515,8 +6536,9 @@ func auditedSynchronization(fn *types.Func) bool {
 // per-item pricing at the call — a Get or Put CALL on a package-level
 // pool carrier is then not mutation of the carrier, while the values
 // passed and produced keep their own full pricing. Without the
-// attestation, sibling subjects sharing a process communicate through
-// pool contents, and every pool use keeps the fail-closed judgment.
+// attestation, a pool use is admitted only through the content-proven
+// discharge (provenSharedPools); every pool the proof does not cover
+// keeps the fail-closed judgment at every use.
 // Grows only by source audit (REQ-closure-shared-dynamic-state).
 func auditedPooling(fn *types.Func) bool {
 	if fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
@@ -6537,6 +6559,282 @@ func auditedPooling(fn *types.Func) bool {
 	switch fn.Name() {
 	case "Get", "Put":
 		return true
+	default:
+		return false
+	}
+}
+
+// provenSharedPools derives the package's content-proven pools and
+// their admitted call selectors: the audited pooling set's
+// engine-proven discharge, admitting Get/Put in any execution model
+// when the declaration alone could ever type the pool's contents
+// (REQ-closure-shared-dynamic-state). A pool is content-proven
+// exactly when it is an unexported package-level sync.Pool variable —
+// unexported so every reference site lies in the owning package's
+// compilation variants; the shared-dynamic-state marks are keyed
+// variant-blind and union at composition, so a dirty site in any
+// variant downgrades every subject linking the package (stricter
+// than per-variant, never weaker) — declared with a composite
+// literal whose single field is a New function literal with no named
+// results and no defer in its own body (the post-return channels
+// that could retype or nil the produced value —
+// provenPoolContentType), every
+// return of that literal one identical concrete
+// dynamic-carrier-free type T (never untyped), and the variable's
+// every other appearance in this package's syntax is exactly the
+// receiver of a Get or Put call — any other appearance, a New-field
+// access or an initializer-flow write included, evicts the proof
+// wholesale. Put-argument conformance stays a per-site judgment
+// (provenPoolCallConforms): a non-conforming site keeps its own
+// fail-closed mark without evicting the proof. Contents are then
+// always of type T under every schedule — New is total and every
+// plant is T, so the interface value Get yields is never nil — and
+// no type assertion, type switch, or method dispatch can distinguish
+// subject orders; the data plane stays order-sensitive exactly as
+// any data-only package variable the invariant never triggers on.
+// The engine's own verdict, not a caller assertion: no attestation,
+// no evidence record. calls marks each Get/Put call selector the
+// discharge admits — a conforming call on a surviving proven pool —
+// derived here, in one place, so the admission gates and the
+// eviction judge one shape.
+func provenSharedPools(p *packages.Package) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
+	proven = map[*types.Var]types.Type{}
+	calls = map[*ast.SelectorExpr]bool{}
+	if p.TypesInfo == nil {
+		return proven, calls
+	}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) != 1 || len(vs.Values) != 1 {
+					continue
+				}
+				name := vs.Names[0]
+				if name.IsExported() {
+					continue
+				}
+				// file.Decls yields only package-scope declarations, so
+				// the Defs object needs no scope check.
+				variable, ok := p.TypesInfo.Defs[name].(*types.Var)
+				if !ok || variable.Pkg() == nil {
+					continue
+				}
+				named, ok := types.Unalias(variable.Type()).(*types.Named)
+				if !ok || named.Obj() == nil || named.Obj().Pkg() == nil ||
+					named.Obj().Pkg().Path() != "sync" || named.Obj().Name() != "Pool" {
+					continue
+				}
+				lit, ok := unparenExpr(vs.Values[0]).(*ast.CompositeLit)
+				if !ok || len(lit.Elts) != 1 {
+					continue
+				}
+				kv, ok := lit.Elts[0].(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				if !ok || key.Name != "New" {
+					continue
+				}
+				fnLit, ok := unparenExpr(kv.Value).(*ast.FuncLit)
+				if !ok {
+					continue
+				}
+				content := provenPoolContentType(p, fnLit)
+				if content == nil {
+					continue
+				}
+				proven[variable] = content
+			}
+		}
+	}
+	if len(proven) == 0 {
+		return proven, calls
+	}
+	// One walk resolves every audited Get/Put call on a candidate: the
+	// receiver idents (the only appearances that do not evict) and the
+	// per-site conformance verdict. The receiver shape is exactly what
+	// the admission gates consult — an unparenthesized selector on an
+	// unparenthesized ident — judged here once, so a shape a gate
+	// would not admit evicts, fail-closed.
+	receiver := map[*ast.Ident]bool{}
+	type poolCall struct {
+		variable *types.Var
+		conforms bool
+	}
+	sites := map[*ast.SelectorExpr]poolCall{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			selection, ok := p.TypesInfo.Selections[sel]
+			if !ok || selection.Kind() != types.MethodVal {
+				return true
+			}
+			fn, ok := selection.Obj().(*types.Func)
+			if !ok || !auditedPooling(fn) {
+				return true
+			}
+			receiver[ident] = true
+			variable, ok := p.TypesInfo.Uses[ident].(*types.Var)
+			if !ok {
+				return true
+			}
+			if content, candidate := proven[variable]; candidate {
+				sites[sel] = poolCall{variable: variable, conforms: provenPoolCallConforms(p, fn, call, content)}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			variable, ok := p.TypesInfo.Uses[ident].(*types.Var)
+			if !ok {
+				return true
+			}
+			if _, candidate := proven[variable]; candidate && !receiver[ident] {
+				delete(proven, variable)
+			}
+			return true
+		})
+	}
+	// Admitted calls are derived after eviction so an evicted pool's
+	// sites never admit.
+	for sel, site := range sites {
+		if _, stands := proven[site.variable]; stands && site.conforms {
+			calls[sel] = true
+		}
+	}
+	return proven, calls
+}
+
+// provenPoolContentType derives the single concrete content type a
+// conforming New function literal could ever produce, or nil when the
+// literal does not conform: no named results (a deferred write to a
+// named result retypes the produced value after the return
+// expression this derivation reads — refusing the signature shape is
+// the fail-closed answer, and it holds without a defer in sight: a
+// racing goroutine can write a named result too), no defer statement
+// in the literal's own body (a deferred call is the only channel
+// that can rewrite a named result or recover a panic into a
+// zero-valued — nil-interface — return; either retypes or nils the
+// produced value after the return expressions the derivation reads,
+// and a New literal has no legitimate use for defer), and every
+// return statement at the
+// literal's own depth (nested literals are their own functions) must
+// return one expression of one identical concrete type — never
+// untyped (an untyped nil would let Get yield nil, and nil-vs-T is a
+// type-plane outcome subject order could steer) — and that type must
+// be free of dynamic carriers under the invariant's own trigger
+// predicate (REQ-closure-shared-dynamic-state). A panic that
+// propagates out of New is outside the proof's claims exactly as
+// under the attestation: contents are contractually removable at any
+// time, so whether New runs at all is undetermined either way, and a
+// verdict conditioned on it is out of contract in every execution
+// model.
+func provenPoolContentType(p *packages.Package, lit *ast.FuncLit) types.Type {
+	if lit.Type == nil || lit.Type.Results == nil {
+		return nil
+	}
+	for _, field := range lit.Type.Results.List {
+		if len(field.Names) > 0 {
+			return nil
+		}
+	}
+	var content types.Type
+	conforming := true
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		if !conforming {
+			return false
+		}
+		if _, nested := n.(*ast.FuncLit); nested {
+			return false
+		}
+		if _, deferred := n.(*ast.DeferStmt); deferred {
+			conforming = false
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		if len(ret.Results) != 1 {
+			conforming = false
+			return false
+		}
+		tv, ok := p.TypesInfo.Types[ret.Results[0]]
+		if !ok || tv.Type == nil {
+			conforming = false
+			return false
+		}
+		t := tv.Type
+		// The untyped rejection is the single source of the "never
+		// untyped" bound: with T never untyped, an untyped Put argument
+		// can never be Identical to T, so the per-site judgment needs no
+		// untyped check of its own. Interfaces need no check at all —
+		// an interface is itself a dynamic carrier, so the carrier
+		// predicate below rejects it.
+		if basic, isBasic := types.Unalias(t).(*types.Basic); isBasic && basic.Info()&types.IsUntyped != 0 {
+			conforming = false
+			return false
+		}
+		if content == nil {
+			content = t
+		} else if !types.Identical(content, t) {
+			conforming = false
+			return false
+		}
+		return true
+	})
+	if !conforming || content == nil {
+		return nil
+	}
+	if typeMayCarryUnknownDynamic(content, make(map[types.Type]bool)) {
+		return nil
+	}
+	return content
+}
+
+// provenPoolCallConforms judges one Get or Put call against a proven
+// pool's content type. Get takes no argument; a Put conforms exactly
+// when its single argument's static type is identical to T — an
+// untyped or differently-typed argument is not admitted and keeps the
+// fail-closed judgment (REQ-closure-shared-dynamic-state).
+func provenPoolCallConforms(p *packages.Package, fn *types.Func, call *ast.CallExpr, content types.Type) bool {
+	switch fn.Name() {
+	case "Get":
+		return len(call.Args) == 0
+	case "Put":
+		if len(call.Args) != 1 {
+			return false
+		}
+		tv, ok := p.TypesInfo.Types[call.Args[0]]
+		if !ok || tv.Type == nil {
+			return false
+		}
+		// T is never untyped (provenPoolContentType's bound), so an
+		// untyped argument can never be Identical to it — no separate
+		// untyped check.
+		return types.Identical(tv.Type, content)
 	default:
 		return false
 	}

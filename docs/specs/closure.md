@@ -307,14 +307,15 @@ distinct grounds. At the effect classification tiers the admission is
 unconditional and receiver-neutral exactly as lock state's: `Get` and
 `Put` touch only process memory fed by the analyzed program, so they
 introduce no external input channel whatever the execution schedule.
-The shared-dynamic-state discharge holds only under the
+The shared-dynamic-state discharge holds on two grounds. Under the
 caller-attested single-subject-process execution model — each subject
-measured in a process of its own — where every in-process `Put` site
+measured in a process of its own — every in-process `Put` site
 lies in the subject's own rooted flow, so pool contents are a function
 of the analyzed source and the subject alone (without the attestation,
 sibling subjects sharing a process communicate through pool contents —
 a prior subject's `Put` plants a value a later subject's `Get`
-dispatches on — and every pool use keeps the fail-closed judgment);
+dispatches on — and a pool the content proof below does not cover
+keeps the fail-closed judgment at every use);
 the contents' contractual removability at any time is why the values
 need no per-item pricing at the call. Under the attestation, a `Get`
 or `Put` method call on a pool-typed carrier, the carrier being a
@@ -324,7 +325,50 @@ mutation of the pool variable, while the values passed and produced
 keep their own full pricing, and every other use — a write, a
 rebinding, an address capture, an escape of the pool value, or a
 `New`-field access outside `init` flow — keeps the fail-closed
-judgment. The attestation is part of the persisted fact identity, so
+judgment. The content-proven discharge is the attestation's
+engine-proven sibling, admitting the same `Get` and `Put` calls in
+any execution model: the cross-subject channel the attestation
+otherwise closes is the planted value's dispatch plane, so a pool
+whose contents provably carry no dispatch needs no execution model at
+all. A pool is content-proven exactly when its owning package's
+syntax shows every content source and every use conforming: an
+unexported package-level `sync.Pool` variable — unexported so every
+reference site lies in the owning package's compilation variants,
+whose marks are keyed variant-blind and union at composition: a
+dirty site in any variant downgrades every subject linking the
+package, stricter than per-variant and never weaker — declared with
+a composite literal whose single field is a `New` function literal
+with no named results and no defer statement in its own body (a
+deferred call is the only channel that can rewrite a named result or
+recover a panic into a zero-valued nil-interface return — either
+retypes or nils the produced value after the return expressions the
+derivation reads — and a named result is refused even without one: a
+racing goroutine can write it too), every return
+of that literal one identical type `T` — never untyped, and free of
+dynamic carriers under the invariant's own trigger predicate (an
+interface is itself such a carrier, so interface-typed contents
+refuse there) — and the variable's every other appearance in the
+package being exactly the receiver of a `Get` or `Put` call — any
+other appearance, a `New`-field access or an initializer-flow write
+included, evicts the proof wholesale. `Put`-argument conformance
+stays per site: a `Put` whose argument's static type is not exactly
+`T` is not admitted and keeps its own fail-closed mark. Contents are
+then always of type `T` under every schedule — every plant is `T`,
+and with the literal's post-return channels closed every completed
+`New` produces `T`, so the interface value `Get` yields is never
+nil; a panic that propagates out of `New` stays outside the proof's
+claims exactly as under the attestation, since removability leaves
+whether `New` runs undetermined in every execution model — and no
+type assertion, type
+switch, or method dispatch can distinguish subject orders; what stays
+order-sensitive is the data plane, which the invariant's type-level
+trigger already leaves out of scope (a mutable data-only package
+variable is never a culprit). Like the memoization set's, this
+discharge is the engine's own verdict, not a caller assertion: it
+needs no attestation and rides no evidence record. An exported pool,
+an element of a package-level array or slice of `sync.Pool`, and
+every shape the proof cannot see keep the attestation requirement.
+The attestation is part of the persisted fact identity, so
 attested and unattested sessions never serve each other's facts, and a
 load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
