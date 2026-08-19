@@ -376,19 +376,35 @@ auditable and never silent (REQ-vouch-recorded in
 [purity.md](purity.md)). The set grows only by source audit. The
 audited mapping set — `golang.org/x/sys/unix`'s package-level `mapper`
 bookkeeping, written by the mapping calls (`Mmap`, `Munmap`, and their
-variants) — is admitted
-under the same caller-attested single-subject-process execution model
-and only for the version-pinned module: mapper's state is
+variants) — is admitted in any execution model, on the deepened
+source audit and exactly for the audited versions of the
+version-pinned module (v0.8.0, v0.26.0, v0.33.0, v0.40.0, v0.43.0,
+v0.45.0, v0.46.0, v0.47.0 — the per-GOOS declaration split included;
+an unaudited version, later or earlier, refuses fail-closed until its
+source is audited, exactly the memoization set's rule): mapper's
+state is
 process-local, fed exclusively by the analyzed program's own mapping
-calls, and consulted only as address-to-length bookkeeping, so under
-the attestation every write site lies in the subject's own rooted flow
-and mapper contents are a function of the analyzed source and the
-subject alone. The discharge covers exactly the named variable in the
+calls; its callable fields (`mmap`, `munmap`, `mremap`) are written
+only in the variable's declarations, so no schedule can change
+dispatch through the carrier; and its bookkeeping maps each live
+mapping's last-byte address to its data-only byte slice, which hands
+out no dynamic carrier. Cross-subject entries are disjoint while
+their mappings live (the kernel's contract); the raw-pointer paths
+(`MunmapPtr`, `MremapPtr`) leave entries stale, and a reissued address could
+then steer `Munmap`'s error-plane outcome by subject order — an
+exposure that is unobservable exactly because any subject able to
+observe it calls the mapping syscalls itself and those keep their
+own fail-closed classification at the observability tiers, which is
+therefore part of this discharge's ground, not merely an adjacent
+fact. The discharge spans the variable's mutation, escape, and
+environment-audit marks alike (the raw callable-field reads the
+`*Ptr` paths take are covered by the init-only-fields leg of the
+audit). Like the memoization set's, the discharge is
+the engine's own source-audited verdict: no attestation, no evidence
+record. It covers exactly the named variable in the
 shared-dynamic-state judgment — a mutable-local checkout keeps every
-mark, every other variable of the module keeps its own judgment, and
-the mapping syscalls' external effects keep their own classification
-at the observability tiers — and a load-bearing discharge is recorded
-on the subject's evidence exactly as the pooling set's. The set grows
+mark and every other variable of the module keeps its own judgment.
+The set grows
 only by source audit. The `//gofresh:single-subject` variable
 directive is the mapping set's own-code dual: a durable in-source
 directive on a package-level variable declaration — discovered under
@@ -453,10 +469,11 @@ refuses fail-closed until its source is audited. The derivation is
 content-invariant, so a prior
 subject's population changes timing and internal pointer identity
 that never leave the package's unexported internals, never a
-looked-up value — which is why, unlike the pooling and mapping sets
-whose contents are subject-planted values, the discharge needs no
+looked-up value — so the discharge needs no
 execution attestation and rides no evidence record (it is the
-engine's own source-audited verdict, not a caller assertion). The set
+engine's own source-audited verdict, not a caller assertion; the
+pooling set's content proof and the mapping set's deepened audit
+reach the same class by their own grounds). The set
 is the source-audited precursor of a structural get-or-compute
 discharge; its entries retire to that proof when it lands. It grows
 only by source audit. Under the caller-attested single-subject-process

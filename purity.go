@@ -152,7 +152,7 @@ type subjectScan struct {
 	// attestationDischarges maps each subject to the canonical sorted
 	// comma-joined variable keys whose discharge the caller's
 	// single-subject-process attestation carried — a pool variable's
-	// admitted Get/Put, the audited mapping set's named bookkeeping —
+	// admitted Get/Put, a single-subject-directed variable —
 	// reachable from its package; the vouch-recording discipline's
 	// parallel (REQ-vouch-recorded).
 	attestationDischarges map[Subject]string

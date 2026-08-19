@@ -524,14 +524,15 @@ func writeMappedDepModule(t *testing.T) string {
 	return dir
 }
 
-// The audited mapping set: under the single-subject attestation the
-// mapper bookkeeping's marks discharge for the version-pinned module and
-// the discharge rides the subject's evidence; without the attestation
-// the downgrade stands naming mapper; and a different variable of the
-// same module keeps its own judgment even attested — the discharge
-// covers exactly the audited name (REQ-closure-shared-dynamic-state,
-// REQ-vouch-recorded).
-func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
+// The audited mapping set discharges WITHOUT any execution attestation
+// (the deepened audit: init-only callable fields, address-keyed
+// data-only bookkeeping): the unattested verdict stands with no
+// evidence record — the engine's own verdict, the memoization set's
+// class — the attested session records nothing for it either, and a
+// ghost variable of the same module keeps its own judgment — the
+// discharge covers exactly the audited name
+// (REQ-closure-shared-dynamic-state).
+func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeMappedDepModule(t)
 	const mapper = "golang.org/x/sys/unix.mapper"
@@ -555,11 +556,15 @@ func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if controlVerdict.Status != Unverifiable || !strings.Contains(controlVerdict.Reason, mapper+" is mutated") {
-		t.Fatalf("unattested verdict = %+v, want the downgrade naming %s", controlVerdict, mapper)
+	// The fixture's closure still reaches the mapping syscalls' external
+	// effects (their observability classification is untouched by the
+	// discharge), so the ONLY residual is that class — pinned by
+	// equality so a second downgrade can never hide behind it.
+	if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call)" {
+		t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason likely means the parent go.mod pins an x/sys version outside the audited set: audit the new source and extend auditedMappingOut's switch", controlVerdict)
 	}
 	if controlFP.SingleSubjectDischarges != "" {
-		t.Fatalf("unattested evidence recorded %q, want nothing", controlFP.SingleSubjectDischarges)
+		t.Fatalf("unattested evidence recorded %q, want nothing - the discharge is the engine's own verdict", controlFP.SingleSubjectDischarges)
 	}
 
 	attested, err := New(WithDir(dir), WithSingleSubjectExecution())
@@ -574,19 +579,19 @@ func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fingerprint.SingleSubjectDischarges != mapper {
-		t.Fatalf("attested evidence = %q, want %q", fingerprint.SingleSubjectDischarges, mapper)
+	if fingerprint.SingleSubjectDischarges != "" {
+		t.Fatalf("attested evidence recorded %q, want nothing - the mapping discharge is not an attestation", fingerprint.SingleSubjectDischarges)
 	}
 	verdict, err := view.Check(ctx, fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
-		t.Fatalf("attested verdict still downgraded: %+v", verdict)
+		t.Fatalf("attested verdict downgraded: %+v", verdict)
 	}
 
-	// A ghost variable of the same module stays refused under the
-	// attestation: the discharge names exactly the audited variable.
+	// A ghost variable of the same module keeps its own judgment in the
+	// unattested mode: the discharge names exactly the audited variable.
 	const ghost = "golang.org/x/sys/unix.Ghost"
 	var hit bool
 	processFactCache.Range(func(k, v any) bool {
@@ -602,7 +607,7 @@ func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
 	if !hit {
 		t.Fatal("no unix fact in the process cache")
 	}
-	poisonedEngine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	poisonedEngine, err := New(WithDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +624,90 @@ func TestAuditedMappingDischargeRequiresAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if poisonedVerdict.Status != Unverifiable || !strings.Contains(poisonedVerdict.Reason, ghost+" is mutated") {
-		t.Fatalf("attested ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
+		t.Fatalf("ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
+	}
+	attestedGhostEngine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestedGhostView, err := attestedGhostEngine.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestedGhostFP, err := attestedGhostView.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestedGhostVerdict, err := attestedGhostView.Check(ctx, attestedGhostFP, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attestedGhostVerdict.Status != Unverifiable || !strings.Contains(attestedGhostVerdict.Reason, ghost+" is mutated") {
+		t.Fatalf("attested ghost verdict = %+v, want the downgrade naming %s - the attestation arms no ghost discharge", attestedGhostVerdict, ghost)
+	}
+}
+
+// The mapping audit is a property of the audited versions' source: an
+// unaudited pinned version carrying the identical mapper shape refuses
+// fail-closed until its source is audited — exactly the memoization
+// set's rule (REQ-closure-shared-dynamic-state).
+func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMODCACHE", modCache)
+	t.Cleanup(func() {
+		clean := exec.Command("go", "clean", "-modcache")
+		clean.Env = append(os.Environ(), "GOMODCACHE="+modCache)
+		_ = clean.Run()
+		os.RemoveAll(modCache)
+	})
+	proxy := t.TempDir()
+	mapperSource := "package unix\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   func(length int) ([]byte, error) { return make([]byte, length), nil },\n\tmunmap: func(b []byte) error { return nil },\n}\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
+	writeFileProxyModule(t, proxy, "golang.org/x/sys", "v0.999.0", map[string]string{
+		"go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
+		"unix/mmap.go": mapperSource,
+	})
+	t.Setenv("GOPROXY", "file://"+proxy)
+	t.Setenv("GOSUMDB", "off")
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys v0.999.0\n",
+		"lib.go": "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
+	}
+	processFactCache = sync.Map{}
+	ctx := context.Background()
+	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.Check(ctx, fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "golang.org/x/sys/unix.mapper is mutated") {
+		t.Fatalf("unaudited-version verdict = %+v, want the downgrade naming the mapper - no version inherits the audit", verdict)
 	}
 }
 

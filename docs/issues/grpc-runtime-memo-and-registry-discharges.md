@@ -21,8 +21,11 @@ purity waiver that retires when this lands.
 The chartered structural get-or-compute discharge subsumes the memo
 class (the audited memoization set's entries retire to it per the
 spec's own retirement sentence); channelz wants a named audited entry
-under the single-subject attestation (subject-own registry, the
-mapping set's derivation verbatim). The 188 init-only-in-fact
+under the single-subject attestation (subject-own registry — the
+attestation-gated discipline the mapping set carried before its
+attestation-free deepening; channelz is genuinely subject-dependent,
+so it needs the attestation-gated shape, never the mapping set's
+current attestation-free one). The 188 init-only-in-fact
 identities from the same enumeration are vouch-shaped and need no
 engine change.
 

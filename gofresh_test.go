@@ -180,8 +180,8 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@31" {
-		t.Fatalf("DynamicStateStrategy = %q, want content-proven pooling discharge semantics", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@32" {
+		t.Fatalf("DynamicStateStrategy = %q, want attestation-free mapping-set semantics", DynamicStateStrategy)
 	}
 }
 

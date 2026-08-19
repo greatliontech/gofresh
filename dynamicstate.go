@@ -631,7 +631,7 @@ type viewDynamicState struct {
 	// attestationDischarges maps each view package to the canonical
 	// sorted comma-joined variable keys whose discharge the caller's
 	// single-subject-process attestation carried — a pool variable's
-	// admitted Get/Put, the audited mapping set's named bookkeeping —
+	// admitted Get/Put, a single-subject-directed variable —
 	// reachable from it; absent when the attestation was not
 	// load-bearing for the package. Recorded on subject evidence like a
 	// vouch discharge, auditable and never silent (REQ-vouch-recorded).
@@ -1388,37 +1388,58 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		return true
 	}
 	// The audited mapping set: golang.org/x/sys/unix's package-level
-	// mapper — a Mutex-guarded address-to-length map with mmap/munmap
-	// function fields, written by every Mmap/Munmap call as pure
+	// mapper — a Mutex-guarded map of each live mapping's last-byte
+	// address to its data-only byte slice, with mmap/munmap (and
+	// mremap) function fields, written by every mapping call as pure
 	// process-local bookkeeping fed only by the analyzed program's own
-	// mapping calls (audited at the version-pinned source). Under the
-	// caller-attested single-subject-process execution model every
-	// write site lies in the subject's own rooted flow, so mapper
-	// contents are a function of the analyzed source and the subject
-	// alone and the marks discharge exactly like a vouch — grounded in
-	// source audit plus the attestation instead of a caller claim, the
-	// version-pinned module only (a mutable-local checkout keeps every
-	// mark), every other variable keeping its own judgment, and the
-	// mapping syscalls' external effects keeping their observability
-	// classification. Load-bearing discharges ride subject evidence
-	// with the pooling set's (REQ-closure-shared-dynamic-state,
-	// REQ-vouch-recorded). Grows only by source audit.
+	// mapping calls. The deepened audit retires the attestation
+	// requirement, exactly for the audited versions below: the
+	// callable fields are written only in the variable's declarations
+	// (init flow), so no schedule can change dispatch through the
+	// carrier (the raw field reads the *Ptr paths take are covered by
+	// the same init-only leg), and the bookkeeping's values hand out
+	// no dynamic carrier. Cross-subject entries are disjoint while
+	// their mappings live; the raw-pointer paths (MunmapPtr,
+	// MremapPtr) leave entries stale, and a reissued address could
+	// then steer Munmap's error-plane outcome by subject order — an
+	// exposure that is unobservable exactly because any subject able
+	// to observe it calls the mapping syscalls itself and those keep
+	// their own fail-closed observability classification, which is
+	// therefore part of this discharge's ground (see the RTA note on
+	// ObservationRTA in gofresh.go). The discharge spans the
+	// variable's mutation, escape, and environment-audit marks alike.
+	// The memoization set's class: the engine's own source-audited
+	// verdict, no attestation, no evidence record — for the audited
+	// versions only (a mutable-local checkout keeps every mark),
+	// every other variable keeping its own judgment. Grows only by
+	// source audit (REQ-closure-shared-dynamic-state).
 	// attestedDischarged carries every attestation-gated
-	// composition-time discharge — the audited mapping set's and the
-	// //gofresh:single-subject directive's — for the evidence fold.
+	// composition-time discharge — the //gofresh:single-subject
+	// directive's — for the evidence fold.
 	attestedDischarged := map[string][]string{}
 	auditedMappingOut := func(pkgPath, key string) bool {
-		if !singleSubject || !pinnedPkg[pkgPath] {
+		if !pinnedPkg[pkgPath] {
 			return false
 		}
 		if pkgPath != "golang.org/x/sys/unix" || key != "golang.org/x/sys/unix.mapper" {
 			return false
 		}
-		if seen := "mapping\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
-			dischargedSeen[seen] = true
-			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
+		// The audit is a property of the audited versions' source, not
+		// of the module name: init-only callable fields and data-only
+		// address-keyed bookkeeping were verified at each listed
+		// version's source (the per-GOOS declaration split included),
+		// and no other version inherits the proof — an unaudited
+		// version, later or earlier, refuses fail-closed until its
+		// source is audited (REQ-closure-shared-dynamic-state).
+		switch pinOf[pkgPath] {
+		case "golang.org/x/sys@v0.8.0", "golang.org/x/sys@v0.26.0",
+			"golang.org/x/sys@v0.33.0", "golang.org/x/sys@v0.40.0",
+			"golang.org/x/sys@v0.43.0", "golang.org/x/sys@v0.45.0",
+			"golang.org/x/sys@v0.46.0", "golang.org/x/sys@v0.47.0":
+			return true
+		default:
+			return false
 		}
-		return true
 	}
 	// The audited memoization set: gopkg.in/yaml.v3's structMap — a
 	// mutex-guarded reflect.Type-to-structInfo cache filled at exactly
@@ -1429,8 +1450,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// prior subject's population changes timing and internal pointer
 	// identity that never leave the package's unexported internals,
 	// never a looked-up value — so the discharge needs NO execution
-	// attestation, unlike the pooling and mapping sets whose contents
-	// are subject-planted values, and rides no evidence record: it is
+	// attestation and rides no evidence record: it is
 	// the engine's own source-audited verdict, not a caller assertion
 	// (the vouch-recording discipline covers only unverifiable caller
 	// assertions). Version-pinned module only, exactly the audited
