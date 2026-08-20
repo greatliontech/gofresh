@@ -531,7 +531,12 @@ func WithSingleSubjectExecution() Option {
 // WithPackageProcessExecution attests the package-process execution
 // model: every process that runs a measured subject is the subject
 // package's OWN test binary — `go test` of that package, under any
-// subject schedule. Under it the shared-dynamic-state judgment gains
+// subject schedule. Precisely: the model binds the processes whose
+// observations ATTRIBUTE to a measured subject — for a subject in
+// package P, the processes measuring it are P's own test binaries.
+// Other binaries may link and even execute P's code; their
+// observations attribute to their own subjects, measured under their
+// own packages' binaries, so they are outside this claim. Under it the shared-dynamic-state judgment gains
 // the binary-scoped reachability discharge: a sibling subject in the
 // process is itself one of the binary's harness roots, so a culprit no
 // harness root's post-initialization flow can reach is init-determined
