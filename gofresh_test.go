@@ -21,11 +21,12 @@ import (
 func TestDecide(t *testing.T) {
 	base := func() (Fingerprint, closure.Closure, guard.Guards, runtimeinput.State) {
 		return Fingerprint{
-				MaximalClosure:     "C",
-				TestVariantClosure: "T",
-				Guards:             guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
-				RuntimeInputs:      "MANIFEST",
-				RuntimeDigest:      "D",
+				MaximalClosure:       "C",
+				TestVariantClosure:   "T",
+				Guards:               guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
+				DynamicStateStrategy: DynamicStateStrategy,
+				RuntimeInputs:        "MANIFEST",
+				RuntimeDigest:        "D",
 			},
 			closure.Closure{Hash: "C", TestVariants: "T"},
 			guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
@@ -158,7 +159,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectDischarges", "PackageProcessDischarges", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectDischarges", "PackageProcessDischarges", "DynamicStateStrategy", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}

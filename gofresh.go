@@ -333,6 +333,14 @@ type Fingerprint struct {
 	// borne acceptances exactly as SingleSubjectDischarges
 	// (REQ-closure-shared-dynamic-state).
 	PackageProcessDischarges string
+	// DynamicStateStrategy records the shared-dynamic-state fact
+	// derivation the evidence was computed under — the structural twin
+	// of ObservationProof.Strategy: a strategy move re-measures rather
+	// than serving verdicts under semantics the record was not computed
+	// by, and an empty recorded value (a record predating the field)
+	// fails closed exactly as the compartment's does
+	// (REQ-closure-dynamic-state-memo's serving arm).
+	DynamicStateStrategy string
 	RuntimeInputs            string // encoded manifest; empty only when the caller supplies no observation manifest
 	RuntimeDigest            string // digest of the manifest at capture
 	ResultKind               Kind   // guard policy captured with this recording; zero is invalid
@@ -858,6 +866,13 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 	}
 	if rec.MaximalClosure != current.Hash {
 		return Verdict{Stale, "closure"}, true
+	}
+	if rec.DynamicStateStrategy != DynamicStateStrategy {
+		// The dynamic-state derivation the record was computed under
+		// moved (or predates the field): its verdict semantics are not
+		// this engine's — re-measure, never serve. The structural twin
+		// of the observation-strategy refusal.
+		return Verdict{Stale, "dynamic-state strategy"}, true
 	}
 	return Verdict{}, false
 }

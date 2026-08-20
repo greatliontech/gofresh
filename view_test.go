@@ -9651,3 +9651,87 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 		t.Fatalf("both-options scope not distinct: %q", both)
 	}
 }
+
+// A sibling narrowing shares the union's facts — the package-process
+// discharges included: a consumer that captures from the union and
+// attaches through the sibling must see identical fingerprints
+// (REQ-closure-shared-dynamic-state's recording arm).
+func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
+	const quiet = "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n"
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":           "module example.com/view\n\ngo 1.26\n",
+		"wire/wire.go":     "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
+		"app/app.go":       "package app\n\nimport \"example.com/view/wire\"\n\nfunc F() bool { return wire.Armed() }\n",
+		"app/app_test.go":  quiet,
+	})
+	subject := Subject{Package: "example.com/view/app", Symbol: "F"}
+	engine, err := New(WithDir(dir), WithPackageProcessExecution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.PackageProcessDischarges == "" {
+		t.Fatal("setup: the union capture carries no discharge to test the carry")
+	}
+	sibling, err := view.Sibling([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingFP, err := sibling.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if siblingFP != fingerprint {
+		t.Fatalf("sibling fingerprint diverged from the union's:\n  union   %+v\n  sibling %+v", fingerprint, siblingFP)
+	}
+}
+
+// A recorded fingerprint computed under another dynamic-state strategy
+// — or predating the field — re-measures rather than serving verdicts
+// under semantics it was not computed by: the structural twin of the
+// observation-strategy refusal
+// (REQ-closure-dynamic-state-memo's serving arm).
+func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := view.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint.DynamicStateStrategy != DynamicStateStrategy {
+		t.Fatalf("capture recorded strategy %q, want the engine's own", fingerprint.DynamicStateStrategy)
+	}
+	for name, recorded := range map[string]string{"moved": "gofresh/dynamic-state@1", "predates the field": ""} {
+		stale := fingerprint
+		stale.DynamicStateStrategy = recorded
+		verdict, err := view.Check(context.Background(), stale, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Stale || verdict.Reason != "dynamic-state strategy" {
+			t.Fatalf("%s: verdict = %+v, want the strategy refusal", name, verdict)
+		}
+	}
+	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("current-strategy verdict = %+v, want Valid", verdict)
+	}
+}

@@ -409,7 +409,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -466,7 +466,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -534,6 +534,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		DynamicStateVouches:      v.facts.vouchDischarges[subject],
 		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
 		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
+		DynamicStateStrategy:     DynamicStateStrategy,
 		ResultKind:               v.kind,
 	}
 }
@@ -961,6 +962,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
 	attestationDischarges := make(map[Subject]string, len(unique))
+	packageProcessDischarges := make(map[Subject]string, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
@@ -982,6 +984,9 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		if attested, ok := v.facts.attestationDischarges[subject]; ok {
 			attestationDischarges[subject] = attested
 		}
+		if attested, ok := v.facts.packageProcessDischarges[subject]; ok {
+			packageProcessDischarges[subject] = attested
+		}
 		if v.capturedObserved[subject] {
 			capturedObserved[subject] = true
 		}
@@ -1000,16 +1005,17 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		moduleDir: v.moduleDir,
 		kind:      v.kind,
 		facts: &observationFacts{
-			snapshot:              v.facts.snapshot,
-			maximal:               maximal,
-			guards:                v.facts.guards,
-			purity:                purity,
-			vouchDischarges:       vouchDischarges,
-			attestationDischarges: attestationDischarges,
-			sourceFiles:           sourceFiles,
-			sourceFilesBySubject:  sourceFilesBySubject,
-			fileDigests:           v.facts.fileDigests,
-			testVariantLedgers:    ledgers,
+			snapshot:                 v.facts.snapshot,
+			maximal:                  maximal,
+			guards:                   v.facts.guards,
+			purity:                   purity,
+			vouchDischarges:          vouchDischarges,
+			attestationDischarges:    attestationDischarges,
+			packageProcessDischarges: packageProcessDischarges,
+			sourceFiles:              sourceFiles,
+			sourceFilesBySubject:     sourceFilesBySubject,
+			fileDigests:              v.facts.fileDigests,
+			testVariantLedgers:       ledgers,
 		},
 		observable:           observable,
 		capturedObserved:     capturedObserved,
