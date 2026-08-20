@@ -238,7 +238,8 @@ recorded on the evidence), an audited-set admission (the synchronization,
 pooling, mapping, and memoization sets below), the author's
 `//gofresh:single-subject` variable directive and the generated-proto
 descriptor cluster under the caller's attestation,
-or the attestation-scoped per-subject reachability judgment — each defined
+or the reachability judgments — the attestation-scoped per-subject
+judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
 Mutation is judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
@@ -503,14 +504,38 @@ rides, at least as wide as that tier's dispatch and reflection
 widenings, and the discharge is fail-closed on every gap: an
 open-world widening or an unrooted subject symbol grants nothing (no
 proof, no discharge — the judgment then stands whole), a mark without
-function attribution — a nested function literal's
-(so a mutation carried by a stored function value can never discharge,
-whatever the RTA resolves), an init-flow refusal's, a deferral
-failure's, a malformed fact's, or one crossed over a carrier link —
+function attribution — an init-flow refusal's, a deferral
+failure's, a malformed fact's, one crossed over a carrier link, or a
+literal's outside any named body —
 forecloses the discharge for its variable, and a variable with any
 rooted marking site keeps every mark. Named functions and methods
 alike are attributable sites (a method's under its type-qualified
-name). An environment-audit refusal rides the variable's use-site
+name). A function literal's or go statement's marks nested in a named
+body are literal-borne sites of the enclosing declaration — the
+mutation, escape, and carrier-method-use classes alike, while the
+remaining use classes (parameter, field, and element deferrals,
+carrier links) keep their fact-immediate composition: executing
+the literal requires the encloser to have produced it, so the
+encloser's unreachability bounds the literal wherever the value
+travels — but the value outlives the encloser's frame, so a
+literal-borne mark never discharges by init-only flow, and it
+forecloses outright whenever init flow can reach the encloser
+(transitively over the reference regions): an init-created
+literal can be stored and executed past initialization by flows no
+site names. The reference regions bound literal contexts by the same
+encloser principle: a literal-context reference, a go-statement
+callee, and a value reference nested in NAMED flow each record
+against the enclosing named function — never provable init-only (the
+value or deferred body outlives the frame), init-REACHABLE exactly
+when the encloser is, because the reference cannot execute and the
+value cannot be handed out unless the encloser ran — while the same
+reference in init flow or a method body records as bare program code,
+poisoned everywhere: its creation site the regions cannot bound. A METHOD encloser forecloses its literal-borne marks
+outright: methods are outside the reference-region graph, so their
+init reach is unknowable — fail-closed (a method's DIRECT marks keep
+their attributed siting; they execute only while the method runs). A direct use needs no such foreclosure — it executes only
+while its encloser runs, so an init-only encloser makes it
+init-determined and an unreachable one makes it dead. An environment-audit refusal rides the variable's use-site
 inventory when the variable's type is not directly callable — the
 value-plane rule already marks every extraction able to execute the
 carried value — while a callable variable keeps a markless execution
@@ -530,7 +555,48 @@ culprit for the subject — records the discharged variables on that
 subject's evidence with the attestation's other discharges,
 canonically and never silently (REQ-vouch-recorded in
 [purity.md](purity.md)): the discharges are attestation-borne exactly
-as the audited sets' are. One narrowing applies to
+as the audited sets' are. Under the caller-attested PACKAGE-PROCESS
+execution model — every process that runs a measured subject is the
+subject package's OWN test binary, under any subject schedule — the
+judgment scopes to the analyzed BINARY instead: the multi-subject
+hazard is a sibling subject's execution in the same process, and under
+this attestation every sibling is itself one of the binary's harness
+roots — the Test, Benchmark, Fuzz, and Example functions of both test
+variants, each riding the user TestMain flow where the harness runs
+one — so the quantification widens from the subject's rooted flow to
+the union of every harness root's post-initialization attributed
+reach, and a culprit none of whose marking sites that union can
+execute is init-determined state for EVERY subject of the binary,
+whatever the process's subject schedule: the downgrade lifts for the
+binary's subjects together. The attestation is weaker than the
+single-subject one — it bounds WHICH binary runs, never how many
+subjects share it — and the single-subject judgment takes precedence
+where both hold (each is sound under its own model; neither dominates
+the other's discharges); without either attestation no reachability judgment
+applies, because an unattested consumer may run the subject through
+any binary at all, whose roots the analysis never saw. Package
+initialization stays outside the rooted set on the same ground —
+with no root reaching a site, no prior subject wrote it, and
+initialization remains a function of the hashed source, the priced
+inputs, and scheduling noise. The judgment is fail-closed on every
+gap of the per-subject form plus its own: an ambiguous harness-named
+root (the two test variants sharing a top-level name — the binary
+runs one of the colliders and the inventory cannot say which) or any
+harness root's open-world widening leaves the binary's inventory
+incomplete, and an incomplete inventory grants nothing; harness
+membership is judged by name alone (a name-matching function the
+harness would refuse only widens the root set — a spurious root
+withholds a discharge, never grants one); a binary declaring no
+harness roots is vacuously complete with an empty inventory (nothing
+executes past initialization in its test process). A load-bearing
+judgment — one that discharged a culprit for the binary's subjects —
+records the discharged prefix of the culprit walk on each subject's
+evidence (the walk stops at the first survivor, which names the
+downgrade), canonically and never silently, attestation-borne exactly
+as the per-subject scoping's (REQ-vouch-recorded in
+[purity.md](purity.md)); the attestation is part of the persisted
+fact identity, so option-on and option-off sessions never serve each
+other's facts. One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any

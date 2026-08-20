@@ -70,7 +70,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, false, pkgPaths...)
+	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, false, false, pkgPaths...)
 	return scan, err
 }
 
@@ -81,7 +81,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, singleSubject bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, singleSubject, packageProcess bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
 		return nil, nil, err
@@ -129,6 +129,17 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		if err := dischargeUnreachableCulprits(hasher, state, scan); err != nil {
 			return nil, nil, err
 		}
+	} else if packageProcess {
+		// The package-process attestation's binary-scoped reachability
+		// judgment: every measured process is the subject package's own
+		// test binary, so sibling subjects are themselves harness roots
+		// of the analyzed binary, and a culprit no harness root's
+		// post-init flow can reach is init-determined for every subject
+		// of the binary — no proof, no discharge
+		// (REQ-closure-shared-dynamic-state).
+		if err := dischargeBinaryUnreachableCulprits(hasher, state, scan); err != nil {
+			return nil, nil, err
+		}
 	}
 	return scan, load, nil
 }
@@ -156,6 +167,10 @@ type subjectScan struct {
 	// reachable from its package; the vouch-recording discipline's
 	// parallel (REQ-vouch-recorded).
 	attestationDischarges map[Subject]string
+	// packageProcessDischarges mirrors attestationDischarges for the
+	// package-process attestation's binary-scoped reachability judgment
+	// (REQ-vouch-recorded).
+	packageProcessDischarges map[Subject]string
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -173,14 +188,15 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:                  map[Subject]bool{},
-		known:                 map[Subject]bool{},
-		openWorld:             map[Subject]bool{},
-		external:              map[Subject]bool{},
-		downgradeReason:       map[Subject]string{},
-		vouchDischarges:       map[Subject]string{},
-		attestationDischarges: map[Subject]string{},
-		ambiguous:             map[Subject]string{},
+		pure:                     map[Subject]bool{},
+		known:                    map[Subject]bool{},
+		openWorld:                map[Subject]bool{},
+		external:                 map[Subject]bool{},
+		downgradeReason:          map[Subject]string{},
+		vouchDischarges:          map[Subject]string{},
+		attestationDischarges:    map[Subject]string{},
+		packageProcessDischarges: map[Subject]string{},
+		ambiguous:                map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -568,6 +584,15 @@ type attributedUse struct {
 	// skips it entirely when fn proves init-only, resolves it against
 	// the receiver-effect read-only union otherwise.
 	method string
+	// literal marks a use recorded inside a function literal or go
+	// statement nested in fn's body: the site attributes to fn for the
+	// reachability scopings ONLY — the literal value outlives fn's
+	// frame, so composition never init-discharges it, and an fn the
+	// init flow can reach (transitively, "prog" failing closed)
+	// forecloses instead of attributing: an init-created literal can be
+	// stored and executed past initialization by flows no site names
+	// (REQ-closure-shared-dynamic-state).
+	literal bool
 }
 
 // plainCalleeFunc resolves a call's function expression to a plain named
@@ -1821,12 +1846,20 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// method-fact spelling): a method is never init flow,
 					// so composition promotes the marks unconditionally —
 					// the same final marks the immediate maps produced —
-					// while the per-subject reachability scoping gains
-					// the site. Literals and go statements inside stay
-					// program code with unattributed (never dischargeable)
-					// marks (REQ-closure-shared-dynamic-state).
+					// while the reachability scopings gain the site.
+					// Literals and go statements inside attribute to the
+					// method as literal-borne sites: their execution
+					// requires the method to have run, so an
+					// init-unreachable method no root reaches bounds them
+					// — composition still never init-discharges them and
+					// forecloses under init reach
+					// (REQ-closure-shared-dynamic-state).
 					fnKey := methodKey
+					litMutated, litEscaped := map[string]bool{}, map[string]bool{}
+					litMethods := map[string]map[string]bool{}
 					interiors := map[ast.Node]bool{}
+					saveLM, saveLE, saveLMU := mutated, escaped, methodUses
+					mutated, escaped, methodUses = litMutated, litEscaped, litMethods
 					ast.Inspect(decl.Body, func(n ast.Node) bool {
 						switch n := n.(type) {
 						case *ast.FuncLit:
@@ -1842,6 +1875,18 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						}
 						return true
 					})
+					mutated, escaped, methodUses = saveLM, saveLE, saveLMU
+					for key := range litMutated {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, literal: true})
+					}
+					for key := range litEscaped {
+						*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, escape: true, literal: true})
+					}
+					for key, methods := range litMethods {
+						for method := range methods {
+							*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, method: method, literal: true})
+						}
+					}
 					localMutated, localEscaped := map[string]bool{}, map[string]bool{}
 					localMethods := map[string]map[string]bool{}
 					saveM, saveE, saveMU := mutated, escaped, methodUses
@@ -1867,15 +1912,18 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					// A plain named function's carrier uses attribute to
 					// it: the cross-package fixed point decides at
 					// composition whether they are init flow. Literals
-					// and go statements inside stay program code.
+					// and go statements nested in the body attribute to
+					// it as literal-borne sites (never init-discharged,
+					// foreclosing under init reach).
 					fnKey := ""
 					if p.Types != nil {
 						fnKey = p.Types.Path() + "\x00" + decl.Name.Name
 					}
-					// Literals and go statements nested in the body are
-					// program code: they walk into the immediate maps
-					// first, and the attributed walk skips them.
+					litMutated, litEscaped := map[string]bool{}, map[string]bool{}
+					litMethods := map[string]map[string]bool{}
 					interiors := map[ast.Node]bool{}
+					saveLM, saveLE, saveLMU := mutated, escaped, methodUses
+					mutated, escaped, methodUses = litMutated, litEscaped, litMethods
 					ast.Inspect(decl.Body, func(n ast.Node) bool {
 						switch n := n.(type) {
 						case *ast.FuncLit:
@@ -1891,6 +1939,37 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						}
 						return true
 					})
+					mutated, escaped, methodUses = saveLM, saveLE, saveLMU
+					if fnKey != "" {
+						for key := range litMutated {
+							*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, literal: true})
+						}
+						for key := range litEscaped {
+							*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, escape: true, literal: true})
+						}
+						for key, methods := range litMethods {
+							for method := range methods {
+								*attributed = append(*attributed, attributedUse{fn: fnKey, key: key, method: method, literal: true})
+							}
+						}
+					} else {
+						// No attributable key: the marks stay immediate,
+						// unattributed, foreclosing exactly as before.
+						for key := range litMutated {
+							mutated[key] = true
+						}
+						for key := range litEscaped {
+							escaped[key] = true
+						}
+						for key, methods := range litMethods {
+							for method := range methods {
+								if methodUses[key] == nil {
+									methodUses[key] = map[string]bool{}
+								}
+								methodUses[key][method] = true
+							}
+						}
+					}
 					localMutated, localEscaped := map[string]bool{}, map[string]bool{}
 					localMethods := map[string]map[string]bool{}
 					saveM, saveE, saveMU := mutated, escaped, methodUses
@@ -6868,14 +6947,20 @@ func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
 
 // recordFunctionReferenceRegions records, for every plain named
 // function this package references - its own and foreign, exported
-// included - the strongest region class of those references:
-// "prog" when any reference is program code, a value reference, or a
-// go-statement callee; otherwise the reference edges from init flow
-// ("init") and from other plain named functions (the caller's own
-// function key), which composition resolves to a graph-wide init-only
-// fixed point (REQ-closure-shared-dynamic-state's cross-package
-// init-only class). Keys are pkgPath NUL name; edges are joined
-// caller NUL callee at composition via the fact schema.
+// included - the strongest region class of those references: the
+// reference edges from init flow ("init") and from other plain named
+// functions (the caller's own function key) compose to the graph-wide
+// init-only fixed point; a reference from a literal or go-statement
+// context nested in NAMED flow, and a value reference in named flow,
+// record as "lit:" plus the enclosing region's base key — never
+// init-only-provable (the value or deferred body outlives the frame),
+// init-REACHABLE exactly when the encloser is (the reference cannot
+// execute, and a value cannot be handed out, unless the encloser ran);
+// a literal or value reference in init flow or method bodies stays
+// "prog", poisoned everywhere — its creation site the regions cannot
+// bound (REQ-closure-shared-dynamic-state's cross-package init-only
+// class and init-reach dual). Keys are pkgPath NUL name; edges are
+// joined caller NUL callee at composition via the fact schema.
 func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
@@ -6897,6 +6982,21 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 		}
 		refs[callee][region] = true
 	}
+	// literalRegion bounds a nested literal's (or handed-out value's)
+	// execution by its enclosing named flow: inside a caller-keyed or
+	// already-lit region the bound is the base caller key; init flow
+	// and method bodies give no bound ("prog" - the value outlives
+	// initialization, and method regions are not part of the fixed
+	// point).
+	literalRegion := func(region string) string {
+		if strings.HasPrefix(region, "lit:") {
+			return region
+		}
+		if region == "init" || region == "prog" {
+			return "prog"
+		}
+		return "lit:" + region
+	}
 	var scan func(region string, root ast.Node)
 	scan = func(region string, root ast.Node) {
 		calls := map[*ast.Ident]bool{}
@@ -6904,11 +7004,11 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 			switch n := n.(type) {
 			case *ast.FuncLit:
 				if n != root && n.Body != nil {
-					scan("prog", n.Body)
+					scan(literalRegion(region), n.Body)
 					return false
 				}
 			case *ast.GoStmt:
-				scan("prog", n.Call)
+				scan(literalRegion(region), n.Call)
 				return false
 			case *ast.CallExpr:
 				// An explicit generic instantiation wraps the callee in
@@ -6946,8 +7046,9 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 				}
 				if key, ok := funcKeyOf(p.TypesInfo.Uses[n]); ok {
 					// A non-call reference hands the function out as a
-					// value - poisoned everywhere.
-					add(key, "prog")
+					// value: never init-only-provable, init-reachable
+					// exactly when the handing flow is.
+					add(key, literalRegion(region))
 				}
 			}
 			return true

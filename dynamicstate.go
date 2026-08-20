@@ -357,7 +357,19 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		if use.escape {
 			class = "e"
 		}
-		if use.method != "" {
+		if use.literal {
+			// Literal-borne classes: sited on the enclosing named
+			// declaration for the reachability scopings, never
+			// init-discharged at composition
+			// (REQ-closure-shared-dynamic-state).
+			class = "lm"
+			if use.escape {
+				class = "le"
+			}
+			if use.method != "" {
+				class = "dl\x00" + use.method
+			}
+		} else if use.method != "" {
 			class = "d\x00" + use.method
 		}
 		fact.AttributedUses = append(fact.AttributedUses, use.fn+"\x00"+use.key+"\x00"+class)
@@ -732,6 +744,93 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 			}
 			sort.Strings(keys)
 			scan.attestationDischarges[subject] = strings.Join(keys, ",")
+		}
+	}
+	return nil
+}
+
+// dischargeBinaryUnreachableCulprits applies the BINARY-scoped
+// reachability judgment of the shared-dynamic-state invariant — the
+// unattested execution model's scoping: a sibling subject in the same
+// process is itself a root of the analyzed test binary, so a culprit
+// none of whose marking sites ANY harness root's post-initialization
+// flow can execute is init-determined state for every subject of that
+// binary, covered by the closure hash like every other startup effect.
+// Per downgraded subject's package: obtain the union rooted-flow
+// inventory over every harness root from the same attributed RTA the
+// observability proof rides; with a complete inventory (no ambiguous
+// harness root, no open-world widening), keep the first culprit
+// carrying an unattributed mark or a rooted site — the downgrade then
+// names that culprit — and lift the downgrade when none survives. No
+// proof, no discharge: an incomplete inventory keeps current behavior
+// whole. The judgment is the engine's own verdict over hashed source —
+// a pure function of the analyzed binary — so it rides no evidence
+// record, exactly as the content-proven pooling discharge does; the
+// audited channels already discharged at composition and nothing here
+// can weaken them (REQ-closure-shared-dynamic-state).
+func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) error {
+	packageSubjects := map[string][]Subject{}
+	for subject := range scan.known {
+		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
+			packageSubjects[subject.Package] = append(packageSubjects[subject.Package], subject)
+		}
+	}
+	if len(packageSubjects) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(packageSubjects))
+	for path := range packageSubjects {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	inventories, err := hasher.ComputeBinaryRootedFunctions(paths)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		proof := inventories[path]
+		if !proof.Complete {
+			continue
+		}
+		surviving := ""
+		dischargedKeys := map[string]bool{}
+		for _, culprit := range state.rootCulprits[path] {
+			sites := state.culpritSites[culprit.key]
+			if sites.unattributed {
+				surviving = culprit.text
+				break
+			}
+			sited := false
+			for fn := range sites.fns {
+				if proof.Fns[fn] {
+					sited = true
+					break
+				}
+			}
+			if sited {
+				surviving = culprit.text
+				break
+			}
+			dischargedKeys[culprit.key] = true
+		}
+		for _, subject := range packageSubjects[path] {
+			if surviving == "" {
+				delete(scan.downgradeReason, subject)
+			} else {
+				scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+			}
+			// A load-bearing judgment records the discharged variables
+			// on the subject's evidence — the partially-discharged case
+			// included, exactly as the per-subject scoping records:
+			// attestation-borne acceptances (REQ-vouch-recorded).
+			if len(dischargedKeys) > 0 {
+				keys := make([]string, 0, len(dischargedKeys))
+				for key := range dischargedKeys {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				scan.packageProcessDischarges[subject] = strings.Join(keys, ",")
+			}
 		}
 	}
 	return nil
@@ -1224,14 +1323,52 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			}
 		}
 	}
-	// Site inventory for the per-subject reachability re-judgment
-	// (REQ-closure-shared-dynamic-state's reachability scoping): every
+	// The init-REACH dual, for the literal-borne classes alone: a
+	// function is init-reachable when any reference to it is init flow,
+	// program code ("prog" fails closed — a literal-context reference
+	// whose own creation site the regions cannot place), or a function
+	// itself init-reachable. A literal created by an init-reachable
+	// encloser can be stored and executed past initialization by flows
+	// no site names, so its marks foreclose instead of attributing.
+	// Direct (non-literal) uses need no such check: they execute only
+	// while their encloser runs, so an init-only encloser makes them
+	// init-determined and an unreachable one makes them dead
+	// (REQ-closure-shared-dynamic-state).
+	initReachFn := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for fn, regions := range refRegions {
+			if initReachFn[fn] {
+				continue
+			}
+			for region := range regions {
+				base := region
+				if lit, ok := strings.CutPrefix(region, "lit:"); ok {
+					// A lit-region reference executes only when its
+					// enclosing named flow does: init-reachable exactly
+					// when the base is (it stays poison for the
+					// init-only fixed point - the value outlives the
+					// frame).
+					base = lit
+				}
+				if base == "init" || base == "prog" || initReachFn[base] {
+					initReachFn[fn] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	// Site inventory for the reachability re-judgments
+	// (REQ-closure-shared-dynamic-state's reachability scopings): every
 	// mark present BEFORE the attributed promotion carries no function
-	// attribution — fact-immediate marks from method bodies and nested
-	// literals, init-flow refusals, deferral failures, malformed arms —
+	// attribution — fact-immediate marks from top-level literal
+	// contexts, init-flow refusals, deferral failures, malformed arms —
 	// and marks the link crossing adds later are crossed; either
-	// forecloses the discharge fail-closed. Only the attributed
-	// promotion below contributes named sites.
+	// forecloses the discharge fail-closed. The attributed promotion
+	// below contributes named sites, literal-borne marks siting on
+	// their enclosing named declaration unless the init flow reaches
+	// it.
 	unattributedMark := map[string]bool{}
 	for key := range mutated {
 		unattributedMark[key] = true
@@ -1287,6 +1424,36 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 					// of attributing (REQ-closure-shared-dynamic-state).
 					escaped[key] = true
 					attributeSite(key, fn)
+					continue
+				}
+				if class == "lm" || class == "le" || class == "dl" {
+					// Literal-borne: never init-discharged (the literal
+					// value outlives its encloser's frame), sited on the
+					// encloser for the reachability scopings — executing
+					// the literal requires the encloser to have produced
+					// it. A proven read-only method use marks nothing,
+					// exactly as the direct class. Foreclosed when init
+					// flow can reach the encloser, and for a METHOD
+					// encloser outright: methods are outside the
+					// reference-region graph, so their init reach is
+					// unknowable — fail-closed
+					// (REQ-closure-shared-dynamic-state).
+					if class == "dl" {
+						if len(parts) >= 6 && readOnly[parts[4]+"\x00"+parts[5]] {
+							continue
+						}
+						mutated[key] = true
+					} else if class == "le" {
+						escaped[key] = true
+					} else {
+						mutated[key] = true
+					}
+					_, encloserName, _ := strings.Cut(fn, "\x00")
+					if initReachFn[fn] || strings.Contains(encloserName, ".") {
+						unattributedMark[key] = true
+					} else {
+						attributeSite(key, fn)
+					}
 					continue
 				}
 				if refRegions[fn] != nil && initOnlyFn[fn] {

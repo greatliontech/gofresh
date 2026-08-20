@@ -144,6 +144,12 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
+		if first.packageProcessDischarges[subject] != second.packageProcessDischarges[subject] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+		}
 		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -198,8 +204,11 @@ type observationFacts struct {
 	purity                map[Subject]string
 	vouchDischarges       map[Subject]string
 	attestationDischarges map[Subject]string
-	sourceFiles           []string
-	sourceFilesBySubject  map[Subject][]string
+	// packageProcessDischarges mirrors attestationDischarges for the
+	// package-process attestation's binary-scoped discharges.
+	packageProcessDischarges map[Subject]string
+	sourceFiles              []string
+	sourceFilesBySubject     map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
 	// identity, so a later validation failure can name the moved file
 	// (REQ-fresh-producer-view's naming arm). Best-effort attribution:
@@ -260,7 +269,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		// (REQ-closure-dynamic-state-memo).
 		factScope += "|single-subject-execution"
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, e.singleSubjectExecution, packages...)
+	if e.packageProcessExecution {
+		// The package-process attestation gates only the scan-time
+		// binary-scoped discharge, but the option-identity discipline
+		// holds regardless: option-on and option-off sessions never
+		// serve each other's facts (REQ-closure-dynamic-state-memo).
+		factScope += "|package-process-execution"
+	}
+	if viewTestHooks.factScope != nil {
+		viewTestHooks.factScope(factScope)
+	}
+	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, e.singleSubjectExecution, e.packageProcessExecution, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -270,14 +289,15 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return observationFacts{}, err
 	}
 	observation := observationFacts{
-		snapshot:              snapshot,
-		maximal:               make(map[Subject]closure.Closure, len(subjects)),
-		guards:                guards,
-		purity:                make(map[Subject]string, len(subjects)),
-		vouchDischarges:       make(map[Subject]string, len(subjects)),
-		attestationDischarges: make(map[Subject]string, len(subjects)),
-		sourceFilesBySubject:  make(map[Subject][]string, len(subjects)),
-		testVariantLedgers:    make(map[string]closure.TestVariantLedger, len(packages)),
+		snapshot:                 snapshot,
+		maximal:                  make(map[Subject]closure.Closure, len(subjects)),
+		guards:                   guards,
+		purity:                   make(map[Subject]string, len(subjects)),
+		vouchDischarges:          make(map[Subject]string, len(subjects)),
+		attestationDischarges:    make(map[Subject]string, len(subjects)),
+		packageProcessDischarges: make(map[Subject]string, len(subjects)),
+		sourceFilesBySubject:     make(map[Subject][]string, len(subjects)),
+		testVariantLedgers:       make(map[string]closure.TestVariantLedger, len(packages)),
 	}
 	for _, pkg := range packages {
 		// Served from the hasher's compartment memo: the ledger was derived
@@ -326,6 +346,9 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 		if attested := scan.attestationDischarges[subject]; attested != "" {
 			observation.attestationDischarges[subject] = attested
+		}
+		if attested := scan.packageProcessDischarges[subject]; attested != "" {
+			observation.packageProcessDischarges[subject] = attested
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
@@ -386,7 +409,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -443,7 +466,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -502,15 +525,16 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 	const assertion = "caller assertion"
 	proof.Evidence = observationProofEvidence(v.facts.maximal[subject].Hash, assertion, proof)
 	return Fingerprint{
-		MaximalClosure:          v.facts.maximal[subject].Hash,
-		TestVariantClosure:      v.facts.maximal[subject].TestVariants,
-		ObservationAssertion:    assertion,
-		ObservationProof:        proof,
-		Guards:                  v.facts.guards,
-		PurityAssertion:         v.facts.purity[subject],
-		DynamicStateVouches:     v.facts.vouchDischarges[subject],
-		SingleSubjectDischarges: v.facts.attestationDischarges[subject],
-		ResultKind:              v.kind,
+		MaximalClosure:           v.facts.maximal[subject].Hash,
+		TestVariantClosure:       v.facts.maximal[subject].TestVariants,
+		ObservationAssertion:     assertion,
+		ObservationProof:         proof,
+		Guards:                   v.facts.guards,
+		PurityAssertion:          v.facts.purity[subject],
+		DynamicStateVouches:      v.facts.vouchDischarges[subject],
+		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
+		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
+		ResultKind:               v.kind,
 	}
 }
 

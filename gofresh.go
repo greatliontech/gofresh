@@ -122,8 +122,23 @@ func DisableMemos() { closure.DisableMemos() }
 // execution model — the memoization set's class, no evidence record —
 // exactly for the audited x/sys versions (v0.8.0-v0.47.0 as
 // enumerated at the discharge), an unaudited version refusing
-// fail-closed.
-const DynamicStateStrategy = "gofresh/dynamic-state@32"
+// fail-closed. @33 extends the reachability scoping two ways: nested
+// function literals' and go statements' marks attribute to their
+// enclosing named declaration as literal-borne sites — never
+// init-discharged, and foreclosed whenever init flow reaches the
+// encloser ("prog" references failing closed), since executing a
+// literal requires its encloser to have produced it — and the
+// unattested execution model gains the BINARY-scoped judgment: a
+// culprit no harness root (Test, Benchmark, Fuzz, Example of both
+// test variants, each with its TestMain flow) can reach post-init is
+// init-determined for every subject of that binary, sibling subjects
+// being roots of the same binary; gated by the caller's
+// package-process attestation (WithPackageProcessExecution — every
+// measured process is the subject package's own test binary), its
+// load-bearing discharges attestation-borne on the evidence
+// (PackageProcessDischarges), fail-closed on ambiguous harness roots,
+// open-world widenings, and unattributed marks.
+const DynamicStateStrategy = "gofresh/dynamic-state@33"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. A standing coupling rides this surface: the audited mapping
@@ -311,9 +326,16 @@ type Fingerprint struct {
 	// a session without the attestation re-marks the variable in the
 	// current derivation and the verdict refuses on its own.
 	SingleSubjectDischarges string
-	RuntimeInputs           string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest           string // digest of the manifest at capture
-	ResultKind              Kind   // guard policy captured with this recording; zero is invalid
+	// PackageProcessDischarges names the package-level variables whose
+	// shared-dynamic-state downgrade the package-process attestation's
+	// binary-scoped reachability judgment discharged for this subject —
+	// canonical (comma-joined, sorted), empty when none. Attestation-
+	// borne acceptances exactly as SingleSubjectDischarges
+	// (REQ-closure-shared-dynamic-state).
+	PackageProcessDischarges string
+	RuntimeInputs            string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest            string // digest of the manifest at capture
+	ResultKind               Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.
@@ -361,7 +383,8 @@ type Engine struct {
 	// subject is measured in a process of its own
 	// (WithSingleSubjectExecution); it arms the audited pooling set's
 	// shared-dynamic-state discharge (REQ-closure-shared-dynamic-state).
-	singleSubjectExecution bool
+	singleSubjectExecution  bool
+	packageProcessExecution bool
 }
 
 // viewTestHooks is the package's one test-observation surface: each field
@@ -378,6 +401,10 @@ var viewTestHooks struct {
 	// dynamicStateMissLoad observes the batched typed load of
 	// version-pinned packages whose dynamic-state facts missed the memo.
 	dynamicStateMissLoad func(patterns []string)
+	// factScope observes the derived dynamic-state fact scope — tests
+	// pin the execution-model markers that keep option-on and
+	// option-off sessions from serving each other's facts.
+	factScope func(scope string)
 }
 
 // Option configures an Engine.
@@ -491,6 +518,33 @@ func WithDynamicStateVouches(identities ...string) Option {
 // other's facts.
 func WithSingleSubjectExecution() Option {
 	return func(e *Engine) { e.singleSubjectExecution = true }
+}
+
+// WithPackageProcessExecution attests the package-process execution
+// model: every process that runs a measured subject is the subject
+// package's OWN test binary — `go test` of that package, under any
+// subject schedule. Under it the shared-dynamic-state judgment gains
+// the binary-scoped reachability discharge: a sibling subject in the
+// process is itself one of the binary's harness roots, so a culprit no
+// harness root's post-initialization flow can reach is init-determined
+// for every subject of the binary (REQ-closure-shared-dynamic-state).
+// The attestation is weaker than the single-subject one — it bounds
+// WHICH binary runs, not how many subjects share it — and the
+// single-subject judgment takes precedence where both are set (each
+// is sound under its own model; neither dominates the other's
+// discharges). A package with no harness roots discharges vacuously —
+// nothing executes past initialization in its own test binary — so
+// setting the option for subjects actually measured through ANOTHER
+// package's binary is the caller's soundness bug, and its cost is
+// maximal. It is the
+// caller's responsibility, it is part of the persisted fact identity
+// (option-on and option-off sessions never serve each other's facts),
+// and its load-bearing discharges ride the evidence
+// (PackageProcessDischarges) exactly as the single-subject ones do. A
+// consumer that runs subjects through any OTHER binary — another
+// package's tests importing the subject's package — must not set it.
+func WithPackageProcessExecution() Option {
+	return func(e *Engine) { e.packageProcessExecution = true }
 }
 
 // WithDeferredCheckClose defers each check's closing base observation —

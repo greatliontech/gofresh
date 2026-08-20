@@ -114,10 +114,10 @@ func TestExplainChainCycleEndsAtEdges(t *testing.T) {
 // parse-broken dep refuses the whole view.)
 func TestExplainChainReplacedDepIsInScope(t *testing.T) {
 	files := map[string]string{
-		"go.mod":            "module example.com/explain\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./depstub\n",
-		"depstub/go.mod":    "module example.com/dep\n\ngo 1.26\n",
-		"depstub/dep.go":    "package dep\n\ntype Handler func(n int) int\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\nfunc Make() []Handler {\n\tc := &counter{}\n\treturn []Handler{c.Next}\n}\n",
-		"reg/reg.go":        "package reg\n\nimport \"example.com/dep\"\n\nfunc gen() []dep.Handler { return dep.Make() }\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
+		"go.mod":         "module example.com/explain\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./depstub\n",
+		"depstub/go.mod": "module example.com/dep\n\ngo 1.26\n",
+		"depstub/dep.go": "package dep\n\ntype Handler func(n int) int\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\nfunc Make() []Handler {\n\tc := &counter{}\n\treturn []Handler{c.Next}\n}\n",
+		"reg/reg.go":     "package reg\n\nimport \"example.com/dep\"\n\nfunc gen() []dep.Handler { return dep.Make() }\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
 	}
 	dir := writeModuleTree(t, files)
 	chain := explainView(t, dir, "example.com/explain/reg", "Registry")

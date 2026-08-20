@@ -8477,11 +8477,19 @@ func TestReachabilityScopedDischarge(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade - the subject's own flow reaches the mutator", verdict)
 		}
 	})
-	t.Run("closure-carried mark never discharges", func(t *testing.T) {
+	t.Run("stored-literal mark discharges through its unreached encloser", func(t *testing.T) {
+		// The literal's marks are literal-borne sites of Register: the
+		// value cannot exist unless Register runs, Register is neither
+		// init-reachable nor in F's rooted flow, so under the
+		// attestation neither the literal nor the stash assignment can
+		// have executed. The foreclosures that keep the stored-value
+		// hazard closed — an init-reachable or program-code-referenced
+		// encloser, a top-level literal — are pinned by
+		// TestLiteralBorneSiteForeclosures.
 		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\nfunc Register() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc F() int { return len(hooks) }\n")
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
-		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
-			t.Fatalf("verdict = %+v, want the downgrade naming hooks - a mark inside a stored function literal has no attribution and never discharges", verdict)
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid under the amended literal-borne siting", verdict)
 		}
 	})
 	t.Run("method-site mutator discharges attested", func(t *testing.T) {
@@ -9363,5 +9371,283 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("manifest evaluations = %d, want one per validation pass", calls)
+	}
+}
+
+// The unattested execution model's binary-scoped reachability judgment
+// (REQ-closure-shared-dynamic-state): sibling subjects in a shared
+// process are themselves harness roots of the analyzed test binary, so
+// a culprit no harness root's post-init flow reaches is
+// init-determined for every subject of the binary — no attestation
+// needed. Fail-closed on a rooted arming site, a benchmark root
+// included, and on an ambiguous harness-named root.
+func TestBinaryScopedReachabilityDischarge(t *testing.T) {
+	wireTree := func(appTest string) map[string]string {
+		tree := map[string]string{
+			"go.mod":       "module example.com/view\n\ngo 1.26\n",
+			"wire/wire.go": "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
+			"app/app.go":   "package app\n\nimport \"example.com/view/wire\"\n\nfunc F() bool { return wire.Armed() }\n",
+		}
+		if appTest != "" {
+			tree["app/app_test.go"] = appTest
+		}
+		return tree
+	}
+	const quietAppTest = "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n"
+	subject := Subject{Package: "example.com/view/app", Symbol: "F"}
+	t.Run("unrooted armer discharges under the attestation", func(t *testing.T) {
+		dir := writeModuleTree(t, wireTree(quietAppTest))
+		engine, err := New(WithDir(dir), WithPackageProcessExecution())
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - no harness root of app's binary reaches wire.Arm, its literal disarm included", verdict)
+		}
+		if fingerprint.PackageProcessDischarges != "example.com/view/wire.reg" {
+			t.Fatalf("evidence = %q, want the discharged culprit recorded - a load-bearing judgment is never silent", fingerprint.PackageProcessDischarges)
+		}
+	})
+	t.Run("no attestation keeps the downgrade", func(t *testing.T) {
+		dir := writeModuleTree(t, wireTree(quietAppTest))
+		verdict := captureCheck(t, dir, subject)
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - the binary-scoped judgment is attestation-gated: an unattested consumer may run the subject through any binary", verdict)
+		}
+	})
+	t.Run("test-rooted armer keeps the downgrade", func(t *testing.T) {
+		dir := writeModuleTree(t, wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc TestF(t *testing.T) {\n\tdisarm := wire.Arm()\n\tdefer disarm()\n\tif !F() {\n\t\tt.Fail()\n\t}\n}\n"))
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming wire.reg - a harness root reaches the armer", verdict)
+		}
+	})
+	t.Run("benchmark-rooted armer keeps the downgrade", func(t *testing.T) {
+		dir := writeModuleTree(t, wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc BenchmarkF(b *testing.B) {\n\twire.Arm()\n\tfor i := 0; i < b.N; i++ {\n\t\tF()\n\t}\n}\n"))
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a benchmark is a harness root exactly as a test is", verdict)
+		}
+	})
+	t.Run("ambiguous harness root grants nothing", func(t *testing.T) {
+		tree := wireTree("package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n")
+		tree["app/ext_test.go"] = "package app_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/app\"\n)\n\nfunc TestF(t *testing.T) {\n\t_ = app.F()\n}\n"
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a tombstoned harness name leaves the binary's inventory incomplete", verdict)
+		}
+	})
+	t.Run("harness-library literal armer discharges when its runner is unrooted", func(t *testing.T) {
+		// The conformance-library shape: a shared test-harness package
+		// arms the oracle inside a subtest literal of a named runner.
+		// A binary that links the library without any root calling the
+		// runner cannot execute the literal — the reference records as
+		// a lit-region bounded by the runner, never bare "prog", so
+		// the armer stays un-init-reachable and the disarm literal's
+		// marks site on it.
+		tree := wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/kit\"\n)\n\nfunc TestF(t *testing.T) {\n\tif kit.Helper() != 1 {\n\t\tt.Fail()\n\t}\n\t_ = F()\n}\n")
+		tree["kit/kit.go"] = "package kit\n\nimport \"example.com/view/wire\"\n\nfunc Helper() int { return 1 }\n\nfunc run(f func()) { f() }\n\nfunc Conformance() {\n\trun(func() {\n\t\tdisarm := wire.Arm()\n\t\tdisarm()\n\t})\n}\n"
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - no root reaches the library's runner, so neither the subtest literal nor the armer can run", verdict)
+		}
+	})
+	t.Run("harness-library runner rooted keeps the downgrade", func(t *testing.T) {
+		tree := wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/kit\"\n)\n\nfunc TestF(t *testing.T) {\n\tkit.Conformance()\n\t_ = F()\n}\n")
+		tree["kit/kit.go"] = "package kit\n\nimport \"example.com/view/wire\"\n\nfunc Helper() int { return 1 }\n\nfunc run(f func()) { f() }\n\nfunc Conformance() {\n\trun(func() {\n\t\tdisarm := wire.Arm()\n\t\tdisarm()\n\t})\n}\n"
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a root runs the conformance runner, whose literal arms", verdict)
+		}
+	})
+	t.Run("fuzz-rooted armer keeps the downgrade", func(t *testing.T) {
+		tree := wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc FuzzF(f *testing.F) {\n\tdisarm := wire.Arm()\n\tdisarm()\n\t_ = F()\n}\n")
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a fuzz target is a harness root and its literal arms", verdict)
+		}
+	})
+	t.Run("testmain-flow armer keeps the downgrade", func(t *testing.T) {
+		tree := wireTree("package app\n\nimport (\n\t\"os\"\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc TestMain(m *testing.M) {\n\twire.Arm()\n\tos.Exit(m.Run())\n}\n\nfunc TestF(t *testing.T) {\n\tif !F() {\n\t\tt.Fail()\n\t}\n}\n")
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - every root rides the user TestMain flow, which arms", verdict)
+		}
+	})
+	t.Run("open-world harness-named root leaves the inventory incomplete", func(t *testing.T) {
+		// The harness filter is name-only, so a PRODUCTION-file
+		// generic with a harness name joins the root set (test files
+		// cannot declare one — the go tool refuses); unbounded and
+		// dynamic-receiving, it reads open-world and the whole
+		// binary's inventory grants nothing.
+		tree := wireTree(quietAppTest)
+		tree["app/generic.go"] = "package app\n\nfunc TestGadget[T any](v T) any {\n\tvar out any = v\n\treturn out\n}\n"
+		dir := writeModuleTree(t, tree)
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - an open-world harness-named root grants nothing", verdict)
+		}
+	})
+	t.Run("no harness roots discharges vacuously", func(t *testing.T) {
+		dir := writeModuleTree(t, wireTree(""))
+		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a binary with no harness roots executes nothing past initialization", verdict)
+		}
+	})
+}
+
+// Literal-borne sites attribute to their enclosing named declaration
+// for the reachability scopings, with the two foreclosures that keep
+// the stored-value hazard closed: an encloser the init flow reaches
+// (an init-created literal outlives initialization through a store)
+// and an encloser referenced from program code — another literal — no
+// named caller carries (REQ-closure-shared-dynamic-state).
+func TestLiteralBorneSiteForeclosures(t *testing.T) {
+	t.Run("init-reachable encloser forecloses", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\nvar _ = arm()\n\nfunc arm() int {\n\tstash = func() { hooks[\"k\"] = nil }\n\treturn 0\n}\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade naming hooks - the init flow created the literal, and a stored literal outlives initialization", verdict)
+		}
+	})
+	t.Run("literal-context reference resolves through its own encloser", func(t *testing.T) {
+		// arm is referenced only from a literal inside Wire: the
+		// lit-region bounds the reference by Wire, and with neither
+		// Wire nor arm in F's rooted flow the whole chain is dead —
+		// relay can never hold the value, so the stored literal can
+		// never run.
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\nvar relay func()\n\nfunc arm() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc Wire() { relay = func() { arm() } }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the literal-context reference is bounded by its unreached encloser", verdict)
+		}
+	})
+	t.Run("method-context reference stays prog and forecloses", func(t *testing.T) {
+		// A method body is outside the named-function fixed point:
+		// a reference from it records bare "prog", the armer reads
+		// init-reachable, and the literal's marks foreclose.
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\ntype wirer struct{ n int }\n\nfunc (w *wirer) Wire() { arm() }\n\nfunc arm() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a method-context reference gives the regions no bound", verdict)
+		}
+	})
+	t.Run("init-called method's literal forecloses", func(t *testing.T) {
+		// The reference regions cannot see method calls, so a method
+		// encloser's init reach is unknowable — and this one IS
+		// init-called: its stored literal outlives initialization.
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\ntype armer struct{ n int }\n\nfunc (armer) arm() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc init() { armer{}.arm() }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - an init-created method literal escapes no foreclosure", verdict)
+		}
+	})
+	t.Run("method-encloser literal forecloses even unrooted", func(t *testing.T) {
+		// Fail-closed uniformly: methods are outside the
+		// reference-region graph, so even an apparently-unreached
+		// method encloser gives its literal marks no bound.
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\ntype armer struct{ n int }\n\nfunc (armer) arm() { stash = func() { hooks[\"k\"] = nil } }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a method encloser's init reach is unknowable", verdict)
+		}
+	})
+	t.Run("carrier method use inside a literal sites on the encloser", func(t *testing.T) {
+		// The frameAccounting shape reduced: the carrier is written
+		// only through an unproven method, called from a literal
+		// nested in an unreached plain function.
+		dir := writeViewModule(t, "package view\n\ntype reg struct{ m map[string]func() }\n\nfunc (r *reg) Add(k string) { r.m[k] = func() {} }\n\nvar acct = reg{m: map[string]func(){}}\n\nfunc Arm() func() {\n\treturn func() { acct.Add(\"k\") }\n}\n\nfunc F() int { return 1 }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - the literal's carrier method use sites on unreached Arm", verdict)
+		}
+	})
+	t.Run("carrier method use in an init-only encloser's literal forecloses", func(t *testing.T) {
+		// The literal-borne method-use class must never ride the
+		// init-only discharge: the encloser ran at init, but the
+		// stored literal outlives it.
+		dir := writeViewModule(t, "package view\n\ntype reg struct{ m map[string]func() }\n\nfunc (r *reg) Add(k string) { r.m[k] = func() {} }\n\nvar acct = reg{m: map[string]func(){}}\n\nvar stash func()\n\nvar _ = arm()\n\nfunc arm() int {\n\tstash = func() { acct.Add(\"k\") }\n\treturn 0\n}\n\nfunc F() int { return 1 }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.acct is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - the init-created literal's method use outlives initialization", verdict)
+		}
+	})
+	t.Run("carrier method use in a method-encloser literal forecloses", func(t *testing.T) {
+		// The dl class composes with the same method-encloser
+		// foreclosure as plain literal marks: the wrapper method's
+		// init reach is unknowable, so its literal's carrier method
+		// use keeps the downgrade even though nothing visibly calls
+		// the wrapper.
+		dir := writeViewModule(t, "package view\n\ntype reg struct{ m map[string]func() }\n\nfunc (r *reg) Add(k string) { r.m[k] = func() {} }\n\nvar acct = reg{m: map[string]func(){}}\n\ntype wrapper struct{ n int }\n\nfunc (wrapper) Arm() func() {\n\treturn func() { acct.Add(\"k\") }\n}\n\nfunc F() int { return 1 }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.acct is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a method encloser bounds nothing", verdict)
+		}
+	})
+	t.Run("top-level literal keeps foreclosing", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash = func() { hooks[\"k\"] = nil }\n\nfunc F() int { return len(hooks) }\n")
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.hooks is mutated") {
+			t.Fatalf("verdict = %+v, want the downgrade - a package-level literal has no named encloser and its marks stay unattributed", verdict)
+		}
+	})
+}
+
+// The execution-model attestations are part of the persisted fact
+// identity: each option stamps its marker into the derived fact scope,
+// so option-on and option-off sessions can never serve each other's
+// facts (REQ-closure-dynamic-state-memo,
+// REQ-closure-shared-dynamic-state).
+func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
+	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
+	subject := Subject{Package: "example.com/view", Symbol: "F"}
+	capture := func(opts ...Option) string {
+		t.Helper()
+		var scope string
+		viewTestHooks.factScope = func(s string) { scope = s }
+		defer func() { viewTestHooks.factScope = nil }()
+		engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := engine.NewView(context.Background(), []Subject{subject}, dir); err != nil {
+			t.Fatal(err)
+		}
+		if scope == "" {
+			t.Fatal("the view derived no fact scope")
+		}
+		return scope
+	}
+	plain := capture()
+	single := capture(WithSingleSubjectExecution())
+	pkgproc := capture(WithPackageProcessExecution())
+	if !strings.Contains(single, "|single-subject-execution") || plain == single {
+		t.Fatalf("single-subject marker missing: plain=%q single=%q", plain, single)
+	}
+	if !strings.Contains(pkgproc, "|package-process-execution") || plain == pkgproc || single == pkgproc {
+		t.Fatalf("package-process marker missing: plain=%q pkgproc=%q", plain, pkgproc)
+	}
+	both := capture(WithSingleSubjectExecution(), WithPackageProcessExecution())
+	if !strings.Contains(both, "|single-subject-execution") || !strings.Contains(both, "|package-process-execution") ||
+		both == single || both == pkgproc {
+		t.Fatalf("both-options scope not distinct: %q", both)
 	}
 }

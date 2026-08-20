@@ -66,7 +66,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, vouches, false, pkgPaths...)
+	scan, _, err := scanViewSubjects(context.Background(), hasher, scope, dir, os.Environ(), nil, nil, vouches, false, false, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +918,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, DynamicStateStrategy+"|dep-directive|cfg", dir, os.Environ(), nil, nil, nil, true, "example.com/dirhost")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, DynamicStateStrategy+"|dep-directive|cfg", dir, os.Environ(), nil, nil, nil, true, false, "example.com/dirhost")
 	if err != nil {
 		t.Fatal(err)
 	}
