@@ -433,6 +433,13 @@ func typeMayCarryUnknownDynamic(t types.Type, seen map[types.Type]bool) bool {
 	case *types.TypeParam:
 		return !closure.TypeParamBoundsAwayFromDynamic(t)
 	case *types.Named:
+		// The audited atomic transparency (closure.AuditedAtomicPointerElem
+		// carries the audit): sync/atomic.Pointer[T] is walked as *T.
+		// The uninstantiated generic inside sync/atomic itself falls
+		// through to the fail-closed type-parameter judgment.
+		if elem, ok := closure.AuditedAtomicPointerElem(t); ok {
+			return typeMayCarryUnknownDynamic(elem, seen)
+		}
 		return typeMayCarryUnknownDynamic(t.Underlying(), seen)
 	case *types.Pointer:
 		return typeMayCarryUnknownDynamic(t.Elem(), seen)
@@ -7537,6 +7544,12 @@ func typeHandsOutDynamicAlias(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Slice:
 		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
 	case *types.Named:
+		// The audited atomic transparency: the toolchain's atomic
+		// pointer reads as *T, so it hands out an alias exactly when a
+		// *T read would — the Pointer arm's judgment of T.
+		if elem, ok := closure.AuditedAtomicPointerElem(t); ok {
+			return typeMayCarryUnknownDynamic(elem, make(map[types.Type]bool))
+		}
 		return typeHandsOutDynamicAlias(t.Underlying(), seen)
 	case *types.TypeParam:
 		return typeHandsOutDynamicAlias(t.Constraint(), seen)

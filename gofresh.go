@@ -137,8 +137,24 @@ func DisableMemos() { closure.DisableMemos() }
 // measured process is the subject package's own test binary), its
 // load-bearing discharges attestation-borne on the evidence
 // (PackageProcessDischarges), fail-closed on ambiguous harness roots,
-// open-world widenings, and unattributed marks.
-const DynamicStateStrategy = "gofresh/dynamic-state@33"
+// open-world widenings, and unattributed marks. @34 adds the audited
+// atomic transparency to EVERY carrier walk of the dynamic-state
+// judgment — the culprit trigger, subject openness (a parameter or
+// receiver of the type no longer opens the subject), and the
+// alias-handing escape walk: the toolchain's sync/atomic.Pointer[T]
+// carries dynamic behavior, opens a signature, and hands out an
+// alias exactly as *T does — its internal unsafe pointer is an
+// implementation cell the zero-width *T field and whole method set
+// type-pin to *T, and a shadowing module is a load error (ambiguous
+// import), so no type-checked program carries a foreign sync/atomic —
+// while a defined wrapper (no inherited methods; its cell reachable
+// only through an address conversion the escape rules already mark)
+// keeps the fail-closed judgment; the audit is toolchain source
+// riding the toolchain guard, no attestation and no evidence record.
+// One helper carries the rule for every walk
+// (closure.AuditedAtomicPointerElem), and the attribution tier's
+// half rides observation-rta@26.
+const DynamicStateStrategy = "gofresh/dynamic-state@34"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. A standing coupling rides this surface: the audited mapping
@@ -267,8 +283,13 @@ const DynamicStateStrategy = "gofresh/dynamic-state@33"
 // (WithSingleSubjectExecution) - there every in-process Put site lies
 // in the subject's own rooted flow - the values passed and produced
 // keeping their own pricing and every other pool use its
-// classification.
-const ObservationRTA = "gofresh/observation-rta@25"
+// classification. @26 carries the audited atomic transparency into
+// the attribution tier's carrier walk (typeMayCarryDynamic and the
+// constraint-term bounds it feeds): sync/atomic.Pointer[T] is walked
+// as *T, so parameterized-subject openness and root-receive judgments
+// close for data-only pointees exactly as the scan tier does — one
+// carrier rule at every tier (REQ-closure-analysis).
+const ObservationRTA = "gofresh/observation-rta@26"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

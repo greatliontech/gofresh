@@ -175,14 +175,14 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@25" {
-		t.Fatalf("ObservationRTA = %q, want audited-pooling admission semantics", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@26" {
+		t.Fatalf("ObservationRTA = %q, want the atomic transparency at the attribution tier", ObservationRTA)
 	}
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@33" {
-		t.Fatalf("DynamicStateStrategy = %q, want literal-borne siting and the package-process binary-scoped judgment", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@34" {
+		t.Fatalf("DynamicStateStrategy = %q, want the audited atomic transparency in every carrier walk", DynamicStateStrategy)
 	}
 }
 

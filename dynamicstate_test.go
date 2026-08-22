@@ -872,6 +872,197 @@ func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	}
 }
 
+// The audited atomic transparency: a sync/atomic.Pointer[T] whose
+// pointee is data-only is no culprit — the carrier walk sees *T, and a
+// mutable data-only variable is out of the invariant's scope — so a
+// subject mutating through it stays verifiable with no attestation and
+// no discharge record (REQ-closure-shared-dynamic-state).
+func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/acct\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct atomic.Pointer[registry]\n\nfunc Track(k string) {\n\tif r := acct.Load(); r != nil {\n\t\tr.live[k] = true\n\t}\n}\n\nfunc Enable() func() {\n\tacct.Store(&registry{live: map[string]bool{}})\n\treturn func() { acct.Store(nil) }\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/acct/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/acct/reg", Symbol: "Track"}
+	if reason := scan.downgradeReason[subject]; reason != "" {
+		t.Fatalf("data-only atomic.Pointer pointee downgraded the subject: %q", reason)
+	}
+}
+
+// The transparency's fail-closed half: a sync/atomic.Pointer[T] whose
+// pointee carries dynamic behavior triggers exactly as *T would — the
+// walk substitutes the semantic type, it never exempts the variable
+// (REQ-closure-shared-dynamic-state).
+func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/hooks\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\nvar hooks atomic.Pointer[hookSet]\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/hooks/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/hooks/reg", Symbol: "Fire"}
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/hooks/reg.hooks is mutated") {
+		t.Fatalf("dynamic-pointee reason = %q, want the downgrade naming hooks - the transparency substitutes the type, never exempts it", reason)
+	}
+}
+
+// The transparency applies through an alias spelling — types.Unalias
+// resolves `type P = atomic.Pointer[T]` to the toolchain instantiation
+// before the walk judges it. The dynamic-pointee alias is the leg with
+// teeth: an unresolved alias would match no case and read as no
+// carrier at all, silently serving a func-carrying culprit as fresh —
+// so the culprit MUST still be seen through the alias
+// (REQ-closure-shared-dynamic-state).
+func TestAtomicTransparencyThroughAlias(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/aliased\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype P = atomic.Pointer[registry]\n\nvar acct P\n\nfunc Track(k string) {\n\tif r := acct.Load(); r != nil {\n\t\tr.live[k] = true\n\t}\n}\n\nfunc Enable() {\n\tacct.Store(&registry{live: map[string]bool{}})\n}\n",
+		"dyn/dyn.go": "package dyn\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\ntype Q = atomic.Pointer[hookSet]\n\nvar hooks Q\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/aliased/reg", "example.com/aliased/dyn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/aliased/reg", Symbol: "Track"}
+	if reason := scan.downgradeReason[subject]; reason != "" {
+		t.Fatalf("aliased data-only atomic.Pointer downgraded the subject: %q", reason)
+	}
+	dynSubject := Subject{Package: "example.com/aliased/dyn", Symbol: "Fire"}
+	if reason := scan.downgradeReason[dynSubject]; !strings.Contains(reason, "example.com/aliased/dyn.hooks is mutated") {
+		t.Fatalf("aliased dynamic-pointee reason = %q, want the downgrade naming hooks - an unresolved alias would silently serve the culprit as fresh", reason)
+	}
+}
+
+// A defined wrapper (`type P atomic.Pointer[T]`) inherits no methods
+// and its cell is reached only through an address conversion the
+// escape rules mark, so it keeps the fail-closed judgment — the
+// transparency never crosses a definition boundary
+// (REQ-closure-shared-dynamic-state).
+func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/wrapped\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype P atomic.Pointer[registry]\n\nvar acct P\n\nfunc Cell() *P {\n\treturn &acct\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/wrapped/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/wrapped/reg", Symbol: "Cell"}
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/wrapped/reg.acct") {
+		t.Fatalf("defined-wrapper reason = %q, want the fail-closed downgrade naming acct", reason)
+	}
+}
+
+// One carrier rule at every tier (REQ-closure-analysis): a parameter
+// of the toolchain's atomic pointer type opens its subject exactly
+// when *T would — a data-only pointee leaves the subject closed, a
+// dynamic-carrying pointee opens it.
+func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/params\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype hooks struct {\n\tfire func()\n}\n\nfunc Data(p *atomic.Pointer[registry]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Bounded[T interface{ atomic.Pointer[registry] }](p *T) int {\n\tif p != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Dyn(p *atomic.Pointer[hooks]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/params/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Data"}] {
+		t.Fatal("a data-only atomic.Pointer parameter opened the subject")
+	}
+	if scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Bounded"}] {
+		t.Fatal("a constraint term of the toolchain atomic type opened the subject - the term walk must see the same transparency the parameter walk does")
+	}
+	if !scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Dyn"}] {
+		t.Fatal("a dynamic-pointee atomic.Pointer parameter left the subject closed")
+	}
+}
+
+// The alias-handing read judgment sees the atomic field as *T: a
+// data-only atomic pointer beside a hook field leaves the struct a
+// by-value carrier whose reads copy — no escape-class downgrade
+// (REQ-closure-shared-dynamic-state).
+func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/beside\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype config struct {\n\tn int\n}\n\ntype box struct {\n\tcfg  atomic.Pointer[config]\n\thook func()\n}\n\nvar state box\n\nfunc Read() {\n\tif f := state.hook; f != nil {\n\t\tf()\n\t}\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/beside/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/beside/reg", Symbol: "Read"}
+	if reason := scan.downgradeReason[subject]; reason != "" {
+		t.Fatalf("data-only atomic field beside a hook downgraded the read: %q", reason)
+	}
+}
+
+// The transparency covers exactly the toolchain's sync/atomic.Pointer:
+// a user-defined generic Pointer carrying an unsafe cell keeps the
+// fail-closed trigger whatever its type argument — the audit is of the
+// toolchain's source, and no name-shaped sibling inherits it
+// (REQ-closure-shared-dynamic-state).
+func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/homebrew\n\ngo 1.26\n",
+		"reg/reg.go": "package reg\n\nimport \"unsafe\"\n\ntype Pointer[T any] struct {\n\tp unsafe.Pointer\n}\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct Pointer[registry]\n\nfunc Track() {\n\tacct.p = nil\n}\n",
+	})
+	processFactCache = sync.Map{}
+	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, _, err := scanViewSubjects(context.Background(), hasher, "", dir, os.Environ(), nil, nil, nil, false, false, "example.com/homebrew/reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{Package: "example.com/homebrew/reg", Symbol: "Track"}
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/homebrew/reg.acct is mutated") {
+		t.Fatalf("homebrew Pointer reason = %q, want the fail-closed downgrade naming acct - the audit never leaves the toolchain", reason)
+	}
+}
+
 // The //gofresh:single-subject directive confers nothing on a
 // dependency's variable even under the attestation: the directive
 // covers exactly the code its author edits and reviews — the inverse of

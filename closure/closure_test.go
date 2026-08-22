@@ -1730,7 +1730,13 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "subtestbench", subject: "BenchmarkSubPure", observable: true},
 		{fixture: "fuzzsibling", subject: "FuzzDecode", reason: "testing.Fuzz"},
 		{fixture: "fuzzsibling", subject: "TestSiblingRead", observable: true},
-		{fixture: "observablebad", subject: "ReadUnattributed", reason: "open subject world"},
+		// A *os.File parameter no longer opens the subject: os.File's
+		// only dynamic-looking member is its atomic dirinfo cell
+		// (atomic.Pointer[dirInfo], data-only pointee), which the
+		// audited atomic transparency reads as *dirInfo — so the
+		// openness refusal yields to the real blocker, the unaudited
+		// os.File operations themselves.
+		{fixture: "observablebad", subject: "ReadUnattributed", reason: "package scan: reaches unaudited standard operation os.File"},
 		{fixture: "initfile", subject: "TestInitFile", reason: "startup effect"},
 		// TestMain flow classifies within subject-time observation: the
 		// test log is installed before the user test main runs, so its

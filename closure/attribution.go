@@ -559,6 +559,28 @@ func isHarnessSubjectSignature(sig *types.Signature) bool {
 	}
 }
 
+// AuditedAtomicPointerElem reports whether t is the toolchain's
+// sync/atomic.Pointer[T] instantiation, yielding T: under the audited
+// atomic transparency the carrier walks see the type as *T — its
+// internal unsafe pointer is an implementation cell the zero-width *T
+// field and the whole method set type-pin to *T, never an unsafe
+// channel (REQ-closure-shared-dynamic-state). The audit covers exactly
+// the toolchain's type: a defined wrapper inherits no methods and its
+// cell is reached only through an address conversion the ordinary
+// escape rules already mark, so it keeps the fail-closed judgment and
+// never matches here (its Obj is not sync/atomic's). One helper for
+// every carrier walk, so the tiers cannot diverge on this rule
+// (REQ-closure-analysis's one-answer arm).
+func AuditedAtomicPointerElem(t *types.Named) (types.Type, bool) {
+	obj := t.Obj()
+	if obj == nil || obj.Pkg() == nil ||
+		obj.Pkg().Path() != "sync/atomic" || obj.Name() != "Pointer" ||
+		t.TypeArgs() == nil || t.TypeArgs().Len() != 1 {
+		return nil, false
+	}
+	return t.TypeArgs().At(0), true
+}
+
 func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
@@ -581,6 +603,9 @@ func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 		// walk entries, which hand each parameter a fresh map.
 		return !constraintBoundsAwayFromDynamic(t.Constraint(), seen)
 	case *types.Named:
+		if elem, ok := AuditedAtomicPointerElem(t); ok {
+			return typeMayCarryDynamic(elem, seen)
+		}
 		return typeMayCarryDynamic(t.Underlying(), seen)
 	case *types.Pointer:
 		return typeMayCarryDynamic(t.Elem(), seen)

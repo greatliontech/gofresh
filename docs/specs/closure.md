@@ -241,6 +241,21 @@ descriptor cluster under the caller's attestation,
 or the reachability judgments — the attestation-scoped per-subject
 judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
+The audited atomic transparency governs every carrier walk of this
+judgment — the trigger above, the openness a parameter, receiver, or
+constraint term confers on its subject (REQ-closure-analysis), and
+the alias-handing read judgment below: each walk sees the toolchain's
+`sync/atomic.Pointer[T]` as `*T`. The ground is a source audit of the
+toolchain's type: its internal unsafe pointer is an implementation
+cell the zero-width `*T` field and the whole method set type-pin to
+`*T`, never an unsafe channel; a shadowing module is a load error (an
+ambiguous import), so no type-checked program carries a foreign
+`sync/atomic`; a defined wrapper type inherits no methods and its
+cell is reached only through an address conversion the escape rules
+already mark, so it keeps the fail-closed judgment; and a
+dynamic-carrying `*T` still triggers everywhere. One rule at every
+tier, riding the toolchain guard — no attestation, no evidence
+record.
 Mutation is judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
 array, or tuple of by-value carriers) is mutated exactly by a write, an address
@@ -953,7 +968,9 @@ generics), identically at every tier: a constraint that provably bounds
 its type set away from dynamic carriers — methodless, with at least one
 bounding element whose every term is free of dynamic reach under the same
 carrier rule ordinary parameters answer to (interface, function, and
-unsafe reach open; a channel opens exactly when its element does);
+unsafe reach open; a channel opens exactly when its element does; the
+toolchain's `sync/atomic.Pointer[T]` reads as `*T` under the audited
+atomic transparency, REQ-closure-shared-dynamic-state);
 `any` and `comparable` bound nothing — closes
 the caller's choice, anything else keeps the subject open-world,
 where observability refuses exactly as for any
