@@ -1773,10 +1773,46 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	openWorld := map[string]string{}
 	pkgCulprits := map[string][]dynCulprit{}
 	culpritSeen := map[string]bool{}
+	const (
+		verbMutated     = " is mutated"
+		verbEscapes     = " escapes writable"
+		verbEnvCarrying = " registers function values outside the environment-free audit"
+	)
+	// dischargeChannel names the lift the culprit's boundary affords, so
+	// the refusal is never a dead end
+	// (REQ-closure-shared-dynamic-state-reason): a version-pinned
+	// dependency variable names the caller-vouch channel — dependency
+	// code cannot be edited — by the variable's canonical identity
+	// (derived from the KEY, whose halves are what a vouch must match;
+	// pkgPath can differ on the persisted-fact channel's foreign keys),
+	// illustrating the flag spelling consumers that take flags share; a
+	// mutable-local variable names the restructure and the
+	// single-subject directive, the vouch boundary's exact inverse. The
+	// audit obligation follows the CARRIER, not the reported verb: the
+	// culprit list dedupes per variable with mutation and escape
+	// outranking the environment mark, so a function-value carrier can
+	// surface under the escape verb — its vouch still lifts the
+	// environment-audit rank, so its stated audit must cover the
+	// registered values' environments regardless of which verb won the
+	// rank (REQ-vouch-discharge's whole-surface exemption).
+	dischargeChannel := func(pkgPath, key string) string {
+		if mutableLocalPkg[pkgPath] {
+			return " (dischargeable by restructuring the state, or by the //gofresh:single-subject directive on the declaration under the caller's single-subject attestation)"
+		}
+		imp, bare := pkgPath, key
+		if i := strings.LastIndexByte(key, '.'); i >= 0 {
+			imp, bare = key[:i], key[i+1:]
+		}
+		obligation := "initialized once and never written"
+		if envCarrying[key] {
+			obligation += ", registering only environment-free function values"
+		}
+		return " (dischargeable by a caller vouch for " + imp + "." + bare + " — e.g. --vouch " + imp + ":" + bare + " where the consumer takes flags — on a source audit that the variable is " + obligation + ")"
+	}
 	recordCulprit := func(pkgPath, key, verb string) {
 		if seen := pkgPath + "\x00" + key; !culpritSeen[seen] {
 			culpritSeen[seen] = true
-			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{key: key, text: pkgPath + ": " + key + verb})
+			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{key: key, text: pkgPath + ": " + key + verb + dischargeChannel(pkgPath, key)})
 		}
 	}
 	pkgPaths := make([]string, 0, len(state.facts))
@@ -1795,9 +1831,9 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, " is mutated")
+					recordCulprit(pkgPath, key, verbMutated)
 					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + " is mutated"
+						openWorld[pkgPath] = key + verbMutated + dischargeChannel(pkgPath, key)
 					}
 				}
 			}
@@ -1805,9 +1841,9 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, " escapes writable")
+					recordCulprit(pkgPath, key, verbEscapes)
 					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + " escapes writable"
+						openWorld[pkgPath] = key + verbEscapes + dischargeChannel(pkgPath, key)
 					}
 				}
 			}
@@ -1819,9 +1855,9 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
 				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, " registers function values outside the environment-free audit")
+					recordCulprit(pkgPath, key, verbEnvCarrying)
 					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + " registers function values outside the environment-free audit"
+						openWorld[pkgPath] = key + verbEnvCarrying + dischargeChannel(pkgPath, key)
 					}
 				}
 			}

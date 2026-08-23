@@ -241,6 +241,8 @@ descriptor cluster under the caller's attestation,
 or the reachability judgments — the attestation-scoped per-subject
 judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
+(The refusal reason's own contract, the discharge channel it names
+included, is REQ-closure-shared-dynamic-state-reason.)
 The audited atomic transparency governs every carrier walk of this
 judgment — the trigger above, the openness a parameter, receiver, or
 constraint term confers on its subject (REQ-closure-analysis), and
@@ -941,9 +943,17 @@ refuse verifiability to nearly every real program, since hook-typed package
 variables are ubiquitous.
 
 **REQ-closure-shared-dynamic-state-reason** (behavior): The shared-dynamic-state
-downgrade's refusal reason MUST name the owning package and a mutated variable
-and be distinct from the signature-dynamism refusal — the two channels are
-separately actionable.
+downgrade's refusal reason MUST name the owning package and a mutated variable,
+be distinct from the signature-dynamism refusal — the two channels are
+separately actionable — AND name the discharge channel the culprit's boundary
+affords, so a correct refusal is never a dead end: a version-pinned dependency
+variable names the caller-vouch channel by the variable's canonical identity
+with the vouch's full audit obligation (for a function-value carrier that
+obligation includes the registered values' environment-freedom, since the lift
+covers the environment-audit rank too); a mutable-local variable names the
+restructure and the single-subject directive with its attestation caveat. The
+reason may illustrate a consumer CLI spelling, but the channel and identity are
+the contract — consumers differ in how vouches are supplied.
 
 ## Analysis requirements
 

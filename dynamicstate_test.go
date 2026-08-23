@@ -336,6 +336,21 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, ghost+" is mutated") {
 		t.Fatalf("poisoned downgrade = %q, want the culprit named", reason)
 	}
+	// The reason contract: a version-pinned dependency culprit names
+	// its discharge channel — the vouch spelling with the audit
+	// obligation — so the refusal is never a dead end
+	// (REQ-closure-shared-dynamic-state-reason).
+	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "dischargeable by a caller vouch for golang.org/x/sync/errgroup.Ghost") ||
+		!strings.Contains(reason, "--vouch golang.org/x/sync/errgroup:Ghost") ||
+		!strings.Contains(reason, "initialized once and never written") {
+		t.Fatalf("poisoned downgrade = %q, want the vouch channel named with its audit obligation", reason)
+	}
+	// The mutated ghost is NOT a function-value carrier: its stated
+	// obligation must stop at init-only — the env clause on a plain
+	// variable would demand an audit with no subject.
+	if reason := poisoned.downgradeReason[subject]; strings.Contains(reason, "environment-free") {
+		t.Fatalf("poisoned downgrade = %q; a non-carrier's obligation must not demand the environment audit", reason)
+	}
 	if discharges := poisoned.vouchDischarges[subject]; discharges != "" {
 		t.Fatalf("unvouched scan recorded a discharge: %q", discharges)
 	}
@@ -362,22 +377,43 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 	// sorted.
 	const shade = "golang.org/x/sync/errgroup.Shade"
 	const wraith = "golang.org/x/sync/errgroup.Wraith"
+	const spectre = "golang.org/x/sync/errgroup.Spectre"
 	processFactCache.Range(func(k, v any) bool {
 		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
 			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, shade, wraith)
-			fact.Escapes = append(fact.Escapes, shade)
-			fact.EnvCarrying = append(fact.EnvCarrying, wraith)
+			fact.Declares = append(fact.Declares, shade, wraith, spectre)
+			fact.Escapes = append(fact.Escapes, shade, spectre)
+			fact.EnvCarrying = append(fact.EnvCarrying, wraith, spectre)
 			processFactCache.Store(k, fact)
 		}
 		return true
 	})
-	all := map[string]bool{ghost: true, shade: true, wraith: true}
+	// The env-carrying culprit's obligation names the environment
+	// audit (REQ-closure-shared-dynamic-state-reason): wraith survives
+	// a vouch set covering the others and renders the env verb with
+	// the full checklist.
+	wraithScan := runScanVouched(t, scope, dir, map[string]bool{ghost: true, shade: true, spectre: true}, pkg)
+	if reason := wraithScan.downgradeReason[subject]; !strings.Contains(reason, wraith+" registers function values outside the environment-free audit") ||
+		!strings.Contains(reason, "registering only environment-free function values") {
+		t.Fatalf("wraith downgrade = %q, want the env verb with the environment-audit obligation", reason)
+	}
+	// The escaped+env-carrying spectre: the escape verb wins the
+	// per-variable rank, and the obligation STILL audits the
+	// registered values' environments — the carrier chooses the
+	// audit, never the verb (the vouch lifts the environment-audit
+	// mark too, so a verb-scoped checklist would hand out an
+	// unearned lift).
+	spectreScan := runScanVouched(t, scope, dir, map[string]bool{ghost: true, shade: true, wraith: true}, pkg)
+	if reason := spectreScan.downgradeReason[subject]; !strings.Contains(reason, spectre+" escapes writable") ||
+		!strings.Contains(reason, "registering only environment-free function values") {
+		t.Fatalf("spectre downgrade = %q, want the escape verb carrying the environment-audit obligation", reason)
+	}
+	all := map[string]bool{ghost: true, shade: true, wraith: true, spectre: true}
 	lifted := runScanVouched(t, scope, dir, all, pkg)
 	if reason := lifted.downgradeReason[subject]; reason != "" {
 		t.Fatalf("three-rank vouch left a downgrade: %q", reason)
 	}
-	if discharges := lifted.vouchDischarges[subject]; discharges != ghost+","+shade+","+wraith {
+	if discharges := lifted.vouchDischarges[subject]; discharges != ghost+","+shade+","+spectre+","+wraith {
 		t.Fatalf("three-rank discharge record = %q", discharges)
 	}
 
@@ -406,12 +442,12 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 		}
 		return true
 	})
-	withZeta := map[string]bool{ghost: true, shade: true, wraith: true, zeta: true}
+	withZeta := map[string]bool{ghost: true, shade: true, wraith: true, spectre: true, zeta: true}
 	mixed := runScanVouched(t, scope, dir, withZeta, pkg)
 	if reason := mixed.downgradeReason[subject]; !strings.Contains(reason, alpha+" is mutated") {
 		t.Fatalf("mixed-package downgrade = %q, want the unvouched culprit named", reason)
 	}
-	if discharges := mixed.vouchDischarges[subject]; discharges != ghost+","+shade+","+wraith+","+zeta {
+	if discharges := mixed.vouchDischarges[subject]; discharges != ghost+","+shade+","+spectre+","+wraith+","+zeta {
 		t.Fatalf("mixed-package discharge record = %q", discharges)
 	}
 }
@@ -869,6 +905,15 @@ func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
 		t.Fatalf("mutable-local checkout reason = %q, want the downgrade naming structMap - the audit covers only the version-pinned line", reason)
+	}
+	// The reason contract at the boundary's other side: a
+	// mutable-local culprit names the restructure and the
+	// single-subject directive — and NEVER the vouch, whose boundary
+	// is exactly the inverse (code the caller can edit is fixed, not
+	// vouched) (REQ-closure-shared-dynamic-state-reason).
+	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "//gofresh:single-subject") ||
+		!strings.Contains(reason, "restructuring") || strings.Contains(reason, "caller vouch") {
+		t.Fatalf("mutable-local checkout reason = %q, want the directive-and-restructure channel and no vouch spelling", reason)
 	}
 }
 

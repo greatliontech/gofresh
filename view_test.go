@@ -8476,6 +8476,14 @@ func TestReachabilityScopedDischarge(t *testing.T) {
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") {
 			t.Fatalf("verdict = %+v, want the downgrade - the subject's own flow reaches the mutator", verdict)
 		}
+		// The re-judgment's surviving culprit carries the reason
+		// contract too (REQ-closure-shared-dynamic-state-reason): this
+		// leg publishes the per-subject culprit list's text, and a
+		// mutable-local culprit names the directive-and-restructure
+		// channel there exactly as the whole-package naming walk does.
+		if !strings.Contains(verdict.Reason, "//gofresh:single-subject") || !strings.Contains(verdict.Reason, "restructuring") {
+			t.Fatalf("verdict reason = %q, want the mutable-local discharge channel on the re-judged culprit", verdict.Reason)
+		}
 	})
 	t.Run("stored-literal mark discharges through its unreached encloser", func(t *testing.T) {
 		// The literal's marks are literal-borne sites of Register: the

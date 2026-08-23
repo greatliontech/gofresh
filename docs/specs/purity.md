@@ -106,8 +106,12 @@ never a package or a pattern.
 
 **REQ-vouch-discharge** (behavior): A vouched variable MUST be exempt from the
 shared-dynamic-state downgrade
-(REQ-closure-shared-dynamic-state in [closure.md](closure.md)) — judged as if
-proven init-only — while every unvouched culprit keeps its downgrade.
+(REQ-closure-shared-dynamic-state in [closure.md](closure.md)) — the exemption
+covers the variable's whole culprit surface: the mutation and writable-escape
+marks, judged as if proven init-only, AND the environment-audit mark, so the
+vouch's audit obligation is correspondingly whole — initialized once, never
+written, and, for a function-value carrier, registering only environment-free
+values — while every unvouched culprit keeps its downgrade.
 
 **REQ-vouch-dependency-boundary** (behavior): A vouch naming a variable in
 mutable-local source MUST confer nothing: code the caller can edit is fixed, not
