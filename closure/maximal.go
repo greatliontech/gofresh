@@ -788,8 +788,14 @@ func isAlwaysExternalPackage(pkgPath string) bool {
 // isSourceOnlyStandardPackage is the deliberately small set whose public
 // operations cannot directly acquire process-external state. Unknown standard
 // packages fail closed to package-wide unverifiability; additions require a
-// source audit, not an API-name heuristic.
+// source audit, not an API-name heuristic — and the whole set is keyed to the
+// audited toolchain releases (toolchainaudit.go): the audit is a property of
+// specific standard-library source, so an unlisted release keeps every
+// package's fail-closed classification until its delta is walked.
 func isSourceOnlyStandardPackage(pkgPath string) bool {
+	if !auditedToolchainSource() {
+		return false
+	}
 	// The audited-pure set: packages that are bit-deterministic pure
 	// computation for every consumer of this audit - the observability
 	// tier and the maximal unverifiable-dependence
@@ -813,7 +819,7 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 	case "bufio", "bytes", "cmp",
 		"container/heap", "container/list", "container/ring",
 		"crypto/hmac", "crypto/md5", "crypto/sha1", "crypto/sha256", "crypto/sha512", "crypto/subtle",
-		"encoding", "encoding/asn1", "encoding/base64", "encoding/binary", "encoding/csv",
+		"encoding", "encoding/asn1", "encoding/base32", "encoding/base64", "encoding/binary", "encoding/csv",
 		"encoding/hex", "encoding/json", "encoding/pem", "encoding/xml",
 		"errors", "hash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
 		"io", "io/fs", "iter", "maps", "math/bits",
@@ -842,7 +848,7 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 // reachability everywhere else. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
 func auditedRuntimeTypeSymbol(pkgPath, name string) bool {
-	if pkgPath != "reflect" {
+	if !auditedToolchainSource() || pkgPath != "reflect" {
 		return false
 	}
 	switch name {
@@ -872,17 +878,33 @@ var auditedLinknameTargets = map[string]bool{
 	"syscall.prlimit":    true,
 }
 
-// auditedLinknamesOnly reports whether every //go:linkname directive in
-// the file is the two-argument pull form naming an audited target: any
-// one-argument form (an export marker whose counterpart lives in
-// assembly or another package), any unparsable directive, and any
-// unaudited target keeps the opaque-linkage floor, fail-closed.
+// auditedLinknamesOnly reports whether every //go:linkname and
+// //go:linknamestd directive in the file is the two-argument pull form
+// naming an audited target: any one-argument form (an export marker
+// whose counterpart lives in assembly or another package), any
+// unparsable directive, and any unaudited target keeps the
+// opaque-linkage floor, fail-closed. The two spellings share one
+// grammar and one policy (go1.27's std-sanctioned variant changes who
+// may declare the link, not what it links); the directive name is
+// matched as a whole field, never as a prefix — a prefix match would
+// read "//go:linknamestd target" as a two-argument "//go:linkname"
+// pull with local name "std", letting a one-argument export marker
+// whose bare name collides with an audited target impersonate an
+// audited pull, the fail-open direction.
 func auditedLinknamesOnly(text string) bool {
 	rest := text
 	for {
 		i := strings.Index(rest, "//go:linkname")
 		if i < 0 {
 			return true
+		}
+		if !auditedToolchainSource() {
+			// The audited targets are claims about runtime/syscall
+			// source; an unlisted release keeps the opaque-linkage
+			// floor for every directive-bearing file
+			// (REQ-closure-observability-analysis's exact-version
+			// keying clause).
+			return false
 		}
 		line := rest[i:]
 		if j := strings.IndexByte(line, '\n'); j >= 0 {
@@ -891,8 +913,11 @@ func auditedLinknamesOnly(text string) bool {
 		} else {
 			rest = ""
 		}
-		fields := strings.Fields(strings.TrimPrefix(line, "//go:linkname"))
-		if len(fields) != 2 || !auditedLinknameTargets[fields[1]] {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "//go:linkname" && fields[0] != "//go:linknamestd" {
+			return false
+		}
+		if len(fields) != 3 || !auditedLinknameTargets[fields[2]] {
 			return false
 		}
 	}
@@ -905,7 +930,7 @@ func auditedLinknamesOnly(text string) bool {
 // names, so the method names are unambiguous. Grows only by source
 // audit (REQ-closure-shared-dynamic-state).
 func auditedSyncSymbol(pkgPath, name string) bool {
-	if pkgPath != "sync" {
+	if !auditedToolchainSource() || pkgPath != "sync" {
 		return false
 	}
 	switch name {
@@ -930,7 +955,7 @@ func auditedSyncSymbol(pkgPath, name string) bool {
 // functions by these names, so the method names are unambiguous. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
 func auditedPoolSymbol(pkgPath, name string) bool {
-	if pkgPath != "sync" {
+	if !auditedToolchainSource() || pkgPath != "sync" {
 		return false
 	}
 	switch name {

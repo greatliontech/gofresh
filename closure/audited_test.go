@@ -1,13 +1,19 @@
 package closure
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 // The audited-pure widening: subjects reaching pure standard
@@ -27,6 +33,7 @@ func TestAuditedPureWideningAndExclusions(t *testing.T) {
 
 import (
 	"bufio"
+	"encoding/base32"
 	"fmt"
 	"strings"
 )
@@ -34,7 +41,11 @@ import (
 func Formats(x float64) string {
 	r := bufio.NewReader(strings.NewReader(fmt.Sprintf("%.2f", x)))
 	line, _ := r.ReadString('\n')
-	return line
+	// A locally constructed Encoding: the package's exported Encoding
+	// VARS (StdEncoding, HexEncoding) stay flagged as standard globals
+	// exactly like base64's — the audited membership admits the
+	// operations.
+	return base32.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567").EncodeToString([]byte(line))
 }
 `)
 	writeFile(t, dir, "pure/pure_test.go", `package pure
@@ -555,9 +566,136 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 		"string literal unaudited": {"var s = \"//go:linkname a runtime.rand\"\n", false},
 		"block comment unaudited":  {"/* //go:linkname a runtime.rand */\n", false},
 		"string literal audited":   {"var s = \"//go:linkname a runtime.getAuxv\"\n", false},
+		// go1.27's std-sanctioned spelling shares the grammar and the
+		// policy; the directive name matches as a whole field, so a
+		// one-argument linknamestd export marker can never parse as a
+		// two-argument linkname pull — the fail-open shape a prefix
+		// match would admit when the marker's bare name collides with
+		// an audited target.
+		"linknamestd audited pull":        {"//go:linknamestd a runtime.getAuxv\n", true},
+		"linknamestd one-argument form":   {"//go:linknamestd exported\n", false},
+		"linknamestd audited-name marker": {"//go:linknamestd runtime.getAuxv\n", false},
+		"linknamestd unaudited target":    {"//go:linknamestd a runtime.rand\n", false},
+		"unknown directive suffix":        {"//go:linknamex a runtime.getAuxv\n", false},
 	} {
 		if got := auditedLinknamesOnly(tc.text); got != tc.want {
 			t.Errorf("%s: auditedLinknamesOnly = %v, want %v", name, got, tc.want)
 		}
 	}
+}
+
+// The toolchain-audit canary: a toolchain move fails HERE, as one named
+// test naming the required walk, instead of surfacing as a scatter of
+// fixture flips (the go1.27 drift arrived exactly that way). The
+// audited sets claim properties of specific standard-library source;
+// this test is the release listing's enforcement pointer.
+func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
+	if !auditedToolchainSource() {
+		t.Fatalf("running toolchain %q is not in auditedToolchainReleases: walk its standard-library delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family) and list the release in closure/toolchainaudit.go", runtime.Version())
+	}
+}
+
+// An unlisted release keeps every toolchain-source admission's ordinary
+// fail-closed classification — the direction that makes an unaudited
+// stdlib refuse instead of silently inheriting a stale proof.
+func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
+	v := runtime.Version()
+	if !auditedToolchainReleases[v] {
+		t.Fatalf("running toolchain %q unlisted; the canary above owns this failure", v)
+	}
+	auditedToolchainReleases[v] = false
+	defer func() { auditedToolchainReleases[v] = true }()
+	if classBPureStandard("fmt", "Sprint") {
+		t.Error("classBPureStandard admits fmt.Sprint on an unaudited toolchain")
+	}
+	if isSourceOnlyStandardPackage("strings") {
+		t.Error("isSourceOnlyStandardPackage admits strings on an unaudited toolchain")
+	}
+	if auditedSyncSymbol("sync", "Lock") {
+		t.Error("auditedSyncSymbol admits sync.Lock on an unaudited toolchain")
+	}
+	if auditedPoolSymbol("sync", "Get") {
+		t.Error("auditedPoolSymbol admits sync.Get on an unaudited toolchain")
+	}
+	if auditedRuntimeTypeSymbol("reflect", "TypeOf") {
+		t.Error("auditedRuntimeTypeSymbol admits reflect.TypeOf on an unaudited toolchain")
+	}
+	if auditedHarnessLogging("testing", "Fatal") {
+		t.Error("auditedHarnessLogging admits testing.Fatal on an unaudited toolchain")
+	}
+	if fmtFprintFamily("fmt", "Fprintf") {
+		t.Error("fmtFprintFamily admits fmt.Fprintf on an unaudited toolchain")
+	}
+	if auditedLinknamesOnly("//go:linkname a runtime.getAuxv\n") {
+		t.Error("auditedLinknamesOnly drops the opaque-linkage floor on an unaudited toolchain")
+	}
+	atomicPkg := types.NewPackage("sync/atomic", "atomic")
+	tparam := types.NewTypeParam(types.NewTypeName(token.NoPos, atomicPkg, "T", nil), types.NewInterfaceType(nil, nil))
+	generic := types.NewNamed(types.NewTypeName(token.NoPos, atomicPkg, "Pointer", nil), types.NewStruct(nil, nil), nil)
+	generic.SetTypeParams([]*types.TypeParam{tparam})
+	inst, err := types.Instantiate(nil, generic, []types.Type{types.Typ[types.Int]}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := AuditedAtomicPointerElem(inst.(*types.Named)); ok {
+		t.Error("AuditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
+	}
+	if driver := harnessSubtestDriverForTest(t); auditedHarnessSubtestDriver(driver) {
+		t.Error("auditedHarnessSubtestDriver admits (*T).Run on an unaudited toolchain")
+	}
+}
+
+// The drops test's probes are non-vacuous only if the fakes are
+// admitted on the audited toolchain; this companion pins that half so
+// the drop assertions cannot rot into always-false trivia.
+func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
+	if !auditedLinknamesOnly("//go:linkname a runtime.getAuxv\n") {
+		t.Error("the audited-pull linkname line is not admitted on the audited toolchain")
+	}
+	atomicPkg := types.NewPackage("sync/atomic", "atomic")
+	tparam := types.NewTypeParam(types.NewTypeName(token.NoPos, atomicPkg, "T", nil), types.NewInterfaceType(nil, nil))
+	generic := types.NewNamed(types.NewTypeName(token.NoPos, atomicPkg, "Pointer", nil), types.NewStruct(nil, nil), nil)
+	generic.SetTypeParams([]*types.TypeParam{tparam})
+	inst, err := types.Instantiate(nil, generic, []types.Type{types.Typ[types.Int]}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := AuditedAtomicPointerElem(inst.(*types.Named)); !ok {
+		t.Error("the instantiated atomic.Pointer fake is not admitted on the audited toolchain")
+	}
+	if !auditedHarnessSubtestDriver(harnessSubtestDriverForTest(t)) {
+		t.Error("the mini-SSA (*T).Run is not admitted on the audited toolchain")
+	}
+}
+
+// harnessSubtestDriverForTest builds a minimal SSA (*T).Run in a
+// package named and pathed "testing" — the smallest value the driver
+// predicate's shape checks accept.
+func harnessSubtestDriverForTest(t *testing.T) *ssa.Function {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "testing.go", `package testing
+
+type T struct{}
+
+func (t *T) Run(name string, f func(*T)) bool { return true }
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := types.NewPackage("testing", "testing")
+	ssaPkg, _, err := ssautil.BuildPackage(&types.Config{}, fset, pkg, []*ast.File{file}, ssa.SanityCheckFunctions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tType := ssaPkg.Type("T").Type()
+	sel := ssaPkg.Prog.MethodSets.MethodSet(types.NewPointer(tType)).Lookup(pkg, "Run")
+	if sel == nil {
+		t.Fatal("no (*T).Run in the mini testing package")
+	}
+	fn := ssaPkg.Prog.MethodValue(sel)
+	if fn == nil {
+		t.Fatal("no SSA function for (*T).Run")
+	}
+	return fn
 }

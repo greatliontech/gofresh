@@ -9,6 +9,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1554,95 +1555,90 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		return true
 	}
-	// The audited mapping set: golang.org/x/sys/unix's package-level
-	// mapper — a Mutex-guarded map of each live mapping's last-byte
-	// address to its data-only byte slice, with mmap/munmap (and
-	// mremap) function fields, written by every mapping call as pure
-	// process-local bookkeeping fed only by the analyzed program's own
-	// mapping calls. The deepened audit retires the attestation
-	// requirement, exactly for the audited versions below: the
-	// callable fields are written only in the variable's declarations
-	// (init flow), so no schedule can change dispatch through the
-	// carrier (the raw field reads the *Ptr paths take are covered by
-	// the same init-only leg), and the bookkeeping's values hand out
-	// no dynamic carrier. Cross-subject entries are disjoint while
-	// their mappings live; the raw-pointer paths (MunmapPtr,
-	// MremapPtr) leave entries stale, and a reissued address could
-	// then steer Munmap's error-plane outcome by subject order — an
-	// exposure that is unobservable exactly because any subject able
-	// to observe it calls the mapping syscalls itself and those keep
-	// their own fail-closed observability classification, which is
-	// therefore part of this discharge's ground (see the RTA note on
-	// ObservationRTA in gofresh.go). The discharge spans the
-	// variable's mutation, escape, and environment-audit marks alike.
-	// The memoization set's class: the engine's own source-audited
-	// verdict, no attestation, no evidence record — for the audited
-	// versions only (a mutable-local checkout keeps every mark),
-	// every other variable keeping its own judgment. Grows only by
-	// source audit (REQ-closure-shared-dynamic-state).
 	// attestedDischarged carries every attestation-gated
 	// composition-time discharge — the //gofresh:single-subject
 	// directive's — for the evidence fold.
 	attestedDischarged := map[string][]string{}
-	auditedMappingOut := func(pkgPath, key string) bool {
-		if !pinnedPkg[pkgPath] {
-			return false
-		}
-		if pkgPath != "golang.org/x/sys/unix" || key != "golang.org/x/sys/unix.mapper" {
-			return false
-		}
-		// The audit is a property of the audited versions' source, not
-		// of the module name: init-only callable fields and data-only
-		// address-keyed bookkeeping were verified at each listed
-		// version's source (the per-GOOS declaration split included),
-		// and no other version inherits the proof — an unaudited
-		// version, later or earlier, refuses fail-closed until its
-		// source is audited (REQ-closure-shared-dynamic-state).
-		switch pinOf[pkgPath] {
-		case "golang.org/x/sys@v0.8.0", "golang.org/x/sys@v0.26.0",
-			"golang.org/x/sys@v0.33.0", "golang.org/x/sys@v0.40.0",
-			"golang.org/x/sys@v0.43.0", "golang.org/x/sys@v0.45.0",
-			"golang.org/x/sys@v0.46.0", "golang.org/x/sys@v0.47.0":
-			return true
-		default:
-			return false
-		}
-	}
-	// The audited memoization set: gopkg.in/yaml.v3's structMap — a
-	// mutex-guarded reflect.Type-to-structInfo cache filled at exactly
-	// one site by getStructInfo, a pure function of the type (field
-	// ordering by struct index, no map-iteration order in stored data,
-	// no options input, values never rewritten after the store; audited
-	// at the version-pinned source). Content-invariant derivation: a
-	// prior subject's population changes timing and internal pointer
-	// identity that never leave the package's unexported internals,
-	// never a looked-up value — so the discharge needs NO execution
-	// attestation and rides no evidence record: it is
-	// the engine's own source-audited verdict, not a caller assertion
-	// (the vouch-recording discipline covers only unverifiable caller
-	// assertions). Version-pinned module only, exactly the audited
-	// variable; the source-audited precursor of the structural
-	// get-or-compute discharge, whose entries retire to that proof when
-	// it lands. Grows only by source audit
+	// The audited source set: version-pinned module variables whose
+	// source audit discharges the shared-dynamic-state marks — one
+	// row per (package, variable key, audited versions). Every audit
+	// is a property of the listed versions' SOURCE, never of the
+	// module name: no other version inherits the proof — an unaudited
+	// version, later or earlier, refuses fail-closed until its source
+	// is audited — and a mutable-local checkout keeps every mark. The
+	// discharge is the engine's own source-audited verdict, no
+	// attestation, no evidence record (the vouch-recording discipline
+	// covers only unverifiable caller assertions). The next audited
+	// variable is a row, not a function. Grows only by source audit
 	// (REQ-closure-shared-dynamic-state).
-	auditedMemoOut := func(pkgPath, key string) bool {
+	auditedSourceSet := []struct {
+		pkgPath, key string
+		versions     []string
+	}{
+		// The audited mapping set: golang.org/x/sys/unix's
+		// package-level mapper — a Mutex-guarded map of each live
+		// mapping's last-byte address to its data-only byte slice,
+		// with mmap/munmap (and mremap) function fields, written by
+		// every mapping call as pure process-local bookkeeping fed
+		// only by the analyzed program's own mapping calls. The
+		// deepened audit retires the attestation requirement, exactly
+		// for the audited versions: the callable fields are written
+		// only in the variable's declarations (init flow), so no
+		// schedule can change dispatch through the carrier (the raw
+		// field reads the *Ptr paths take are covered by the same
+		// init-only leg), and the bookkeeping's values hand out no
+		// dynamic carrier. Cross-subject entries are disjoint while
+		// their mappings live; the raw-pointer paths (MunmapPtr,
+		// MremapPtr) leave entries stale, and a reissued address could
+		// then steer Munmap's error-plane outcome by subject order —
+		// an exposure that is unobservable exactly because any subject
+		// able to observe it calls the mapping syscalls itself and
+		// those keep their own fail-closed observability
+		// classification, which is therefore part of this discharge's
+		// ground (see the RTA note on ObservationRTA in gofresh.go).
+		// The discharge spans the variable's mutation, escape, and
+		// environment-audit marks alike. Init-only callable fields and
+		// data-only address-keyed bookkeeping were verified at each
+		// listed version's source, the per-GOOS declaration split
+		// included.
+		{
+			pkgPath: "golang.org/x/sys/unix",
+			key:     "golang.org/x/sys/unix.mapper",
+			versions: []string{
+				"golang.org/x/sys@v0.8.0", "golang.org/x/sys@v0.26.0",
+				"golang.org/x/sys@v0.33.0", "golang.org/x/sys@v0.40.0",
+				"golang.org/x/sys@v0.43.0", "golang.org/x/sys@v0.45.0",
+				"golang.org/x/sys@v0.46.0", "golang.org/x/sys@v0.47.0",
+			},
+		},
+		// The audited memoization set: gopkg.in/yaml.v3's structMap —
+		// a mutex-guarded reflect.Type-to-structInfo cache filled at
+		// exactly one site by getStructInfo, a pure function of the
+		// type (field ordering by struct index, no map-iteration order
+		// in stored data, no options input, values never rewritten
+		// after the store). Content-invariant derivation: a prior
+		// subject's population changes timing and internal pointer
+		// identity that never leave the package's unexported
+		// internals, never a looked-up value. Content-invariance was
+		// proven against the v3.0.0/v3.0.1 getStructInfo; the
+		// source-audited precursor of the structural get-or-compute
+		// discharge, whose entries retire to that proof when it lands.
+		{
+			pkgPath:  "gopkg.in/yaml.v3",
+			key:      "gopkg.in/yaml.v3.structMap",
+			versions: []string{"gopkg.in/yaml.v3@v3.0.0", "gopkg.in/yaml.v3@v3.0.1"},
+		},
+	}
+	auditedSourceOut := func(pkgPath, key string) bool {
 		if !pinnedPkg[pkgPath] {
 			return false
 		}
-		if pkgPath != "gopkg.in/yaml.v3" || key != "gopkg.in/yaml.v3.structMap" {
-			return false
+		for _, row := range auditedSourceSet {
+			if row.pkgPath == pkgPath && row.key == key {
+				return slices.Contains(row.versions, pinOf[pkgPath])
+			}
 		}
-		// The audit is a property of the audited versions' source, not
-		// of the module name: content-invariance was proven against the
-		// v3.0.0/v3.0.1 getStructInfo, and no other version inherits it
-		// - an unaudited version, later or earlier, refuses fail-closed
-		// until its source is audited (REQ-closure-shared-dynamic-state).
-		switch pinOf[pkgPath] {
-		case "gopkg.in/yaml.v3@v3.0.0", "gopkg.in/yaml.v3@v3.0.1":
-			return true
-		default:
-			return false
-		}
+		return false
 	}
 	// The //gofresh:single-subject variable directive discharge: the
 	// author's in-source declaration that the variable's state is
@@ -1830,7 +1826,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// unvouched hit per rank order still names the culprit.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbMutated)
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + verbMutated + dischargeChannel(pkgPath, key)
@@ -1840,7 +1836,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbEscapes)
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + verbEscapes + dischargeChannel(pkgPath, key)
@@ -1854,7 +1850,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		// write state the settled verdict assumed stable.
 		for _, fact := range state.facts[pkgPath] {
 			for _, key := range fact.Declares {
-				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedMappingOut(pkgPath, key) && !auditedMemoOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbEnvCarrying)
 					if _, ok := openWorld[pkgPath]; !ok {
 						openWorld[pkgPath] = key + verbEnvCarrying + dischargeChannel(pkgPath, key)

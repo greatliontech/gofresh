@@ -15,11 +15,18 @@ import (
 // diagnostic bumps it, so persisted scans from the prior interpretation
 // refuse instead of serving (REQ-closure-effect-scan-memo).
 // @10 adds the audited linkname-target floor (audited-only linkname
-// files drop exactly the opaque-linkage effect). ObservationRTA is
-// deliberately NOT bumped with it: no observation proof could have
+// files drop exactly the opaque-linkage effect). ObservationRTA was
+// deliberately NOT bumped with @10: no observation proof could have
 // existed for a file the opaque-linkage effect blocked, so no recorded
-// proof can serve under semantics it predates.
-const effectScanStrategy = "gofresh/effect-scan@10"
+// proof could serve under semantics it predated. @11 admits
+// encoding/base32 into the scan's source-only consultation and parses
+// //go:linknamestd as its own directive under the linkname floor's
+// grammar with the floor keyed to the audited toolchain releases —
+// the floor changes ride this surface alone (the same
+// no-prior-proof argument as @10: a file the floor blocked had no
+// servable proof), while ObservationRTA@27 carries base32 and the
+// keying for the walk tiers.
+const effectScanStrategy = "gofresh/effect-scan@11"
 
 // effectScanScope is the memo's full scope: the strategy version plus the
 // toolchain identity. The per-file scan is a pure function of the file

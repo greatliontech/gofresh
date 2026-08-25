@@ -1018,7 +1018,19 @@ own value, governed by the harness admissions, and confers no open
 world. The
 enumeration is decided against the same analyzed binary the walk
 describes, so a caller added later changes the closure and re-measures
-rather than serving under an enumeration it was never part of. A
+rather than serving under an enumeration it was never part of. An
+enumeration-closed subject's function-value dispatch drops, from its
+target set, every whole-program signature collision whose
+address-taking references all lie in initializer flow — an
+init-parented closure, a bound-method wrapper an initializer
+materializes, a named function registered there — sound because a
+subject-closed operand can hold an init-planted value only through a
+shared-state load the closed-value walk refuses; other collisions may
+remain and refuse conservatively. The drop applies only at sites in
+user frames — a standard-library frame's computed dispatch never
+proves its operand, so a std-frame site keeps the whole-mask drag,
+spurious but never unsound — and interface dispatch resolves through
+runtime-type flow, outside this value-provenance judgment. A
 constraint-bounded parameterized subject analyzes closed: its
 materialized in-binary instantiations root the reachability walk — each
 dispatches concretely, so instantiation-reached content enters the
@@ -1163,7 +1175,27 @@ fmt's shape), and the maximal scan's package-level Fprint finding, blind to
 operands, narrows to a diagnostic so the writer-sensitive tiers decide.
 Widening the
 audited set changes proof semantics and rides the strategy-version bump like
-any other proof change. The audited set carries the testing harness's
+any other proof change. Every toolchain-source admission — the audited-pure
+package set (encoding/base32 a member alongside base64, audited on the same
+terms: single-file value computation, io-interface-only wrappers, exported
+Encoding variables never mutated in-package), the class-B operations, the
+sync/pool/reflect symbols, the atomic transparency, the harness channels,
+and the writer-sink family — is keyed to an exact-version list of audited
+toolchain releases, experiment and vendor flavors included (both select
+source): the audit is a property of specific standard-library source, no
+other release inherits a proof, and an unlisted release keeps every
+symbol's ordinary fail-closed classification — the direction that makes an
+unaudited standard library refuse loudly instead of silently inheriting a
+stale admission, exactly as the version-gated third-party harness audit and
+the version-pinned module-variable audits already behave. A toolchain move
+therefore fails as one named canary (the release-listing enforcement test)
+rather than a scatter of proof flips, and listing a release requires the
+release's standard-library delta walked against the admission bar. The key binds every
+tier that answers a toolchain-source claim — the purity tier's audited synchronization,
+pooling, and immutable-type admissions and the audited linkname-target floor included —
+through one list, and the audits cover the DEFAULT build selection of each listed release:
+a build selection whose tags swap audited bodies (a vendor fork's hook tag) is outside the
+key until its own delta is walked. The audited set carries the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,
 `Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
 `Fail`, and `FailNow`, matched by package and symbol name; the admission is

@@ -288,8 +288,17 @@ const DynamicStateStrategy = "gofresh/dynamic-state@34"
 // constraint-term bounds it feeds): sync/atomic.Pointer[T] is walked
 // as *T, so parameterized-subject openness and root-receive judgments
 // close for data-only pointees exactly as the scan tier does — one
-// carrier rule at every tier (REQ-closure-analysis).
-const ObservationRTA = "gofresh/observation-rta@26"
+// carrier rule at every tier (REQ-closure-analysis). @27 generalizes
+// @24's narrowing from shape to value provenance — ANY value
+// address-taken only in initializer flow (bound-method wrappers and
+// named registrations included, not just init-parented closures) stays
+// out of an enumeration-closed subject's target set, on @24's own
+// soundness ground — keys every toolchain-source admission to the
+// audited-release list (closure/toolchainaudit.go: an unlisted release
+// keeps fail-closed classifications), and admits encoding/base32 into
+// the source-only audited set on base64's terms
+// (REQ-closure-observability-analysis's exact-version keying clause).
+const ObservationRTA = "gofresh/observation-rta@27"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
@@ -362,9 +371,9 @@ type Fingerprint struct {
 	// fails closed exactly as the compartment's does
 	// (REQ-closure-dynamic-state-memo's serving arm).
 	DynamicStateStrategy string
-	RuntimeInputs            string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest            string // digest of the manifest at capture
-	ResultKind               Kind   // guard policy captured with this recording; zero is invalid
+	RuntimeInputs        string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest        string // digest of the manifest at capture
+	ResultKind           Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.

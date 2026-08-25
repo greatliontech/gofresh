@@ -123,6 +123,7 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		}
 		openCandidates[root] = i
 	}
+	var valueRefOutsideInit map[*ssa.Function]bool
 	if len(openCandidates) > 0 {
 		if allFunctions == nil {
 			allFunctions = ssautil.AllFunctions(prog.Prog)
@@ -131,7 +132,9 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		for root := range openCandidates {
 			candidateSet[root] = true
 		}
-		callerSites, valueRefs := enumerateCallerReferences(candidateSet, allFunctions)
+		var callerSites map[*ssa.Function][]ssa.CallInstruction
+		var valueRefs map[*ssa.Function]bool
+		callerSites, valueRefs, valueRefOutsideInit = enumerateCallerReferences(candidateSet, allFunctions)
 		for root, i := range openCandidates {
 			enc, ok := subjectEnumerationClosure(root, callerSites[root], valueRefs[root])
 			if !ok {
@@ -206,29 +209,43 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 			}
 		}
 		// The enumeration-target narrowing applies to the subject walk
-		// alone: an init-parented anonymous closure outside the pinned
-		// enumerated set can never be a subject-closed operand's value
-		// (a shared-state load refuses operand-side), so RTA's
-		// matching-signature collision must not drag initializer
-		// content into the subject's scan. The startup walk keeps its
-		// own judgment of initializer content
+		// alone: an init-planted value outside the pinned enumerated
+		// set — a value whose every address-taking reference lies in
+		// initializer flow, whatever its shape: an init-parented
+		// anonymous closure, a synthetic method-value wrapper an
+		// initializer materializes (go1.27's encoding/json/v2 plants
+		// base32 bound methods this way in every test binary), a named
+		// function registered there — can never be a subject-closed
+		// operand's value (a shared-state load refuses operand-side),
+		// so RTA's matching-signature collision must not drag
+		// initializer content into the subject's scan. The startup walk
+		// keeps its own judgment of initializer content
 		// (REQ-closure-analysis's enumeration design).
-		// The drop applies only at sites in user frames: the operand-
-		// closed proof that anchors the narrowing runs only for
-		// non-standard callers (a std frame's computed dispatch never
-		// widens and never proves its operand), so a std-frame site
-		// keeps the whole-mask drag - spurious, never unsound. The
-		// site's frame classifies by the load's module facts exactly as
-		// the walks do.
+		// The drop applies only at function-value dispatch sites in
+		// user frames: interface dispatch resolves through runtime-type
+		// flow, not function values — the init-planted judgment is a
+		// value-provenance argument and claims nothing about it — and
+		// the operand-closed proof that anchors the narrowing runs only
+		// for non-standard callers (a std frame's computed dispatch
+		// never widens and never proves its operand), so invoke sites
+		// and std-frame sites keep the whole-mask drag - spurious,
+		// never unsound. The site's frame classifies by the load's
+		// module facts exactly as the walks do. A value referenced
+		// outside init flow anywhere in the program is kept even where
+		// this subject's mask carries only the init reference - the
+		// conservative direction, refusal over precision.
 		var dropCollided func(site ssa.CallInstruction, target *ssa.Function) bool
 		if enumerated {
 			pinned := enc.addrTaken
 			dropCollided = func(site ssa.CallInstruction, target *ssa.Function) bool {
+				if site.Common().IsInvoke() {
+					return false
+				}
 				framePath := funcPkgPath(site.Parent())
 				if isStdImportPath(framePath) && !userPaths[framePath] {
 					return false
 				}
-				return initParentedAnonymous(target) && !pinned[target]
+				return !pinned[target] && !valueRefOutsideInit[target]
 			}
 		}
 		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided)
@@ -266,9 +283,9 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 					// pin their value set exactly - the enumerated
 					// caller arguments and subject-local constructions -
 					// yet RTA's mask carries every address-taken function
-					// of matching signature, and init-flow closures are
-					// address-taken under every mask. An init-parented
-					// anonymous closure outside the pinned set is that
+					// of matching signature, and init-flow values are
+					// address-taken under every mask. An init-planted
+					// value outside the pinned set is that
 					// collision: dropping it removes the spurious
 					// initializer-content drag (a refusal class, never a
 					// false valid - a subject-closed operand can hold an
@@ -328,7 +345,7 @@ func isTestingMRun(fn *ssa.Function) bool {
 // reflectively over corpus files - both keep their classifications
 // (REQ-closure-observability-analysis).
 func auditedHarnessSubtestDriver(fn *ssa.Function) bool {
-	if fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
+	if !auditedToolchainSource() || fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
 		return false
 	}
 	if fn.Signature == nil || fn.Signature.Recv() == nil {
@@ -378,9 +395,15 @@ type enumerationClosure struct {
 // analyzed program, collecting for each candidate root its direct static
 // call sites and whether any other reference exists — an address
 // capture, a stored value, a dynamic use, or a call held by a body the
-// enumeration cannot judge as a caller. Function order is sorted so
-// site order, and every judgment derived from it, is run-to-run stable.
-func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.Function]bool) (map[*ssa.Function][]ssa.CallInstruction, map[*ssa.Function]bool) {
+// enumeration cannot judge as a caller. The same pass records, for EVERY
+// function value in the program, whether any address-taking reference to
+// it lies outside initializer flow: a value with none is init-planted —
+// whatever its shape (an init-parented anonymous closure, a synthetic
+// method-value wrapper materialized by an initializer, a named function
+// registered there) — and feeds the enumeration-target narrowing.
+// Function order is sorted so site order, and every judgment derived
+// from it, is run-to-run stable.
+func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.Function]bool) (map[*ssa.Function][]ssa.CallInstruction, map[*ssa.Function]bool, map[*ssa.Function]bool) {
 	ordered := make([]*ssa.Function, 0, len(all))
 	for fn := range all {
 		if fn != nil {
@@ -390,6 +413,7 @@ func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.F
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
 	sites := make(map[*ssa.Function][]ssa.CallInstruction)
 	valueRef := make(map[*ssa.Function]bool)
+	valueRefOutsideInit := make(map[*ssa.Function]bool)
 	var space [16]*ssa.Value
 	for _, fn := range ordered {
 		// A body the enumeration cannot judge as a caller — a synthetic
@@ -399,6 +423,7 @@ func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.F
 		// capture: its arguments are never judged, so they must never
 		// count as an enumerated site.
 		judgeable := fn.Synthetic == "" && !parameterizedBody(fn)
+		initFrame := initFlowFrame(fn)
 		for _, b := range fn.Blocks {
 			for _, instr := range b.Instrs {
 				rands := instr.Operands(space[:0])
@@ -417,14 +442,19 @@ func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.F
 					}
 				}
 				for _, op := range rands {
-					if g, ok := (*op).(*ssa.Function); ok && candidates[g] {
-						valueRef[g] = true
+					if g, ok := (*op).(*ssa.Function); ok {
+						if candidates[g] {
+							valueRef[g] = true
+						}
+						if !initFrame {
+							valueRefOutsideInit[g] = true
+						}
 					}
 				}
 			}
 		}
 	}
-	return sites, valueRef
+	return sites, valueRef, valueRefOutsideInit
 }
 
 // subjectEnumerationClosure judges one open-signature root against its
@@ -572,6 +602,9 @@ func isHarnessSubjectSignature(sig *types.Signature) bool {
 // every carrier walk, so the tiers cannot diverge on this rule
 // (REQ-closure-analysis's one-answer arm).
 func AuditedAtomicPointerElem(t *types.Named) (types.Type, bool) {
+	if !auditedToolchainSource() {
+		return nil, false
+	}
 	obj := t.Obj()
 	if obj == nil || obj.Pkg() == nil ||
 		obj.Pkg().Path() != "sync/atomic" || obj.Name() != "Pointer" ||
@@ -814,14 +847,16 @@ func userModulePaths(pkgs []*packages.Package) map[string]bool {
 	return user
 }
 
-// initParentedAnonymous reports an anonymous function whose top-level
-// parent is a package initializer (the synthetic init or a user init#N
-// body): address-taken under every mask by the init roots, the one
-// provenance an enumeration-closed subject's pinned operand set can
-// never legitimately carry. Init-flow qualified helpers' closures keep
-// their masks - the narrowing stays at the initializer boundary.
-func initParentedAnonymous(fn *ssa.Function) bool {
-	if fn == nil || fn.Parent() == nil {
+// initFlowFrame reports whether a frame is initializer flow: the
+// synthetic package initializer, a compiler-numbered user init body, or
+// a function transitively parented under one. A function value whose
+// every address-taking reference lies in such frames is init-planted -
+// address-taken under every mask by the init roots, the one provenance
+// an enumeration-closed subject's pinned operand set can never
+// legitimately carry. Init-flow qualified helpers keep their masks -
+// the boundary is the initializer itself.
+func initFlowFrame(fn *ssa.Function) bool {
+	if fn == nil {
 		return false
 	}
 	top := fn
@@ -830,8 +865,9 @@ func initParentedAnonymous(fn *ssa.Function) bool {
 	}
 	// A method named init is an ordinary function: only the synthetic
 	// package initializer and the compiler-numbered user init bodies
-	// qualify - dropping any other parent's closures would remove
-	// legitimate subject content, the unsound direction.
+	// qualify - classifying any other frame as initializer flow would
+	// let the narrowing drop legitimate subject content, the unsound
+	// direction.
 	if top.Signature != nil && top.Signature.Recv() != nil {
 		return false
 	}

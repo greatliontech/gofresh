@@ -175,8 +175,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@26" {
-		t.Fatalf("ObservationRTA = %q, want the atomic transparency at the attribution tier", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@27" {
+		t.Fatalf("ObservationRTA = %q, want the value-provenance narrowing with the exact-version toolchain keying", ObservationRTA)
 	}
 }
 

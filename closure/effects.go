@@ -145,7 +145,7 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 // ambient-input and mutation surfaces (Setenv, Chdir, TempDir, the
 // runtime-configuration reads) keep their own classifications.
 func auditedHarnessLogging(pkgPath, name string) bool {
-	if pkgPath != "testing" {
+	if !auditedToolchainSource() || pkgPath != "testing" {
 		return false
 	}
 	switch name {
@@ -200,6 +200,9 @@ func harnessSubtestDriverEffect() externalEffect {
 // - each equally pure decomposition or conversion over its operands.
 // Grows only by source audit (REQ-closure-observability-analysis).
 func classBPureStandard(pkgPath, name string) bool {
+	if !auditedToolchainSource() {
+		return false
+	}
 	switch pkgPath {
 	case "fmt":
 		switch name {
@@ -230,7 +233,7 @@ func classBPureStandard(pkgPath, name string) bool {
 // channel in the symbol itself
 // (REQ-closure-observability-analysis's writer-sink admission).
 func fmtFprintFamily(pkgPath, name string) bool {
-	if pkgPath != "fmt" {
+	if !auditedToolchainSource() || pkgPath != "fmt" {
 		return false
 	}
 	switch name {

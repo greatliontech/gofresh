@@ -1690,6 +1690,13 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// drags a spurious refusal in (the startup walk still judges
 		// the initializer itself on its own terms).
 		{fixture: "dyninitcollide", subject: "Run", observable: true},
+		// The narrowing is value-provenance, not closure-shape: an
+		// init-materialized method value (a parentless synthetic bound
+		// wrapper — the go1.27 encoding/json/v2 base32 shape every test
+		// binary links) and an init-registered named function stay out
+		// of a closed subject's target set exactly as the init-parented
+		// closure above does.
+		{fixture: "dyninitbound", subject: "Run", observable: true},
 		// The std-frame keep is load-bearing: an init-planted
 		// comparator passed as a plain argument into a std generic
 		// dispatches inside the std frame where no operand proof runs,

@@ -6536,6 +6536,9 @@ func instantiatedResultsHandOutNothing(t types.Type) bool {
 // construction. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
 func auditedImmutableType(t types.Type) bool {
+	if !closure.AuditedToolchainSource() {
+		return false
+	}
 	named, ok := types.Unalias(t).(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return false
@@ -6585,7 +6588,7 @@ func methodFactKey(fn *types.Func) string {
 // receiver-neutral because lock state cannot change dispatch. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
 func auditedSynchronization(fn *types.Func) bool {
-	if fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+	if !closure.AuditedToolchainSource() || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
 		return false
 	}
 	sig, ok := fn.Type().(*types.Signature)
@@ -6627,7 +6630,7 @@ func auditedSynchronization(fn *types.Func) bool {
 // keeps the fail-closed judgment at every use.
 // Grows only by source audit (REQ-closure-shared-dynamic-state).
 func auditedPooling(fn *types.Func) bool {
-	if fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+	if !closure.AuditedToolchainSource() || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
 		return false
 	}
 	sig, ok := fn.Type().(*types.Signature)
