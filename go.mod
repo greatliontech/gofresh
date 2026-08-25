@@ -1,6 +1,6 @@
 module github.com/greatliontech/gofresh
 
-go 1.26.4
+go 1.27.0
 
 require (
 	github.com/greatliontech/stipulator/stipulate/structural v0.2.0
