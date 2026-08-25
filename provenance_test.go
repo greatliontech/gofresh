@@ -41,7 +41,21 @@ func TestToolchainSkewComparesLanguageSeries(t *testing.T) {
 	}
 	err := toolchainSkew("go1.26.5-X:nodwarf5", "go1.27.0-dst.10")
 	if err == nil || !strings.Contains(err.Error(), "go1.26") || !strings.Contains(err.Error(), "go1.27") {
-		t.Fatalf("cross-series skew = %v, want both series named", err)
+		t.Fatalf("older-frontend skew = %v, want both series named", err)
+	}
+	// The refusal is DIRECTIONAL within a major: a newer frontend
+	// reads older language under the Go 1 compatibility promise — the
+	// declared-toolchain workflow (--toolchain go1.26.x under a
+	// go1.27 binary) must pass.
+	if err := toolchainSkew("go1.27.0-dst.10", "go1.26.5"); err != nil {
+		t.Fatalf("newer frontend over older ambient refused: %v", err)
+	}
+	// Across majors the promise has no basis: refuse BOTH directions.
+	if err := toolchainSkew("go3.0.1", "go1.27.0"); err == nil || !strings.Contains(err.Error(), "cross-major") {
+		t.Fatalf("go3 frontend over go1 ambient = %v, want the cross-major refusal", err)
+	}
+	if err := toolchainSkew("go1.27.0", "go3.0.1"); err == nil || !strings.Contains(err.Error(), "cross-major") {
+		t.Fatalf("go1 frontend over go3 ambient = %v, want the cross-major refusal", err)
 	}
 	// TWO unidentifiable versions are not an agreement of anything.
 	if err := toolchainSkew("devel +abc", "devel +abc"); err == nil {
@@ -69,13 +83,12 @@ func TestToolchainSkewComparesLanguageSeries(t *testing.T) {
 func TestToolchainSkewLabelsTheBinarySide(t *testing.T) {
 	self := runtime.Version()
 	series := languageSeries(self)
-	ambient := "go1.1.0"
-	if series == "go1.1" {
-		ambient = "go1.2.0"
-	}
+	// A far-future ambient: the binary's frontend predates it, the
+	// refusing direction.
+	ambient := "go99.1.0"
 	err := ToolchainSkew(ambient)
 	if err == nil {
-		t.Fatal("cross-series ambient did not skew")
+		t.Fatal("newer-series ambient did not skew")
 	}
 	// Each version's LANGUAGE annotation must be its own — a crossed
 	// annotation points the operator's rebuild at the wrong series.

@@ -13,8 +13,11 @@ import (
 // LANGUAGE series (go1.26 vs go1.27), the compiled-in stdlib
 // frontend (go/types, go/parser) faces source shapes it predates:
 // parse refusals, analysis panics, and silently shifted evidence. A
-// judged run must refuse that state loudly instead of degrading
-// target by target.
+// judged run must refuse that state loudly — the refusal is
+// DIRECTIONAL within a major (an older frontend refuses newer
+// sources; a newer one reads older language under the Go 1
+// compatibility promise) and total across majors — instead of
+// degrading target by target.
 //
 // Scope: the check witnesses the STDLIB frontend series only. The
 // x/tools layers are a module pin of the embedding tool, not a
@@ -30,10 +33,18 @@ import (
 // this check exists to refuse. (The same dir-relativity rule the
 // guard evidence already binds to.)
 
-// ToolchainSkew reports a language-series disagreement between the
-// running binary's build toolchain and the ambient toolchain as an
-// error; nil means the series agree. An unidentifiable version on
-// either side is a skew — unidentifiable is not agreement.
+// ToolchainSkew reports the breaking direction of a language-series
+// disagreement between the running binary's build toolchain and the
+// ambient toolchain as an error; nil means the binary's frontend can
+// judge the ambient's sources. Within a major the refusal is
+// DIRECTIONAL: a frontend OLDER than the ambient series breaks (it
+// predates the sources' language — the field class), while a NEWER
+// frontend reads older language under the Go 1 compatibility
+// promise — refusing that direction would break the legitimate
+// declared-toolchain workflows (measuring under a pinned older
+// toolchain from a current binary). Across majors the promise has no
+// basis and BOTH directions refuse. An unidentifiable version on
+// either side refuses — unidentifiable is not agreement.
 func ToolchainSkew(ambient string) error {
 	return toolchainSkew(runtime.Version(), ambient)
 }
@@ -45,10 +56,23 @@ func toolchainSkew(binary, ambient string) error {
 	if bs == "" || as == "" {
 		return fmt.Errorf("gofresh: toolchain provenance: binary built with %q, ambient toolchain %q: unidentifiable language series — refusing to judge under an unidentifiable frontend", binary, ambient)
 	}
-	if bs != as {
-		return fmt.Errorf("gofresh: toolchain provenance: binary built with %s (language %s), ambient toolchain %s (language %s): the compiled-in frontend predates or postdates the sources the run loads — rebuild the tool on the ambient toolchain", binary, bs, ambient, as)
+	if majorOf(bs) != majorOf(as) {
+		// The backward-compatibility law the newer-frontend direction
+		// rests on is the Go 1 promise, scoped WITHIN a major: across
+		// majors there is no promise in either direction, and the
+		// fail-closed posture refuses both.
+		return fmt.Errorf("gofresh: toolchain provenance: binary built with %s (language %s), ambient toolchain %s (language %s): cross-major toolchains carry no compatibility promise in either direction — rebuild the tool on the ambient toolchain's major", binary, bs, ambient, as)
+	}
+	if version.Compare(bs, as) < 0 {
+		return fmt.Errorf("gofresh: toolchain provenance: binary built with %s (language %s), ambient toolchain %s (language %s): the compiled-in frontend predates the sources the run loads — rebuild the tool on the ambient toolchain", binary, bs, ambient, as)
 	}
 	return nil
+}
+
+// majorOf cuts the major from a "goMAJOR.MINOR" series.
+func majorOf(series string) string {
+	major, _, _ := strings.Cut(strings.TrimPrefix(series, "go"), ".")
+	return major
 }
 
 // languageSeries derives the "goMAJOR.MINOR" language series via the
