@@ -5,7 +5,6 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
-| [go127-generic-method-closure-analysis](go127-generic-method-closure-analysis.md) | go1.27 stdlib generic-method shapes fail closure reachability — both consumers blocked; fix here, consumers bump | with the go1.27 analysis support (fleet toolchain moved 2026-08-24) |
 | [audited-source-set-table](audited-source-set-table.md) | collapse the two audited-set gates onto one version-keyed table | with the next audited VARIABLE-set change set |
 | [binary-roots-single-mask-union](binary-roots-single-mask-union.md) | one all-roots RTA walk instead of per-root batches for the binary inventory | with the next reachability-scoping change |
 | [unify-discharge-walks](unify-discharge-walks.md) | one culprit walk parameterized by proof and destination; the reason-channel clause and verb literals now spelled at two composition points fold in, and a channel enum carried by the discharge machinery would make message-names-a-channel-the-engine-won't-honor unrepresentable | with the next reachability-scoping change |
