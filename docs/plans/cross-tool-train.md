@@ -146,14 +146,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band B — standing guards (the neglect-proofing layer)
 
-- [ ] 107. cross-tool: CI on all four repos — build, vet, full suite,
-      and a {current, next-rc} Go toolchain matrix per repo (the
-      go1.27 episode's structural prevention: a next-rc leg fails
-      LOUDLY months before the fleet trips on a release); absorbs
-      gomutant docs/issues/library-suite-exceeds-default-test-timeout
-      (the workflows carry the measured -timeout) and encodes each
-      repo's measured suite budgets; semrel rides where adopted; the
-      resolving doc deletes at close.
 - [ ] 108. cross-tool: language-shape canary suites per tool — seeded
       by the gofresh generic-method reproducers; each tool carries a
       canary corpus of language shapes its frontend must parse and
