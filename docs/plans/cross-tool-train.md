@@ -52,13 +52,6 @@ and scheduled at the user's convenience.
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 103. gomutant: the growth-serve false-survivor pair (gomutant
-      docs/issues: growth-serve-misses-modified-oracle-bodies —
-      VERDICT INTEGRITY: a strengthen-in-place oracle edit leaves a
-      false survivor served; false-survivors-despite-killing-oracle —
-      the instrumented watch class, mode line + loud FLIP landed
-      2239e3c, reproducer standing guard) — fix both serve-path
-      classes; both docs delete at close.
 - [ ] 83. gofresh: callee-argument insertions join the population —
       the chunk-65 review's seventh and eighth clause-family members,
       both probe-confirmed composed false Valid on HEAD: a
@@ -186,8 +179,10 @@ and scheduled at the user's convenience.
       docs/issues: fold-growth-into-generalized-drift,
       consolidate-reidentification-and-bucket-policy) — growth is a
       strict special case of generalized drift; one re-identification
-      helper, one advisory-bucket policy; sequenced right after 103
-      (same subsystem, warm); both docs delete at close.
+      helper, one advisory-bucket policy; same subsystem as the
+      landed 103 (gomutant 2ba8841), whose windowScores bundle and
+      newSurvivor/carrySurvivor constructors are the shapes the
+      consolidation builds on; both docs delete at close.
 - [ ] 113. gomutant: ergonomics and robustness batch (gomutant
       docs/issues: graceful-interrupt-persistence,
       refusal-exit-collapse, coverage-guided-oracle-ordering,
