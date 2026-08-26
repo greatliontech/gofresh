@@ -44,11 +44,28 @@ register.
 
 User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
 126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 115, then
+— amended 2026-08-27 under the field-response doctrine (bldc campaign
+reports): 132 inserted after 83 (coverage integrity; lands before
+108 so the canary corpus includes the shapes it fixes), 133 inserted
+after 110 (same artifact, the findings document) — then
 91, 92, 96, then 129, 130, 131, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then 95 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
+
+**CI doctrine** (chunk 107's review, binding on 108+): a
+workspace repo's "full suite" is the module-path pattern
+(`github.com/greatliontech/<repo>/...`), never `./...` — `./...`
+silently drops workspace members. A CI budget states its
+measurement host, date, AND toolchain — the dev fleet's default go
+is the godst fork, and a fork-hosted timing is not evidence about
+upstream stable (measured 2026-08-27 at n=1 per arm: stock go1.27.0
+-2.1..-4.4% on the three long suites, +19% on pew's 83-second arm —
+noise-class at that length; the budgets carry the stock numbers);
+runner-class factors are measured, not assumed
+(core count probed 2026-08-27: ~1.04x on the dominant child-process
+workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
@@ -66,6 +83,17 @@ and scheduled at the user's convenience.
       The edge must carry argument-storage insertions, not only
       return-position freedom, and literal detection must include the
       elided spelling; the admission legs stay admissible.
+- [ ] 132. gomutant/gofresh: generic shapes in attributed
+      reachability (gomutant docs/issues:
+      generic-shape-reachability-gap — bldc 2026-08-27: 567/1164
+      targets skipped "unsupported analysis shape: T", 14 packages
+      with zero campaign evidence; one generic-shaped symbol in the
+      closure takes its whole package's target set down) — handle
+      type-parameterized symbols in the attributed-reachability
+      closure, and surface skip blast radius package-grouped
+      ("package X: all N targets skipped"), never a scattered count;
+      lands before 108 so the canary corpus carries the fixed shapes;
+      doc deletes at close.
 - [ ] 82. stipulator: capture-group key soundness — the key joins
       tags, env, exclusions, and vouches with control-byte separators,
       and a legal env VALUE containing a separator byte can collide
@@ -148,6 +176,21 @@ and scheduled at the user's convenience.
       findings-inspection-cost — inspection without re-judging,
       summary O(targets)) — bound, compact, and make inspection
       cheap; both docs delete at close.
+- [ ] 133. gomutant: evidence pins travel (gomutant docs/issues:
+      machine-local-evidence-pins — bldc 2026-08-27: absolute
+      runtime-input paths and host-RAM-derived oracleMemoryBytes in
+      evidence identity confine a committed findings document to the
+      producing checkout, defeating the portable repo layer) —
+      module-relative runtime-input path pins; split measurement
+      identity from machine circumstance (the toolchain pin STAYS
+      identity — provenance-refusal is deliberate; the RAM-derived
+      ceiling moves to a machine-profile facet unless the ceiling
+      demonstrably decided a verdict). Stated residual: the doc's
+      "or a CI runner" case stays open BY DESIGN — the toolchain pin
+      keeps cross-toolchain documents re-measuring (this fleet's godst
+      vs CI's stock), and 133 delivers same-toolchain travel only;
+      close-out promotes that refusal into the spec's provenance
+      section, then the doc deletes.
 
 ## Band U — UX (MCP-first)
 
