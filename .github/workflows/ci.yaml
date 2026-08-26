@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# Successive PR pushes supersede (per-ref group, cancelled on the next
+# push). Main is keyed per-SHA so no two main runs ever share a group:
+# by default GitHub cancels a group's PENDING member (cancel-in-progress
+# governs only the running one), so a shared main group would leave
+# rapid-push intermediate commits verdictless while release.yaml tags
+# them on the same push. Per-SHA grouping removes the collision
+# structurally while keeping a concurrency stanza PRs can reuse.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+# GOTOOLCHAIN=local pins each leg to the toolchain it installed: the
+# current leg must actually run stable and the next-rc leg must
+# actually run the candidate — auto would silently substitute the
+# go.mod-resolved toolchain and the matrix would measure nothing.
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go vet ./...
+      # Suite budget measured 2026-08-27 on the 24-core dev host under
+      # UPSTREAM stock go1.27.0 (fork-vs-stock measured at n=1 per arm:
+      # -2.1..-4.4% on the three long suites, +19% on pew's 83s arm —
+      # noise-class at that length; no arm approaches its headroom): slowest package closure 544s, whole run 555s. Headroom over that: ~3.3x.
+      # Core count is a measured non-factor too (24 -> 4 cores cost
+      # ~4% on the dominant child-process-serialized workload, probed
+      # 2026-08-27); per-core runner speed is asserted within the
+      # headroom, and a cold cache lands on the job ceiling, not this
+      # flag. A budget overrun is a real finding (a hang, or a suite
+      # outgrowing its budget) — re-measure before raising the number.
+      - run: go test ./... -count=1 -timeout=30m
+
+  # The pre-release leg: go.dev/dl orders by version, newest first, so
+  # an unstable entry at the top is exactly "a candidate newer than
+  # every stable release" — the freeze-window signal this leg exists
+  # for (a point release cannot mask it: go1.N+1rc1 sorts above every
+  # go1.N.x). A stable top entry means no candidate is published and
+  # the leg no-ops — but only after the resolver AFFIRMS it parsed a
+  # plausible version AND a plausible stability flag, so a broken
+  # endpoint or a moved schema fails the job instead of impersonating
+  # the quiet season. When a candidate exists, its failure is LOUD:
+  # this is the structural prevention for release-day toolchain
+  # breakage, surfaced months early.
+  next-rc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Resolve the next Go release candidate
+        id: rc
+        # shell: bash is load-bearing: it switches Actions to
+        # `bash -eo pipefail`, so a curl failure inside the pipe fails
+        # this step instead of yielding an empty version that reads as
+        # a legitimate no-op.
+        shell: bash
+        run: |
+          top=$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' | jq -r '.[0] | "\(.version) \(.stable)"')
+          case "$top" in
+            go1.*" true" | go1.*" false") ;;
+            *) echo "resolver broke: top dl entry is '$top'" >&2; exit 1 ;;
+          esac
+          version=""
+          [ "${top##* }" = "false" ] && version="${top%% *}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "${version:-no pre-release published; leg is a no-op}"
+      - name: Install the release candidate
+        if: steps.rc.outputs.version != ''
+        shell: bash
+        run: |
+          go install "golang.org/dl/${{ steps.rc.outputs.version }}@latest"
+          wrapper="$(go env GOPATH)/bin/${{ steps.rc.outputs.version }}"
+          "$wrapper" download
+          echo "$("$wrapper" env GOROOT)/bin" >> "$GITHUB_PATH"
+      - if: steps.rc.outputs.version != ''
+        run: go version && go build ./...
+      - if: steps.rc.outputs.version != ''
+        run: go vet ./...
+      - if: steps.rc.outputs.version != ''
+        run: go test ./... -count=1 -timeout=30m
