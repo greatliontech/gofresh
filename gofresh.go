@@ -153,8 +153,36 @@ func DisableMemos() { closure.DisableMemos() }
 // riding the toolchain guard, no attestation and no evidence record.
 // One helper carries the rule for every walk
 // (closure.AuditedAtomicPointerElem), and the attribution tier's
-// half rides observation-rta@26.
-const DynamicStateStrategy = "gofresh/dynamic-state@34"
+// half rides observation-rta@26. @35 gives the environment-free
+// registration audit's callees-join-their-populations clause its
+// implementing mechanism: per-parameter argument-storage insertion
+// facts (what a function stores into storage reachable from each
+// parameter, judged by the audit's own value judgment; a stored bare
+// unrebroken parameter is the caller's obligation; capture-broken
+// components poison), a caller's plain-named call handing a tracked
+// chain-rooted argument deferring over a conditional edge
+// (calleeKey NUL index) resolved with the return-environment-free
+// proofs in one least fixed point — previously a no-return callee
+// resolved vacuously and its writes into argument storage were
+// recorded nowhere — while composite-literal arguments (plain,
+// addressed, and Go's elided address-of in pointer-element literals,
+// which carry no UnaryExpr) break their embedded reach-bearing
+// tracked names fail-closed, and call-rooted or unattributable
+// argument values break identically (demonstrated: sink(id(s)) hands
+// s's backing through the call result). The classification gates on
+// the value's own type — a value handing no mutable reach copies, so
+// element reads, copied function values, and fresh-and-copying
+// derivations (make/new, append and audited value-plane clones over
+// copying elements, conversions) stay admissible; the same gate
+// narrows the address-of-literal break to reach-bearing embedded
+// names, where the capture arm still breaks the addressed chain
+// itself. Every argument of a deferring call judges under the
+// audit's value judgment at the call site, to a poison fixpoint — an
+// unjudgeable argument (a method value, an opaque local) poisons the
+// handed storage, which is what discharges the callee-side
+// bare-parameter skip (a stored bare parameter neither rebound nor
+// capture-broken).
+const DynamicStateStrategy = "gofresh/dynamic-state@35"
 
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. A standing coupling rides this surface: the audited mapping

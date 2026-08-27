@@ -171,6 +171,46 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 	}
 }
 
+// An insertion condition renders with its parameter context and walks
+// to the refusing site - never a raw NUL, never a spurious edge for a
+// resolved condition, and an unresolved insertion claim's own edges
+// chain onward (REQ-explain-chain; the chunk-83 review's M1).
+func TestExplainEnvAuditInsertionChain(t *testing.T) {
+	const culprit = "example.com/reg.Registry"
+	facts := map[string][]dynamicStateFact{
+		"example.com/reg": {{
+			EnvCarrying:            []string{culprit},
+			EnvCallUses:            []string{culprit + "\x01example.com/reg\x00Gen"},
+			ReturnEnvFree:          []string{"example.com/reg\x00Gen"},
+			ReturnEnvInsertionDeps: []string{"example.com/reg\x00Gen\x01example.com/dep\x00Sink\x000", "example.com/reg\x00Gen\x01example.com/dep\x00Fill\x001"},
+		}},
+		"example.com/dep": {{
+			// Fill's parameter resolves; Sink's is undeclared - only
+			// Sink may contribute an edge and the refusal site.
+			ParamInsertionFree: []string{"example.com/dep\x00Fill\x001"},
+		}},
+	}
+	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, culprit, "Registry")
+	if refusedFn != "Sink" || refusedPath != "example.com/dep" {
+		t.Fatalf("refusal site = %q in %q, want Sink in example.com/dep", refusedFn, refusedPath)
+	}
+	sawInsertionEdge := false
+	for _, e := range edges {
+		if strings.ContainsRune(e.Symbol+e.Callee+e.Package, 0) {
+			t.Fatalf("chain link carries a raw NUL: %+v", e)
+		}
+		if strings.Contains(e.Callee, "Fill") {
+			t.Fatalf("resolved insertion condition contributed a spurious edge: %+v", e)
+		}
+		if e.Callee == "example.com/dep.Sink (parameter 0)" {
+			sawInsertionEdge = true
+		}
+	}
+	if !sawInsertionEdge {
+		t.Fatalf("no edge renders the insertion condition with its parameter context: %+v", edges)
+	}
+}
+
 // The deferral arm's bound is real: a culprit with more deferral
 // observations than the link cap truncates with the omission counted
 // and the deepest deciding site kept (REQ-explain-bounded's deferral

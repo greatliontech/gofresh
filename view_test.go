@@ -5998,6 +5998,255 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 			t.Fatalf("verdict = %+v, want Valid - a bind-position literal capture broke instead of linking", verdict)
 		}
 	})
+	t.Run("bind-then-pass capture defers to the callee's argument insertions", func(t *testing.T) {
+		// p := &holder{rows: rows}; sink(p) hands the callee a write
+		// path into rows' backing through the bind link; sink's
+		// p.rows[0] = c.Next inserts a method value the audit refuses —
+		// the callee's argument-storage insertions must join the
+		// carrier's population over the dependency edge, not vanish
+		// behind a return-position-only proof (a no-return callee
+		// resolves vacuously).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc sink(p *holder) {\n\tc := &counter{}\n\tp.rows[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tp := &holder{rows: rows}\n\tsink(p)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a bind-then-pass callee's argument insertion was invisible", verdict)
+		}
+	})
+	t.Run("no-address tracked argument defers to the callee's argument insertions", func(t *testing.T) {
+		// sink2(s) passes the slice header itself - same backing, no &
+		// anywhere; sink2's q[0] = c.Next is the same unaudited
+		// insertion through argument storage.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc sink2(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc gen(s []handler) []handler {\n\tsink2(s)\n\treturn s\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - a no-address tracked argument's callee insertion was invisible", verdict)
+		}
+	})
+	t.Run("elided address-of in pointer-element composite literal breaks embedded reach", func(t *testing.T) {
+		// sink([]*holder{{rows: rows}}) - Go elides the & on the inner
+		// literal (no UnaryExpr), but the slice element is *holder and
+		// the callee writes ps[0].rows[0]; the argument-literal walk
+		// must see the elided spelling.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc sink(ps []*holder) {\n\tc := &counter{}\n\tps[0].rows[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tsink([]*holder{{rows: rows}})\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry registers function values outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade naming reg.Registry - the elided address-of hid the literal's embedded reach", verdict)
+		}
+	})
+	t.Run("non-inserting callee keeps the tracked argument admissible", func(t *testing.T) {
+		// probe(rows) reads len(q) only - a callee with no argument
+		// insertions must not poison the store; the admission leg pins
+		// that the new edge is precise, never a blanket break.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nvar total int\n\nfunc probe(q []handler) {\n\ttotal += len(q)\n}\n\nfunc gen(rows []handler) []handler {\n\tprobe(rows)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a non-inserting callee poisoned its tracked argument", verdict)
+		}
+	})
+	t.Run("plain-named-function insertion through argument storage stays admissible", func(t *testing.T) {
+		// fill(q) writes q[0] = double - an insertion the audit admits
+		// (a plain named function carries no environment); the edge must
+		// carry the insertion into the population, where it composes.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc fill(q []handler) {\n\tq[0] = double\n}\n\nfunc gen(rows []handler) []handler {\n\tfill(rows)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - an admissible plain-named insertion refused the store", verdict)
+		}
+	})
+	t.Run("init-flow carrier argument refuses on the writable escape", func(t *testing.T) {
+		// var A = ...; var Registry = gen2(A) - gen2 inserts a method
+		// value into A's backing at init. An observer of A refuses
+		// TODAY on the writable-escape arm (A handed to a call is
+		// mutation-equivalent), which outranks the env-audit culprit;
+		// this anchor pins that init-flow carrier arguments never need
+		// the callee-insertion mechanism to refuse.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen2(q []handler) []handler {\n\tc := &counter{}\n\tq[0] = c.Next\n\treturn q\n}\n\nvar A = []handler{double}\n\nvar Registry = gen2(A)\n\nfunc CountA() int { return len(A) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.CountA() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "CountA"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.A escapes writable") {
+			t.Fatalf("verdict = %+v, want the writable-escape refusal covering init-flow carrier arguments", verdict)
+		}
+	})
+	t.Run("rebound parameter insertion keeps the poison", func(t *testing.T) {
+		// sink rebinds h before storing it: the stored value is no
+		// longer the caller's judged argument, so the bare-parameter
+		// skip must not fire (H1 of the chunk-83 review).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc sink(q []handler, h handler) {\n\tc := &counter{}\n\th = c.Next\n\tq[0] = h\n}\n\nfunc gen(rows []handler) []handler {\n\tsink(rows, double)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a rebound parameter's insertion was skipped as the caller's value", verdict)
+		}
+	})
+	t.Run("environment-carrying argument to a deferring call keeps the poison", func(t *testing.T) {
+		// gen passes c.Next as sink's second argument; sink stores it
+		// into the first. The caller's obligation is discharged by
+		// judging EVERY argument of a deferring call at the call site
+		// (H2 of the chunk-83 review) - a method value refuses.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc sink(q []handler, h handler) {\n\tq[0] = h\n}\n\nfunc gen(rows []handler) []handler {\n\tc := &counter{}\n\tsink(rows, c.Next)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - an environment-carrying argument slipped past the deferring call", verdict)
+		}
+	})
+	t.Run("call-rooted tracked argument keeps the poison", func(t *testing.T) {
+		// sink(id(s)) hands the callee s's backing through a call
+		// result: the per-parameter fact cannot attribute the value's
+		// provenance, so the tracked names break fail-closed - the
+		// demonstrated fault licensing the call-rooted break.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc id(s []handler) []handler { return s }\n\nfunc sink(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc gen(s []handler) []handler {\n\tsink(id(s))\n\treturn s\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a call-rooted tracked argument was invisible", verdict)
+		}
+	})
+	t.Run("reach-free derived arguments stay admissible", func(t *testing.T) {
+		// append onto a fresh base, an audited clone, and a literal of
+		// copied function values each hand the callee fresh backing
+		// whose elements copy - no write path into rows exists, and
+		// the classification gates on the value's own type, never the
+		// chain root's alone (M3 of the chunk-83 review).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\nimport \"slices\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nvar total int\n\nfunc probe(q []handler) {\n\ttotal += len(q)\n}\n\nfunc genAppend(rows []handler) []handler {\n\tprobe(append([]handler{}, rows...))\n\treturn rows\n}\n\nfunc genClone(rows []handler) []handler {\n\tprobe(slices.Clone(rows))\n\treturn rows\n}\n\nfunc genLit(rows []handler) []handler {\n\tprobe([]handler{rows[0]})\n\treturn rows\n}\n\nvar A = genAppend([]handler{double})\n\nvar B = genClone([]handler{double})\n\nvar C = genLit([]handler{double})\n\nfunc Count() int { return len(A) + len(B) + len(C) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/user", Symbol: "F"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a reach-free derived argument was broken on its chain root", verdict)
+		}
+	})
+	t.Run("relayed parameter chains through the callee's insertion fact", func(t *testing.T) {
+		// relay hands its own parameter onward: relay's insertion fact
+		// chains through sink2's, and sink2's poison reaches gen over
+		// two conditional edges.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc sink2(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc relay(q []handler) {\n\tsink2(q)\n}\n\nfunc gen(s []handler) []handler {\n\trelay(s)\n\treturn s\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - the relayed insertion chain was invisible", verdict)
+		}
+	})
+	t.Run("variadic trailing arguments key the final parameter", func(t *testing.T) {
+		// vsink's variadic parameter receives rows through the
+		// ellipsis; its insertion poisons, keyed at the final declared
+		// index whatever the call-site arity.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc vsink(tag int, qs ...[]handler) {\n\tc := &counter{}\n\tqs[1][0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tvsink(1, []handler{double}, rows)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - the variadic insertion was invisible", verdict)
+		}
+	})
+	t.Run("local-rooted deferral edge survives the judgment memo", func(t *testing.T) {
+		// loc is a LOCAL handed to the inserting callee: the deferral
+		// edge must fold whether or not the local's freedom was
+		// memoized during use resolution (round-2 H1 - the memo
+		// short-circuit dropped local-rooted edges).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc b(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc gen() []handler {\n\tloc := []handler{double}\n\tb(loc)\n\treturn loc\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a local-rooted deferral edge was dropped by the memo", verdict)
+		}
+	})
+	t.Run("param-sourced local carries the deferral to the return", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc b(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tloc := rows\n\tb(loc)\n\treturn loc\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a param-sourced local dropped the deferral", verdict)
+		}
+	})
+	t.Run("held copy carries the deferral to its origin", func(t *testing.T) {
+		// x copies the header struct, but x.rows shares rows' backing:
+		// the callee's insertion through the copy lands in the origin
+		// (round-2 H2 - the use maps crossed alias pairs only).
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc mut(x holder) {\n\tc := &counter{}\n\tx.rows[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\thh := holder{rows: rows}\n\tx := hh\n\tmut(x)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a held copy hid the insertion from its origin", verdict)
+		}
+	})
+	t.Run("held copy carries the poison to its origin", func(t *testing.T) {
+		// The same shape through the poison route: an unjudgeable
+		// argument beside the copy poisons the origin's storage too.
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype holder struct{ rows []handler }\n\nfunc put(x holder, h handler) {\n\tx.rows[0] = h\n}\n\nfunc gen(rows []handler) []handler {\n\thh := holder{rows: rows}\n\tx := hh\n\tc := &counter{}\n\tput(x, c.Next)\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Count() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Count"})
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "outside the environment-free audit") {
+			t.Fatalf("verdict = %+v, want the environment-audit downgrade - a held copy hid the poison from its origin", verdict)
+		}
+	})
 	t.Run("element read of a judged map derives", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -9667,10 +9916,10 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
 	const quiet = "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n"
 	dir := writeModuleTree(t, map[string]string{
-		"go.mod":           "module example.com/view\n\ngo 1.26\n",
-		"wire/wire.go":     "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
-		"app/app.go":       "package app\n\nimport \"example.com/view/wire\"\n\nfunc F() bool { return wire.Armed() }\n",
-		"app/app_test.go":  quiet,
+		"go.mod":          "module example.com/view\n\ngo 1.26\n",
+		"wire/wire.go":    "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
+		"app/app.go":      "package app\n\nimport \"example.com/view/wire\"\n\nfunc F() bool { return wire.Armed() }\n",
+		"app/app_test.go": quiet,
 	})
 	subject := Subject{Package: "example.com/view/app", Symbol: "F"}
 	engine, err := New(WithDir(dir), WithPackageProcessExecution())

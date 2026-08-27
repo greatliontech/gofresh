@@ -181,8 +181,8 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@34" {
-		t.Fatalf("DynamicStateStrategy = %q, want the audited atomic transparency in every carrier walk", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@35" {
+		t.Fatalf("DynamicStateStrategy = %q, want the per-parameter argument-storage insertion facts", DynamicStateStrategy)
 	}
 }
 

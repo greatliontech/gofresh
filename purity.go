@@ -3481,9 +3481,9 @@ var auditedValuePlane = map[string]bool{
 // recursively. Naked returns and every unrecognized signature-carrying
 // shape refuse the proof - absence keeps the poison
 // (REQ-closure-shared-dynamic-state).
-func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]map[string]bool) {
+func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool, map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil, nil
 	}
 	ownPath := p.Types.Path()
 	carries := func(t types.Type) bool {
@@ -3517,6 +3517,14 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 	deps := map[string]map[string]bool{}
 	retDefer := map[string]map[string]bool{}
 	retPoison := map[string]map[string]bool{}
+	// insFree marks fnName\x00idx parameters whose argument-storage
+	// insertions all judge environment-free (possibly conditionally,
+	// via insDeps edges); absence is poison, fail-closed
+	// (REQ-closure-shared-dynamic-state's callees-join-their-populations
+	// clause).
+	insFree := map[string]bool{}
+	insDeps := map[string]map[string]bool{}
+	callerInsDeps := map[string]map[string]bool{}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
@@ -3525,12 +3533,31 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			}
 			fnKey := fd.Name.Name
 			params := map[types.Object]bool{}
+			// paramIndex keys each named parameter to its zero-based
+			// declared index — the persisted insertion-fact key's third
+			// segment; unnamed and blank parameters are unreferencable,
+			// so their storage receives nothing and the index is
+			// insertion-free by construction.
+			paramIndex := map[types.Object]int{}
+			paramCount := 0
 			if fd.Type.Params != nil {
 				for _, field := range fd.Type.Params.List {
+					if len(field.Names) == 0 {
+						insFree[fnKey+"\x00"+strconv.Itoa(paramCount)] = true
+						paramCount++
+						continue
+					}
 					for _, name := range field.Names {
-						if obj := p.TypesInfo.Defs[name]; obj != nil {
+						// A blank parameter is unreferencable whatever
+						// go/types records for it - insertion-free by
+						// construction like an unnamed one.
+						if obj := p.TypesInfo.Defs[name]; obj != nil && name.Name != "_" {
 							params[obj] = true
+							paramIndex[obj] = paramCount
+						} else {
+							insFree[fnKey+"\x00"+strconv.Itoa(paramCount)] = true
 						}
+						paramCount++
 					}
 				}
 			}
@@ -3548,7 +3575,21 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			// each alias component before judgment, because a store
 			// through any alias is a store into the same storage.
 			writeSources := map[types.Object][]ast.Expr{}
+			// insertionWrites holds values stored by DEEP writes into a
+			// root's reachable storage: unattributable to a slot for the
+			// return plane (the root breaks there, fail-closed), but for
+			// a parameter component these are exactly the
+			// argument-storage insertions the per-parameter fact judges
+			// (REQ-closure-shared-dynamic-state).
+			insertionWrites := map[types.Object][]ast.Expr{}
 			localBroken := map[types.Object]bool{}
+			// captureBroken records the fail-closed break causes alone —
+			// captures, escapes, unattributable callees — separately from
+			// the parameter-store rule: a parameter component broken only
+			// by judged stores still gets a per-parameter insertion fact,
+			// while a capture-broken component's insertions are
+			// unknowable, poison.
+			captureBroken := map[types.Object]bool{}
 			// aliasPairs links bindings whose bound value shares its
 			// backing header: the two names are one storage, so breaks,
 			// the store union, and the parameter refusal all cross the
@@ -3585,6 +3626,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						if obj != nil {
 							if _, ok := trackedVar(obj); ok || params[obj] {
 								localBroken[obj] = true
+								captureBroken[obj] = true
 							}
 						}
 					}
@@ -3765,6 +3807,19 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				source ast.Expr
 			}
 			var pendingStores []pendingStore
+			// pendingInsertionUses records a plain named callee handed a
+			// tracked chain-rooted argument: the callee holds a write
+			// path into the argument's storage, and the storage's later
+			// judgment defers to the callee's per-parameter insertion
+			// fact over a conditional edge (calleeKey\x00index), resolved
+			// at composition to a least fixed point
+			// (REQ-closure-shared-dynamic-state).
+			type insertionUse struct {
+				root        types.Object
+				calleeParam string
+				args        []ast.Expr
+			}
+			var pendingInsertionUses []insertionUse
 			bindLocal := func(target ast.Expr, source ast.Expr, broken bool) {
 				ident, ok := unparen(target).(*ast.Ident)
 				if !ok {
@@ -3992,27 +4047,196 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							if reaches {
 								stmtCallDeps[fn.Pkg().Path()+"\x00"+fn.Name()] = true
 							}
-							// An argument-position literal capture hands
-							// the callee a pointer into storage embedding
-							// tracked reach - a write path the dependency
-							// edge's population sweep never sees, so the
-							// literal's embedded tracked names break,
-							// fail-closed. The literal exemption is sound
-							// only where the bind link or the
-							// returned-literal audit carries the reach;
-							// audited value-plane callees are proven
-							// non-mutating and keep it.
-							for _, arg := range n.Args {
-								ast.Inspect(arg, func(inner ast.Node) bool {
-									u, ok := inner.(*ast.UnaryExpr)
-									if !ok || u.Op != token.AND {
-										return true
-									}
-									if _, ok := chainRoot(u.X).(*ast.CompositeLit); ok {
-										breakTargets(u.X)
+							// Every argument is classified by the write
+							// path its value hands the callee
+							// (REQ-closure-shared-dynamic-state's
+							// callees-join-their-populations clause). A
+							// tracked chain-rooted argument whose value
+							// hands out mutable reach defers to the
+							// callee's per-parameter insertion fact — the
+							// precise edge. A composite literal — plain,
+							// addressed, or Go's elided address-of in
+							// pointer-element literals (no UnaryExpr
+							// exists to see) — breaks its embedded
+							// reach-bearing tracked names fail-closed: the
+							// literal's fresh storage maps caller names
+							// onto callee storage in a shape the
+							// per-parameter fact cannot attribute. A
+							// call-rooted or otherwise unattributable
+							// argument value breaks every reach-bearing
+							// tracked name it reaches, the discipline the
+							// capture arm already applies. Audited
+							// value-plane callees are proven non-mutating
+							// and classify nothing.
+							sig, _ := fn.Type().(*types.Signature)
+							var breakReachIn func(e ast.Expr)
+							breakReachIn = func(e ast.Expr) {
+								ast.Inspect(e, func(inner ast.Node) bool {
+									if ident, ok := inner.(*ast.Ident); ok {
+										obj := p.TypesInfo.Uses[ident]
+										if obj == nil {
+											obj = p.TypesInfo.Defs[ident]
+										}
+										if obj != nil {
+											if _, ok := trackedVar(obj); ok || params[obj] {
+												if typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
+													localBroken[obj] = true
+													captureBroken[obj] = true
+												}
+											}
+										}
 									}
 									return true
 								})
+							}
+							var classifyLit func(lit *ast.CompositeLit)
+							classifyLit = func(lit *ast.CompositeLit) {
+								for _, elt := range lit.Elts {
+									value := elt
+									if kv, ok := elt.(*ast.KeyValueExpr); ok {
+										value = kv.Value
+									}
+									value = unparen(value)
+									// An element whose value hands no mutable
+									// reach copies into the literal's fresh
+									// storage - no write path back.
+									if t := p.TypesInfo.TypeOf(value); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+										continue
+									}
+									switch v := value.(type) {
+									case *ast.CompositeLit:
+										classifyLit(v)
+									case *ast.UnaryExpr:
+										if v.Op == token.AND {
+											if inner, ok := unparen(v.X).(*ast.CompositeLit); ok {
+												classifyLit(inner)
+												continue
+											}
+										}
+										breakReachIn(value)
+									case *ast.BasicLit, *ast.FuncLit:
+									default:
+										breakReachIn(value)
+									}
+								}
+							}
+							elemReach := func(t types.Type) bool {
+								if t == nil {
+									return true
+								}
+								switch u := types.Unalias(t).Underlying().(type) {
+								case *types.Slice:
+									return typeHandsOutMutableReach(u.Elem(), make(map[types.Type]bool))
+								case *types.Array:
+									return typeHandsOutMutableReach(u.Elem(), make(map[types.Type]bool))
+								case *types.Map:
+									return typeHandsOutMutableReach(u.Key(), make(map[types.Type]bool)) || typeHandsOutMutableReach(u.Elem(), make(map[types.Type]bool))
+								}
+								return true
+							}
+							var classifyArg func(e ast.Expr, calleeParam string, callArgs []ast.Expr)
+							classifyArg = func(e ast.Expr, calleeParam string, callArgs []ast.Expr) {
+								e = unparen(e)
+								// The classification gates on the VALUE's own
+								// type, never the chain root's alone: a value
+								// handing no mutable reach copies, and no
+								// write path into tracked backing rides it
+								// whatever storage its expression read from.
+								if t := p.TypesInfo.TypeOf(e); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
+									return
+								}
+								switch v := e.(type) {
+								case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.StarExpr, *ast.SliceExpr:
+									if ident, ok := chainRoot(e).(*ast.Ident); ok {
+										obj := p.TypesInfo.Uses[ident]
+										if obj == nil {
+											obj = p.TypesInfo.Defs[ident]
+										}
+										if obj != nil {
+											_, tracked := trackedVar(obj)
+											if (tracked || params[obj]) && typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
+												pendingInsertionUses = append(pendingInsertionUses, insertionUse{root: obj, calleeParam: calleeParam, args: callArgs})
+											}
+										}
+										return
+									}
+									breakReachIn(e)
+								case *ast.CompositeLit:
+									classifyLit(v)
+								case *ast.UnaryExpr:
+									if v.Op == token.AND {
+										if lit, ok := unparen(v.X).(*ast.CompositeLit); ok {
+											classifyLit(lit)
+											return
+										}
+										// A &chain capture is the capture
+										// arm's own case, already broken
+										// there.
+										return
+									}
+									breakReachIn(e)
+								case *ast.BasicLit, *ast.FuncLit:
+								case *ast.CallExpr:
+									// Fresh-and-copying derivations hand the
+									// callee backing the caller's tracked
+									// names never share: builtin make/new,
+									// append whose operands classify clean,
+									// conversions of clean operands, and an
+									// audited value-plane result whose
+									// container elements copy. Everything
+									// else is unattributable provenance -
+									// the demonstrated sink(id(s)) fault -
+									// and breaks fail-closed.
+									if fnIdent, ok := unparen(v.Fun).(*ast.Ident); ok {
+										if _, builtin := p.TypesInfo.Uses[fnIdent].(*types.Builtin); builtin {
+											switch fnIdent.Name {
+											case "make", "new":
+												return
+											case "append":
+												for ai, a := range v.Args {
+													// The spread hands only the
+													// operand's ELEMENTS - copied
+													// into the append target - so
+													// a no-reach element type
+													// classifies nothing.
+													if ai == len(v.Args)-1 && v.Ellipsis.IsValid() {
+														if t := p.TypesInfo.TypeOf(a); t != nil {
+															if sl, ok := types.Unalias(t).Underlying().(*types.Slice); ok && !typeHandsOutMutableReach(sl.Elem(), make(map[types.Type]bool)) {
+																continue
+															}
+														}
+													}
+													classifyArg(a, calleeParam, callArgs)
+												}
+												return
+											}
+											breakReachIn(e)
+											return
+										}
+									}
+									if tv, ok := p.TypesInfo.Types[v.Fun]; ok && tv.IsType() && len(v.Args) == 1 {
+										classifyArg(v.Args[0], calleeParam, callArgs)
+										return
+									}
+									if inner := plainNamedCalleeFn(p, v); inner != nil && auditedValuePlane[inner.Pkg().Path()+"\x00"+inner.Name()] {
+										if !elemReach(p.TypesInfo.TypeOf(e)) {
+											// The fresh container's elements
+											// copy - no path back into the
+											// operands' backing.
+											return
+										}
+									}
+									breakReachIn(e)
+								default:
+									breakReachIn(e)
+								}
+							}
+							for j, arg := range n.Args {
+								idx := j
+								if sig != nil && sig.Variadic() && sig.Params().Len() > 0 && idx >= sig.Params().Len()-1 {
+									idx = sig.Params().Len() - 1
+								}
+								classifyArg(arg, fn.Pkg().Path()+"\x00"+fn.Name()+"\x00"+strconv.Itoa(idx), n.Args)
 							}
 						}
 						return true
@@ -4162,7 +4386,30 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			}
 			for _, ps := range pendingStores {
 				if deepWrite(ps.target, freshObj[ps.robj]) {
-					breakTargets(ps.root)
+					// The return plane breaks fail-closed (the slot
+					// discipline cannot attribute the write), but the
+					// stored value still lands in the root's reachable
+					// storage: recorded for the insertion plane, where a
+					// parameter component judges it instead of
+					// inheriting the break. Only breakTargets-class
+					// causes poison insertions, so localBroken is set
+					// directly here, never captureBroken.
+					ast.Inspect(ps.root, func(n ast.Node) bool {
+						if ident, ok := n.(*ast.Ident); ok {
+							obj := p.TypesInfo.Uses[ident]
+							if obj == nil {
+								obj = p.TypesInfo.Defs[ident]
+							}
+							if obj != nil {
+								if _, ok := trackedVar(obj); ok || params[obj] {
+									localBroken[obj] = true
+								}
+							}
+						}
+						return true
+					})
+					insertionWrites[ps.robj] = append(insertionWrites[ps.robj], ps.source)
+					linkBacking(ps.robj, ps.source)
 					continue
 				}
 				writeSources[ps.robj] = append(writeSources[ps.robj], ps.source)
@@ -4180,6 +4427,10 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 					for _, pair := range pairs {
 						if localBroken[pair[0]] != localBroken[pair[1]] {
 							localBroken[pair[0]], localBroken[pair[1]] = true, true
+							changed = true
+						}
+						if captureBroken[pair[0]] != captureBroken[pair[1]] {
+							captureBroken[pair[0]], captureBroken[pair[1]] = true, true
 							changed = true
 						}
 					}
@@ -4211,6 +4462,18 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				root := aliasFind(obj)
 				sharedWrites[root] = append(sharedWrites[root], stores...)
 			}
+			sharedInsertionWrites := map[types.Object][]ast.Expr{}
+			for obj, stores := range insertionWrites {
+				root := aliasFind(obj)
+				sharedInsertionWrites[root] = append(sharedInsertionWrites[root], stores...)
+			}
+			// resolvedUses and usePoison are filled by the use-resolution
+			// pass once the value judgment exists: a deferring call's
+			// every argument judges at the call site (the caller's
+			// obligation), an unjudgeable argument poisoning the handed
+			// storage instead of deferring.
+			resolvedUses := map[types.Object]map[string]bool{}
+			usePoison := map[types.Object]bool{}
 			// A store into a parameter's storage breaks outright - the
 			// caller's storage mutates under the caller's judgment - and
 			// the storage is reached through any alias of the parameter,
@@ -4255,13 +4518,48 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 			}
 			fnDeps := map[string]bool{}
+			// Load-bearing superset: stmtCallDeps records every plain
+			// named callee whose call carries signature results or
+			// touches tracked storage, gated on the same carries()
+			// predicate as free's CallExpr recording - so a dep free()
+			// would record while running under a redirected channel
+			// (the insertion-facts loop) is already seeded here, and a
+			// memoized local skipping free(src) on the return walk
+			// loses nothing. Narrowing the reaches gate without
+			// widening this seed would silently break that cover.
 			for callee := range stmtCallDeps {
 				fnDeps[callee] = true
 			}
+			// insCallDeps carries this proof's insertion conditions — a
+			// callee parameter handed tracked storage — on their own
+			// channel: the population-join walk follows fnDeps as
+			// function keys, and an insertion condition is a parameter
+			// key resolved against the insertion fixed point instead.
+			insCallDeps := map[string]bool{}
+			// useFold is where a consumed insertion edge lands: the
+			// return plane's insCallDeps normally, the parameter fact's
+			// own collected set while the insertion loop judges - so a
+			// persisted ParamInsertionDeps carries conditions reached
+			// through locals too, never only direct ones.
+			useFold := &insCallDeps
 			var free func(expr ast.Expr) bool
 			localFree := map[types.Object]int{} // 0 unknown, 1 proving, 2 free, 3 refused
 			var judgeLocal func(obj types.Object) bool
 			judgeLocal = func(obj types.Object) bool {
+				// Poison and edge folding run BEFORE the memo: a local
+				// judged while the use-resolution was still recording
+				// caches its freedom with no edges attached, and a
+				// memo-shortcut past the fold would drop every
+				// local-rooted deferral condition. The fold runs even
+				// when the binding then refuses - an extra condition on
+				// a refusing path is over-conservative, never unsound.
+				if usePoison[aliasFind(obj)] {
+					localFree[obj] = 3
+					return false
+				}
+				for use := range resolvedUses[aliasFind(obj)] {
+					(*useFold)[use] = true
+				}
 				switch localFree[obj] {
 				case 2:
 					return true
@@ -4341,8 +4639,19 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 						if params[obj] {
 							// The caller judged the entry value; a broken
 							// parameter (reassigned, address-captured)
-							// no longer holds it.
-							return !localBroken[obj]
+							// no longer holds it. A callee handed the
+							// parameter's storage joins over its
+							// insertion edges.
+							if localBroken[obj] {
+								return false
+							}
+							if usePoison[aliasFind(obj)] {
+								return false
+							}
+							for use := range resolvedUses[aliasFind(obj)] {
+								(*useFold)[use] = true
+							}
+							return true
 						}
 						if obj.Parent() != nil && obj.Pkg() != nil && obj.Parent() != obj.Pkg().Scope() && !obj.IsField() {
 							return judgeLocal(obj)
@@ -4458,6 +4767,172 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				}
 				return false
 			}
+			// Use resolution: each recorded call deferral resolves once
+			// - every argument of the deferring call judges under the
+			// audit's value judgment (the caller's obligation,
+			// discharged here); a call with an unjudgeable argument
+			// poisons the storage it was handed instead of deferring
+			// (an environment-carrying value could land there through
+			// the callee's insertions).
+			// The pass iterates to a fixpoint on the poison set: a use
+			// judged before a sibling's poison landed may have read a
+			// clean cache, so each new poison clears the local caches
+			// and re-runs; the final recording pass then re-judges every
+			// surviving use under the converged poison state, so no edge
+			// rests on a stale freedom claim.
+			resolveUses := func(record bool) bool {
+				changed := false
+				for _, use := range pendingInsertionUses {
+					root := aliasFind(use.root)
+					if usePoison[root] {
+						continue
+					}
+					allFree := true
+					for _, a := range use.args {
+						if !free(a) {
+							allFree = false
+							break
+						}
+					}
+					if !allFree {
+						usePoison[root] = true
+						changed = true
+						continue
+					}
+					if record {
+						if resolvedUses[root] == nil {
+							resolvedUses[root] = map[string]bool{}
+						}
+						resolvedUses[root][use.calleeParam] = true
+					}
+				}
+				return changed
+			}
+			// Poison and recorded edges cross shared backing AND held
+			// copies exactly as the breaks do: a struct copy's interior
+			// reaches its origin's backing, so a callee handed the copy
+			// holds a write path into the origin (the chunk-83 round-2
+			// review's H2) - fail-closed, both directions.
+			propagateUses := func() bool {
+				changed := false
+				for _, pairs := range [][][2]types.Object{aliasPairs, heldPairs} {
+					for _, pair := range pairs {
+						a, b := aliasFind(pair[0]), aliasFind(pair[1])
+						if a == b {
+							continue
+						}
+						if usePoison[a] != usePoison[b] {
+							usePoison[a], usePoison[b] = true, true
+							changed = true
+						}
+						for use := range resolvedUses[a] {
+							if !resolvedUses[b][use] {
+								if resolvedUses[b] == nil {
+									resolvedUses[b] = map[string]bool{}
+								}
+								resolvedUses[b][use] = true
+								changed = true
+							}
+						}
+						for use := range resolvedUses[b] {
+							if !resolvedUses[a][use] {
+								if resolvedUses[a] == nil {
+									resolvedUses[a] = map[string]bool{}
+								}
+								resolvedUses[a][use] = true
+								changed = true
+							}
+						}
+					}
+				}
+				return changed
+			}
+			// Discovery rounds judge against scratch dep targets: an edge
+			// collected for a use later poisoned must not linger on the
+			// return proof (over-conservative but noisy); only the final
+			// recording pass writes the real channels.
+			scratchDeps := map[string]bool{}
+			savedDeps, savedFold := fnDeps, useFold
+			fnDeps, useFold = scratchDeps, &scratchDeps
+			for {
+				changed := resolveUses(false)
+				if propagateUses() {
+					changed = true
+				}
+				if !changed {
+					break
+				}
+				for k := range localFree {
+					delete(localFree, k)
+				}
+			}
+			fnDeps, useFold = savedDeps, savedFold
+			for k := range localFree {
+				delete(localFree, k)
+			}
+			resolveUses(true)
+			for propagateUses() {
+			}
+			for k := range localFree {
+				delete(localFree, k)
+			}
+			// Per-parameter argument-storage insertion facts
+			// (REQ-closure-shared-dynamic-state's
+			// callees-join-their-populations clause): a parameter's
+			// component judges by what the body stores into it. A
+			// capture-broken component's insertions are unknowable —
+			// poison, absent. A stored bare unrebroken parameter is the
+			// caller's obligation, discharged by the recursive argument
+			// judgment at each call site, so it contributes nothing here.
+			// Every other stored value judges by the audit's own value
+			// judgment, its dependency edges collected onto this
+			// parameter's fact rather than the enclosing return proof;
+			// a parameter handed onward chains through the callee's own
+			// insertion fact. Runs before the explain wrap: insertion
+			// refusals surface through composition, not as return-shape
+			// refusal links.
+			for obj, idx := range paramIndex {
+				key := fnKey + "\x00" + strconv.Itoa(idx)
+				root := aliasFind(obj)
+				// captureBroken propagates across both link kinds before
+				// any judgment reads it, so the component's poison shows
+				// on the parameter itself; a poisoned deferral (an
+				// unjudgeable call argument) poisons identically.
+				if captureBroken[obj] || usePoison[root] {
+					continue
+				}
+				collected := map[string]bool{}
+				saved, savedFold := fnDeps, useFold
+				fnDeps, useFold = collected, &collected
+				okIns := true
+				for _, stored := range append(append([]ast.Expr{}, sharedWrites[root]...), sharedInsertionWrites[root]...) {
+					if ident, isIdent := unparen(stored).(*ast.Ident); isIdent {
+						if sobj := p.TypesInfo.Uses[ident]; sobj != nil && params[sobj] &&
+							!localBroken[sobj] && !captureBroken[sobj] {
+							// A stored bare parameter neither rebound nor
+							// broken is the caller's obligation - judged
+							// at each deferring call site by the
+							// use-resolution pass.
+							continue
+						}
+					}
+					if !free(stored) {
+						okIns = false
+						break
+					}
+				}
+				fnDeps, useFold = saved, savedFold
+				if !okIns {
+					continue
+				}
+				for use := range resolvedUses[root] {
+					collected[use] = true
+				}
+				insFree[key] = true
+				if len(collected) > 0 {
+					insDeps[key] = collected
+				}
+			}
 			if h := explainHooks.Load(); h != nil && h.refusal != nil {
 				inner := free
 				free = func(e ast.Expr) bool {
@@ -4473,6 +4948,8 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 							switch {
 							case obj != nil && localBroken[obj]:
 								clause = "write or capture broke the binding"
+							case obj != nil && usePoison[aliasFind(obj)]:
+								clause = "an unjudgeable argument to a deferring call poisoned the storage"
 							case obj != nil && len(sharedWrites[aliasFind(obj)]) > 0:
 								clause = "a stored value refused"
 							default:
@@ -4527,10 +5004,13 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			if len(fnDeps) > 0 {
 				deps[fnKey] = fnDeps
 			}
+			if len(insCallDeps) > 0 {
+				callerInsDeps[fnKey] = insCallDeps
+			}
 			recordReturnFieldRegistrants(p, fnKey, fd.Body, retDefer, retPoison)
 		}
 	}
-	return proven, deps, retDefer, retPoison
+	return proven, deps, retDefer, retPoison, insFree, insDeps, callerInsDeps
 }
 
 // recordReturnFieldRegistrants derives a proven constructor's contribution

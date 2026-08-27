@@ -2077,3 +2077,25 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// A malformed insertion claim marks its fact instead of resolving: a
+// two-segment ParamInsertionFree key (a function key misfiled as a
+// parameter key) must not enter the declared set, where the cross-kind
+// union would let it discharge a return-proof edge it never proved
+// (the chunk-83 review's M2).
+func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
+	misfiled := dynamicStateFact{
+		ParamInsertionFree: []string{"example.com/dep\x00Make"},
+	}
+	marked := 0
+	e := resolveEnvAudit(map[string][]dynamicStateFact{"example.com/dep": {misfiled}}, func(dynamicStateFact) { marked++ })
+	if marked == 0 {
+		t.Fatal("misfiled insertion key did not mark the fact malformed")
+	}
+	if e.insDeclared["example.com/dep\x00Make"] || e.insResolved["example.com/dep\x00Make"] {
+		t.Fatal("misfiled insertion key entered the declared set")
+	}
+	if e.depResolved("example.com/dep\x00Make") {
+		t.Fatal("misfiled key discharges a return-proof dependency")
+	}
+}

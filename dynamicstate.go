@@ -240,10 +240,35 @@ type dynamicStateFact struct {
 	// environment-free values given environment-free arguments.
 	ReturnEnvFree []string `json:"returnEnvFree,omitempty"`
 	// ReturnEnvDeps holds conditional edges of those proofs: function
-	// key and callee function key joined by \x01 - the proof resolves
+	// key and dependency key joined by \x01 - the proof resolves
 	// only when every edge target resolves, cycles and absence failing
-	// closed.
+	// closed. A dependency key is a callee function key (package path,
+	// function name NUL-joined - a return-proof condition) or a callee
+	// parameter key (package path, function name, zero-based parameter
+	// index NUL-joined - an argument-storage insertion condition on the
+	// callee handed a tracked binding).
 	ReturnEnvDeps []string `json:"returnEnvDeps,omitempty"`
+	// ParamInsertionFree holds the parameter keys (package path,
+	// function name, zero-based parameter index NUL-joined) whose
+	// argument-storage insertions the declaring package proves
+	// environment-free - what the function stores into storage
+	// reachable from that parameter all judges under the registration
+	// audit. Absence is poison, fail-closed: a callee handed a tracked
+	// binding whose parameter is not proven here refuses the caller's
+	// proof.
+	ParamInsertionFree []string `json:"paramInsertionFree,omitempty"`
+	// ReturnEnvInsertionDeps holds a return proof's insertion
+	// conditions on their own channel - function key and callee
+	// parameter key joined by \x01 - so ReturnEnvDeps stays a pure
+	// function-key list for its other consumers (the population-join
+	// walk follows it as function keys). Resolved with the insertion
+	// fixed point; cycles and absence fail closed.
+	ReturnEnvInsertionDeps []string `json:"returnEnvInsertionDeps,omitempty"`
+	// ParamInsertionDeps holds conditional edges of those proofs:
+	// parameter key and dependency key joined by \x01, the dependency
+	// key a callee function key or a callee parameter key exactly as
+	// ReturnEnvDeps' - resolved with them in one least fixed point.
+	ParamInsertionDeps []string `json:"paramInsertionDeps,omitempty"`
 	// PureMethods and ExternalMethods map "Recv.Method" to the declaration
 	// key of a method declaration carrying the respective directive, so a
 	// method promoted into a scanned type honors its directive without the
@@ -427,12 +452,15 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		}
 		sort.Strings(fact.ParamRetentionFree)
 		sort.Strings(fact.ParamRetentionFreeDeps)
-		envFree, envDeps, retFieldDefer, retFieldPoison := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
+		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
 		for fnName := range envFree {
 			fnKey := p.Types.Path() + "\x00" + fnName
 			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
 			for callee := range envDeps[fnName] {
 				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, fnKey+"\x01"+callee)
+			}
+			for dep := range callerInsDeps[fnName] {
+				fact.ReturnEnvInsertionDeps = append(fact.ReturnEnvInsertionDeps, fnKey+"\x01"+dep)
 			}
 			for entry := range retFieldDefer[fnName] {
 				fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, fnKey+"\x01"+entry)
@@ -447,8 +475,18 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		}
 		sort.Strings(fact.ReturnEnvFree)
 		sort.Strings(fact.ReturnEnvDeps)
+		sort.Strings(fact.ReturnEnvInsertionDeps)
 		sort.Strings(fact.ReturnFieldParamDefer)
 		sort.Strings(fact.ReturnFieldParamPoison)
+		for paramKey := range insFree {
+			ownKey := p.Types.Path() + "\x00" + paramKey
+			fact.ParamInsertionFree = append(fact.ParamInsertionFree, ownKey)
+			for dep := range insDeps[paramKey] {
+				fact.ParamInsertionDeps = append(fact.ParamInsertionDeps, ownKey+"\x01"+dep)
+			}
+		}
+		sort.Strings(fact.ParamInsertionFree)
+		sort.Strings(fact.ParamInsertionDeps)
 	}
 	sort.Strings(fact.ParamLeakFree)
 	for varKey, paramKeys := range paramUses {
@@ -2173,11 +2211,153 @@ type deferralResolution struct {
 	notOpaque       map[string]bool
 	envFreeResolved map[string]bool
 	envFreeDeps     map[string]map[string]bool
-	fieldDeferAt    map[string][]string
-	fieldPoisonAt   map[string]bool
-	retDeferAt      map[string][]string
-	retPoisonAt     map[string]bool
-	ctorsOf         map[string][]string
+
+	fieldDeferAt  map[string][]string
+	fieldPoisonAt map[string]bool
+	retDeferAt    map[string][]string
+	retPoisonAt   map[string]bool
+	ctorsOf       map[string][]string
+}
+
+// envAuditResolution is the environment-audit resolution shared by the
+// verdict composition and explain: return-environment-free and
+// argument-insertion claims resolve in ONE least fixed point over their
+// conditional edges - a dependency key with one NUL is a return-proof
+// condition, with two an insertion condition, never satisfiable across
+// kinds - cycles and absent foreign proofs failing closed
+// (REQ-closure-shared-dynamic-state). One implementation serving both
+// consumers is load-bearing: an explain-side reimplementation drifted
+// from the composition's semantics once. retDeps stays a pure
+// function-key channel (the population-join walk follows it as
+// function keys); the insertion conditions ride retInsDeps.
+type envAuditResolution struct {
+	declared    map[string]bool
+	insDeclared map[string]bool
+	resolved    map[string]bool
+	insResolved map[string]bool
+	retDeps     map[string]map[string]bool
+	retInsDeps  map[string]map[string]bool
+	insDeps     map[string]map[string]bool
+}
+
+func (e *envAuditResolution) depResolved(dep string) bool {
+	switch strings.Count(dep, "\x00") {
+	case 1:
+		return e.resolved[dep]
+	case 2:
+		return e.insResolved[dep]
+	}
+	return false
+}
+
+func resolveEnvAudit(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *envAuditResolution {
+	e := &envAuditResolution{
+		declared:    map[string]bool{},
+		insDeclared: map[string]bool{},
+		resolved:    map[string]bool{},
+		insResolved: map[string]bool{},
+		retDeps:     map[string]map[string]bool{},
+		retInsDeps:  map[string]map[string]bool{},
+		insDeps:     map[string]map[string]bool{},
+	}
+	if malformed == nil {
+		malformed = func(dynamicStateFact) {}
+	}
+	addEdge := func(m map[string]map[string]bool, own, dep string) {
+		if m[own] == nil {
+			m[own] = map[string]bool{}
+		}
+		m[own][dep] = true
+	}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, key := range fact.ReturnEnvFree {
+				if strings.Count(key, "\x00") != 1 {
+					malformed(fact)
+					continue
+				}
+				e.declared[key] = true
+			}
+			for _, edge := range fact.ReturnEnvDeps {
+				fnKey, callee, ok := strings.Cut(edge, "\x01")
+				if !ok || strings.Count(fnKey, "\x00") != 1 || strings.Count(callee, "\x00") != 1 {
+					// A dropped condition would resolve a proof with
+					// fewer obligations - malformed edges mark the fact,
+					// fail-closed like every sibling arm.
+					malformed(fact)
+					continue
+				}
+				addEdge(e.retDeps, fnKey, callee)
+			}
+			for _, edge := range fact.ReturnEnvInsertionDeps {
+				fnKey, dep, ok := strings.Cut(edge, "\x01")
+				if !ok || strings.Count(fnKey, "\x00") != 1 || strings.Count(dep, "\x00") < 1 || strings.Count(dep, "\x00") > 2 {
+					malformed(fact)
+					continue
+				}
+				addEdge(e.retInsDeps, fnKey, dep)
+			}
+			for _, key := range fact.ParamInsertionFree {
+				if strings.Count(key, "\x00") != 2 {
+					malformed(fact)
+					continue
+				}
+				e.insDeclared[key] = true
+			}
+			for _, edge := range fact.ParamInsertionDeps {
+				paramKey, dep, ok := strings.Cut(edge, "\x01")
+				if !ok || strings.Count(paramKey, "\x00") != 2 || strings.Count(dep, "\x00") < 1 || strings.Count(dep, "\x00") > 2 {
+					malformed(fact)
+					continue
+				}
+				addEdge(e.insDeps, paramKey, dep)
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for fnKey := range e.declared {
+			if e.resolved[fnKey] {
+				continue
+			}
+			ok := true
+			for dep := range e.retDeps[fnKey] {
+				if !e.depResolved(dep) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				for dep := range e.retInsDeps[fnKey] {
+					if !e.depResolved(dep) {
+						ok = false
+						break
+					}
+				}
+			}
+			if ok {
+				e.resolved[fnKey] = true
+				changed = true
+			}
+		}
+		for paramKey := range e.insDeclared {
+			if e.insResolved[paramKey] {
+				continue
+			}
+			ok := true
+			for dep := range e.insDeps[paramKey] {
+				if !e.depResolved(dep) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				e.insResolved[paramKey] = true
+				changed = true
+			}
+		}
+	}
+	return e
 }
 
 func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *deferralResolution {
@@ -2189,16 +2369,17 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 		notOpaque:          map[string]bool{},
 		envFreeResolved:    map[string]bool{},
 		envFreeDeps:        map[string]map[string]bool{},
-		fieldDeferAt:       map[string][]string{},
-		fieldPoisonAt:      map[string]bool{},
-		retDeferAt:         map[string][]string{},
-		retPoisonAt:        map[string]bool{},
-		ctorsOf:            map[string][]string{},
+
+		fieldDeferAt:  map[string][]string{},
+		fieldPoisonAt: map[string]bool{},
+		retDeferAt:    map[string][]string{},
+		retPoisonAt:   map[string]bool{},
+		ctorsOf:       map[string][]string{},
 	}
 	if malformed == nil {
 		malformed = func(dynamicStateFact) {}
 	}
-	envFreeDeclared := map[string]bool{}
+
 	declaredKeys := map[string]bool{}
 	opaqueDeps := map[string]map[string]bool{}
 	paramDeps := map[string]map[string]bool{}
@@ -2263,19 +2444,8 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				}
 				opaqueDeps[own][dep] = true
 			}
-			for _, key := range fact.ReturnEnvFree {
-				envFreeDeclared[key] = true
-			}
-			for _, edge := range fact.ReturnEnvDeps {
-				fnKey, callee, ok := strings.Cut(edge, "\x01")
-				if !ok {
-					continue
-				}
-				if r.envFreeDeps[fnKey] == nil {
-					r.envFreeDeps[fnKey] = map[string]bool{}
-				}
-				r.envFreeDeps[fnKey][callee] = true
-			}
+			// Environment-audit claims ingest through the shared
+			// resolver below (resolveEnvAudit).
 		}
 	}
 	// The conditional leak-free least fixed point: a cross-package
@@ -2352,28 +2522,13 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 			}
 		}
 	}
-	// The return-environment-free least fixed point: a conditional proof
-	// resolves only when every callee it depends on resolves - cycles and
-	// absent foreign proofs fail closed (REQ-closure-shared-dynamic-state).
-	for changed := true; changed; {
-		changed = false
-		for fnKey := range envFreeDeclared {
-			if r.envFreeResolved[fnKey] {
-				continue
-			}
-			ok := true
-			for callee := range r.envFreeDeps[fnKey] {
-				if !r.envFreeResolved[callee] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				r.envFreeResolved[fnKey] = true
-				changed = true
-			}
-		}
-	}
+	// The environment-audit claims resolve through the shared resolver
+	// - one implementation for composition and explain
+	// (REQ-closure-shared-dynamic-state).
+	ea := resolveEnvAudit(allFacts, malformed)
+	r.envFreeResolved = ea.resolved
+	r.envFreeDeps = ea.retDeps
+
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, entry := range fact.FieldParamDefer {

@@ -385,47 +385,35 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string, 
 // locally. A registration whose every callee resolves contributes no
 // edges: a proven constructor is no refusal (REQ-explain-chain).
 func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynamicStateFact, varKey, varName string) ([]ChainLink, string, string) {
-	declared := map[string]bool{}
-	deps := map[string][]string{}
-	for _, fl := range facts {
-		for _, f := range fl {
-			for _, k := range f.ReturnEnvFree {
-				declared[k] = true
-			}
-			for _, d := range f.ReturnEnvDeps {
-				from, to, ok := strings.Cut(d, "\x01")
-				if ok {
-					deps[from] = append(deps[from], to)
-				}
-			}
+	ea := resolveEnvAudit(facts, nil)
+	// render splits an audit key: a function key yields (pkg, name); a
+	// parameter key yields (pkg, name, index) with the edge label
+	// carrying the parameter context - never a raw NUL
+	// (REQ-explain-chain).
+	renderEdge := func(key string) (string, string) {
+		parts := strings.Split(key, "\x00")
+		switch len(parts) {
+		case 2:
+			return parts[0], parts[1]
+		case 3:
+			return parts[0], parts[1] + " (parameter " + parts[2] + ")"
 		}
+		return key, key
 	}
-	for k := range deps {
-		sort.Strings(deps[k])
-	}
-	resolved := map[string]bool{}
-	for changed := true; changed; {
-		changed = false
-		for k := range declared {
-			if resolved[k] {
-				continue
-			}
-			ok := true
-			for _, dep := range deps[k] {
-				if !resolved[dep] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				resolved[k] = true
-				changed = true
-			}
+	renderSite := func(key string) (string, string) {
+		parts := strings.Split(key, "\x00")
+		if len(parts) >= 2 {
+			return parts[0], parts[1]
 		}
+		return key, key
 	}
-	render := func(fnKey string) (string, string) {
-		pkgPath, name, _ := strings.Cut(fnKey, "\x00")
-		return pkgPath, name
+	sortedKeys := func(m map[string]bool) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys
 	}
 
 	// Registrations naming the culprit land from any package's fact;
@@ -436,7 +424,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
 				key, callee, ok := strings.Cut(use, "\x01")
-				if ok && key == varKey && !resolved[callee] {
+				if ok && key == varKey && !ea.resolved[callee] {
 					callees = append(callees, rootedCallee{fromPath, callee})
 				}
 			}
@@ -451,37 +439,50 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 
 	var edges []ChainLink
 	visited := map[string]bool{}
-	// Depth-first along unresolved callees: the first function with
-	// no local declaration is the local refusal; a cycle of declared
-	// functions refuses at the fixed point with no single refusing
-	// site, leaving an edges-only chain.
-	var walk func(fnKey string) (string, string)
-	walk = func(fnKey string) (string, string) {
-		if visited[fnKey] {
+	// Depth-first along unresolved conditions of BOTH kinds - a return
+	// claim's function and insertion edges, an insertion claim's own
+	// edges - the first key with no local declaration is the local
+	// refusal; a cycle of declared claims refuses at the fixed point
+	// with no single refusing site, leaving an edges-only chain.
+	var walk func(key string) (string, string)
+	walk = func(key string) (string, string) {
+		if visited[key] {
 			return "", ""
 		}
-		visited[fnKey] = true
-		pkgPath, name := render(fnKey)
-		if !declared[fnKey] {
+		visited[key] = true
+		pkgPath, name := renderSite(key)
+		insertionKey := strings.Count(key, "\x00") == 2
+		declaredHere := ea.declared[key]
+		var depSets []map[string]bool
+		if insertionKey {
+			declaredHere = ea.insDeclared[key]
+			depSets = []map[string]bool{ea.insDeps[key]}
+		} else {
+			depSets = []map[string]bool{ea.retDeps[key], ea.retInsDeps[key]}
+		}
+		if !declaredHere {
 			if len(variants[pkgPath]) > 0 {
 				return name, pkgPath
 			}
 			return "", ""
 		}
-		for _, dep := range deps[fnKey] {
-			if resolved[dep] {
-				continue
-			}
-			depPkg, depName := render(dep)
-			edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: name, Callee: depPkg + "." + depName})
-			if fn, p := walk(dep); fn != "" {
-				return fn, p
+		for _, set := range depSets {
+			for _, dep := range sortedKeys(set) {
+				if ea.depResolved(dep) {
+					continue
+				}
+				depPkg, depName := renderEdge(dep)
+				_, symbol := renderEdge(key)
+				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: depPkg + "." + depName})
+				if fn, p := walk(dep); fn != "" {
+					return fn, p
+				}
 			}
 		}
 		return "", ""
 	}
 	for _, rc := range callees {
-		calleePkg, calleeName := render(rc.callee)
+		calleePkg, calleeName := renderEdge(rc.callee)
 		edges = append(edges, ChainLink{Kind: "edge", Package: rc.from, Symbol: varName, Callee: calleePkg + "." + calleeName})
 		if fn, p := walk(rc.callee); fn != "" {
 			return edges, fn, p

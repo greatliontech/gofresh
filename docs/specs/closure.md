@@ -787,7 +787,42 @@ deferred argument marks join the variable key to that parameter key —
 an entry a consumer cannot parse marks every variable its fact declares,
 fail-closed like every malformed-fact arm (a malformed deferral of a
 foreign variable keeps only the declaring fact's marks — the accepted
-residual every malformed-fact arm shares).
+residual every malformed-fact arm shares). On the registration
+audit's plane the callees-join-their-populations rule binds through
+per-parameter argument-storage insertion facts, keyed exactly as the
+parameter facts above: the declaring package proves, per parameter,
+that everything the function stores into storage reachable from that
+parameter — slot and unattributable-depth stores alike — judges under
+the audit's own value judgment, a stored bare parameter neither
+rebound nor capture-broken contributing nothing — the caller's
+obligation, discharged at each deferring call site: every argument of
+the call judges under the audit's value judgment, to a poison
+fixpoint, and a call with an unjudgeable argument poisons the storage
+it was handed instead of deferring — a parameter handed onward to a
+plain named callee chaining through that callee's own insertion fact,
+and a capture-broken component poisoning the parameter outright —
+absence is poison, fail-closed. A caller's plain-named call to an
+unaudited callee (audited value-plane helpers are proven non-mutating
+and classify nothing) classifies every argument by the write path its
+value hands the callee, gating on the value's OWN type — a value
+handing no mutable reach copies, so element reads, copied function
+values, and fresh-and-copying derivations (make and new, append and
+audited value-plane clones whose container elements hand no reach,
+conversions of clean operands) classify nothing: a tracked
+chain-rooted argument whose value hands out mutable reach defers over
+a conditional edge naming the callee's parameter key, resolved with
+the return-environment-free proofs in one least fixed point — the
+insertion conditions ride their own edge list so the return proofs'
+edge list stays a pure function-key channel for its population-join
+consumers, and the resolution has one implementation serving verdict
+composition and explain alike — while a composite-literal argument,
+plain, addressed, or Go's elided address-of in a pointer-element
+literal (which carries no address syntax to see), breaks its embedded
+reach-bearing tracked names fail-closed, and a call-rooted or
+otherwise unattributable argument value breaks every reach-bearing
+tracked name it reaches. Unnamed and blank parameters are
+insertion-free by construction; variadic trailing arguments key the
+final declared parameter's index.
 Every admitted read path is sound only under the environment-free
 registration audit: a function-carrying value a package's direct code
 stores into a carrier — its own or a foreign one, initializer
