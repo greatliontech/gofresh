@@ -1244,7 +1244,15 @@ stale admission, exactly as the version-gated third-party harness audit and
 the version-pinned module-variable audits already behave. A toolchain move
 therefore fails as one named canary (the release-listing enforcement test)
 rather than a scatter of proof flips, and listing a release requires the
-release's standard-library delta walked against the admission bar. The key binds every
+release's standard-library delta walked against the admission bar; an
+unlisted release additionally announces itself once per engine on the
+progress channel's diagnostic face (a Detail-bearing event, delivered
+exactly when the consumer installs a progress callback and a run
+reaches precise analysis) — the running version and the walk needed —
+so a consuming run's log points at the listing instead of reading only
+the scattered ordinary refusals; a consumer that installs no callback
+forgoes the notice, and each engine's announcement is its own, never
+spent by another engine's run. The key binds every
 tier that answers a toolchain-source claim — the purity tier's audited synchronization,
 pooling, and immutable-type admissions and the audited linkname-target floor included —
 through one list, and the audits cover the DEFAULT build selection of each listed release:

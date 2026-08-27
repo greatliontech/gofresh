@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/greatliontech/gofresh/closure"
@@ -425,12 +426,15 @@ type Verdict struct {
 // generations (REQ-fresh-coherent-view); within one generation, sibling views
 // derived from a parent share its recorded facts by contract.
 type Engine struct {
-	assumePure  func(Subject) bool
-	buildFlags  []string
-	buildInputs []string
-	dir         string
-	env         []string
-	envSet      bool
+	// unauditedNotice gates this engine's one unlisted-toolchain
+	// announcement (view.go emitUnauditedToolchainNotice).
+	unauditedNotice sync.Once
+	assumePure      func(Subject) bool
+	buildFlags      []string
+	buildInputs     []string
+	dir             string
+	env             []string
+	envSet          bool
 	// producerEnv, when declared, is the producer processes' environment:
 	// runtime-input revalidation computes environment values from it
 	// instead of env, so checks stay coherent with recorded evidence when

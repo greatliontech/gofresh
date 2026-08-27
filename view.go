@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1432,6 +1433,9 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
 			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
 		})
+		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, closure.AuditedToolchainSource(), func(detail string) {
+			progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
+		})
 	}
 	// The caller's analysis budget bounds only the precise analysis itself: the
 	// Hasher's analysis context carries the budget deadline, so exhaustion
@@ -1504,4 +1508,22 @@ func compatibleObservationProof(proof ObservationProof, assertion string, subjec
 func observationProofEvidence(maximalClosure, assertion string, proof ObservationProof) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason))
 	return hex.EncodeToString(sum[:])[:32]
+}
+
+// emitUnauditedToolchainNotice announces an unlisted toolchain ONCE
+// PER ENGINE on the diagnostic channel: one line of each consumer
+// run's output points at the walk needed - without it, an unlisted
+// release surfaces only as a scatter of ordinary fail-closed
+// refusals, the exact discovery shape the exact-version keying was
+// built to prevent. Per-engine (not per-process) so a long-lived
+// server's every campaign log carries it; the once is the caller's,
+// so a consumer-less engine's emission is never spent into a void it
+// shares with a later consumer.
+func emitUnauditedToolchainNotice(once *sync.Once, audited bool, emit func(detail string)) {
+	if audited {
+		return
+	}
+	once.Do(func() {
+		emit(runtime.Version() + " is not in the audited-release list: standard-library admissions are disabled and refusals keep their ordinary fail-closed classifications until the release's delta is walked and listed (closure/toolchainaudit.go)")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -3062,6 +3063,14 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		case "observe", "runtime":
 			if event.Package != "" {
 				t.Fatalf("%s event names a package: %+v", event.Phase, event)
+			}
+		case "analysis-unavailable", "toolchain-unaudited":
+			// Diagnostic phases carry their payload in Detail; both
+			// fire only under their conditions (an isolated analysis
+			// failure; an unlisted release), so their absence here is
+			// as legal as their presence on the next-rc leg.
+			if event.Detail == "" {
+				t.Fatalf("diagnostic phase %q carries no detail", event.Phase)
 			}
 		default:
 			t.Fatalf("unknown progress phase %q", event.Phase)
@@ -9990,5 +9999,32 @@ func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
 	}
 	if verdict.Status != Valid {
 		t.Fatalf("current-strategy verdict = %+v, want Valid", verdict)
+	}
+}
+
+// The unaudited-toolchain notice fires exactly once per process and
+// names the release plus the walk needed; an audited toolchain emits
+// nothing — without the notice, an unlisted release surfaces only as
+// a scatter of ordinary fail-closed refusals, the discovery shape the
+// exact-version keying was built to prevent.
+func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
+	var got []string
+	var once sync.Once
+	emitUnauditedToolchainNotice(&once, true, func(d string) { got = append(got, d) })
+	if len(got) != 0 {
+		t.Fatalf("audited toolchain emitted a notice: %v", got)
+	}
+	emitUnauditedToolchainNotice(&once, false, func(d string) { got = append(got, d) })
+	emitUnauditedToolchainNotice(&once, false, func(d string) { got = append(got, d) })
+	if len(got) != 1 {
+		t.Fatalf("notice fired %d times, want once per engine", len(got))
+	}
+	var second sync.Once
+	emitUnauditedToolchainNotice(&second, false, func(d string) { got = append(got, d) })
+	if len(got) != 2 {
+		t.Fatalf("a second engine's once did not fire independently: %d", len(got))
+	}
+	if !strings.Contains(got[0], runtime.Version()) || !strings.Contains(got[0], "toolchainaudit.go") {
+		t.Fatalf("notice does not name the release and the walk: %q", got[0])
 	}
 }
