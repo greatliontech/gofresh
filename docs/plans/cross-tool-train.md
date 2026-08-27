@@ -69,20 +69,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 82. stipulator: capture-group key soundness — the key joins
-      tags, env, exclusions, and vouches with control-byte separators,
-      and a legal env VALUE containing a separator byte can collide
-      two differently-configured invocations into one capture group;
-      replace the concatenation with a collision-free encoding
-      (length-prefixed or escaped) without changing any collision-free
-      key's identity semantics. FOLDS (2026-08-26): the same key folds
-      the whole Args list, so a runtime-only knob edit
-      (-test.timeout) discards every stored record and forces a ~31m
-      cold re-execution (stipulator
-      docs/issues/runtime-args-rekey-witness-store.md) — partition
-      build-affecting from runtime-only args, the classification
-      failing closed; one chunk, one key mechanism; the doc deletes at
-      close.
 - [ ] 94. gomutant: line-directive position hazards — pre-existing
       sites read //line-adjusted positions where on-disk identity is
       meant: the _test.go suffix gates (enumerate, surface), the
@@ -198,7 +184,10 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/witness-runner-environment-divergence.md) — a
       witness red only inside the runner dumps the divergence (env
       delta, cwd, limits) so the correlated variable is identified,
-      not guessed; doc deletes at close.
+      not guessed; doc deletes at close. FOLDS stipulator
+      docs/issues/timeout-kill-attribution.md — a
+      harness-timeout kill's red names the exhausted budget, not the
+      unlucky test; same diagnostics class, doc deletes at close.
 - [ ] 115. pew: verdict-surface batch (pew docs/issues:
       gitblob-linked-worktree-object-lookup — pew run fails in linked
       worktrees; ab-worktree-placement-escape — operator escape +
@@ -279,7 +268,11 @@ strategy bump.
       5; ~23) — net/url.Parse, time.Time, path/filepath.Ext.
 - [ ] 124. gofresh: enumeration targets tightened (was SEP 10;
       gofresh docs/issues/enumeration-targets-over-approximated.md,
-      already deleted — history in git).
+      already deleted — history in git). RIDES: gofresh
+      docs/issues/range-over-func-yield-closure.md — admit the
+      range-desugared yield callback as a closing caller and flip the
+      corpus pin deliberately in the same change set; doc deletes at
+      close.
 - [ ] 125. gofresh: precision-band acceptance — re-run the charter
       sweep on the pinned field repro and record the
       observable-subject fraction against the 0.5% baseline (was SEP

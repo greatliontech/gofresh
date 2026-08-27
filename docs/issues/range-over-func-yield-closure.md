@@ -12,5 +12,6 @@ walk was built to admit. The shape corpus pins the current refusal
 any flip is a red canary; admitting the range-desugared callback would
 flip the pin deliberately.
 
-Lands: with the precision/discharge band (cross-tool train chunks
-116-125), ordered by field mass at its triage.
+Lands: cross-tool train chunk 124 (enumeration targets tightened —
+the range-desugared yield is exactly an enumeration-precision case:
+a computed call whose closing caller the walk fails to admit).

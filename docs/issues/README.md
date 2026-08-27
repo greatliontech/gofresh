@@ -15,4 +15,4 @@ when its work lands (git holds history).
 | [attestation-keyed-record](attestation-keyed-record.md) | collapse the per-mode discharge plumbing into one attestation-keyed record | rides train chunk 99 |
 | [reusable-ci-workflow](reusable-ci-workflow.md) | chunk-107 ci.yaml exists in four near-identical copies; the rc-resolution loudness contract must be fixed four times | user decision (org .github repo) |
 | [registration-audit-walk-helper-unification](registration-audit-walk-helper-unification.md) | three break-walks + three literal-element walks in the registration audit; one helper each (chunk-83 review) | with train chunk 106 |
-| [range-over-func-yield-closure](range-over-func-yield-closure.md) | ranging a function iterator reads open-world through its own desugared yield callback; corpus pins the refusal | precision/discharge band (116-125) |
+| [range-over-func-yield-closure](range-over-func-yield-closure.md) | ranging a function iterator reads open-world through its own desugared yield callback; corpus pins the refusal | cross-tool train chunk 124 |
