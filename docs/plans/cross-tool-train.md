@@ -69,20 +69,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 83. gofresh: callee-argument insertions join the population —
-      the chunk-65 review's seventh and eighth clause-family members,
-      both probe-confirmed composed false Valid on HEAD: a
-      bind-then-pass capture (p := &holder{rows: rows}; sink(p);
-      return rows, sink writing p.rows[0]) composes Valid because the
-      plain-named-callee dependency edge proves return-position
-      environment-freedom only — a callee with no returns resolves
-      vacuously and its writes into argument storage are recorded
-      nowhere; and Go's elided address-of in pointer-element composite
-      literals (sink([]*holder{{rows: rows}})) carries no UnaryExpr,
-      so both the capture arm and the argument-literal walk miss it.
-      The edge must carry argument-storage insertions, not only
-      return-position freedom, and literal detection must include the
-      elided spelling; the admission legs stay admissible.
 - [ ] 132. gomutant/gofresh: generic shapes in attributed
       reachability (gomutant docs/issues:
       generic-shape-reachability-gap — bldc 2026-08-27: 567/1164
