@@ -152,9 +152,10 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       refuse at check; prose lists drift silently — the two-places
       redundancy the structural gate collapses). The same sweep
       deletes gofresh's six residual prose pointers (purity.md,
-      closure.md — adoption already full). pew's adoption is decided
-      AT the chunk (pilot scope, recorded as the user's chartering
-      call), never assumed.
+      closure.md — adoption already full). pew ADOPTS (user ruling
+      2026-08-27, timing and method delegated): manifest, corpus
+      compile over pew's specs, and tests-role bindings land as this
+      chunk's pew leg, check green before its change set ships.
 - [ ] 111. cross-tool: tool-resident guidance — design chunk, opens
       with a short design pass (mechanism only; the ruling itself is
       settled): each tool answers "what does this verb do, what does
