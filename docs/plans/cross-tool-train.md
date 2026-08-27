@@ -121,23 +121,16 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band B — standing guards (the neglect-proofing layer)
 
-- [ ] 108. cross-tool: language-shape canary suites per tool — seeded
-      by the gofresh generic-method reproducers; each tool carries a
-      canary corpus of language shapes its frontend must parse and
-      judge, run under the CI matrix's next-rc leg, so a new Go
-      release's shape breakage is a red canary, not a field session.
-      FOLDS gofresh
-      docs/issues/unlisted-toolchain-refusals-lack-naming-diagnostic
-      (the canary leg runs on unlisted toolchains constantly — the
-      refusal must name the release that needs walking); doc deletes
-      at close.
 - [ ] 109. cross-tool: weekly fleet health sweep — scheduled (cron)
       sweep over the machine's tool estate: store freshness (pew
       status), check summaries (stipulator), findings-document size
-      and layer health (gomutant), and binary provenance (installed
+      and layer health (gomutant), binary provenance (installed
       binaries vs repo HEADs — the skew guards refuse loudly at use;
-      the sweep catches drift before use); its report files
-      field-response chunks per the standing doctrine.
+      the sweep catches drift before use), and shape-corpus version
+      lag (each consumer's pinned gofresh vs the corpus's latest —
+      content drift is unrepresentable, version lag is the one drift
+      channel left); its report files field-response chunks per the
+      standing doctrine.
 - [ ] 110. gomutant: findings-document bounds (gomutant docs/issues:
       findings-doc-unbounded-growth — 70 MB after one campaign;
       findings-inspection-cost — inspection without re-judging,
