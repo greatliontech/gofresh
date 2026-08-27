@@ -47,7 +47,9 @@ User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
 — amended 2026-08-27 under the field-response doctrine (bldc campaign
 reports): 132 inserted after 83 (coverage integrity; lands before
 108 so the canary corpus includes the shapes it fixes), 133 inserted
-after 110 (same artifact, the findings document) — then
+after 110 (same artifact, the findings document), 134 inserted after
+133 (chartered 2026-08-27: enforcement pointers become bindings) —
+then
 91, 92, 96, then 129, 130, 131, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then 95 (ecosystem-blocked, re-audited at open), with the
@@ -140,6 +142,19 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band U — UX (MCP-first)
 
+- [ ] 134. cross-tool: enforcement pointers become bindings —
+      complete gomutant's stipulator adoption (manifest compiled,
+      zero bindings authored): author tests-role bindings for every
+      requirement's "enforced by" prose pointer (29 across
+      execution/results/mcp/mutation), stipulator check joins the
+      change-set gate, and the prose lists delete — spec prose states
+      contracts, the binding store owns enforcement (stale pins
+      refuse at check; prose lists drift silently — the two-places
+      redundancy the structural gate collapses). The same sweep
+      deletes gofresh's six residual prose pointers (purity.md,
+      closure.md — adoption already full). pew's adoption is decided
+      AT the chunk (pilot scope, recorded as the user's chartering
+      call), never assumed.
 - [ ] 111. cross-tool: tool-resident guidance — design chunk, opens
       with a short design pass (mechanism only; the ruling itself is
       settled): each tool answers "what does this verb do, what does
