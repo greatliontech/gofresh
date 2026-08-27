@@ -69,17 +69,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 132. gomutant/gofresh: generic shapes in attributed
-      reachability (gomutant docs/issues:
-      generic-shape-reachability-gap — bldc 2026-08-27: 567/1164
-      targets skipped "unsupported analysis shape: T", 14 packages
-      with zero campaign evidence; one generic-shaped symbol in the
-      closure takes its whole package's target set down) — handle
-      type-parameterized symbols in the attributed-reachability
-      closure, and surface skip blast radius package-grouped
-      ("package X: all N targets skipped"), never a scattered count;
-      lands before 108 so the canary corpus carries the fixed shapes;
-      doc deletes at close.
 - [ ] 82. stipulator: capture-group key soundness — the key joins
       tags, env, exclusions, and vouches with control-byte separators,
       and a legal env VALUE containing a separator byte can collide
