@@ -1006,7 +1006,26 @@ dispatches concretely, initializer roots included so a concrete type registered 
 when the subject never names the registering package, the test main rooted for a test
 subject so setup it runs before the subject (state a production subject never sees)
 is in the closure; a narrower root or edge set is taken only when proven to preserve
-the same startup and global-flow coverage. A parameterized subject is open to
+the same startup and global-flow coverage. The runtime-type walk skips any
+type mentioning a type parameter wholesale: such a type denotes no
+runtime type — only fully concrete instantiations exist at runtime, and
+they enter the walk through their own instantiation and interface sites
+— so a type-parameterized shape reaching the walk contributes nothing
+instead of failing the analysis. An analysis failure the walk cannot
+classify (an unsupported shape outside that class) isolates to the
+subject that provoked it: the batch bisects until the failing subject
+degrades alone, carrying the failure as its own unavailable evidence —
+the memoized, hashed refusal reason is ONE fixed string, byte-stable
+across recomputation, and every walk-order-dependent payload (the
+panic value, the visited function) rides the diagnostic channel at
+refusal time — while every batch sibling keeps its result; failure
+classes other than unsupported shapes remain batch-wide. Whether a
+failure is package-scoped is decided by its own probe — the shared
+init and harness roots analyzed alone — never by bisection-half
+coincidence (two independent subject-scoped provocations on opposite
+halves must isolate individually, not darken their sound siblings); a
+package-scoped failure degrades every subject at once with the
+probe's own correctly attributed error. A parameterized subject is open to
 caller-chosen instantiations, and its openness is decided on the
 type-parameter list itself (a signature walk alone misses zero-parameter
 generics), identically at every tier: a constraint that provably bounds

@@ -60,6 +60,10 @@ type Closure struct {
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
 // cache-vs-mutable classification; loaded whole-program SSA is cached per package
 // (the dominant cost, REQ-closure-analysis) so repeated per-benchmark Compute calls amortize it.
+// A Hasher is single-goroutine by contract: nothing on the analysis
+// path spawns goroutines, and every unsynchronized map it carries -
+// progs, progErrs, memo state, and each program's PkgScopeProbe -
+// leans on that invariant.
 type Hasher struct {
 	// dir roots every package load and go invocation; "" = the process
 	// working directory. The analyzed tree is an explicit input.
@@ -89,9 +93,10 @@ type Hasher struct {
 	// them, reset per call.
 	testBinaryKeys map[string]string
 	variantScope   map[string]testvariant.Identity
-	testVariants   map[string]testvariant.Identity // test-variant compartments by requested package
-	fileDigests    map[string]string               // per-file content digests from the closure's own reads, by absolute path
-	progress       func(phase, pkgPath string)     // start-of-step keep-alive events; nil disables
+	testVariants   map[string]testvariant.Identity     // test-variant compartments by requested package
+	fileDigests    map[string]string                   // per-file content digests from the closure's own reads, by absolute path
+	progress       func(phase, pkgPath string)         // start-of-step keep-alive events; nil disables
+	diagnostic     func(phase, pkgPath, detail string) // payload-bearing diagnostics; nil disables
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
@@ -110,6 +115,21 @@ type Hasher struct {
 // semantics.
 func (h *Hasher) UseViewLoad(load *ViewLoad) {
 	h.viewLoad = load
+}
+
+// OnDiagnostic supplies a callback for phases carrying a payload the
+// progress line cannot: the per-subject analysis-unavailable
+// provenance rides it, never a memoized surface. Unlike progress
+// events, diagnostics ARE contract for the operator's field log -
+// each event is a distinct fact, delivered synchronously.
+func (h *Hasher) OnDiagnostic(f func(phase, pkgPath, detail string)) {
+	h.diagnostic = f
+}
+
+func (h *Hasher) emitDiagnostic(phase, pkgPath, detail string) {
+	if h.diagnostic != nil {
+		h.diagnostic(phase, pkgPath, detail)
+	}
 }
 
 // OnProgress supplies a callback invoked synchronously at the start of each

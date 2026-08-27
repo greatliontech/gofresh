@@ -192,6 +192,22 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 				if err := h.ctx.Err(); err != nil {
 					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 				}
+				if reachable[i].unavailable != "" {
+					// The bisection isolated this subject's analysis
+					// failure: it refuses alone, fail-closed, and its
+					// siblings keep their evidence
+					// (REQ-closure-analysis). The visited-function
+					// provenance is walk-order-dependent, so it rides
+					// the progress channel; the memoized, hashed Reason
+					// stays byte-stable across recomputation
+					// (REQ-closure-observability-memo).
+					full := reachable[i].unavailable
+					h.emitDiagnostic("analysis-unavailable", subject.Package, subject.Symbol+": "+full)
+					result := Observability{Observable: false, Reason: unsupportedShapeReason}
+					results[subject] = result
+					sliceProofs[subject.Symbol] = result
+					continue
+				}
 				result, err := h.observabilityFromReachability(base, subject.Package, reachable[i])
 				if err != nil {
 					return nil, err
@@ -961,3 +977,11 @@ func flagBackedReadEffect(g *ssa.Global) externalEffect {
 	}
 	return symbolExternalEffect(externalEffectEnvironment, pkgPath, g.Name(), "references flag-registered state "+g.String()+" (storage flag.Parse writes from the command line, a channel the test log cannot audit)")
 }
+
+// unsupportedShapeReason is the ONE memoized, hashed refusal reason
+// for an isolated analysis failure: with several provocations under a
+// subject's mask, walk order decides which surfaces first, so any
+// payload - the panic value included - would break the memo's
+// byte-equivalence (REQ-closure-observability-memo). The full
+// provenance rides the diagnostic channel at refusal time.
+const unsupportedShapeReason = "attributed reachability unavailable: unsupported analysis shape"

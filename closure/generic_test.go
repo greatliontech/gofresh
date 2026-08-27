@@ -317,3 +317,120 @@ func UseInt() string {
 		t.Fatalf("generic method disposition = %+v, want the forced open-world refusal", proof)
 	}
 }
+
+// A generic calling a generic with its own type parameter materializes a
+// PARAMETERIZED instance (Inner[T], type argument still a type param) in
+// the SSA program. The instantiation rooting must yield those to their
+// concrete counterparts: rooting one walks a body whose MakeInterface
+// boxes a bare type parameter, and the runtime-type walk has no arm for
+// it — the bldc field campaign's "unsupported analysis shape: T",
+// 567/1164 targets dark (REQ-closure-analysis).
+func TestAttributedAnalysisSkipsParameterizedInstances(t *testing.T) {
+	dir := writeGenericFixture(t, `package generic
+
+import "fmt"
+
+func Inner[U any](v U) string {
+	var boxed any = v
+	return fmt.Sprint(boxed)
+}
+
+func Outer[T any](v T) string { return Inner(v) }
+
+func UseInt() string { return Outer[int](1) }
+`)
+	const pkg = "example.com/generic"
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range []string{"Inner", "Outer"} {
+		if _, err := computeTier2Result(h, pkg, symbol); err != nil {
+			t.Fatalf("precise analysis over %s: %v", symbol, err)
+		}
+	}
+	proofs, err := h.ComputeObservabilityBatch([]Subject{
+		{Package: pkg, Symbol: "Inner"},
+		{Package: pkg, Symbol: "UseInt"},
+	})
+	if err != nil {
+		t.Fatalf("observability batch with a nested-generic subject: %v", err)
+	}
+	inner, ok := proofs[Subject{Package: pkg, Symbol: "Inner"}]
+	if !ok || inner.Observable == (inner.Reason != "") {
+		t.Fatalf("no sound disposition for the nested-generic subject: %+v", proofs)
+	}
+	if strings.Contains(inner.Reason, "unsupported analysis shape") {
+		t.Fatalf("the nested-generic subject still refuses on the analysis shape: %+v", inner)
+	}
+	use, ok := proofs[Subject{Package: pkg, Symbol: "UseInt"}]
+	if !ok || use.Observable == (use.Reason != "") || strings.Contains(use.Reason, "unsupported analysis shape") {
+		t.Fatalf("the plain sibling lost its evidence to the generic's batch: %+v", proofs)
+	}
+}
+
+// A type declared inside a generic body mentions the enclosing type
+// parameters only through its underlying: Inner[local]'s type argument
+// looks concrete while local's struct carries T. The shape defeated the
+// guard, the rooting filter, and the loud arm at once (the chunk-132
+// review's H1) and its walk crashed on a nil MethodValue for the
+// embedded interface's method (H2) - both must analyze clean now.
+func TestAttributedAnalysisSkipsLocalTypeInstances(t *testing.T) {
+	dir := writeGenericFixture(t, `package generic
+
+type Iface interface{ M() }
+
+type impl struct{}
+
+func (impl) M() {}
+
+func Inner[U any](v U) any {
+	var boxed any = v
+	return boxed
+}
+
+func Outer[T any](t T, i Iface) any {
+	type local struct {
+		Iface
+		x T
+	}
+	return Inner(local{i, t})
+}
+
+func UseInt() string {
+	if Outer[int](1, impl{}) == nil {
+		return ""
+	}
+	return "ok"
+}
+`)
+	const pkg = "example.com/generic"
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range []string{"Inner", "Outer", "UseInt"} {
+		if _, err := computeTier2Result(h, pkg, symbol); err != nil {
+			t.Fatalf("precise analysis over %s: %v", symbol, err)
+		}
+	}
+	proofs, err := h.ComputeObservabilityBatch([]Subject{
+		{Package: pkg, Symbol: "Inner"},
+		{Package: pkg, Symbol: "UseInt"},
+	})
+	if err != nil {
+		t.Fatalf("observability batch with a local-type instance: %v", err)
+	}
+	for _, symbol := range []string{"Inner", "UseInt"} {
+		proof, ok := proofs[Subject{Package: pkg, Symbol: symbol}]
+		if !ok {
+			t.Fatalf("no disposition for %s: %+v", symbol, proofs)
+		}
+		if proof.Observable == (proof.Reason != "") {
+			t.Fatalf("%s carries an inconsistent disposition: %+v", symbol, proof)
+		}
+		if strings.Contains(proof.Reason, "unsupported analysis shape") {
+			t.Fatalf("%s still refuses on the analysis shape: %+v", symbol, proof)
+		}
+	}
+}

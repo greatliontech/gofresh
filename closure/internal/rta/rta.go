@@ -30,6 +30,9 @@ type attributedRTA struct {
 	prog   *ssa.Program
 
 	reflectValueCall *ssa.Function
+	// current is the function whose body the walk is visiting - the
+	// recover boundary's provenance for unsupported-shape panics.
+	current *ssa.Function
 
 	worklist []*ssa.Function
 	pending  map[*ssa.Function]uint64
@@ -74,6 +77,13 @@ type attributedInterfaceTypeInfo struct {
 }
 
 func (r *attributedRTA) addReachable(f *ssa.Function, masks uint64) {
+	if f == nil {
+		// MethodValue returns nil for interface and parameterized
+		// receivers and LookupMethod can miss: a nil enqueued here
+		// crashes the walk into an unsupported-shape refusal - the
+		// class this chunk removes (the chunk-132 review's H2).
+		return
+	}
 	delta := masks &^ r.result.Reachable[f]
 	if delta == 0 {
 		return
@@ -176,6 +186,7 @@ func (r *attributedRTA) visitInvoke(site ssa.CallInstruction, masks uint64) {
 }
 
 func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
+	r.current = f
 	var space [32]*ssa.Value
 	for _, b := range f.Blocks {
 		for _, instr := range b.Instrs {
@@ -237,9 +248,17 @@ type TypeSeed struct {
 // detection signal is corpus-level "unsupported analysis shape" counts.
 // Analyze runs attributed RTA over the masked roots and seeds.
 func Analyze(ctx context.Context, roots map[*ssa.Function]uint64, seeds *Seeds) (result *Result, err error) {
+	var r *attributedRTA
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result, err = nil, fmt.Errorf("closure: attributed reachability: unsupported analysis shape: %v", recovered)
+			// The visiting-function provenance makes the next field
+			// occurrence self-attributing: the shape's entry path was
+			// undiagnosable from a bare panic value once.
+			site := ""
+			if r != nil && r.current != nil {
+				site = " (visiting " + r.current.String() + ")"
+			}
+			result, err = nil, fmt.Errorf("closure: attributed reachability: unsupported analysis shape: %v%s", recovered, site)
 		}
 	}()
 	if ctx == nil {
@@ -251,12 +270,43 @@ func Analyze(ctx context.Context, roots map[*ssa.Function]uint64, seeds *Seeds) 
 	if len(roots) == 0 {
 		return nil, nil
 	}
+	// Rooting a parameterized body is a caller-contract violation, not
+	// a stray shape: attribution's own arm roots concrete
+	// instantiations and never origins, so an origin root fails loudly
+	// here instead of silently walking a body whose dispatch surface
+	// was never analyzable - the flattering direction the type-param
+	// SHAPE skip below must not extend to.
+	for root := range roots {
+		if root == nil {
+			continue
+		}
+		// An instance carries its origin's TypeParams; what makes a
+		// root parameterized is an EMPTY argument list (an origin) or
+		// an argument still mentioning a type parameter (a
+		// parameterized instance) - a fully concrete instance roots
+		// like any plain function.
+		generic := root.TypeParams().Len() > 0 || (root.Signature != nil && root.Signature.RecvTypeParams() != nil)
+		if !generic {
+			continue
+		}
+		args := root.TypeArgs()
+		parameterized := len(args) == 0
+		for _, arg := range args {
+			if ContainsTypeParam(arg, make(map[types.Type]bool)) {
+				parameterized = true
+				break
+			}
+		}
+		if parameterized {
+			return nil, fmt.Errorf("closure: attributed reachability: parameterized root %s", root.String())
+		}
+	}
 	var prog *ssa.Program
 	for root := range roots {
 		prog = root.Prog
 		break
 	}
-	r := &attributedRTA{
+	r = &attributedRTA{
 		result: &Result{
 			Reachable: make(map[*ssa.Function]uint64),
 			Resolved:  make(map[ssa.CallInstruction]uint64),
@@ -354,10 +404,97 @@ func (r *attributedRTA) implementations(I *types.Interface) []types.Type {
 	return iinfo.implementations
 }
 
+// containsTypeParam reports whether the type mentions a type parameter
+// anywhere in its structure. Such a type denotes no runtime type - only
+// fully concrete instantiations exist at runtime, and they enter the
+// walk through their own MakeInterface and instantiation sites - so the
+// runtime-type walk skips it wholesale instead of panicking in the
+// shape switch (the bldc field campaign's "unsupported analysis
+// shape: T", one generic-shaped symbol darkening whole packages
+// through the batch). The seen map breaks reference cycles.
+func ContainsTypeParam(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.TypeParam, *types.Union:
+		return true
+	case *types.Basic:
+		return false
+	case *types.Pointer:
+		return ContainsTypeParam(t.Elem(), seen)
+	case *types.Slice:
+		return ContainsTypeParam(t.Elem(), seen)
+	case *types.Array:
+		return ContainsTypeParam(t.Elem(), seen)
+	case *types.Chan:
+		return ContainsTypeParam(t.Elem(), seen)
+	case *types.Map:
+		return ContainsTypeParam(t.Key(), seen) || ContainsTypeParam(t.Elem(), seen)
+	case *types.Signature:
+		if t.TypeParams() != nil || t.RecvTypeParams() != nil {
+			return true
+		}
+		return ContainsTypeParam(t.Params(), seen) || ContainsTypeParam(t.Results(), seen)
+	case *types.Tuple:
+		for i, n := 0, t.Len(); i < n; i++ {
+			if ContainsTypeParam(t.At(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	case *types.Struct:
+		for i, n := 0, t.NumFields(); i < n; i++ {
+			if ContainsTypeParam(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	case *types.Named:
+		if t.TypeParams() != nil && t.TypeArgs() == nil {
+			// A generic origin type is never a runtime type.
+			return true
+		}
+		if args := t.TypeArgs(); args != nil {
+			for i, n := 0, args.Len(); i < n; i++ {
+				if ContainsTypeParam(args.At(i), seen) {
+					return true
+				}
+			}
+		}
+		// A type declared INSIDE a generic body mentions the enclosing
+		// type parameters only through its underlying - x/tools' own
+		// free-variable walker ends its Named case the same way
+		// ("recurse for types local to parameterized functions"), and
+		// missing it let Inner[local] defeat the guard, the rooting
+		// filter, and the loud arm at once (the chunk-132 review's
+		// H1). The seen map breaks reference cycles.
+		return ContainsTypeParam(t.Underlying(), seen)
+	case *types.Interface:
+		for i, n := 0, t.NumEmbeddeds(); i < n; i++ {
+			if ContainsTypeParam(t.EmbeddedType(i), seen) {
+				return true
+			}
+		}
+		for i, n := 0, t.NumExplicitMethods(); i < n; i++ {
+			if ContainsTypeParam(t.ExplicitMethod(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	}
+	// Unknown kinds keep the shape switch's fail-closed panic path.
+	return false
+}
+
 // addRuntimeType is adapted from needMethods in go/ssa/builder.go, matching
 // upstream RTA's exported-method and recursive runtime-type behavior.
 func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	T = types.Unalias(T)
+	if ContainsTypeParam(T, make(map[types.Type]bool)) {
+		return
+	}
 	previous, _ := r.runtimeTypes.At(T).(uint64)
 	delta := masks &^ previous
 	if delta == 0 {

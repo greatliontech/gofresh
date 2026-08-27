@@ -117,6 +117,15 @@ func (h *Hasher) ComputeRootedFunctions(subjects []Subject) (map[Subject]RootedF
 			}
 			for i, subject := range batch {
 				reach := reachable[i]
+				if reach.unavailable != "" {
+					// An isolated analysis failure degrades this subject
+					// alone, in the surface's own fail-closed vocabulary
+					// - the incomplete RootedFunctions an absent root and
+					// an open world already produce
+					// (REQ-closure-analysis).
+					results[subject] = RootedFunctions{}
+					continue
+				}
 				if reach.openWorld {
 					results[subject] = RootedFunctions{}
 					continue

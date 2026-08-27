@@ -1419,11 +1419,18 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	// The observability memo's scope is the analysis identity outside the
 	// source closure: the proof-strategy version plus the code guards.
 	// The memo key completes with the package test-binary closure hash
-	// inside the Hasher (REQ-closure-observability-memo).
+	// inside the Hasher (REQ-closure-observability-memo). Since the
+	// per-subject isolation landed, SHAPE REFUSALS memoize too - a
+	// change to the analyzer's shape capability (a new admitted shape,
+	// a widened guard) must bump ObservationRTA, or cached refusals
+	// serve under semantics that no longer refuse them.
 	hasher.SetMemoScope(ObservationRTA + "|" + v.facts.guards.Toolchain + "|" + v.facts.guards.BuildConfig)
 	if progress := v.engine.progress; progress != nil {
 		hasher.OnProgress(func(phase, pkgPath string) {
 			progress(Progress{Phase: phase, Package: pkgPath})
+		})
+		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
+			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
 		})
 	}
 	// The caller's analysis budget bounds only the precise analysis itself: the

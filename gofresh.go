@@ -502,6 +502,12 @@ func WithBuildInputs(inputs ...string) Option {
 type Progress struct {
 	Phase   string
 	Package string
+	// Detail carries a diagnostic payload for phases that have one -
+	// the per-subject analysis-unavailable provenance included, whose
+	// walk-order-dependent content must reach the operator without
+	// riding any memoized, hashed surface
+	// (REQ-closure-observability-memo).
+	Detail string
 }
 
 // WithProgress supplies a callback invoked synchronously at the start of each

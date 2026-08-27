@@ -30,6 +30,11 @@ type Program struct {
 	// unavailable evidence for that subject alone.
 	Ambiguous map[string]bool
 	TestMain  *ssa.Function
+	// PkgScopeProbe memoizes the package-scope discriminator's verdict
+	// per harness inclusion: the shared roots are batch-invariant, so
+	// one probe per program (and per harness arm) serves every failing
+	// batch.
+	PkgScopeProbe map[bool]error
 }
 
 func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...string) *packages.Config {

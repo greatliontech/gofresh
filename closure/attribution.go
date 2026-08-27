@@ -13,6 +13,10 @@ import (
 )
 
 type attributedReachability struct {
+	// unavailable carries a per-subject analysis failure the bisection
+	// isolated: the subject's evidence is unavailable (fail-closed at
+	// every consumer) while its batch siblings keep theirs.
+	unavailable      string
 	functions        map[*ssa.Function]bool
 	subjectFunctions map[*ssa.Function]bool
 	startupFunctions map[*ssa.Function]bool
@@ -42,7 +46,120 @@ type attributedReachability struct {
 
 // attributedReachableSets runs package-local RTA once and projects its masks
 // back into the reachable set expected by the existing per-subject analyzer.
+// analyzeAttributedBatch is the swappable batch worker - a var so the
+// isolation behavior is testable without a shape that defeats the
+// analysis (the walk guard removes the known one).
+var analyzeAttributedBatch = attributedReachableSetsOnce
+
+// probePackageScope is the swappable package-scope discriminator: it
+// analyzes the roots every sub-batch SHARES - the package inits, and
+// the harness main only when some subject in the batch actually runs
+// through the harness (the worker roots TestMain under testMasks, so
+// a batch of production subjects never walks it; probing it anyway
+// once classified a harness-borne subject-scoped shape as
+// package-scoped and darkened every sound sibling - the chunk-132
+// review's round-3 M2). A provocation in the shared roots explains
+// every subject's failure directly; a subject-scoped shape can never
+// satisfy the probe. A non-nil result is the package-scoped failure,
+// correctly attributed to every subject. Results memoize per
+// (program, harness inclusion): the shared roots are batch-invariant.
+var probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error {
+	includeHarness := false
+	if prog.TestMain != nil {
+		for _, subject := range subjects {
+			if root := prog.Roots[subject.Symbol]; root != nil && subjectRunsThroughHarness(prog, root) {
+				includeHarness = true
+				break
+			}
+		}
+	}
+	if cached, ok := prog.PkgScopeProbe[includeHarness]; ok {
+		return cached
+	}
+	roots := make(map[*ssa.Function]uint64)
+	for _, p := range prog.Prog.AllPackages() {
+		if isGeneratedTestMainPackage(prog, p) {
+			continue
+		}
+		if init := p.Func("init"); init != nil {
+			roots[init] |= 1
+		}
+	}
+	if includeHarness {
+		roots[prog.TestMain] |= 1
+	}
+	var result error
+	if _, err := rta.Analyze(ctx, roots, nil); err != nil && strings.Contains(err.Error(), "unsupported analysis shape") {
+		result = err
+	}
+	if prog.PkgScopeProbe == nil {
+		prog.PkgScopeProbe = map[bool]error{}
+	}
+	prog.PkgScopeProbe[includeHarness] = result
+	return result
+}
+
+func shapeFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unsupported analysis shape")
+}
+
+// attributedReachableSets computes per-subject attributed reachability.
+// An unsupported-analysis-shape failure isolates: a package-scoped
+// provocation (the shared init/harness roots themselves) degrades
+// every subject at once with the probe's own error; a subject-scoped
+// one bisects until each offender degrades alone, its row carrying its
+// own batch's failure, while every sound sibling keeps its result
+// (REQ-closure-analysis). Other failure classes stay batch-wide.
 func attributedReachableSets(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	res, err := analyzeAttributedBatch(ctx, prog, subjects)
+	if err == nil || ctx.Err() != nil || !shapeFailure(err) {
+		return res, err
+	}
+	if pkgErr := probePackageScope(ctx, prog, subjects); pkgErr != nil {
+		rows := make([]attributedReachability, len(subjects))
+		for i := range rows {
+			rows[i] = attributedReachability{unavailable: pkgErr.Error()}
+		}
+		return rows, nil
+	}
+	return splitAttributed(ctx, prog, subjects, err)
+}
+
+// splitAttributed bisects a shape-failing batch whose provocation is
+// subject-scoped: each half runs the worker once per level (never
+// re-analyzing a half the caller already ran), a failing single
+// subject degrades with its own batch's error, and a non-shape
+// failure anywhere propagates batch-wide.
+func splitAttributed(ctx context.Context, prog *program, subjects []Subject, batchErr error) ([]attributedReachability, error) {
+	if len(subjects) == 1 {
+		return []attributedReachability{{unavailable: batchErr.Error()}}, nil
+	}
+	mid := len(subjects) / 2
+	resolve := func(half []Subject) ([]attributedReachability, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		res, err := analyzeAttributedBatch(ctx, prog, half)
+		if err == nil {
+			return res, nil
+		}
+		if !shapeFailure(err) {
+			return nil, err
+		}
+		return splitAttributed(ctx, prog, half, err)
+	}
+	left, err := resolve(subjects[:mid])
+	if err != nil {
+		return nil, err
+	}
+	right, err := resolve(subjects[mid:])
+	if err != nil {
+		return nil, err
+	}
+	return append(left, right...), nil
+}
+
+func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
 	roots := make(map[*ssa.Function]uint64)
 	allMasks := ^uint64(0)
 	if len(subjects) < 64 {
@@ -73,6 +190,25 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 			}
 			for fn := range allFunctions {
 				if fn != nil && fn != root && fn.Origin() == root {
+					if args := fn.TypeArgs(); len(args) > 0 {
+						parameterized := false
+						for _, arg := range args {
+							if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+								parameterized = true
+								break
+							}
+						}
+						if parameterized {
+							// A parameterized instance (type arguments
+							// still mentioning type parameters, created
+							// inside another origin's body) is not a
+							// concrete dispatch surface: its coverage
+							// arrives through the fully concrete
+							// instances, and rooting it would walk a
+							// parameterized body.
+							continue
+						}
+					}
 					roots[fn] |= mask
 					// The origin's own body scan yields to the rooted
 					// instantiations': each dispatches concretely, so
