@@ -71,15 +71,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 94. gomutant: line-directive position hazards — pre-existing
-      sites read //line-adjusted positions where on-disk identity is
-      meant: the _test.go suffix gates (enumerate, surface), the
-      candidate catalog's source read (catalog.go fileOf +
-      os.ReadFile — measuring ANY target in a //line file fails
-      ENOENT on HEAD) and the survivor position anchors minted from
-      adjusted names (candidate_edit.go). Audit and convert the
-      remaining sites, with directive fixtures (the immune sites
-      landed in chunk 40).
 - [ ] 105. gomutant: structural-shaped probe provenance (gomutant
       docs/issues/structural-shaped-probe-provenance-gap.md) —
       structural shapes' probe content escapes dirty judgment and
