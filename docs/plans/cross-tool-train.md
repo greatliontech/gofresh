@@ -195,7 +195,9 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       staged-campaign-reports-clean-index-as-drift,
       symbol-cutter-duality, planonly-gatherwindow-suite-hang — the
       hang needs a mechanism-showing dump or closes unreproducible at
-      triage) — seven docs delete at close.
+      triage; suite-shared-fixture-bracket-flake, added 2026-08-27 —
+      identify the writer, then isolate mutable-fixture users) —
+      eight docs delete at close.
 - [ ] 114. stipulator: runner-environment inspectability (stipulator
       docs/issues/witness-runner-environment-divergence.md) — a
       witness red only inside the runner dumps the divergence (env
