@@ -141,15 +141,3 @@ canonically
 the subject) recording nothing, and validity likewise needing no comparison — an
 unattested session re-marks the variable in the current derivation and refuses
 on its own.
-
-REQ-vouch-input, REQ-vouch-discharge, REQ-vouch-dependency-boundary,
-REQ-vouch-recorded: enforced by
-`TestVouchDischargesPinnedCulprit`, `TestVouchedFingerprintRecordsDischarge`,
-`TestVouchConfersNothingOnMutableLocalState`,
-`TestObservedEvidenceNeverSuppressesSharedDynamicState`,
-`TestVouchWithdrawalRefusesObservedServe`, and (the attestation-recording arm)
-`TestSingleSubjectAttestationRecordedOnEvidence`.
-
-REQ-purity-observation-separation (shared-dynamic-state arm — completed
-observation evidence never substitutes for the downgrade): enforced by
-`TestObservedEvidenceNeverSuppressesSharedDynamicState`.

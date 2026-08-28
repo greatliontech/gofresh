@@ -72,3 +72,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "24889b8fe0dc19bc98fadd32d3592ceea2082355e4e8a32fedb829b3d6d5f9d4"
 }
+
+bindings {
+  requirement_id: "REQ-vouch-recorded"
+  content_hash: "cfffb26e52d971db3e0db23f78a484e9ced147dee7671469d617ccef9f5ef4aa"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSingleSubjectAttestationRecordedOnEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3dab660e4b27b52552cd61cf2ce94b5b4c67a97ebb6330312a963ac815494b99"
+}

@@ -126,3 +126,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "5148c5af08855c48e9686e7cb9611db5ccf240438a075aff1550e2d2d7579ba8"
 }
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestObservedEvidenceNeverSuppressesSharedDynamicState"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "356d8c3788c824857144c19cb385f254d644fd50ba15207a5406967086082107"
+}

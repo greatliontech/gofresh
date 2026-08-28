@@ -1462,11 +1462,6 @@ without bumping the strategy version
 was already a violation of the recorded-evidence contract; the memo adds no
 new versioning obligation.
 
-REQ-closure-observability-memo: enforced by
-`TestObservabilityMemoServesEquivalentProofsWithoutLoading`,
-`TestObservabilityMemoMissesOnScopeAndSourceChange`, and
-`TestObservabilityMemoKeepsCompletedSlicesOnDeadline`.
-
 **REQ-closure-dynamic-state-memo** (behavior): Per-package shared-dynamic-state
 facts — the dynamic-capable package-level variables a package declares, the
 variable identities its code mutates after initialization
@@ -1501,16 +1496,6 @@ sibling directory under the consumer-controlled store, atomic writes, silent
 recomputation on any miss, corruption, or key mismatch, deletable wholesale
 at any time; changing fact semantics bumps the fact-strategy version.
 
-REQ-closure-dynamic-state-memo: enforced by
-`TestDynamicStateFactsServePinnedPackagesWithoutLoading`,
-`TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives`,
-`TestDynamicStateFactStoreMissesOnScopeAndBucketChange`,
-`TestPinnedBucketsMoveWithImportConeVersions`,
-`TestPinnedBucketsExcludeModulesReachingMutableLocalSource`,
-`TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass`,
-`TestIntermediateRecompilationsScanFromTheirOwnCompilation`, and
-`TestDynamicStateLocalFactsDeriveFreshEachScan`.
-
 **REQ-closure-effect-scan-memo** (behavior): The fold of a version-pinned
 package's per-file effect scans MAY be served from a persistent memo,
 because that fold is a pure syntactic function of its key's complete input
@@ -1534,11 +1519,6 @@ silent recomputation on any miss, corruption, or key mismatch, deletable
 wholesale at any time; changing scan semantics — classification tables
 included — bumps the scan-strategy version.
 
-REQ-closure-effect-scan-memo: enforced by
-`TestEffectScanMemoServesPinnedPackagesWithoutReads`,
-`TestEffectScanMemoMissesOnScopeAndFileSetChange`, and
-`TestEffectScanMemoFoldMatchesInlineFold`.
-
 **REQ-closure-testing-scan-memo** (behavior): A package's typed
 testing-effect scan MAY be served from a persistent memo, because the scan
 is a pure function of its key's complete input identity: the scan-strategy
@@ -1558,10 +1538,6 @@ directory, atomic writes, silent recomputation on any miss, corruption, or
 key mismatch, deletable wholesale at any time; changing scan semantics —
 the testing classification table included — bumps the scan-strategy
 version.
-
-REQ-closure-testing-scan-memo: enforced by
-`TestTestingScanMemoServesWithoutTypeLoad` and
-`TestTestingScanMemoMissesOnScopeAndSourceChange`.
 
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the
 subject MUST be hashed by its source content, never pinned by module version — such
