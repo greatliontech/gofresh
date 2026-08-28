@@ -1255,9 +1255,33 @@ forgoes the notice, and each engine's announcement is its own, never
 spent by another engine's run. The key binds every
 tier that answers a toolchain-source claim — the purity tier's audited synchronization,
 pooling, and immutable-type admissions and the audited linkname-target floor included —
-through one list, and the audits cover the DEFAULT build selection of each listed release:
-a build selection whose tags swap audited bodies (a vendor fork's hook tag) is outside the
-key until its own delta is walked. The audited set carries the testing harness's
+through one list, and the key is TWO-AXIS — release and build selection —
+over the analysis' EFFECTIVE selection, never the explicit flags alone: the
+go command merges GOFLAGS into every invocation, GOEXPERIMENT swaps
+build-tagged standard-library source, and GOOS/GOARCH select per-platform
+files, so the selection derives from the explicit build flags joined with
+the environment's resolved GOFLAGS, canonicalized to a sorted tag-set key
+(the declared `-tags` union the tags the sanitizer flags select, their
+explicit boolean value forms classified or refused — an unclassifiable flag
+set never admits), with the experiment axis fail-closed: an environment
+GOEXPERIMENT differing from the binary's baked one is a selection no walk
+covered and never admits. GOOS/GOARCH selection needs no axis — the delta
+walks read each audited package's non-test source whole, platform-split
+files included, so a platform selection of an audited package selects
+among walked files, and the memo scopes carry the platform through the
+build configuration. An
+admission answers true only when the running release AND the effective
+selection are both listed. Each listing names the selections its walks
+cover — the default, and the race selection, whose walk found that no
+audited package has a non-test file constrained on a tag the -race
+selection sets (audited packages carry other build-constrained files;
+those ride the platform axes and unwalked tag keys, which refuse
+separately), so every audited package's selected non-test source is
+byte-identical under plain -race — and a selection whose tags swap audited
+bodies (a vendor fork's hook tag) is outside the key until its own delta
+is walked: it degrades every stdlib admission to the ordinary fail-closed
+classification, announced on the same diagnostic face as an unlisted
+release, never inheriting the default selection's audit. The audited set carries the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,
 `Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
 `Fail`, and `FailNow`, matched by package and symbol name; the admission is
@@ -1499,7 +1523,12 @@ at any time; changing fact semantics bumps the fact-strategy version.
 **REQ-closure-effect-scan-memo** (behavior): The fold of a version-pinned
 package's per-file effect scans MAY be served from a persistent memo,
 because that fold is a pure syntactic function of its key's complete input
-identity: the scan-strategy version and the toolchain identity, plus the
+identity: the scan-strategy version and the toolchain identity — joined by
+the analysis' selection-audit verdict when the build selection is not the
+audited default, since the scan's audited-set consultations answer per
+selection and an unaudited selection's scans must never serve an audited
+consumer or vice versa (the default-selection scope stays byte-identical to
+the pre-selection era's, so its memos keep serving) — plus the
 module's version pin, the package's import path, and the identity — with
 its Go/cgo partition — of the file set the current listing selects for it.
 No type-environment signature participates, because the per-file scan reads

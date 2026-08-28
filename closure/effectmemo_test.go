@@ -172,7 +172,7 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	var rawEffects int
 	var preferreds []string
 	for _, name := range pkg.GoFiles {
-		scan, err := maximalFileEffects(filepath.Join(pkgDir, name))
+		scan, err := maximalFileEffects(true, filepath.Join(pkgDir, name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +222,7 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	// one that does not must drop the assembly fact, not replay it.
 	var flatNoAsm maximalEffectScan
 	for _, name := range pkg.GoFiles {
-		scan, err := maximalFileEffects(filepath.Join(pkgDir, name))
+		scan, err := maximalFileEffects(true, filepath.Join(pkgDir, name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,35 +262,35 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 		importCandidates: []externalEffect{{kind: externalEffectNetwork, packagePath: "net", reason: "reaches net (network I/O)"}},
 	}
 	key := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go"}, nil)
-	storeEffectScan(effectScanDirName, effectScanScope(), key, scan)
-	if got, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
+	storeEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), key, scan)
+	if got, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
 		t.Fatalf("round trip = %+v ok=%v", got, ok)
 	}
-	if _, ok := loadEffectScan(effectScanDirName, effectScanScope()+"-bumped", key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope()+"-bumped", key); ok {
 		t.Fatal("a bumped scan strategy served a prior generation's scan")
 	}
 	if _, ok := loadEffectScan(effectScanDirName, effectScanStrategy, key); ok {
 		t.Fatal("the bare strategy without the toolchain identity served")
 	}
-	if _, ok := loadEffectScan(testingScanDirName, effectScanScope(), key); ok {
+	if _, ok := loadEffectScan(testingScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), key); ok {
 		t.Fatal("the sibling testing-scan directory served the effect-scan entry")
 	}
 	otherFiles := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go", "extra.go"}, nil)
-	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), otherFiles); ok {
+	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), otherFiles); ok {
 		t.Fatal("a changed file set served the prior set's scan")
 	}
 	migrated := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", nil, []string{"eff.go"})
-	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), migrated); ok {
+	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), migrated); ok {
 		t.Fatal("a file migrating between the Go and cgo lists served the prior partition's scan")
 	}
-	path, err := cachefile.Path(effectScanDirName, effectScanScope(), key)
+	path, err := cachefile.Path(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionAudited: true}).effectScanScope(), key); ok {
 		t.Fatal("a corrupt entry served")
 	}
 }

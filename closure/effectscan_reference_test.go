@@ -25,7 +25,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	if strings.Contains(string(content), "//go:wasmimport") {
 		return "reaches go:wasmimport", nil
 	}
-	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(string(content)) {
+	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(true, string(content)) {
 		return "reaches go:linkname (opaque linkage)", nil
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.ImportsOnly)
@@ -60,10 +60,10 @@ func referenceMaximalFileReason(filename string) (string, error) {
 		if alias == "." && packageHasClassifiedExternalAPI(pkgPath) && potentialExternal == "" {
 			potentialExternal = pkgPath
 		}
-		if potentialExternal == "" && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
+		if potentialExternal == "" && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
 			potentialExternal = pkgPath
 		}
-		if (alias == "." || alias == "_") && (packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) && unauditedReason == "" {
+		if (alias == "." || alias == "_") && (packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 			unauditedReason = "reaches " + pkgPath + " (potential external dependence)"
 		}
 	}
@@ -86,7 +86,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 						reason = classified
 						return false
 					}
-					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedPoolSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) && unauditedReason == "" {
+					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !classBPureStandard(true, pkgPath, sel.Sel.Name) && !auditedSyncSymbol(true, pkgPath, sel.Sel.Name) && !auditedPoolSymbol(true, pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
@@ -166,7 +166,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		effect.unrefinable = true
 		scan.add(effect)
 	}
-	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(string(content)) {
+	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(true, string(content)) {
 		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)
@@ -196,7 +196,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		if alias == "." || alias == "_" {
 			if isAlwaysExternalPackage(pkgPath) {
 				scan.add(trueExternalEffect(pkgPath))
-			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath) {
+			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
 			}
 		}
@@ -218,7 +218,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			// carve-out
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
-		} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedPoolSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+		} else if pkgPath != "testing" && !classBPureStandard(true, pkgPath, sel.Sel.Name) && !auditedSyncSymbol(true, pkgPath, sel.Sel.Name) && !auditedPoolSymbol(true, pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true

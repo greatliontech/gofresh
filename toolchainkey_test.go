@@ -3,17 +3,8 @@ package gofresh
 import (
 	"go/token"
 	"go/types"
-	"runtime"
 	"testing"
-	_ "unsafe" // for go:linkname
 )
-
-// The purity tier's audited admissions answer from the same
-// exact-version key as the closure tier's; this poke reaches the one
-// list through its package (the fork's test-linkname idiom).
-//
-//go:linkname closureAuditedToolchainReleases github.com/greatliontech/gofresh/closure.auditedToolchainReleases
-var closureAuditedToolchainReleases map[string]bool
 
 // TestUnauditedToolchainDropsPurityAdmissions pins the purity tier's
 // half of the exact-version keying: on an unlisted release the audited
@@ -32,22 +23,22 @@ func TestUnauditedToolchainDropsPurityAdmissions(t *testing.T) {
 	get := method("Pool", "Get")
 	reflectPkg := types.NewPackage("reflect", "reflect")
 	reflType := types.NewNamed(types.NewTypeName(token.NoPos, reflectPkg, "Type", nil), types.NewInterfaceType(nil, nil), nil)
-	if !auditedSynchronization(lock) || !auditedPooling(get) || !auditedImmutableType(reflType) {
-		t.Fatal("fakes not admitted on the audited toolchain; the poke below would be vacuous")
+	// The vacuity guard: under an audited verdict the fakes admit, so
+	// the refusals below witness the verdict parameter, not a
+	// malformed fake. The verdict is the two-axis
+	// AuditedToolchainSelection value the scan entries compute once —
+	// an unlisted release or unaudited selection reaches every
+	// admission as false.
+	if !auditedSynchronization(true, lock) || !auditedPooling(true, get) || !auditedImmutableType(true, reflType) {
+		t.Fatal("fakes not admitted under an audited verdict; the refusal arms below would be vacuous")
 	}
-	v := runtime.Version()
-	if !closureAuditedToolchainReleases[v] {
-		t.Fatalf("running toolchain %q unlisted; the closure-tier canary owns this failure", v)
-	}
-	closureAuditedToolchainReleases[v] = false
-	defer func() { closureAuditedToolchainReleases[v] = true }()
-	if auditedSynchronization(lock) {
+	if auditedSynchronization(false, lock) {
 		t.Error("auditedSynchronization admits sync.Mutex.Lock on an unaudited toolchain")
 	}
-	if auditedPooling(get) {
+	if auditedPooling(false, get) {
 		t.Error("auditedPooling admits sync.Pool.Get on an unaudited toolchain")
 	}
-	if auditedImmutableType(reflType) {
+	if auditedImmutableType(false, reflType) {
 		t.Error("auditedImmutableType admits reflect.Type on an unaudited toolchain")
 	}
 }

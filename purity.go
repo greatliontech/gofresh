@@ -117,7 +117,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 	if err != nil {
 		return nil, nil, err
 	}
-	scan, err := scanSubjectsFromLoaded(load.Packages(), state, pkgPaths...)
+	scan, err := scanSubjectsFromLoaded(hasher.SelectionAudited(), load.Packages(), state, pkgPaths...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -186,7 +186,7 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // pass's already-loaded packages, applying the pass's dynamic-state
 // derivation for the shared-dynamic-state downgrade and promoted-method
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
-func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
+func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
 		pure:                     map[Subject]bool{},
 		known:                    map[Subject]bool{},
@@ -291,7 +291,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 					if isExternal {
 						external[subject] = true
 					}
-					if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok && signatureMayReceiveUnknownDynamic(fn.Type().(*types.Signature)) {
+					if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok && signatureMayReceiveUnknownDynamic(audited, fn.Type().(*types.Signature)) {
 						openWorld[subject] = true
 					}
 				}
@@ -317,7 +317,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 					}
 					subject := Subject{Package: pkgPath, Symbol: name + "." + method.Name()}
 					record(subject, objectDeclarationKey(p, method))
-					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(sig) {
+					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(audited, sig) {
 						openWorld[subject] = true
 					}
 					pureKey, externalKey := state.methodDirectives(method)
@@ -368,7 +368,7 @@ func scanSubjectsFromLoaded(pkgs []*packages.Package, state *viewDynamicState, p
 	return scan, nil
 }
 
-func signatureMayReceiveUnknownDynamic(sig *types.Signature) bool {
+func signatureMayReceiveUnknownDynamic(audited bool, sig *types.Signature) bool {
 	if sig == nil {
 		return true
 	}
@@ -381,19 +381,19 @@ func signatureMayReceiveUnknownDynamic(sig *types.Signature) bool {
 	// parameterized-subject arm).
 	for _, list := range []*types.TypeParamList{sig.TypeParams(), sig.RecvTypeParams()} {
 		for i := 0; list != nil && i < list.Len(); i++ {
-			if !closure.TypeParamBoundsAwayFromDynamic(list.At(i)) {
+			if !closure.TypeParamBoundsAwayFromDynamic(audited, list.At(i)) {
 				return true
 			}
 		}
 	}
 	// One fresh map per parameter, mirroring the closure tier: no
 	// cross-parameter mark leakage, cycle-safe within each evaluation.
-	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(recv.Type(), make(map[types.Type]bool)) {
+	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(audited, recv.Type(), make(map[types.Type]bool)) {
 		return true
 	}
 	params := sig.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryUnknownDynamic(params.At(i).Type(), make(map[types.Type]bool)) {
+		if typeMayCarryUnknownDynamic(audited, params.At(i).Type(), make(map[types.Type]bool)) {
 			return true
 		}
 	}
@@ -420,7 +420,7 @@ func isHarnessSignature(sig *types.Signature) bool {
 	}
 }
 
-func typeMayCarryUnknownDynamic(t types.Type, seen map[types.Type]bool) bool {
+func typeMayCarryUnknownDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -431,35 +431,35 @@ func typeMayCarryUnknownDynamic(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Interface, *types.Signature:
 		return true
 	case *types.TypeParam:
-		return !closure.TypeParamBoundsAwayFromDynamic(t)
+		return !closure.TypeParamBoundsAwayFromDynamic(audited, t)
 	case *types.Named:
 		// The audited atomic transparency (closure.AuditedAtomicPointerElem
 		// carries the audit): sync/atomic.Pointer[T] is walked as *T.
 		// The uninstantiated generic inside sync/atomic itself falls
 		// through to the fail-closed type-parameter judgment.
-		if elem, ok := closure.AuditedAtomicPointerElem(t); ok {
-			return typeMayCarryUnknownDynamic(elem, seen)
+		if elem, ok := closure.AuditedAtomicPointerElem(audited, t); ok {
+			return typeMayCarryUnknownDynamic(audited, elem, seen)
 		}
-		return typeMayCarryUnknownDynamic(t.Underlying(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Underlying(), seen)
 	case *types.Pointer:
-		return typeMayCarryUnknownDynamic(t.Elem(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
 	case *types.Slice:
-		return typeMayCarryUnknownDynamic(t.Elem(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
 	case *types.Array:
-		return typeMayCarryUnknownDynamic(t.Elem(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
 	case *types.Map:
-		return typeMayCarryUnknownDynamic(t.Key(), seen) || typeMayCarryUnknownDynamic(t.Elem(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Key(), seen) || typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
 	case *types.Chan:
-		return typeMayCarryUnknownDynamic(t.Elem(), seen)
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
-			if typeMayCarryUnknownDynamic(t.Field(i).Type(), seen) {
+			if typeMayCarryUnknownDynamic(audited, t.Field(i).Type(), seen) {
 				return true
 			}
 		}
 	case *types.Tuple:
 		for i := 0; i < t.Len(); i++ {
-			if typeMayCarryUnknownDynamic(t.At(i).Type(), seen) {
+			if typeMayCarryUnknownDynamic(audited, t.At(i).Type(), seen) {
 				return true
 			}
 		}
@@ -565,8 +565,8 @@ func dynamicVarKey(variable *types.Var) string {
 // them. init functions are exempt — startup flow is deterministic,
 // source-determined state — but function bodies nested in package-level
 // declarations are program code and are walked.
-func recordDynamicGlobalMutations(p *packages.Package, mutated map[string]bool) {
-	recordDynamicGlobalUses(p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil, false, nil)
+func recordDynamicGlobalMutations(audited bool, p *packages.Package, mutated map[string]bool) {
+	recordDynamicGlobalUses(audited, p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil, false, nil)
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -680,7 +680,7 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 // collects the pool variable keys whose admitted Get/Put calls the
 // attestation discharged, for the subject-evidence audit record
 // (REQ-vouch-recorded).
-func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks map[string]map[string]bool, attributed *[]attributedUse, singleSubject bool, poolDischarged map[string]bool) {
+func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped, initOnly map[string]bool, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks map[string]map[string]bool, attributed *[]attributedUse, singleSubject bool, poolDischarged map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -689,7 +689,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 			return nil, false
 		}
-		if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+		if !typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 			return nil, false
 		}
 		return variable, true
@@ -989,7 +989,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 				}
 				return false
 			}
-			if !composite && !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
+			if !composite && !typeHandsOutDynamicAlias(audited, obj.Type(), make(map[types.Type]bool)) {
 				// A composite binding skips the type gate: the stored
 				// carrier keys are themselves the proof the base now
 				// reaches carrier state, whatever the base's own type
@@ -1126,7 +1126,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 											gateType = slice.Elem()
 										}
 									}
-									if !typeHandsOutDynamicAlias(gateType, make(map[types.Type]bool)) {
+									if !typeHandsOutDynamicAlias(audited, gateType, make(map[types.Type]bool)) {
 										continue
 									}
 									for key := range rhsKeys(arg) {
@@ -1181,7 +1181,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 		if !ok {
 			return nil, nil
 		}
-		if !typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+		if !typeHandsOutDynamicAlias(audited, variable.Type(), make(map[types.Type]bool)) {
 			// A non-alias-handing carrier (a func-typed hook, a by-value
 			// struct) cannot be rebound through the argument - the ident
 			// arm already classifies it without an escape, and no
@@ -1292,7 +1292,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 	// attestation, whose admission is broader.
 	provenCalls := map[*ast.SelectorExpr]bool{}
 	if !singleSubject {
-		_, provenCalls = provenSharedPools(p)
+		_, provenCalls = provenSharedPools(audited, p)
 	}
 	// scanExemptCalls covers the call arguments of the init-exempt
 	// regions - init bodies, init-only helpers, initializer expressions -
@@ -1312,7 +1312,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 			if ident, ok := inner.(*ast.Ident); ok {
 				if obj, ok := resolve(ident); ok {
 					if variable, ok := dynamicPackageVar(obj); ok {
-						if typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+						if typeHandsOutDynamicAlias(audited, variable.Type(), make(map[types.Type]bool)) {
 							explainMark(p, "escape", dynamicVarKey(variable), ident.Pos())
 							escaped[dynamicVarKey(variable)] = true
 						}
@@ -1365,7 +1365,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
 						deferred := false
 						var poolVar *types.Var
-						if fn, fnOK := selection.Obj().(*types.Func); fnOK && (singleSubject || provenCalls[sel]) && auditedPooling(fn) {
+						if fn, fnOK := selection.Obj().(*types.Func); fnOK && (singleSubject || provenCalls[sel]) && auditedPooling(audited, fn) {
 							_, poolVar = poolCarrierIdent(sel.X)
 						}
 						if poolVar != nil {
@@ -1387,7 +1387,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								markExemptEscapes(index.Index)
 							}
 							deferred = true
-						} else if fn, fnOK := selection.Obj().(*types.Func); fnOK && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+						} else if fn, fnOK := selection.Obj().(*types.Func); fnOK && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(audited, selection.Type()) {
 							if ident, idOK := sel.X.(*ast.Ident); idOK {
 								if obj, rOK := resolve(ident); rOK {
 									if variable, vOK := dynamicPackageVar(obj); vOK {
@@ -1535,7 +1535,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 								retPtr = &returned
 							}
 						}
-						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(p, roots, n.Body, wants, retPtr, methodWants, fieldWants, elemWants)) {
+						if sound && (len(roots) == 0 || boundValueLeakFreeJudged(audited, p, roots, n.Body, wants, retPtr, methodWants, fieldWants, elemWants)) {
 							if len(wants) == 0 && len(methodWants) == 0 && len(fieldWants) == 0 && len(elemWants) == 0 && !returned {
 								markRead(n.X)
 							} else {
@@ -1693,7 +1693,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 												continue
 											}
 											variable, ok := dynamicPackageVar(aobj)
-											if !ok || !typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+											if !ok || !typeHandsOutDynamicAlias(audited, variable.Type(), make(map[types.Type]bool)) {
 												continue
 											}
 											idx := i
@@ -1747,14 +1747,14 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 						// bind, a New-field access outside init flow —
 						// the fail-closed judgment stands
 						// (REQ-closure-shared-dynamic-state).
-						if (singleSubject || provenCalls[n]) && calledSelectors[n] && auditedPooling(fn) {
+						if (singleSubject || provenCalls[n]) && calledSelectors[n] && auditedPooling(audited, fn) {
 							if ident, variable := poolCarrierIdent(n.X); variable != nil {
 								dischargePool(variable)
 								readContext[ident] = true
 								return true
 							}
 						}
-						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(audited, selection.Type()) {
 							if ident, ok := n.X.(*ast.Ident); ok {
 								if obj, ok := resolve(ident); ok {
 									if variable, ok := dynamicPackageVar(obj); ok {
@@ -1787,7 +1787,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					return true
 				}
 				if obj, ok := resolve(n); ok {
-					if variable, ok := dynamicPackageVar(obj); ok && typeHandsOutDynamicAlias(variable.Type(), make(map[types.Type]bool)) {
+					if variable, ok := dynamicPackageVar(obj); ok && typeHandsOutDynamicAlias(audited, variable.Type(), make(map[types.Type]bool)) {
 						explainMark(p, "escape", dynamicVarKey(variable), n.Pos())
 						escaped[dynamicVarKey(variable)] = true
 					} else {
@@ -2282,7 +2282,7 @@ func recordDynamicGlobalUses(p *packages.Package, mutated, escaped, initOnly map
 					if siteEligible {
 						siteRet = &siteReturned
 					}
-					if !boundValueLeakFreeJudged(p, roots, body, siteWants, siteRet, siteMethodWants, siteFieldWants, siteElemWants) {
+					if !boundValueLeakFreeJudged(audited, p, roots, body, siteWants, siteRet, siteMethodWants, siteFieldWants, siteElemWants) {
 						bad[fnName] = true
 						return true
 					}
@@ -2504,8 +2504,8 @@ func callResultHandsOut(t types.Type) bool {
 // exactly as a written captured slice does. Package-level referents are not
 // captures: their uses attribute at this site like any program code
 // (REQ-closure-shared-dynamic-state).
-func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast.Node) bool {
-	return environmentFreeFuncLitJudged(p, lit, enclosing, nil, nil)
+func environmentFreeFuncLit(audited bool, p *packages.Package, lit *ast.FuncLit, enclosing ast.Node) bool {
+	return environmentFreeFuncLitJudged(audited, p, lit, enclosing, nil, nil)
 }
 
 // environmentFreeFuncLitJudged additionally collects parameter and
@@ -2513,7 +2513,7 @@ func environmentFreeFuncLit(p *packages.Package, lit *ast.FuncLit, enclosing ast
 // deferrable shapes outright - the constructor-result proof resolves the
 // collected wants against its own package's facts
 // (REQ-closure-shared-dynamic-state).
-func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosing ast.Node, wants, methodWants map[string]bool) bool {
+func environmentFreeFuncLitJudged(audited bool, p *packages.Package, lit *ast.FuncLit, enclosing ast.Node, wants, methodWants map[string]bool) bool {
 	if p == nil || p.TypesInfo == nil || lit == nil || lit.Body == nil {
 		return false
 	}
@@ -2641,7 +2641,7 @@ func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosi
 			}
 		}
 	}
-	if !boundValueLeakFreeJudged(p, roots, lit.Body, wants, nil, methodWants, nil, nil) {
+	if !boundValueLeakFreeJudged(audited, p, roots, lit.Body, wants, nil, methodWants, nil, nil) {
 		return false
 	}
 	if enclosing == nil {
@@ -2664,7 +2664,7 @@ func environmentFreeFuncLitJudged(p *packages.Package, lit *ast.FuncLit, enclosi
 					break
 				}
 			}
-			if shared && !boundValueLeakFreeJudged(p, roots, n.Body, wants, nil, methodWants, nil, nil) {
+			if shared && !boundValueLeakFreeJudged(audited, p, roots, n.Body, wants, nil, methodWants, nil, nil) {
 				sound = false
 			}
 			return false
@@ -2722,16 +2722,16 @@ type fieldRegMark struct {
 // attribute poisons the whole population - the discharge over an
 // enumerated population is sound only when the enumeration is complete
 // (REQ-closure-shared-dynamic-state).
-func classifyFieldRegistrants(p *packages.Package, lhs, rhs ast.Expr, emit func(fieldRegMark)) {
+func classifyFieldRegistrants(audited bool, p *packages.Package, lhs, rhs ast.Expr, emit func(fieldRegMark)) {
 	if sel, ok := unparenExpr(lhs).(*ast.SelectorExpr); ok {
 		if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.FieldVal {
 			if _, isSig := types.Unalias(selection.Type()).Underlying().(*types.Signature); isSig {
-				classifyFieldRegistrantValue(p, sel.Sel.Name, rhs, emit)
+				classifyFieldRegistrantValue(audited, p, sel.Sel.Name, rhs, emit)
 				return
 			}
 		}
 	}
-	classifyRegistrantFlow(p, rhs, emit)
+	classifyRegistrantFlow(audited, p, rhs, emit)
 }
 
 func unparenExpr(expr ast.Expr) ast.Expr {
@@ -2758,18 +2758,18 @@ const elemPositionField = "\x02"
 // through the callee's return-environment-free field marks
 // (EnvCallUses names the callee). Everything else that can carry a
 // function is unattributable here: whole-population poison.
-func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldRegMark)) {
+func classifyRegistrantFlow(audited bool, p *packages.Package, expr ast.Expr, emit func(fieldRegMark)) {
 	switch e := unparenExpr(expr).(type) {
 	case *ast.CompositeLit:
-		classifyRegistrantComposite(p, e, emit)
+		classifyRegistrantComposite(audited, p, e, emit)
 		return
 	case *ast.UnaryExpr:
 		if e.Op == token.AND {
-			classifyRegistrantFlow(p, e.X, emit)
+			classifyRegistrantFlow(audited, p, e.X, emit)
 			return
 		}
 	case *ast.FuncLit:
-		classifyLiteralRegistrant(p, elemPositionField, e, emit)
+		classifyLiteralRegistrant(audited, p, elemPositionField, e, emit)
 		return
 	case *ast.BasicLit:
 		return
@@ -2789,14 +2789,14 @@ func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldR
 			}
 		}
 		for _, arg := range e.Args {
-			classifyRegistrantFlow(p, arg, emit)
+			classifyRegistrantFlow(audited, p, arg, emit)
 		}
 		return
 	case *ast.Ident:
 		if obj, ok := identUseOrDef(p, e); ok {
 			switch obj.(type) {
 			case *types.Func:
-				classifyFieldRegistrantValue(p, elemPositionField, e, emit)
+				classifyFieldRegistrantValue(audited, p, elemPositionField, e, emit)
 				return
 			case *types.Nil:
 				return
@@ -2805,7 +2805,7 @@ func classifyRegistrantFlow(p *packages.Package, expr ast.Expr, emit func(fieldR
 	case *ast.SelectorExpr:
 		if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
 			if _, isFunc := obj.(*types.Func); isFunc {
-				classifyFieldRegistrantValue(p, elemPositionField, e, emit)
+				classifyFieldRegistrantValue(audited, p, elemPositionField, e, emit)
 				return
 			}
 		}
@@ -2830,7 +2830,7 @@ func identUseOrDef(p *packages.Package, ident *ast.Ident) (types.Object, bool) {
 // name of whatever binding it judged, and a nested value can become such a
 // binding through the taint chain, so all levels share one namespace;
 // pooling only ever adds constraints.
-func classifyRegistrantComposite(p *packages.Package, lit *ast.CompositeLit, emit func(fieldRegMark)) {
+func classifyRegistrantComposite(audited bool, p *packages.Package, lit *ast.CompositeLit, emit func(fieldRegMark)) {
 	t := p.TypesInfo.TypeOf(lit)
 	if t == nil {
 		emit(fieldRegMark{class: 'p', idx: -1})
@@ -2859,10 +2859,10 @@ func classifyRegistrantComposite(p *packages.Package, lit *ast.CompositeLit, emi
 				continue
 			}
 			if _, isSig := types.Unalias(field.Type()).Underlying().(*types.Signature); isSig {
-				classifyFieldRegistrantValue(p, field.Name(), value, emit)
+				classifyFieldRegistrantValue(audited, p, field.Name(), value, emit)
 				continue
 			}
-			classifyRegistrantFlow(p, value, emit)
+			classifyRegistrantFlow(audited, p, value, emit)
 		}
 	case *types.Map, *types.Slice, *types.Array:
 		for _, elt := range lit.Elts {
@@ -2870,7 +2870,7 @@ func classifyRegistrantComposite(p *packages.Package, lit *ast.CompositeLit, emi
 			if kv, ok := elt.(*ast.KeyValueExpr); ok {
 				value = kv.Value
 			}
-			classifyRegistrantFlow(p, value, emit)
+			classifyRegistrantFlow(audited, p, value, emit)
 		}
 	default:
 		emit(fieldRegMark{class: 'p', idx: -1})
@@ -2884,7 +2884,7 @@ func classifyRegistrantComposite(p *packages.Package, lit *ast.CompositeLit, emi
 // registers nothing. Method values and expressions carry a receiver frame
 // no leak-free fact covers, and every unrecognized shape is
 // unattributable - poison, fail-closed.
-func classifyFieldRegistrantValue(p *packages.Package, field string, value ast.Expr, emit func(fieldRegMark)) {
+func classifyFieldRegistrantValue(audited bool, p *packages.Package, field string, value ast.Expr, emit func(fieldRegMark)) {
 	deferNamed := func(fn *types.Func) bool {
 		if fn == nil || fn.Pkg() == nil {
 			return false
@@ -2900,7 +2900,7 @@ func classifyFieldRegistrantValue(p *packages.Package, field string, value ast.E
 	}
 	switch v := unparenExpr(value).(type) {
 	case *ast.FuncLit:
-		classifyLiteralRegistrant(p, field, v, emit)
+		classifyLiteralRegistrant(audited, p, field, v, emit)
 		return
 	case *ast.Ident:
 		if obj, ok := identUseOrDef(p, v); ok {
@@ -2925,7 +2925,7 @@ func classifyFieldRegistrantValue(p *packages.Package, field string, value ast.E
 	emit(fieldRegMark{class: 'p', field: field, idx: -1})
 }
 
-func classifyLiteralRegistrant(p *packages.Package, field string, lit *ast.FuncLit, emit func(fieldRegMark)) {
+func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, lit *ast.FuncLit, emit func(fieldRegMark)) {
 	if lit.Type == nil || lit.Body == nil {
 		emit(fieldRegMark{class: 'p', field: field, idx: -1})
 		return
@@ -2952,7 +2952,7 @@ func classifyLiteralRegistrant(p *packages.Package, field string, lit *ast.FuncL
 					continue
 				}
 				wants := map[string]bool{}
-				if boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil, nil) {
+				if boundValueLeakFreeJudged(audited, p, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil, nil) {
 					for want := range wants {
 						emit(fieldRegMark{class: 'd', field: field, idx: idx, param: want})
 					}
@@ -2965,7 +2965,7 @@ func classifyLiteralRegistrant(p *packages.Package, field string, lit *ast.FuncL
 	}
 }
 
-func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]bool, envCalls, fieldDefer, fieldPoison map[string]map[string]bool) {
+func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarrying map[string]bool, envCalls, fieldDefer, fieldPoison map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
@@ -2983,7 +2983,7 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 			return nil, false
 		}
-		if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+		if !typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 			return nil, false
 		}
 		return variable, true
@@ -3058,7 +3058,7 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			if _, pkg := carrierVar(obj); pkg {
 				return false
 			}
-			if !typeHandsOutDynamicAlias(obj.Type(), make(map[types.Type]bool)) {
+			if !typeHandsOutDynamicAlias(audited, obj.Type(), make(map[types.Type]bool)) {
 				return false
 			}
 			have := map[*types.Var]bool{}
@@ -3161,7 +3161,7 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 				return carrying(e.X)
 			}
 		case *ast.FuncLit:
-			return !environmentFreeFuncLit(p, e, enclosingBody)
+			return !environmentFreeFuncLit(audited, p, e, enclosingBody)
 		case *ast.BasicLit:
 			return false
 		case *ast.CallExpr:
@@ -3303,7 +3303,7 @@ func recordEnvCarryingRegistrations(p *packages.Package, envCarrying map[string]
 			if fieldDefer != nil {
 				var marks []fieldRegMark
 				for _, flow := range flows {
-					classifyFieldRegistrants(p, lhs, flow, func(m fieldRegMark) {
+					classifyFieldRegistrants(audited, p, lhs, flow, func(m fieldRegMark) {
 						marks = append(marks, m)
 					})
 				}
@@ -3481,7 +3481,7 @@ var auditedValuePlane = map[string]bool{
 // recursively. Naked returns and every unrecognized signature-carrying
 // shape refuse the proof - absence keeps the poison
 // (REQ-closure-shared-dynamic-state).
-func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool, map[string]map[string]bool) {
+func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, readOnly map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool, map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return nil, nil, nil, nil, nil, nil, nil
 	}
@@ -4624,7 +4624,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 				case *ast.FuncLit:
 					wants := map[string]bool{}
 					methodWants := map[string]bool{}
-					if !environmentFreeFuncLitJudged(p, e, fd.Body, wants, methodWants) {
+					if !environmentFreeFuncLitJudged(audited, p, e, fd.Body, wants, methodWants) {
 						return false
 					}
 					return wantsResolve(wants, methodWants)
@@ -5007,7 +5007,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 			if len(insCallDeps) > 0 {
 				callerInsDeps[fnKey] = insCallDeps
 			}
-			recordReturnFieldRegistrants(p, fnKey, fd.Body, retDefer, retPoison)
+			recordReturnFieldRegistrants(audited, p, fnKey, fd.Body, retDefer, retPoison)
 		}
 	}
 	return proven, deps, retDefer, retPoison, insFree, insDeps, callerInsDeps
@@ -5024,7 +5024,7 @@ func returnEnvFreeFunctions(p *packages.Package, paramLeakFree, readOnly map[str
 // (REQ-closure-shared-dynamic-state). Values arriving through dependency
 // callees are the callees' own records, joined transitively at
 // composition over the proof's dependency edges.
-func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.Node, retDefer, retPoison map[string]map[string]bool) {
+func recordReturnFieldRegistrants(audited bool, p *packages.Package, fnKey string, body ast.Node, retDefer, retPoison map[string]map[string]bool) {
 	emit := func(m fieldRegMark) {
 		switch m.class {
 		case 'd':
@@ -5047,7 +5047,7 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 		if sel, ok := unparenExpr(lhs).(*ast.SelectorExpr); ok {
 			if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.FieldVal {
 				if _, isSig := types.Unalias(selection.Type()).Underlying().(*types.Signature); isSig {
-					classifyFieldRegistrantValue(p, sel.Sel.Name, rhs, emit)
+					classifyFieldRegistrantValue(audited, p, sel.Sel.Name, rhs, emit)
 				}
 			}
 		}
@@ -5085,7 +5085,7 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.CompositeLit:
-			classifyRegistrantComposite(p, n, emit)
+			classifyRegistrantComposite(audited, p, n, emit)
 			return false
 
 		case *ast.AssignStmt:
@@ -5100,7 +5100,7 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 			}
 		case *ast.FuncLit:
 			if !funPositions[n] {
-				classifyLiteralRegistrant(p, elemPositionField, n, emit)
+				classifyLiteralRegistrant(audited, p, elemPositionField, n, emit)
 			}
 		case *ast.CallExpr:
 			// A conversion produces its operand - the operand is swept
@@ -5128,7 +5128,7 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 				break
 			}
 			if _, isFunc := p.TypesInfo.Uses[n.Sel].(*types.Func); isFunc {
-				classifyFieldRegistrantValue(p, elemPositionField, n, emit)
+				classifyFieldRegistrantValue(audited, p, elemPositionField, n, emit)
 				break
 			}
 			// A field or foreign read producing a signature-carrying
@@ -5149,7 +5149,7 @@ func recordReturnFieldRegistrants(p *packages.Package, fnKey string, body ast.No
 				break
 			}
 			if _, isFunc := p.TypesInfo.Uses[n].(*types.Func); isFunc {
-				classifyFieldRegistrantValue(p, elemPositionField, n, emit)
+				classifyFieldRegistrantValue(audited, p, elemPositionField, n, emit)
 				break
 			}
 			if v, ok := p.TypesInfo.Uses[n].(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeCarriesSignature(v.Type(), make(map[types.Type]bool)) {
@@ -5342,12 +5342,12 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 // resolve or carry as deferred marks; a go statement's arguments never
 // defer, the goroutine runs concurrently
 // (REQ-closure-shared-dynamic-state).
-func boundValueLeakFree(p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
-	return boundValueLeakFreeJudged(p, roots, body, nil, nil, nil, nil, nil)
+func boundValueLeakFree(audited bool, p *packages.Package, roots map[types.Object]bool, body ast.Node) bool {
+	return boundValueLeakFreeJudged(audited, p, roots, body, nil, nil, nil, nil, nil)
 }
 
-func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
-	return boundValueLeakFreeJudged(p, roots, body, wants, nil, nil, nil, nil)
+func boundValueLeakFreeDeferred(audited bool, p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool) bool {
+	return boundValueLeakFreeJudged(audited, p, roots, body, wants, nil, nil, nil, nil)
 }
 
 // boundValueLeakFreeJudged additionally tolerates return-position handouts
@@ -5376,8 +5376,8 @@ func boundValueLeakFreeDeferred(p *packages.Package, roots map[types.Object]bool
 // carrier's key and the parameter index \x01-joined, resolved at
 // composition against that carrier's element population - never from a
 // go statement's call (REQ-closure-shared-dynamic-state).
-func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool) bool {
-	return boundValueJudged(p, roots, body, wants, returns, methodWants, fieldWants, elemWants, false)
+func boundValueLeakFreeJudged(audited bool, p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool) bool {
+	return boundValueJudged(audited, p, roots, body, wants, returns, methodWants, fieldWants, elemWants, false)
 }
 
 // boundValueRetentionFreeJudged proves the retention-only grade: the
@@ -5386,11 +5386,11 @@ func boundValueLeakFreeJudged(p *packages.Package, roots map[types.Object]bool, 
 // init-flow deferral's grade, where direct stores are already exempt;
 // every other use keeps the leak-free rules
 // (REQ-closure-shared-dynamic-state).
-func boundValueRetentionFreeJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, methodWants map[string]bool) bool {
-	return boundValueJudged(p, roots, body, wants, nil, methodWants, nil, nil, true)
+func boundValueRetentionFreeJudged(audited bool, p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, methodWants map[string]bool) bool {
+	return boundValueJudged(audited, p, roots, body, wants, nil, methodWants, nil, nil, true)
 }
 
-func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool, tolerateRootedStores bool) bool {
+func boundValueJudged(audited bool, p *packages.Package, roots map[types.Object]bool, body ast.Node, wants map[string]bool, returns *bool, methodWants map[string]bool, fieldWants map[string]bool, elemWants map[string]bool, tolerateRootedStores bool) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
@@ -5480,7 +5480,7 @@ func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast
 					}
 					if variable, ok := obj.(*types.Var); ok && variable.Pkg() != nil &&
 						variable.Parent() == variable.Pkg().Scope() &&
-						typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+						typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 						found = true
 					}
 				}
@@ -5902,7 +5902,7 @@ func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast
 				selection, selOK := p.TypesInfo.Selections[sel]
 				if selOK && selection.Kind() == types.MethodVal {
 					fn, isFunc := selection.Obj().(*types.Func)
-					if isFunc && auditedSynchronization(fn) {
+					if isFunc && auditedSynchronization(audited, fn) {
 						consume(sel.X)
 						break
 					}
@@ -5911,7 +5911,7 @@ func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast
 					// dispatched, results handing out no mutable reach,
 					// never concurrently - mirroring the carrier-receiver
 					// deferral, resolved through the same marks.
-					if isFunc && methodWants != nil && !goCalls[n] && fn.Pkg() != nil && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(selection.Type()) {
+					if isFunc && methodWants != nil && !goCalls[n] && fn.Pkg() != nil && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(audited, selection.Type()) {
 						methodWants[methodFactKey(fn)] = true
 						consume(sel.X)
 					} else {
@@ -5985,7 +5985,7 @@ func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast
 							if index, ok := unparenExpr(n.Fun).(*ast.IndexExpr); ok {
 								if base, ok := unparenExpr(index.X).(*ast.Ident); ok {
 									obj := p.TypesInfo.Uses[base]
-									if v, isVar := obj.(*types.Var); isVar && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeMayCarryUnknownDynamic(v.Type(), make(map[types.Type]bool)) {
+									if v, isVar := obj.(*types.Var); isVar && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeMayCarryUnknownDynamic(audited, v.Type(), make(map[types.Type]bool)) {
 										if sig, sigOK := types.Unalias(p.TypesInfo.TypeOf(n.Fun)).Underlying().(*types.Signature); sigOK && sig.Params().Len() > 0 {
 											idx := i
 											if sig.Variadic() && idx >= sig.Params().Len()-1 {
@@ -6065,7 +6065,7 @@ func boundValueJudged(p *packages.Package, roots map[types.Object]bool, body ast
 // other rule kept - recorded only where the leak-free grade failed
 // (leak-free implies retention-free; consumers union the two)
 // (REQ-closure-shared-dynamic-state).
-func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal, retentionMethods map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool) {
+func paramLeakFreeFunctions(audited bool, p *packages.Package, readOnlyLocal, retentionMethods map[string]bool) (map[string]bool, map[string]map[string]bool, map[string]bool, map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return nil, nil, nil, nil
 	}
@@ -6100,7 +6100,7 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal, retentionMethods
 	retainOnly := func(obj types.Object, body ast.Node, key string) {
 		wants := map[string]bool{}
 		methodWants := map[string]bool{}
-		if !boundValueRetentionFreeJudged(p, map[types.Object]bool{obj: true}, body, wants, methodWants) {
+		if !boundValueRetentionFreeJudged(audited, p, map[types.Object]bool{obj: true}, body, wants, methodWants) {
 			return
 		}
 		for want := range methodWants {
@@ -6165,7 +6165,7 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal, retentionMethods
 					key := fd.Name.Name + "\x00" + strconv.Itoa(idx)
 					wants := map[string]bool{}
 					methodWants := map[string]bool{}
-					if !boundValueLeakFreeJudged(p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants, nil, nil) {
+					if !boundValueLeakFreeJudged(audited, p, map[types.Object]bool{obj: true}, fd.Body, wants, nil, methodWants, nil, nil) {
 						retainOnly(obj, fd.Body, key)
 						continue
 					}
@@ -6306,7 +6306,7 @@ func paramLeakFreeFunctions(p *packages.Package, readOnlyLocal, retentionMethods
 // intra-package fixed point, fail-closed on every other shape
 // (REQ-closure-shared-dynamic-state). Keys are "Recv.Method"; the fact
 // layer prefixes the package path.
-func receiverRetentionFreeMethods(p *packages.Package, readOnlyLocal map[string]bool) map[string]bool {
+func receiverRetentionFreeMethods(audited bool, p *packages.Package, readOnlyLocal map[string]bool) map[string]bool {
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
@@ -6343,7 +6343,7 @@ func receiverRetentionFreeMethods(p *packages.Package, readOnlyLocal map[string]
 			}
 			wants := map[string]bool{}
 			methodWants := map[string]bool{}
-			if !boundValueRetentionFreeJudged(p, map[types.Object]bool{recvObj: true}, fd.Body, wants, methodWants) {
+			if !boundValueRetentionFreeJudged(audited, p, map[types.Object]bool{recvObj: true}, fd.Body, wants, methodWants) {
 				continue
 			}
 			if len(wants) != 0 {
@@ -6403,7 +6403,7 @@ func receiverRetentionFreeMethods(p *packages.Package, readOnlyLocal map[string]
 // on every other shape, cross-package chains included
 // (REQ-closure-shared-dynamic-state). Keys are "Recv.Method"; the fact
 // layer prefixes the package path.
-func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
+func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool {
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
@@ -6498,7 +6498,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 			if _, sibling := methods[recvTypeNameOf(p, sel)+"."+fn.Name()]; !sibling {
 				return false, false
 			}
-			return true, !instantiatedResultsHandOutNothing(selection.Type())
+			return true, !instantiatedResultsHandOutNothing(audited, selection.Type())
 		}
 		// rhsHandsReceiverValue reports whether the expression hands a
 		// receiver-reachable value to its binding: a receiver-rooted
@@ -6859,7 +6859,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 				}
 				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && recvRooted(sel.X) {
 					if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
-						if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(fn) {
+						if fn, ok := selection.Obj().(*types.Func); ok && auditedSynchronization(audited, fn) {
 							// The audited synchronization set: lock state
 							// cannot change dispatch, so a lock operation
 							// on a receiver-reachable mutex is
@@ -6989,7 +6989,7 @@ func receiverReadOnlyMethods(p *packages.Package) map[string]bool {
 // receiver-effect discharge: the declaring proof allows returns, the
 // call site judges what actually comes back
 // (REQ-closure-shared-dynamic-state).
-func instantiatedResultsHandOutNothing(t types.Type) bool {
+func instantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 	sig, ok := types.Unalias(t).(*types.Signature)
 	if !ok {
 		return false
@@ -6997,7 +6997,7 @@ func instantiatedResultsHandOutNothing(t types.Type) bool {
 	results := sig.Results()
 	for i := 0; results != nil && i < results.Len(); i++ {
 		rt := results.At(i).Type()
-		if auditedImmutableType(rt) {
+		if auditedImmutableType(audited, rt) {
 			continue
 		}
 		// A signature-carrying result IS its environment - the method
@@ -7015,8 +7015,8 @@ func instantiatedResultsHandOutNothing(t types.Type) bool {
 // reflect.Type is runtime-canonical and never written after
 // construction. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
-func auditedImmutableType(t types.Type) bool {
-	if !closure.AuditedToolchainSource() {
+func auditedImmutableType(audited bool, t types.Type) bool {
+	if !audited {
 		return false
 	}
 	named, ok := types.Unalias(t).(*types.Named)
@@ -7067,8 +7067,8 @@ func methodFactKey(fn *types.Func) string {
 // synchronization set: sync.Mutex and sync.RWMutex lock operations,
 // receiver-neutral because lock state cannot change dispatch. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
-func auditedSynchronization(fn *types.Func) bool {
-	if !closure.AuditedToolchainSource() || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+func auditedSynchronization(audited bool, fn *types.Func) bool {
+	if !audited || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
 		return false
 	}
 	sig, ok := fn.Type().(*types.Signature)
@@ -7109,8 +7109,8 @@ func auditedSynchronization(fn *types.Func) bool {
 // discharge (provenSharedPools); every pool the proof does not cover
 // keeps the fail-closed judgment at every use.
 // Grows only by source audit (REQ-closure-shared-dynamic-state).
-func auditedPooling(fn *types.Func) bool {
-	if !closure.AuditedToolchainSource() || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
+func auditedPooling(audited bool, fn *types.Func) bool {
+	if !audited || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
 		return false
 	}
 	sig, ok := fn.Type().(*types.Signature)
@@ -7166,7 +7166,7 @@ func auditedPooling(fn *types.Func) bool {
 // discharge admits — a conforming call on a surviving proven pool —
 // derived here, in one place, so the admission gates and the
 // eviction judge one shape.
-func provenSharedPools(p *packages.Package) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
+func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
 	proven = map[*types.Var]types.Type{}
 	calls = map[*ast.SelectorExpr]bool{}
 	if p.TypesInfo == nil {
@@ -7214,7 +7214,7 @@ func provenSharedPools(p *packages.Package) (proven map[*types.Var]types.Type, c
 				if !ok {
 					continue
 				}
-				content := provenPoolContentType(p, fnLit)
+				content := provenPoolContentType(audited, p, fnLit)
 				if content == nil {
 					continue
 				}
@@ -7256,7 +7256,7 @@ func provenSharedPools(p *packages.Package) (proven map[*types.Var]types.Type, c
 				return true
 			}
 			fn, ok := selection.Obj().(*types.Func)
-			if !ok || !auditedPooling(fn) {
+			if !ok || !auditedPooling(audited, fn) {
 				return true
 			}
 			receiver[ident] = true
@@ -7320,7 +7320,7 @@ func provenSharedPools(p *packages.Package) (proven map[*types.Var]types.Type, c
 // time, so whether New runs at all is undetermined either way, and a
 // verdict conditioned on it is out of contract in every execution
 // model.
-func provenPoolContentType(p *packages.Package, lit *ast.FuncLit) types.Type {
+func provenPoolContentType(audited bool, p *packages.Package, lit *ast.FuncLit) types.Type {
 	if lit.Type == nil || lit.Type.Results == nil {
 		return nil
 	}
@@ -7377,7 +7377,7 @@ func provenPoolContentType(p *packages.Package, lit *ast.FuncLit) types.Type {
 	if !conforming || content == nil {
 		return nil
 	}
-	if typeMayCarryUnknownDynamic(content, make(map[types.Type]bool)) {
+	if typeMayCarryUnknownDynamic(audited, content, make(map[types.Type]bool)) {
 		return nil
 	}
 	return content
@@ -8008,7 +8008,7 @@ func rangeBindsAlias(t types.Type) bool {
 // reaching a dynamic carrier, or an unsafe pointer. Function values
 // and by-value composites of them are copies — reading them cannot
 // reach the shared cell (REQ-closure-shared-dynamic-state).
-func typeHandsOutDynamicAlias(t types.Type, seen map[types.Type]bool) bool {
+func typeHandsOutDynamicAlias(audited bool, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -8019,34 +8019,34 @@ func typeHandsOutDynamicAlias(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Interface:
 		return true
 	case *types.Chan:
-		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
 	case *types.Pointer:
-		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
 	case *types.Map:
-		return typeMayCarryUnknownDynamic(t.Key(), make(map[types.Type]bool)) || typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+		return typeMayCarryUnknownDynamic(audited, t.Key(), make(map[types.Type]bool)) || typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
 	case *types.Slice:
-		return typeMayCarryUnknownDynamic(t.Elem(), make(map[types.Type]bool))
+		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
 	case *types.Named:
 		// The audited atomic transparency: the toolchain's atomic
 		// pointer reads as *T, so it hands out an alias exactly when a
 		// *T read would — the Pointer arm's judgment of T.
-		if elem, ok := closure.AuditedAtomicPointerElem(t); ok {
-			return typeMayCarryUnknownDynamic(elem, make(map[types.Type]bool))
+		if elem, ok := closure.AuditedAtomicPointerElem(audited, t); ok {
+			return typeMayCarryUnknownDynamic(audited, elem, make(map[types.Type]bool))
 		}
-		return typeHandsOutDynamicAlias(t.Underlying(), seen)
+		return typeHandsOutDynamicAlias(audited, t.Underlying(), seen)
 	case *types.TypeParam:
-		return typeHandsOutDynamicAlias(t.Constraint(), seen)
+		return typeHandsOutDynamicAlias(audited, t.Constraint(), seen)
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
-			if typeHandsOutDynamicAlias(t.Field(i).Type(), seen) {
+			if typeHandsOutDynamicAlias(audited, t.Field(i).Type(), seen) {
 				return true
 			}
 		}
 	case *types.Array:
-		return typeHandsOutDynamicAlias(t.Elem(), seen)
+		return typeHandsOutDynamicAlias(audited, t.Elem(), seen)
 	case *types.Tuple:
 		for i := 0; i < t.Len(); i++ {
-			if typeHandsOutDynamicAlias(t.At(i).Type(), seen) {
+			if typeHandsOutDynamicAlias(audited, t.At(i).Type(), seen) {
 				return true
 			}
 		}

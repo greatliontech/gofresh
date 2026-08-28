@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/internal/processenv"
 	"golang.org/x/tools/go/packages"
 )
@@ -132,7 +133,11 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 		}
 	}
 	varKey := pkgPath + "." + varName
-	return explainCulprit(pkgs, pkgPath, varKey, varName, v.engine.singleSubjectExecution)
+	audited, err := closure.AuditedToolchainSelectionResolvedContext(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags, nil)
+	if err != nil {
+		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
+	}
+	return explainCulprit(audited, pkgs, pkgPath, varKey, varName, v.engine.singleSubjectExecution)
 }
 
 // explainCulprit re-derives every loaded package's fact with mark
@@ -140,7 +145,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 // package or a test variant - and assembles the chain, following
 // environment-audit dependency edges to the first locally refused
 // proof.
-func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool) (Chain, error) {
+func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool) (Chain, error) {
 	explainMu.Lock()
 	defer explainMu.Unlock()
 
@@ -206,7 +211,7 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string, 
 	// the verdict's composition appends and unions per path.
 	facts := map[string][]dynamicStateFact{}
 	for _, p := range order {
-		facts[p.PkgPath] = append(facts[p.PkgPath], dynamicStateFactOf(p, singleSubject))
+		facts[p.PkgPath] = append(facts[p.PkgPath], dynamicStateFactOf(audited, p, singleSubject))
 	}
 	explainHooks.Store(nil)
 	mu.Lock()
@@ -363,7 +368,7 @@ func explainCulprit(roots []*packages.Package, pkgPath, varKey, varName string, 
 		// a production function judged in both variants dedupes to one
 		// link set.
 		for _, vp := range variants[refusedPath] {
-			dynamicStateFactOf(vp, singleSubject)
+			dynamicStateFactOf(audited, vp, singleSubject)
 		}
 		explainHooks.Store(nil)
 		mu.Lock()

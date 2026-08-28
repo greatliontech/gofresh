@@ -258,7 +258,7 @@ func TestMaximalTestingMethodClassificationUsesHarnessReceiver(t *testing.T) {
 	if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	scan, err := maximalFileEffects(filename)
+	scan, err := maximalFileEffects(true, filename)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func F() {
 	if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	scan, err := maximalFileEffects(filename)
+	scan, err := maximalFileEffects(true, filename)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ import "fmt"
 type wrap struct{ s fmt.State }
 func F(w wrap) string { return fmt.Sprintf("%v", w.s) }
 `)
-	scan, err := maximalFileEffects(named)
+	scan, err := maximalFileEffects(true, named)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ type pair struct {
 	b fmt.Formatter
 }
 `)
-	scan, err = maximalFileEffects(first)
+	scan, err = maximalFileEffects(true, first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +509,7 @@ type pair struct {
 import "fmt"
 func G(v int) string { return fmt.Sprintf("%d", v) }
 `)
-	scan, err = maximalFileEffects(fallback)
+	scan, err = maximalFileEffects(true, fallback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +521,7 @@ import "fmt"
 type labeled struct{ s fmt.Stringer }
 func H(l labeled) string { return fmt.Sprint(l.s) }
 `)
-	scan, err = maximalFileEffects(stringerOnly)
+	scan, err = maximalFileEffects(true, stringerOnly)
 	if err != nil {
 		t.Fatal(err)
 	}

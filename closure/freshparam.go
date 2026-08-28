@@ -44,6 +44,11 @@ type freshParamAnalysis struct {
 	// the closed-value walk's harness arms consult it so no admission
 	// outlives the audit.
 	propertyHarnessAudited bool
+	// selectionAudited is the analysis' two-axis toolchain-selection
+	// audit verdict (AuditedToolchainSelection): the closed-value
+	// walk's audited-set arms consult it exactly as the harness arms
+	// consult propertyHarnessAudited.
+	selectionAudited bool
 }
 
 type freshParamKey struct {
@@ -51,8 +56,9 @@ type freshParamKey struct {
 	idx int
 }
 
-func newFreshParamAnalysis(reach attributedReachability) *freshParamAnalysis {
+func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
+		selectionAudited:       audited,
 		functions:              reach.functions,
 		callers:                map[*ssa.Function][]ssa.CallInstruction{},
 		dynamic:                map[*ssa.Function]bool{},

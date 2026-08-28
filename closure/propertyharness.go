@@ -214,7 +214,7 @@ func propertyHarnessClosedArgs(c *ssa.CallCommon, fp *freshParamAnalysis) bool {
 		return false
 	}
 	for _, arg := range c.Args {
-		if arg == nil || !typeMayCarryDynamic(arg.Type(), map[types.Type]bool{}) {
+		if arg == nil || !typeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
 			continue
 		}
 		if !propertyHarnessClosedValue(arg, fp) {
@@ -233,7 +233,7 @@ func (a *tier2Analyzer) localHarnessView() *freshParamAnalysis {
 	if a.fresh == nil || !a.fresh.propertyHarnessAudited {
 		return nil
 	}
-	return &freshParamAnalysis{propertyHarnessAudited: true}
+	return &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: a.h.selectionAudited}
 }
 
 // propertyHarnessClosedResult reports whether a call value is a

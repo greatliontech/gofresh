@@ -205,7 +205,7 @@ func (Widget) External() int { return 2 }
 	var fact dynamicStateFact
 	for _, p := range load.Packages() {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			fact = dynamicStateFactOf(p, false)
+			fact = dynamicStateFactOf(true, p, false)
 			plain = p.Types
 		}
 	}
@@ -283,7 +283,7 @@ func (Widget) External() int { return 2 }
 	var attested dynamicStateFact
 	for _, p := range load.Packages() {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			attested = dynamicStateFactOf(p, true)
+			attested = dynamicStateFactOf(true, p, true)
 		}
 	}
 	rawAttested, err := json.Marshal(attested)
@@ -1522,7 +1522,7 @@ func TestCarrierAliasLinkRecorded(t *testing.T) {
 	if err != nil || len(pkgs) != 1 {
 		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
 	}
-	fact := dynamicStateFactOf(pkgs[0], false)
+	fact := dynamicStateFactOf(true, pkgs[0], false)
 	want := "example.com/xesc/reg.Alias\x01example.com/xesc/reg.Hooks"
 	found := false
 	for _, link := range fact.CarrierLinks {
@@ -1550,7 +1550,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 	if err != nil || len(pkgs) != 1 {
 		t.Fatalf("load: %v (%d packages)", err, len(pkgs))
 	}
-	fact := dynamicStateFactOf(pkgs[0], false)
+	fact := dynamicStateFactOf(true, pkgs[0], false)
 	wantStore := "example.com/xesc/reg.Hooks\x01example.com/xesc/reg.Inner"
 	foundStore := false
 	for _, link := range fact.CarrierLinks {

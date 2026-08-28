@@ -202,7 +202,7 @@ func (h *Hasher) maximalFileEffectsCached(path string) (maximalEffectScan, error
 	if scan, ok := h.maximalFiles[path]; ok {
 		return scan, nil
 	}
-	scan, err := maximalFileEffects(path)
+	scan, err := maximalFileEffects(h.selectionAudited, path)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
@@ -375,14 +375,14 @@ type importAlias struct {
 // of the file's bytes. One read and one parse serve both the effect
 // collection and the preferred-reason derivation
 // (equivalence-pinned by TestFileEffectScanMatchesTwoPassReference).
-func maximalFileEffects(filename string) (maximalEffectScan, error) {
+func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error) {
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
-	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(text)
+	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
 	// The walks read identifiers by name and imports from file.Imports;
 	// object resolution is unused, so skipping it saves its allocations.
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
@@ -435,13 +435,13 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
 			potentialExternal = imp.pkgPath
 		}
-		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
+		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
 			potentialExternal = imp.pkgPath
 		}
 		if imp.alias == "." || imp.alias == "_" {
 			if isAlwaysExternalPackage(imp.pkgPath) {
 				scan.add(trueExternalEffect(imp.pkgPath))
-			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(imp.pkgPath) {
+			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
 			}
 		}
@@ -471,7 +471,7 @@ func maximalFileEffects(filename string) (maximalEffectScan, error) {
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-analysis).
-				} else if pkgPath != "testing" && !classBPureStandard(pkgPath, sel.Sel.Name) && !auditedSyncSymbol(pkgPath, sel.Sel.Name) && !auditedPoolSymbol(pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(pkgPath)) {
+				} else if pkgPath != "testing" && !classBPureStandard(audited, pkgPath, sel.Sel.Name) && !auditedSyncSymbol(audited, pkgPath, sel.Sel.Name) && !auditedPoolSymbol(audited, pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(audited, pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 				}
 			}
@@ -792,8 +792,8 @@ func isAlwaysExternalPackage(pkgPath string) bool {
 // audited toolchain releases (toolchainaudit.go): the audit is a property of
 // specific standard-library source, so an unlisted release keeps every
 // package's fail-closed classification until its delta is walked.
-func isSourceOnlyStandardPackage(pkgPath string) bool {
-	if !auditedToolchainSource() {
+func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
+	if !audited {
 		return false
 	}
 	// The audited-pure set: packages that are bit-deterministic pure
@@ -847,8 +847,8 @@ func isSourceOnlyStandardPackage(pkgPath string) bool {
 // never sees them either way. reflect dispatch still defeats static
 // reachability everywhere else. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
-func auditedRuntimeTypeSymbol(pkgPath, name string) bool {
-	if !auditedToolchainSource() || pkgPath != "reflect" {
+func auditedRuntimeTypeSymbol(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "reflect" {
 		return false
 	}
 	switch name {
@@ -891,14 +891,14 @@ var auditedLinknameTargets = map[string]bool{
 // pull with local name "std", letting a one-argument export marker
 // whose bare name collides with an audited target impersonate an
 // audited pull, the fail-open direction.
-func auditedLinknamesOnly(text string) bool {
+func auditedLinknamesOnly(audited bool, text string) bool {
 	rest := text
 	for {
 		i := strings.Index(rest, "//go:linkname")
 		if i < 0 {
 			return true
 		}
-		if !auditedToolchainSource() {
+		if !audited {
 			// The audited targets are claims about runtime/syscall
 			// source; an unlisted release keeps the opaque-linkage
 			// floor for every directive-bearing file
@@ -929,8 +929,8 @@ func auditedLinknamesOnly(text string) bool {
 // process-external state. sync exports no top-level functions by these
 // names, so the method names are unambiguous. Grows only by source
 // audit (REQ-closure-shared-dynamic-state).
-func auditedSyncSymbol(pkgPath, name string) bool {
-	if !auditedToolchainSource() || pkgPath != "sync" {
+func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "sync" {
 		return false
 	}
 	switch name {
@@ -954,8 +954,8 @@ func auditedSyncSymbol(pkgPath, name string) bool {
 // produced keep their own classifications. sync exports no top-level
 // functions by these names, so the method names are unambiguous. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
-func auditedPoolSymbol(pkgPath, name string) bool {
-	if !auditedToolchainSource() || pkgPath != "sync" {
+func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "sync" {
 		return false
 	}
 	switch name {
@@ -1035,7 +1035,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 			composite.preferred = selected
 		}
 	}
-	if stored, ok := loadEffectScan(effectScanDirName, effectScanScope(), key); ok {
+	if stored, ok := loadEffectScan(effectScanDirName, h.effectScanScope(), key); ok {
 		fold(stored)
 		deriveComposite()
 		return composite, true, nil
@@ -1063,7 +1063,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 	if selected := preferredEffectReason(append(append([]externalEffect(nil), fileFold.effects...), fileFold.importCandidates...)); selected != "" {
 		fileFold.preferred = selected
 	}
-	storeEffectScan(effectScanDirName, effectScanScope(), key, fileFold)
+	storeEffectScan(effectScanDirName, h.effectScanScope(), key, fileFold)
 	fold(fileFold)
 	deriveComposite()
 	return composite, true, nil

@@ -74,7 +74,7 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 ## Band A — verdict integrity (correctness)
 
 - [ ] 126. gofresh: dst-tagged selections join the audit key (gofresh
-      docs/issues/dst-tagged-selection-outside-audit-key.md) —
+      docs/issues/walk-dst-selection-for-audit-key.md) —
       dst-tagged build selections get default-selection audit
       admissions because the key cannot see tags; judged runs over
       dst-tagged selections are imminent (stipulator's build-tagged

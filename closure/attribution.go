@@ -110,8 +110,8 @@ func shapeFailure(err error) bool {
 // one bisects until each offender degrades alone, its row carrying its
 // own batch's failure, while every sound sibling keeps its result
 // (REQ-closure-analysis). Other failure classes stay batch-wide.
-func attributedReachableSets(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
-	res, err := analyzeAttributedBatch(ctx, prog, subjects)
+func attributedReachableSets(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	res, err := analyzeAttributedBatch(ctx, audited, prog, subjects)
 	if err == nil || ctx.Err() != nil || !shapeFailure(err) {
 		return res, err
 	}
@@ -122,7 +122,7 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 		}
 		return rows, nil
 	}
-	return splitAttributed(ctx, prog, subjects, err)
+	return splitAttributed(ctx, audited, prog, subjects, err)
 }
 
 // splitAttributed bisects a shape-failing batch whose provocation is
@@ -130,7 +130,7 @@ func attributedReachableSets(ctx context.Context, prog *program, subjects []Subj
 // re-analyzing a half the caller already ran), a failing single
 // subject degrades with its own batch's error, and a non-shape
 // failure anywhere propagates batch-wide.
-func splitAttributed(ctx context.Context, prog *program, subjects []Subject, batchErr error) ([]attributedReachability, error) {
+func splitAttributed(ctx context.Context, audited bool, prog *program, subjects []Subject, batchErr error) ([]attributedReachability, error) {
 	if len(subjects) == 1 {
 		return []attributedReachability{{unavailable: batchErr.Error()}}, nil
 	}
@@ -139,14 +139,14 @@ func splitAttributed(ctx context.Context, prog *program, subjects []Subject, bat
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		res, err := analyzeAttributedBatch(ctx, prog, half)
+		res, err := analyzeAttributedBatch(ctx, audited, prog, half)
 		if err == nil {
 			return res, nil
 		}
 		if !shapeFailure(err) {
 			return nil, err
 		}
-		return splitAttributed(ctx, prog, half, err)
+		return splitAttributed(ctx, audited, prog, half, err)
 	}
 	left, err := resolve(subjects[:mid])
 	if err != nil {
@@ -159,7 +159,7 @@ func splitAttributed(ctx context.Context, prog *program, subjects []Subject, bat
 	return append(left, right...), nil
 }
 
-func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 	roots := make(map[*ssa.Function]uint64)
 	allMasks := ^uint64(0)
 	if len(subjects) < 64 {
@@ -184,7 +184,7 @@ func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []
 		switch {
 		case !parameterizedBody(root):
 			roots[root] |= mask
-		case !rootMayReceiveUnknownDynamic(prog, root):
+		case !rootMayReceiveUnknownDynamic(audited, prog, root):
 			if allFunctions == nil {
 				allFunctions = ssautil.AllFunctions(prog.Prog)
 			}
@@ -254,7 +254,7 @@ func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []
 	openCandidates := map[*ssa.Function]int{}
 	for i, subject := range subjects {
 		root := prog.Roots[subject.Symbol]
-		if root == nil || parameterizedBody(root) || !rootMayReceiveUnknownDynamic(prog, root) {
+		if root == nil || parameterizedBody(root) || !rootMayReceiveUnknownDynamic(audited, prog, root) {
 			continue
 		}
 		openCandidates[root] = i
@@ -272,7 +272,7 @@ func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []
 		var valueRefs map[*ssa.Function]bool
 		callerSites, valueRefs, valueRefOutsideInit = enumerateCallerReferences(candidateSet, allFunctions)
 		for root, i := range openCandidates {
-			enc, ok := subjectEnumerationClosure(root, callerSites[root], valueRefs[root])
+			enc, ok := subjectEnumerationClosure(audited, root, callerSites[root], valueRefs[root])
 			if !ok {
 				continue
 			}
@@ -312,7 +312,7 @@ func attributedReachableSetsOnce(ctx context.Context, prog *program, subjects []
 			resolved:               make(map[ssa.CallInstruction]bool, len(res.Resolved)),
 			dynamicTargets:         make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins:    instantiated[uint64(1)<<i],
-			openWorld:              !enumerated && rootMayReceiveUnknownDynamic(prog, prog.Roots[subjects[i].Symbol]),
+			openWorld:              !enumerated && rootMayReceiveUnknownDynamic(audited, prog, prog.Roots[subjects[i].Symbol]),
 			enumeratedRootSites:    enc.sites,
 			subjectRoot:            prog.Roots[subjects[i].Symbol],
 			propertyHarnessAudited: harnessAudited,
@@ -480,8 +480,8 @@ func isTestingMRun(fn *ssa.Function) bool {
 // the test-main driver and (*testing.F).Fuzz dispatches its target
 // reflectively over corpus files - both keep their classifications
 // (REQ-closure-observability-analysis).
-func auditedHarnessSubtestDriver(fn *ssa.Function) bool {
-	if !auditedToolchainSource() || fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
+func auditedHarnessSubtestDriver(audited bool, fn *ssa.Function) bool {
+	if !audited || fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
 		return false
 	}
 	if fn.Signature == nil || fn.Signature.Recv() == nil {
@@ -598,7 +598,7 @@ func enumerateCallerReferences(candidates map[*ssa.Function]bool, all map[*ssa.F
 // calls only, at least one exists, and every dynamic-reaching argument
 // position closes in the calling function's own frame (the caller-local
 // walk — the caller's parameters, loads, and call results refuse).
-func subjectEnumerationClosure(root *ssa.Function, sites []ssa.CallInstruction, valueRef bool) (enumerationClosure, bool) {
+func subjectEnumerationClosure(audited bool, root *ssa.Function, sites []ssa.CallInstruction, valueRef bool) (enumerationClosure, bool) {
 	// Functions only: a method's interface invocability leaves no
 	// reference the scan can see (a pointer-receiver invoke synthesizes
 	// no wrapper and takes no address), so a receiver-bearing subject
@@ -616,7 +616,7 @@ func subjectEnumerationClosure(root *ssa.Function, sites []ssa.CallInstruction, 
 			return enumerationClosure{}, false
 		}
 		for i, param := range root.Params {
-			if !typeMayCarryDynamic(param.Type(), make(map[types.Type]bool)) {
+			if !typeMayCarryDynamic(audited, param.Type(), make(map[types.Type]bool)) {
 				continue
 			}
 			if !locallyClosedDynamicValue(args[i], make(map[ssa.Value]bool)) {
@@ -668,7 +668,7 @@ func collectClosedDynamicSeeds(value ssa.Value, enc *enumerationClosure, seen ma
 	}
 }
 
-func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
+func rootMayReceiveUnknownDynamic(audited bool, prog *program, root *ssa.Function) bool {
 	if root == nil || root.Signature == nil {
 		return true
 	}
@@ -682,7 +682,7 @@ func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
 	// Anything unbounded (any, comparable, a method-bearing constraint)
 	// keeps the forced open world
 	// (REQ-closure-analysis's parameterized-subject arm).
-	if parameterizedBody(root) && !typeParamListsBoundAwayFromDynamic(root) {
+	if parameterizedBody(root) && !typeParamListsBoundAwayFromDynamic(audited, root) {
 		return true
 	}
 	if subjectRunsThroughHarness(prog, root) && isHarnessSubjectSignature(root.Signature) {
@@ -693,12 +693,12 @@ func rootMayReceiveUnknownDynamic(prog *program, root *ssa.Function) bool {
 	// marked by a bounding evaluation reading clean as a later value
 	// type); within one parameter's evaluation the map is shared - the
 	// cycle guard for recursive constraints.
-	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(recv.Type(), make(map[types.Type]bool)) {
+	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(audited, recv.Type(), make(map[types.Type]bool)) {
 		return true
 	}
 	params := root.Signature.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryDynamic(params.At(i).Type(), make(map[types.Type]bool)) {
+		if typeMayCarryDynamic(audited, params.At(i).Type(), make(map[types.Type]bool)) {
 			return true
 		}
 	}
@@ -737,8 +737,8 @@ func isHarnessSubjectSignature(sig *types.Signature) bool {
 // never matches here (its Obj is not sync/atomic's). One helper for
 // every carrier walk, so the tiers cannot diverge on this rule
 // (REQ-closure-analysis's one-answer arm).
-func AuditedAtomicPointerElem(t *types.Named) (types.Type, bool) {
-	if !auditedToolchainSource() {
+func AuditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
+	if !audited {
 		return nil, false
 	}
 	obj := t.Obj()
@@ -750,7 +750,7 @@ func AuditedAtomicPointerElem(t *types.Named) (types.Type, bool) {
 	return t.TypeArgs().At(0), true
 }
 
-func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
+func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -770,31 +770,31 @@ func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 		// structure inside one evaluation, where a carrier-free cycle
 		// path adds no carrier. Cross-parameter decoupling lives at the
 		// walk entries, which hand each parameter a fresh map.
-		return !constraintBoundsAwayFromDynamic(t.Constraint(), seen)
+		return !constraintBoundsAwayFromDynamic(audited, t.Constraint(), seen)
 	case *types.Named:
-		if elem, ok := AuditedAtomicPointerElem(t); ok {
-			return typeMayCarryDynamic(elem, seen)
+		if elem, ok := AuditedAtomicPointerElem(audited, t); ok {
+			return typeMayCarryDynamic(audited, elem, seen)
 		}
-		return typeMayCarryDynamic(t.Underlying(), seen)
+		return typeMayCarryDynamic(audited, t.Underlying(), seen)
 	case *types.Pointer:
-		return typeMayCarryDynamic(t.Elem(), seen)
+		return typeMayCarryDynamic(audited, t.Elem(), seen)
 	case *types.Slice:
-		return typeMayCarryDynamic(t.Elem(), seen)
+		return typeMayCarryDynamic(audited, t.Elem(), seen)
 	case *types.Array:
-		return typeMayCarryDynamic(t.Elem(), seen)
+		return typeMayCarryDynamic(audited, t.Elem(), seen)
 	case *types.Map:
-		return typeMayCarryDynamic(t.Key(), seen) || typeMayCarryDynamic(t.Elem(), seen)
+		return typeMayCarryDynamic(audited, t.Key(), seen) || typeMayCarryDynamic(audited, t.Elem(), seen)
 	case *types.Chan:
-		return typeMayCarryDynamic(t.Elem(), seen)
+		return typeMayCarryDynamic(audited, t.Elem(), seen)
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
-			if typeMayCarryDynamic(t.Field(i).Type(), seen) {
+			if typeMayCarryDynamic(audited, t.Field(i).Type(), seen) {
 				return true
 			}
 		}
 	case *types.Tuple:
 		for i := 0; i < t.Len(); i++ {
-			if typeMayCarryDynamic(t.At(i).Type(), seen) {
+			if typeMayCarryDynamic(audited, t.At(i).Type(), seen) {
 				return true
 			}
 		}
@@ -807,20 +807,20 @@ func typeMayCarryDynamic(t types.Type, seen map[types.Type]bool) bool {
 // the openness question a parameterized subject asks per parameter,
 // shared with the view tier so both tiers give one answer
 // (REQ-closure-analysis's parameterized-subject arm).
-func TypeParamBoundsAwayFromDynamic(tp *types.TypeParam) bool {
+func TypeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
 	if tp == nil {
 		return false
 	}
-	return constraintBoundsAwayFromDynamic(tp.Constraint(), make(map[types.Type]bool))
+	return constraintBoundsAwayFromDynamic(audited, tp.Constraint(), make(map[types.Type]bool))
 }
 
 // typeParamListsBoundAwayFromDynamic reports whether every type parameter
 // of fn (function and receiver lists both) carries a constraint that
 // provably bounds its type set away from dynamic carriers.
-func typeParamListsBoundAwayFromDynamic(fn *ssa.Function) bool {
+func typeParamListsBoundAwayFromDynamic(audited bool, fn *ssa.Function) bool {
 	for _, list := range []*types.TypeParamList{fn.TypeParams(), fn.Signature.RecvTypeParams()} {
 		for i := 0; list != nil && i < list.Len(); i++ {
-			if !constraintBoundsAwayFromDynamic(list.At(i).Constraint(), make(map[types.Type]bool)) {
+			if !constraintBoundsAwayFromDynamic(audited, list.At(i).Constraint(), make(map[types.Type]bool)) {
 				return false
 			}
 		}
@@ -838,15 +838,15 @@ func typeParamListsBoundAwayFromDynamic(fn *ssa.Function) bool {
 // bounded element sufficient: the type set is the intersection of every
 // element's set, so a dirty sibling only shrinks a clean bound, never
 // widens it. `any` and `comparable` embed nothing and bound nothing.
-func constraintBoundsAwayFromDynamic(constraint types.Type, seen map[types.Type]bool) bool {
+func constraintBoundsAwayFromDynamic(audited bool, constraint types.Type, seen map[types.Type]bool) bool {
 	iface, ok := types.Unalias(constraint).Underlying().(*types.Interface)
 	if !ok {
 		return false
 	}
-	return interfaceBoundsAwayFromDynamic(iface, seen)
+	return interfaceBoundsAwayFromDynamic(audited, iface, seen)
 }
 
-func interfaceBoundsAwayFromDynamic(iface *types.Interface, seen map[types.Type]bool) bool {
+func interfaceBoundsAwayFromDynamic(audited bool, iface *types.Interface, seen map[types.Type]bool) bool {
 	if iface == nil || iface.NumMethods() > 0 {
 		return false
 	}
@@ -866,7 +866,7 @@ func interfaceBoundsAwayFromDynamic(iface *types.Interface, seen map[types.Type]
 				// whole approximation set. Extra methods on a defined
 				// type in that set are unreachable through a methodless
 				// constraint.
-				if typeMayCarryDynamic(e.Term(j).Type(), seen) {
+				if typeMayCarryDynamic(audited, e.Term(j).Type(), seen) {
 					clean = false
 					break
 				}
@@ -876,13 +876,13 @@ func interfaceBoundsAwayFromDynamic(iface *types.Interface, seen map[types.Type]
 			}
 		default:
 			if under, ok := types.Unalias(e).Underlying().(*types.Interface); ok {
-				if interfaceBoundsAwayFromDynamic(under, seen) {
+				if interfaceBoundsAwayFromDynamic(audited, under, seen) {
 					bounded = true
 				}
 				continue
 			}
 			// A single specific-type element (interface{ int }).
-			if !typeMayCarryDynamic(e, seen) {
+			if !typeMayCarryDynamic(audited, e, seen) {
 				bounded = true
 			}
 		}

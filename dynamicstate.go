@@ -284,7 +284,7 @@ type dynamicStateFact struct {
 // fact records (the audited pooling set's discharge), so it is part of every
 // fact-cache identity the fact is stored under
 // (REQ-closure-dynamic-state-memo).
-func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFact {
+func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) dynamicStateFact {
 	var fact dynamicStateFact
 	mutated, escaped, opaque, breaks := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	initOnly := initOnlyReachableHelpers(p)
@@ -302,7 +302,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 	if singleSubject {
 		poolDischarged = map[string]bool{}
 	}
-	recordDynamicGlobalUses(p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged)
+	recordDynamicGlobalUses(audited, p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -319,7 +319,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 	envCalls := map[string]map[string]bool{}
 	fieldDefer := map[string]map[string]bool{}
 	fieldPoison := map[string]map[string]bool{}
-	recordEnvCarryingRegistrations(p, envCarrying, envCalls, fieldDefer, fieldPoison)
+	recordEnvCarryingRegistrations(audited, p, envCarrying, envCalls, fieldDefer, fieldPoison)
 	for varKey, entries := range fieldDefer {
 		for entry := range entries {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, varKey+"\x01"+entry)
@@ -409,8 +409,8 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		}
 	}
 	sort.Strings(fact.FuncRefs)
-	readOnly := receiverReadOnlyMethods(p)
-	retentionMethods := receiverRetentionFreeMethods(p, readOnly)
+	readOnly := receiverReadOnlyMethods(audited, p)
+	retentionMethods := receiverRetentionFreeMethods(audited, p, readOnly)
 	for method := range readOnly {
 		if p.Types != nil {
 			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
@@ -430,7 +430,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
-		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps := paramLeakFreeFunctions(p, readOnly, retentionMethods)
+		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps := paramLeakFreeFunctions(audited, p, readOnly, retentionMethods)
 		for paramKey := range paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
 		}
@@ -452,7 +452,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 		}
 		sort.Strings(fact.ParamRetentionFree)
 		sort.Strings(fact.ParamRetentionFreeDeps)
-		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(p, paramLeakFree, readOnly)
+		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, paramLeakFree, readOnly)
 		for fnName := range envFree {
 			fnKey := p.Types.Path() + "\x00" + fnName
 			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
@@ -532,7 +532,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 	if p.Types != nil && p.Module != nil {
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
-			if variable, ok := scope.Lookup(name).(*types.Var); ok && typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+			if variable, ok := scope.Lookup(name).(*types.Var); ok && typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 				fact.Declares = append(fact.Declares, dynamicVarKey(variable))
 			}
 		}
@@ -593,7 +593,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 							continue
 						}
-						if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+						if !typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 							continue
 						}
 						fact.SingleSubjectVars = append(fact.SingleSubjectVars, dynamicVarKey(variable))
@@ -636,7 +636,7 @@ func dynamicStateFactOf(p *packages.Package, singleSubject bool) dynamicStateFac
 						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 							continue
 						}
-						if !typeMayCarryUnknownDynamic(variable.Type(), make(map[types.Type]bool)) {
+						if !typeMayCarryUnknownDynamic(audited, variable.Type(), make(map[types.Type]bool)) {
 							continue
 						}
 						if generator == "protoc-gen-go-grpc" {
@@ -989,7 +989,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			continue
 		}
 		matched[listing] = true
-		state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg, singleSubject))
+		state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
 	}
 	// An intermediate recompilation ("r [a.test]") exists only inside a test
 	// binary's graph: it is scanned from its own compilation — test-added
@@ -1026,7 +1026,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				return
 			}
 			matched[listing] = true
-			state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(pkg, singleSubject))
+			state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
 		})
 	}
 	for _, node := range meta {
@@ -1111,7 +1111,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			for _, loadErr := range pkg.Errors {
 				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
 			}
-			derived[pkg.PkgPath] = dynamicStateFactOf(pkg, singleSubject)
+			derived[pkg.PkgPath] = dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject)
 		}
 		store := map[string]map[string]json.RawMessage{}
 		for _, node := range missing {

@@ -74,13 +74,20 @@ type Hasher struct {
 	packageEnv []string
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
-	buildFlags     []string
-	progs          map[string]*program             // by package import path
-	progErrs       map[string]error                // memoized load failures, by package import path
-	lists          map[string][]listPkg            // parsed `go list -deps -test`, by package import path
-	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
-	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
-	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
+	buildFlags []string
+	// selectionAudited is the two-axis toolchain-audit verdict for this
+	// analysis' build selection, computed once at construction: every
+	// audited-set consultation under this Hasher answers through it, so
+	// a tag-swapped selection degrades the stdlib admissions to the
+	// ordinary fail-closed classification instead of inheriting the
+	// default selection's audit (AuditedToolchainSelection).
+	selectionAudited bool
+	progs            map[string]*program             // by package import path
+	progErrs         map[string]error                // memoized load failures, by package import path
+	lists            map[string][]listPkg            // parsed `go list -deps -test`, by package import path
+	maximalTesting   map[string]maximalEffectScan    // typed testing-runtime effects by requested package
+	maximalEffects   map[string]maximalEffectsResult // package external-effect scans by requested package
+	maximalFiles     map[string]maximalEffectScan    // per-file effect scans by absolute path
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -211,20 +218,32 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	mc := snapshot.Value("GOMODCACHE")
-	if mc == "" {
-		out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE")
+	var mc, goflags, goexperiment string
+	if snapshot != nil {
+		mc, goflags, goexperiment = snapshot.Value("GOMODCACHE"), snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT")
+	}
+	if snapshot == nil {
+		// One combined read covers the module cache and the
+		// selection-bearing values; a resolution failure refuses
+		// construction loudly rather than silently disabling every
+		// stdlib admission.
+		out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE", "GOFLAGS", "GOEXPERIMENT")
 		if err != nil {
 			return nil, err
 		}
-		mc = strings.TrimSpace(string(out))
+		lines := strings.Split(string(out), "\n")
+		if len(lines) < 3 {
+			return nil, fmt.Errorf("closure: go env returned %d values, want 3", len(lines))
+		}
+		mc, goflags, goexperiment = strings.TrimSpace(lines[0]), strings.TrimRight(lines[1], "\r"), strings.TrimRight(lines[2], "\r")
 	}
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
-		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
+		selectionAudited: AuditedToolchainSelection(buildFlags, goflags, goexperiment),
+		progs:            map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{},
 	}, nil

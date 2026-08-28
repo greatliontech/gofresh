@@ -28,12 +28,20 @@ import (
 // keying for the walk tiers.
 const effectScanStrategy = "gofresh/effect-scan@11"
 
-// effectScanScope is the memo's full scope: the strategy version plus the
-// toolchain identity. The per-file scan is a pure function of the file
-// bytes and of the parser linked into this binary, so a toolchain change
-// refuses prior generations exactly as a strategy bump does.
-func effectScanScope() string {
-	return effectScanStrategy + " " + runtime.Version()
+// effectScanScope is the memo's full scope: the strategy version, the
+// toolchain identity, and — when the analysis' build selection is not
+// the audited default — the selection's audit verdict, because the
+// scan's audited-set consultations now answer per selection
+// (REQ-closure-effect-scan-memo). The default-selection scope is
+// byte-identical to the pre-selection era's, so existing memos keep
+// serving; an unaudited selection's scans key separately and can
+// never serve an audited consumer or vice versa.
+func (h *Hasher) effectScanScope() string {
+	scope := effectScanStrategy + " " + runtime.Version()
+	if !h.selectionAudited {
+		scope += " selection-unaudited"
+	}
+	return scope
 }
 
 // testingScanStrategy versions the typed testing-effect scan's semantics:

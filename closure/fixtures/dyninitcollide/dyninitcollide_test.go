@@ -34,4 +34,3 @@ func TestRun(t *testing.T) {
 		t.Fatal("wrong")
 	}
 }
-

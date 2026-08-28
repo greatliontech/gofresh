@@ -232,7 +232,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "86ef5239559abbc360df1942e5b1ff34a348ce9c87d13928eb83d643df72ec9d"
+  shape_hash: "f518c1fb4735c764fe13ecda3083b509a41fbbb56064cfd5c720a01cf36b1c93"
 }
 
 bindings {
@@ -250,7 +250,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "86ef5239559abbc360df1942e5b1ff34a348ce9c87d13928eb83d643df72ec9d"
+  shape_hash: "f518c1fb4735c764fe13ecda3083b509a41fbbb56064cfd5c720a01cf36b1c93"
 }
 
 bindings {

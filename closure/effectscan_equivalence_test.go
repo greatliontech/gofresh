@@ -130,7 +130,7 @@ func TestFileEffectScanMatchesTwoPassReference(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		got, gotErr := maximalFileEffects(path)
+		got, gotErr := maximalFileEffects(true, path)
 		want, wantErr := referenceMaximalFileEffects(path)
 		if (gotErr == nil) != (wantErr == nil) {
 			t.Fatalf("%s: error disposition diverged: got %v, reference %v\ninput:\n%s", name, gotErr, wantErr, content)
@@ -169,7 +169,7 @@ func TestFileEffectScanMatchesReferenceOverRepository(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		got, gotErr := maximalFileEffects(path)
+		got, gotErr := maximalFileEffects(true, path)
 		want, wantErr := referenceMaximalFileEffects(path)
 		if (gotErr == nil) != (wantErr == nil) {
 			t.Fatalf("%s: error disposition diverged: got %v, reference %v", path, gotErr, wantErr)
@@ -202,7 +202,7 @@ func BenchmarkMaximalFileEffects(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := maximalFileEffects(path); err != nil {
+		if _, err := maximalFileEffects(true, path); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -225,7 +225,7 @@ func BenchmarkTestingHeavyFileEffects(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := maximalFileEffects(path); err != nil {
+		if _, err := maximalFileEffects(true, path); err != nil {
 			b.Fatal(err)
 		}
 	}

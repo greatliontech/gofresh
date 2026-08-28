@@ -35,7 +35,7 @@ func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 		{Package: batchIsolationPackage, Symbol: "Production"},
 		{Package: batchIsolationPackage, Symbol: "BenchmarkHarness"},
 	}
-	got, err := attributedReachableSets(context.Background(), prog, subjects)
+	got, err := attributedReachableSets(context.Background(), true, prog, subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 		{Package: batchIsolationPackage, Symbol: "Materializer"},
 		{Package: batchIsolationPackage, Symbol: "Invoker"},
 	}
-	reachable, err := attributedReachableSets(context.Background(), prog, subjects)
+	reachable, err := attributedReachableSets(context.Background(), true, prog, subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestAttributedRTARootMasks(t *testing.T) {
 		{Package: batchIsolationPackage, Symbol: "Production"},
 		{Package: batchIsolationPackage, Symbol: "BenchmarkHarness"},
 	}
-	reachable, err := attributedReachableSets(context.Background(), prog, subjects)
+	reachable, err := attributedReachableSets(context.Background(), true, prog, subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestAttributedRTAHonorsCancellationDuringTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := &cancelAfterContext{Context: context.Background(), remaining: 2}
-	_, err = attributedReachableSets(ctx, prog, []Subject{{Package: batchIsolationPackage, Symbol: "Materializer"}})
+	_, err = attributedReachableSets(ctx, true, prog, []Subject{{Package: batchIsolationPackage, Symbol: "Materializer"}})
 	if err == nil {
 		t.Fatal("attributed RTA ignored cancellation during traversal")
 	}
@@ -189,7 +189,7 @@ func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: batchIsolationPackage, Symbol: "Materializer"}
-	reachable, err := attributedReachableSets(context.Background(), prog, []Subject{subject})
+	reachable, err := attributedReachableSets(context.Background(), true, prog, []Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reachable, err := attributedReachableSets(context.Background(), prog, subjects)
+	reachable, err := attributedReachableSets(context.Background(), true, prog, subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,8 +447,8 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 		}
 		return rows
 	}
-	poisonWorker := func(poisoned map[Subject]bool) func(context.Context, *program, []Subject) ([]attributedReachability, error) {
-		return func(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	poisonWorker := func(poisoned map[Subject]bool) func(context.Context, bool, *program, []Subject) ([]attributedReachability, error) {
+		return func(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 			for _, s := range subjects {
 				if poisoned[s] {
 					return nil, shapeErr(s.Symbol)
@@ -470,7 +470,7 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 
 	// One offender isolates alone.
 	analyzeAttributedBatch = poisonWorker(map[Subject]bool{bad1: true})
-	rows, err := attributedReachableSets(context.Background(), nil, subjects)
+	rows, err := attributedReachableSets(context.Background(), true, nil, subjects)
 	if err != nil || len(rows) != len(subjects) {
 		t.Fatalf("single-offender isolation: rows=%d err=%v", len(rows), err)
 	}
@@ -483,7 +483,7 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 	// Two offenders on opposite halves isolate individually - the
 	// sound siblings keep their evidence.
 	analyzeAttributedBatch = poisonWorker(map[Subject]bool{bad1: true, bad2: true})
-	rows, err = attributedReachableSets(context.Background(), nil, subjects)
+	rows, err = attributedReachableSets(context.Background(), true, nil, subjects)
 	if err != nil || len(rows) != len(subjects) {
 		t.Fatalf("two-offender isolation: rows=%d err=%v", len(rows), err)
 	}
@@ -508,14 +508,14 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 	// A package-scoped provocation degrades everything at ONE worker
 	// run, each row carrying the probe's own error.
 	calls := 0
-	analyzeAttributedBatch = func(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	analyzeAttributedBatch = func(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 		calls++
 		return nil, shapeErr("init")
 	}
 	probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error {
 		return fmt.Errorf("closure: attributed reachability: unsupported analysis shape: T (visiting p.init)")
 	}
-	rows, err = attributedReachableSets(context.Background(), nil, subjects)
+	rows, err = attributedReachableSets(context.Background(), true, nil, subjects)
 	if err != nil {
 		t.Fatalf("package-scoped failure surfaced batch-wide: %v", err)
 	}
@@ -530,10 +530,10 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 
 	// A non-shape failure keeps the batch-wide error.
 	probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error { return nil }
-	analyzeAttributedBatch = func(ctx context.Context, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	analyzeAttributedBatch = func(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 		return nil, fmt.Errorf("closure: analysis cancelled: context deadline exceeded")
 	}
-	if _, err := attributedReachableSets(context.Background(), nil, subjects); err == nil {
+	if _, err := attributedReachableSets(context.Background(), true, nil, subjects); err == nil {
 		t.Fatal("a non-shape failure was swallowed by the bisection")
 	}
 }

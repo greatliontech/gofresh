@@ -46,7 +46,7 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 			delete(h.lists, pkgPath)
 		}
 	}()
-	reachable, err := attributedReachableSets(h.ctx, prog, []Subject{{Package: pkgPath, Symbol: symbol}})
+	reachable, err := attributedReachableSets(h.ctx, true, prog, []Subject{{Package: pkgPath, Symbol: symbol}})
 	if err != nil {
 		return tier2Result{}, nil, err
 	}

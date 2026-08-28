@@ -1433,7 +1433,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
 			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
 		})
-		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, closure.AuditedToolchainSource(), func(detail string) {
+		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, hasher.SelectionAudited(), func(detail string) {
 			progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
 		})
 	}
@@ -1524,6 +1524,6 @@ func emitUnauditedToolchainNotice(once *sync.Once, audited bool, emit func(detai
 		return
 	}
 	once.Do(func() {
-		emit(runtime.Version() + " is not in the audited-release list: standard-library admissions are disabled and refusals keep their ordinary fail-closed classifications until the release's delta is walked and listed (closure/toolchainaudit.go)")
+		emit(runtime.Version() + ": the release or this analysis' build selection is not in the audited list: standard-library admissions are disabled and refusals keep their ordinary fail-closed classifications until the delta — the release's, or the tag selection's — is walked and listed (closure/toolchainaudit.go)")
 	})
 }

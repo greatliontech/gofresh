@@ -11,8 +11,24 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-func observableCallEffect(effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {
+func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	if call == nil {
+		return false
+	}
+	// Every observation admission below is a toolchain-source claim
+	// about the wrapper bodies the producing binary compiles — the
+	// admitted os read set's "internal steps solely realize the logged
+	// effect", the guard-pinned accessor, the fresh-path helpers — and
+	// the producing build shares the analysis' selection
+	// (WithBuildFlags is the producing go command's flags). Under an
+	// unwalked selection those bodies are unaudited source: no
+	// observation admission fires, and every effect keeps its ordinary
+	// fail-closed refusal (REQ-closure-observability-analysis's
+	// two-axis keying clause). The verdict arrives explicitly — it is
+	// a property of the analysis, never of the optional fresh-param
+	// value, whose nil keeps meaning exactly "parameter crossing
+	// refused" as the crossing helpers state.
+	if !audited {
 		return false
 	}
 	// The toolchain accessor is guard-pinned: its value is fixed by the

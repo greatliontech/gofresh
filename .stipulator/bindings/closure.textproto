@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "efcaa36a286fbe682b6b42f0765dfcf72271a8476b4f1027d8ea776d8e1e2e12"
+  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
   role: BINDING_ROLE_IMPLEMENTS
@@ -102,7 +102,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "efcaa36a286fbe682b6b42f0765dfcf72271a8476b4f1027d8ea776d8e1e2e12"
+  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
@@ -543,7 +543,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "efcaa36a286fbe682b6b42f0765dfcf72271a8476b4f1027d8ea776d8e1e2e12"
+  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAuditedHarnessLoggingBounds"
   role: BINDING_ROLE_TESTS
@@ -552,7 +552,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "efcaa36a286fbe682b6b42f0765dfcf72271a8476b4f1027d8ea776d8e1e2e12"
+  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingIsNotPurityEvidence"
   role: BINDING_ROLE_TESTS
@@ -561,7 +561,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "efcaa36a286fbe682b6b42f0765dfcf72271a8476b4f1027d8ea776d8e1e2e12"
+  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingDeclarationInventory"
   role: BINDING_ROLE_TESTS
@@ -624,7 +624,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "8834fb53970689bca22c6633040ee275f9c21a7b933a80d494eada993a17601d"
+  content_hash: "61c1bdabb0274f28d9e73950f08fee6e842028ace810cc20e63ab97e9e89df47"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoServesPinnedPackagesWithoutReads"
   role: BINDING_ROLE_TESTS
@@ -633,7 +633,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "8834fb53970689bca22c6633040ee275f9c21a7b933a80d494eada993a17601d"
+  content_hash: "61c1bdabb0274f28d9e73950f08fee6e842028ace810cc20e63ab97e9e89df47"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoMissesOnScopeAndFileSetChange"
   role: BINDING_ROLE_TESTS
@@ -642,7 +642,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "8834fb53970689bca22c6633040ee275f9c21a7b933a80d494eada993a17601d"
+  content_hash: "61c1bdabb0274f28d9e73950f08fee6e842028ace810cc20e63ab97e9e89df47"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoFoldMatchesInlineFold"
   role: BINDING_ROLE_TESTS

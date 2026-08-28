@@ -321,8 +321,8 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		{"time", "October"}, {"time", "November"}, {"time", "December"},
 		{"fmt", "Stringer"}, {"fmt", "Sprint"},
 	} {
-		if !classBPureStandard(tc.pkg, tc.name) {
-			t.Errorf("classBPureStandard(%s, %s) = false, want audited", tc.pkg, tc.name)
+		if !classBPureStandard(true, tc.pkg, tc.name) {
+			t.Errorf("classBPureStandard(true, %s, %s) = false, want audited", tc.pkg, tc.name)
 		}
 	}
 	for _, tc := range []struct{ pkg, name string }{
@@ -331,19 +331,19 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		{"math/big", "Rand"}, {"math/big", "ParseFloat"},
 		{"fmt", "State"}, {"fmt", "Print"}, {"fmt", "Formatter"},
 	} {
-		if classBPureStandard(tc.pkg, tc.name) {
-			t.Errorf("classBPureStandard(%s, %s) = true, want outside the audited set", tc.pkg, tc.name)
+		if classBPureStandard(true, tc.pkg, tc.name) {
+			t.Errorf("classBPureStandard(true, %s, %s) = true, want outside the audited set", tc.pkg, tc.name)
 		}
 	}
-	if !auditedRuntimeTypeSymbol("reflect", "DeepEqual") {
-		t.Error("auditedRuntimeTypeSymbol(reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
+	if !auditedRuntimeTypeSymbol(true, "reflect", "DeepEqual") {
+		t.Error("auditedRuntimeTypeSymbol(true, reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
 	}
 	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect"} {
-		if auditedRuntimeTypeSymbol("reflect", name) {
-			t.Errorf("auditedRuntimeTypeSymbol(reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
+		if auditedRuntimeTypeSymbol(true, "reflect", name) {
+			t.Errorf("auditedRuntimeTypeSymbol(true, reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
 		}
 	}
-	if classBPureStandard("example.com/big", "NewInt") || auditedRuntimeTypeSymbol("example.com/reflect", "DeepEqual") {
+	if classBPureStandard(true, "example.com/big", "NewInt") || auditedRuntimeTypeSymbol(true, "example.com/reflect", "DeepEqual") {
 		t.Error("an admission leaked to a non-standard package path")
 	}
 }
@@ -354,16 +354,16 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 // (REQ-closure-observability-analysis's audited-set boundary).
 func TestAuditedHarnessLoggingBounds(t *testing.T) {
 	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {
-		if !auditedHarnessLogging("testing", name) {
-			t.Errorf("auditedHarnessLogging(testing, %s) = false, want audited", name)
+		if !auditedHarnessLogging(true, "testing", name) {
+			t.Errorf("auditedHarnessLogging(true, testing, %s) = false, want audited", name)
 		}
 	}
 	for _, name := range []string{"Setenv", "Chdir", "TempDir", "Run", "Cleanup", "Helper", "Short", "Deadline", "Context", "Parallel", "Name", "Failed", "Skipped"} {
-		if auditedHarnessLogging("testing", name) {
-			t.Errorf("auditedHarnessLogging(testing, %s) = true, want outside the audited set", name)
+		if auditedHarnessLogging(true, "testing", name) {
+			t.Errorf("auditedHarnessLogging(true, testing, %s) = true, want outside the audited set", name)
 		}
 	}
-	if auditedHarnessLogging("os", "Fatal") || auditedHarnessLogging("log", "Fatal") {
+	if auditedHarnessLogging(true, "os", "Fatal") || auditedHarnessLogging(true, "log", "Fatal") {
 		t.Error("auditedHarnessLogging admits a non-testing package")
 	}
 }
@@ -578,7 +578,7 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 		"linknamestd unaudited target":    {"//go:linknamestd a runtime.rand\n", false},
 		"unknown directive suffix":        {"//go:linknamex a runtime.getAuxv\n", false},
 	} {
-		if got := auditedLinknamesOnly(tc.text); got != tc.want {
+		if got := auditedLinknamesOnly(true, tc.text); got != tc.want {
 			t.Errorf("%s: auditedLinknamesOnly = %v, want %v", name, got, tc.want)
 		}
 	}
@@ -595,38 +595,34 @@ func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
 	}
 }
 
-// An unlisted release keeps every toolchain-source admission's ordinary
-// fail-closed classification — the direction that makes an unaudited
-// stdlib refuse instead of silently inheriting a stale proof.
+// A false audit verdict — an unlisted release or an unaudited build
+// selection, computed once per analysis by AuditedToolchainSelection —
+// keeps every toolchain-source admission's ordinary fail-closed
+// classification: the direction that makes an unaudited stdlib refuse
+// instead of silently inheriting a stale proof.
 func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
-	v := runtime.Version()
-	if !auditedToolchainReleases[v] {
-		t.Fatalf("running toolchain %q unlisted; the canary above owns this failure", v)
-	}
-	auditedToolchainReleases[v] = false
-	defer func() { auditedToolchainReleases[v] = true }()
-	if classBPureStandard("fmt", "Sprint") {
+	if classBPureStandard(false, "fmt", "Sprint") {
 		t.Error("classBPureStandard admits fmt.Sprint on an unaudited toolchain")
 	}
-	if isSourceOnlyStandardPackage("strings") {
+	if isSourceOnlyStandardPackage(false, "strings") {
 		t.Error("isSourceOnlyStandardPackage admits strings on an unaudited toolchain")
 	}
-	if auditedSyncSymbol("sync", "Lock") {
+	if auditedSyncSymbol(false, "sync", "Lock") {
 		t.Error("auditedSyncSymbol admits sync.Lock on an unaudited toolchain")
 	}
-	if auditedPoolSymbol("sync", "Get") {
+	if auditedPoolSymbol(false, "sync", "Get") {
 		t.Error("auditedPoolSymbol admits sync.Get on an unaudited toolchain")
 	}
-	if auditedRuntimeTypeSymbol("reflect", "TypeOf") {
+	if auditedRuntimeTypeSymbol(false, "reflect", "TypeOf") {
 		t.Error("auditedRuntimeTypeSymbol admits reflect.TypeOf on an unaudited toolchain")
 	}
-	if auditedHarnessLogging("testing", "Fatal") {
+	if auditedHarnessLogging(false, "testing", "Fatal") {
 		t.Error("auditedHarnessLogging admits testing.Fatal on an unaudited toolchain")
 	}
-	if fmtFprintFamily("fmt", "Fprintf") {
+	if fmtFprintFamily(false, "fmt", "Fprintf") {
 		t.Error("fmtFprintFamily admits fmt.Fprintf on an unaudited toolchain")
 	}
-	if auditedLinknamesOnly("//go:linkname a runtime.getAuxv\n") {
+	if auditedLinknamesOnly(false, "//go:linkname a runtime.getAuxv\n") {
 		t.Error("auditedLinknamesOnly drops the opaque-linkage floor on an unaudited toolchain")
 	}
 	atomicPkg := types.NewPackage("sync/atomic", "atomic")
@@ -637,10 +633,10 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := AuditedAtomicPointerElem(inst.(*types.Named)); ok {
+	if _, ok := AuditedAtomicPointerElem(false, inst.(*types.Named)); ok {
 		t.Error("AuditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
 	}
-	if driver := harnessSubtestDriverForTest(t); auditedHarnessSubtestDriver(driver) {
+	if driver := harnessSubtestDriverForTest(t); auditedHarnessSubtestDriver(false, driver) {
 		t.Error("auditedHarnessSubtestDriver admits (*T).Run on an unaudited toolchain")
 	}
 }
@@ -649,7 +645,7 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 // admitted on the audited toolchain; this companion pins that half so
 // the drop assertions cannot rot into always-false trivia.
 func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
-	if !auditedLinknamesOnly("//go:linkname a runtime.getAuxv\n") {
+	if !auditedLinknamesOnly(true, "//go:linkname a runtime.getAuxv\n") {
 		t.Error("the audited-pull linkname line is not admitted on the audited toolchain")
 	}
 	atomicPkg := types.NewPackage("sync/atomic", "atomic")
@@ -660,10 +656,10 @@ func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := AuditedAtomicPointerElem(inst.(*types.Named)); !ok {
+	if _, ok := AuditedAtomicPointerElem(true, inst.(*types.Named)); !ok {
 		t.Error("the instantiated atomic.Pointer fake is not admitted on the audited toolchain")
 	}
-	if !auditedHarnessSubtestDriver(harnessSubtestDriverForTest(t)) {
+	if !auditedHarnessSubtestDriver(true, harnessSubtestDriverForTest(t)) {
 		t.Error("the mini-SSA (*T).Run is not admitted on the audited toolchain")
 	}
 }

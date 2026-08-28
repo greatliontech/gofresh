@@ -144,8 +144,8 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 // exactly as fmt's Sprint family. Deliberately excluded: the harness's
 // ambient-input and mutation surfaces (Setenv, Chdir, TempDir, the
 // runtime-configuration reads) keep their own classifications.
-func auditedHarnessLogging(pkgPath, name string) bool {
-	if !auditedToolchainSource() || pkgPath != "testing" {
+func auditedHarnessLogging(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "testing" {
 		return false
 	}
 	switch name {
@@ -199,8 +199,8 @@ func harnessSubtestDriverEffect() externalEffect {
 // these names - (time.Time).Month, (*big.Float).Int, (*big.Float).Rat
 // - each equally pure decomposition or conversion over its operands.
 // Grows only by source audit (REQ-closure-observability-analysis).
-func classBPureStandard(pkgPath, name string) bool {
-	if !auditedToolchainSource() {
+func classBPureStandard(audited bool, pkgPath, name string) bool {
+	if !audited {
 		return false
 	}
 	switch pkgPath {
@@ -232,8 +232,8 @@ func classBPureStandard(pkgPath, name string) bool {
 // while Print (implicit stdout) and the Scan families carry their
 // channel in the symbol itself
 // (REQ-closure-observability-analysis's writer-sink admission).
-func fmtFprintFamily(pkgPath, name string) bool {
-	if !auditedToolchainSource() || pkgPath != "fmt" {
+func fmtFprintFamily(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "fmt" {
 		return false
 	}
 	switch name {
