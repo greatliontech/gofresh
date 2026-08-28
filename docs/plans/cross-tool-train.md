@@ -115,20 +115,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band U — UX (MCP-first)
 
-- [ ] 134. cross-tool: enforcement pointers become bindings —
-      complete gomutant's stipulator adoption (manifest compiled,
-      zero bindings authored): author tests-role bindings for every
-      requirement's "enforced by" prose pointer (29 across
-      execution/results/mcp/mutation), stipulator check joins the
-      change-set gate, and the prose lists delete — spec prose states
-      contracts, the binding store owns enforcement (stale pins
-      refuse at check; prose lists drift silently — the two-places
-      redundancy the structural gate collapses). The same sweep
-      deletes gofresh's six residual prose pointers (purity.md,
-      closure.md — adoption already full). pew ADOPTS (user ruling
-      2026-08-27, timing and method delegated): manifest, corpus
-      compile over pew's specs, and tests-role bindings land as this
-      chunk's pew leg, check green before its change set ships.
 - [ ] 111. cross-tool: tool-resident guidance — design chunk, opens
       with a short design pass (mechanism only; the ruling itself is
       settled): each tool answers "what does this verb do, what does
