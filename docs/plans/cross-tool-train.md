@@ -102,17 +102,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band B — standing guards (the neglect-proofing layer)
 
-- [ ] 135. gofresh: own-estate repair (gofresh
-      docs/issues/estate-check-red.md — filed by the fleet sweep's
-      first report, 2026-08-27) — diagnose the closure witness-run
-      timeout (18m in TestReadOnlyObservabilityProof under the
-      witness env vs ~8m for the whole package plain: race +
-      width-cap cost, policy bound, or real regression), re-consent
-      the train commits' 28 stale pin rows per requirement with the
-      moved bodies read, and restore check green; check green then
-      re-joins every gofresh change-set gate. Band: current-arc. Doc
-      deletes at close.
-
 ## Band U — UX (MCP-first)
 
 - [ ] 111. cross-tool: tool-resident guidance — design chunk, opens
