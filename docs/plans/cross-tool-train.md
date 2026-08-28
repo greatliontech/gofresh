@@ -112,21 +112,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       moved bodies read, and restore check green; check green then
       re-joins every gofresh change-set gate. Band: current-arc. Doc
       deletes at close.
-- [ ] 133. gomutant: evidence pins travel (gomutant docs/issues:
-      machine-local-evidence-pins — bldc 2026-08-27: absolute
-      runtime-input paths and host-RAM-derived oracleMemoryBytes in
-      evidence identity confine a committed findings document to the
-      producing checkout, defeating the portable repo layer) —
-      module-relative runtime-input path pins; split measurement
-      identity from machine circumstance (the toolchain pin STAYS
-      identity — provenance-refusal is deliberate; the RAM-derived
-      ceiling moves to a machine-profile facet unless the ceiling
-      demonstrably decided a verdict). Stated residual: the doc's
-      "or a CI runner" case stays open BY DESIGN — the toolchain pin
-      keeps cross-toolchain documents re-measuring (this fleet's godst
-      vs CI's stock), and 133 delivers same-toolchain travel only;
-      close-out promotes that refusal into the spec's provenance
-      section, then the doc deletes.
 
 ## Band U — UX (MCP-first)
 
