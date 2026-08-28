@@ -1143,3 +1143,48 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "758fb1b0b9a922079983446a54a937edc03be7fa0175054c9c6958a668028c0d"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-observation-class"
+  content_hash: "25b74eab2d0e8447af2af155f69168342b171a928e28147297155f288c63be34"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestOpenObservedEvidenceTravelsAcrossCheckouts"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3a5b377d8b7cff50b9893f09f0c86be8787abc78220abeb872597fd4ffa01f84"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-class"
+  content_hash: "25b74eab2d0e8447af2af155f69168342b171a928e28147297155f288c63be34"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservedEvidenceStaysMetadataBound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ec957f3801e9cbf60a7a54cae36690d6e99c0aeb2591b36af74b47b9d35a513"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-class"
+  content_hash: "25b74eab2d0e8447af2af155f69168342b171a928e28147297155f288c63be34"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestConversionsPreserveMetadataClass"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f8a9e8f6b7ea6dc2f6a8f822085116dc51b26cfd7569fbfd7110423be47538f6"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-relative-identities"
+  content_hash: "7bbee3bb3b8d935db7eb7accafcd64331a37a4ef66da17fe35e30cfb712982b7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRelativeIdentitiesTravelAcrossCheckoutRoots"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3a08a1bddab9922869e999e75c1679e104fe005045f2b9e1ffcfc5caf922f00d"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-relative-identities"
+  content_hash: "7bbee3bb3b8d935db7eb7accafcd64331a37a4ef66da17fe35e30cfb712982b7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRelativeRoundTripsWithAbsolute"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8ebb8f60d207fb3a55914d19b9c27eee079ad464108bfb6bdc42862884c7c001"
+}

@@ -294,7 +294,11 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, ex
 		}
 		members[rel] = true
 	}
-	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false)
+	// The bracket fingerprint always binds full state: its job is span
+	// integrity — detecting any mid-span modification, a content-restoring
+	// one included — so the metadata the persisted-reuse identity drops is
+	// exactly what it must keep (REQ-inputs-observation-class).
+	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false, true)
 	if err != nil {
 		return "", nil, false, "", err
 	}

@@ -121,10 +121,17 @@ type pathID struct {
 
 // pathInput is one observed path identity with the digest of the object state
 // the producing run saw. The identity is the embedded pathID alone — the
-// digest is evidence about it, never part of its key.
+// digest is evidence about it, never part of its key. Metadata marks a
+// metadata-bound entry — one a recorded stat observed — whose digest binds
+// the full object state, modification times included; an unmarked entry was
+// only ever opened, so its digest binds exactly the surface an open can
+// expose (content, mode, size — never mtime), and the persisted identity
+// stays portable across checkouts whose file times differ
+// (REQ-inputs-observation-class).
 type pathInput struct {
 	pathID
-	Digest string `json:"d"`
+	Digest   string `json:"d"`
+	Metadata bool   `json:"m,omitempty"`
 }
 
 // Incomplete constructs canonical evidence for a process whose runtime-input
@@ -166,12 +173,72 @@ func Absolute(observation Observation, moduleDir string) (Observation, error) {
 // AbsoluteEnv is Absolute with env as the complete process environment used to
 // revalidate the input and compute the converted state.
 func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Observation, error) {
+	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
+		name: "absolute",
+		convert: func(moduleDir, path string) pathID {
+			return pathID{Kind: pathAbs, Path: path}
+		},
+	})
+}
+
+// Relative revalidates state under moduleDir and returns equivalent evidence
+// whose path identities lexically under the module are module-relative,
+// external identities unchanged. This is the portable persisted form: the
+// converted identities revalidate under any checkout of the same content, so
+// evidence is keyed by what was measured, never by the checkout root that
+// measured it (REQ-inputs-relative-identities).
+func Relative(observation Observation, moduleDir string) (Observation, error) {
+	return RelativeEnv(observation, moduleDir, os.Environ())
+}
+
+// RelativeEnv is Relative with env as the complete process environment used
+// to revalidate the input and compute the converted state.
+func RelativeEnv(observation Observation, moduleDir string, env []string) (Observation, error) {
+	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
+		name: "relative",
+		convert: func(moduleDir, path string) pathID {
+			if rel, ok := relUnder(moduleDir, path); ok {
+				return pathID{Kind: pathRel, Path: filepath.ToSlash(rel)}
+			}
+			return pathID{Kind: pathAbs, Path: path}
+		},
+	})
+}
+
+// upsertPath adds entry to paths under the one-identity-one-class rule:
+// a new identity appends; a seen identity keeps its first entry and
+// unions the class to the stronger, metadata-bound observation
+// (REQ-inputs-observation-class). Every site that collapses identities
+// — merge, and the identity-kind conversions when two kinds map onto
+// one identity — goes through this one mechanism, so a collapse can
+// never drop a class or duplicate an identity. Digests are evidence,
+// not identity: the recomputed state rewrites them after any collapse.
+func upsertPath(paths []pathInput, index map[pathID]int, entry pathInput) []pathInput {
+	if at, ok := index[entry.pathID]; ok {
+		if entry.Metadata {
+			paths[at].Metadata = true
+		}
+		return paths
+	}
+	index[entry.pathID] = len(paths)
+	return append(paths, entry)
+}
+
+// identityConversion parameterizes the one identity-kind conversion core:
+// both directions share the revalidate/convert/recompute/reseal spine, and
+// differ only in the per-identity target kind and the sealed view tag.
+type identityConversion struct {
+	name    string
+	convert func(moduleDir, path string) pathID
+}
+
+func convertIdentityKinds(observation Observation, moduleDir string, env []string, conversion identityConversion) (Observation, error) {
 	if err := validateObservation(observation, false); err != nil {
 		return Observation{}, err
 	}
 	state := observation.State
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
-		return Observation{}, fmt.Errorf("runtimeinputs: incomplete state for absolute identities")
+		return Observation{}, fmt.Errorf("runtimeinputs: incomplete state for %s identities", conversion.name)
 	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
@@ -182,7 +249,7 @@ func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Obser
 		return Observation{}, err
 	}
 	if current != state {
-		return Observation{}, fmt.Errorf("runtimeinputs: state moved before absolute identity conversion")
+		return Observation{}, fmt.Errorf("runtimeinputs: state moved before %s identity conversion", conversion.name)
 	}
 	m, err := decode(state.Manifest)
 	if err != nil {
@@ -199,16 +266,21 @@ func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Obser
 	if err != nil {
 		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
-	for i, entry := range m.Paths {
+	convertedPaths := make([]pathInput, 0, len(m.Paths))
+	convertedIndex := map[pathID]int{}
+	for _, entry := range m.Paths {
 		path, err := materializePath(moduleDir, entry.pathID)
 		if err != nil {
 			return Observation{}, err
 		}
 		// The digest is recomputed by the converted state below: the framed
 		// stream is identity-dependent, so a converted identity's digest is
-		// never carried over.
-		m.Paths[i] = pathInput{pathID: pathID{Kind: pathAbs, Path: path}}
+		// never carried over. The observation class is identity-independent
+		// and rides the conversion; a conversion that maps two kinds onto
+		// one identity collapses them under the class-union rule.
+		convertedPaths = upsertPath(convertedPaths, convertedIndex, pathInput{pathID: conversion.convert(moduleDir, path), Metadata: entry.Metadata})
 	}
+	m.Paths = convertedPaths
 	sortManifest(&m)
 	converted, err := stateFromManifest(context.Background(), m, moduleDir, normalized)
 	if err != nil {
@@ -219,7 +291,7 @@ func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Obser
 		records[i] = processObservation{
 			process: record.process,
 			origin:  record.origin,
-			view:    absoluteProcessView(record.origin),
+			view:    conversionProcessView(conversion.name, record.origin),
 		}
 	}
 	return sealObservation(converted, records, observation.empty), nil
@@ -647,7 +719,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 
 	m := manifest{Version: manifestVersion}
 	envSeen := map[string]bool{}
-	pathSeen := map[pathID]bool{}
+	pathIndex := map[pathID]int{}
 	unverifiableSeen := map[string]bool{}
 	guardRoots := resolveGuardRoots(cfg.guardRoots)
 	// A module tree lying inside a declared ephemeral root does not
@@ -775,10 +847,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			if cfg.excludes(id) {
 				continue
 			}
-			if !pathSeen[id] {
-				pathSeen[id] = true
-				m.Paths = append(m.Paths, pathInput{pathID: id})
-			}
+			m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 			if ambiguousParent {
 				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
 			}
@@ -806,10 +875,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				if _, inModule := relUnder(moduleDir, p); !inModule {
 					if info, statErr := classifyProbe(p); statErr == nil && info.IsDir() {
 						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
-						if !pathSeen[id] {
-							pathSeen[id] = true
-							m.Paths = append(m.Paths, pathInput{pathID: id})
-						}
+						m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 						existenceBound[id] = true
 						continue
 					} else if os.IsNotExist(statErr) {
@@ -822,10 +888,7 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 						// is named and accepted in the spec
 						// (REQ-inputs-absent-stat).
 						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
-						if !pathSeen[id] {
-							pathSeen[id] = true
-							m.Paths = append(m.Paths, pathInput{pathID: id})
-						}
+						m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 						existenceBound[id] = true
 						continue
 					}
@@ -839,10 +902,18 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 			if cfg.excludes(id) {
 				continue
 			}
-			if !pathSeen[id] {
-				pathSeen[id] = true
-				m.Paths = append(m.Paths, pathInput{pathID: id})
-			}
+			m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
+			// The stat observed the full object state, so this entry's
+			// digest is metadata-bound from here on even if an earlier
+			// open recorded it content-bound
+			// (REQ-inputs-observation-class). An existence-bound entry
+			// CAN be re-reached here (a post-chdir relative stat of an
+			// absent external skips the existence block above) and then
+			// carries the mark; that is harmless over-pinning — an
+			// absent target digests as missing before any stat stream,
+			// and the mark only binds the post-appearance state more
+			// tightly.
+			m.Paths[pathIndex[id]].Metadata = true
 			// A stat under a DECLARED bracket root needs no metadata
 			// seal: the bracket fingerprint spans content and metadata
 			// over the whole run-to-ingest span — a directory object's
@@ -878,9 +949,8 @@ func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts
 				id, reason := classifyPath(moduleDir, p)
 				if reason != "" {
 					addUnverifiable(&m, unverifiableSeen, reason)
-				} else if !cfg.excludes(id) && !pathSeen[id] {
-					pathSeen[id] = true
-					m.Paths = append(m.Paths, pathInput{pathID: id})
+				} else if !cfg.excludes(id) {
+					m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 				}
 				addUnverifiable(&m, unverifiableSeen, "working-directory change")
 				if reason == "" && !cfg.excludes(id) && ambiguousParent {
@@ -988,8 +1058,8 @@ func processOrigin(state State, process, disposition string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func absoluteProcessView(origin string) string {
-	sum := sha256.Sum256([]byte("absolute:" + origin))
+func conversionProcessView(name, origin string) string {
+	sum := sha256.Sum256([]byte(name + ":" + origin))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -1087,7 +1157,7 @@ func MergeEnv(moduleDir string, env []string, observations ...Observation) (Obse
 	}
 	merged := manifest{Version: manifestVersion}
 	envSeen := map[string]bool{}
-	pathSeen := map[pathID]bool{}
+	pathIndex := map[pathID]int{}
 	unverifiableSeen := map[string]bool{}
 	processes := map[string]processObservation{}
 	for i, observation := range observations {
@@ -1122,10 +1192,7 @@ func MergeEnv(moduleDir string, env []string, observations ...Observation) (Obse
 			}
 		}
 		for _, entry := range m.Paths {
-			if !pathSeen[entry.pathID] {
-				pathSeen[entry.pathID] = true
-				merged.Paths = append(merged.Paths, entry)
-			}
+			merged.Paths = upsertPath(merged.Paths, pathIndex, entry)
 		}
 		for _, reason := range m.Unverifiable {
 			addUnverifiable(&merged, unverifiableSeen, reason)
@@ -1211,9 +1278,9 @@ func envEntryDigest(env []string, name string) string {
 
 // pathEntryDigest digests one path input's observed object state through the
 // same framed stream hashPath has always produced, into its own hasher.
-func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string) (string, bool, string, error) {
+func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string, metadata bool) (string, bool, string, error) {
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true)
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true, metadata)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -1258,7 +1325,7 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 		// Manifest hashing never filters: exclusion is per identity, never per
 		// content (REQ-inputs-exclusions), so a recorded directory identity
 		// digests everything its hash walks.
-		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleDir)
+		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleDir, entry.Metadata)
 		if err != nil {
 			return State{}, err
 		}
@@ -1821,7 +1888,7 @@ var currentMachineFacts = guard.CurrentMachineFacts
 // root must fingerprint content — an existence-bound root would hold
 // still while everything beneath it churns — so bracket hashing keeps
 // the refusal.
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs bool) (bool, string, error) {
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -1863,7 +1930,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 	mode := info.Mode()
 	switch {
 	case mode.IsRegular():
-		writeStat(h, info)
+		writeStat(h, info, metadata)
 		sum, err := fileHash(ctx, target)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
@@ -1872,7 +1939,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && id.Kind == pathRel:
-		sum, unv, reason, err := dirHashFiltered(ctx, target, skip, visit)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, skip, visit, metadata)
 		if err != nil {
 			return false, "", err
 		}
@@ -1923,8 +1990,17 @@ func resolvedTarget(path, moduleDir string) (string, bool, error) {
 	return resolved, false, nil
 }
 
-func writeStat(h hash.Hash, info os.FileInfo) {
-	fprintf(h, "stat %d %x %d %t\n", info.Size(), uint64(info.Mode()), info.ModTime().UnixNano(), info.IsDir())
+func writeStat(h hash.Hash, info os.FileInfo, metadata bool) {
+	if metadata {
+		fprintf(h, "stat %d %x %d %t\n", info.Size(), uint64(info.Mode()), info.ModTime().UnixNano(), info.IsDir())
+		return
+	}
+	// A subject that only ever opened this object cannot observe its
+	// modification time; binding it would pin the record to the checkout
+	// that measured it (the dropped field guards nothing a subject could
+	// observe — the same rationale the directory walk states for a
+	// directory object's own size and mtime).
+	fprintf(h, "stat %d %x %t\n", info.Size(), uint64(info.Mode()), info.IsDir())
 }
 
 func fileHash(ctx context.Context, path string) ([32]byte, error) {
@@ -1956,7 +2032,7 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 }
 
 func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
-	return dirHashFiltered(ctx, root, nil, nil)
+	return dirHashFiltered(ctx, root, nil, nil, true)
 }
 
 // dirHashFiltered is dirHash with a skip predicate over the slash-form path of
@@ -1965,7 +2041,7 @@ func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
 // visit receives each digested entry's slash-form rel (the root's own "."
 // included), letting a bracket capture retain the walked membership without
 // a second walk that could diverge from the hashing semantics.
-func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool, visit func(rel string)) ([32]byte, bool, string, error) {
+func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool, visit func(rel string), metadata bool) ([32]byte, bool, string, error) {
 	h := sha256.New()
 	unverifiable := false
 	reason := ""
@@ -2018,7 +2094,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			// scratch churn indistinguishable from real drift.
 			fprintf(h, "dir %s/ mode %x\n", rel, uint64(info.Mode()))
 		case info.Mode().IsRegular():
-			writeStat(h, info)
+			writeStat(h, info, metadata)
 			sum, err := fileHash(ctx, path)
 			if err != nil {
 				unverifiable = true
@@ -2029,7 +2105,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			}
 			fprintf(h, "file %s %x\n", rel, sum)
 		case info.Mode()&os.ModeSymlink != 0:
-			writeStat(h, info)
+			writeStat(h, info, metadata)
 			target, err := os.Readlink(path)
 			if err != nil {
 				unverifiable = true
@@ -2211,7 +2287,7 @@ func MovedInputsContext(ctx context.Context, encoded, moduleDir string, env []st
 		if err != nil {
 			return nil, err
 		}
-		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, abs)
+		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, abs, entry.Metadata)
 		if err != nil {
 			return nil, err
 		}

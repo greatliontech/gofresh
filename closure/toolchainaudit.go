@@ -49,6 +49,37 @@ var auditedToolchainReleases = map[string]bool{
 	// (docs/issues/dst-tagged-selection-outside-audit-key.md).
 	"go1.27.0-dst.10": true,
 	"go1.27.0-dst.11": true,
+	// dst.12's delta over dst.11 is one change: os.(*File).Stat gains
+	// a testlog.Stat record on every platform (godst 48c7e688), plus
+	// its test. Beyond strengthening the file-I/O class's
+	// testlog-visibility premise (a previously invisible fd-based
+	// metadata read becomes logged), the new record also CHANGES
+	// ingest classification: entries fd-stat'd by stdlib internals
+	// (ReadFile's buffer-sizing stat) classify metadata-bound, and an
+	// fd-stat outside a declared bracket stat root newly adds the
+	// "stat metadata input" unverifiable reason — both over-report
+	// (over-pin/refuse, never falsely serve), and dst.13 removes the
+	// non-escaping internal stat from the log. No audited symbol's
+	// body otherwise changed; the dead-code hook posture is dst.11's.
+	"go1.27.0-dst.12": true,
+	// dst.13's delta over dst.12: the fd-stat log line moves to the
+	// public method alone — stdlib-internal stats whose FileInfo never
+	// escapes (ReadFile's buffer-sizing stat via the new fstatNolog)
+	// no longer log, so the record matches what the subject could
+	// read: an explicit f.Stat() logs, os.ReadFile logs its open only.
+	// Same audited-surface intersection as dst.12 (the testlog
+	// premise, now drawn at the observable boundary); no audited
+	// symbol's body otherwise changed. dst.13 applied the rule at one
+	// of five internal call sites; dst.14 completes it.
+	"go1.27.0-dst.13": true,
+	// dst.14's delta over dst.13: the four remaining non-escaping
+	// internal fd-stats route through the nolog core (Getwd fallback
+	// hop, plan9 openDirNolog, illumos zero-copy check, windows
+	// readdir error-shaping); CopyFS's source stat stays logged - its
+	// mode escapes into the destination. Same audited-surface
+	// intersection as dst.13; no audited symbol's body otherwise
+	// changed.
+	"go1.27.0-dst.14": true,
 }
 
 // auditedToolchainSource reports whether the running toolchain's

@@ -21,13 +21,18 @@ at check time to detect a change and to name which input moved.
 base64url encoding of a compact JSON object whose keys, in order, are `v`, optional
 `env`, optional `paths`, and optional `unverifiable`; `v` is `1`, `unverifiable` is an
 array of strings, `env` is an array of objects with keys `n` (the variable name) and
-`d`, and `paths` is an array of objects with keys `k`, `p`, and `d`, where `k` is
+`d`, and `paths` is an array of objects with keys `k`, `p`, `d`, and optionally `m`,
+where `k` is
 `rel` for a slash-separated module-relative path or `abs` for a clean absolute host
-path. Each `d` is that input's entry digest: 32 lowercase hex characters of truncated
+path, and `m` is `true` for a metadata-bound entry (one a recorded stat observed —
+REQ-inputs-observation-class); an absent `m` marks the content-bound default. Each
+`d` is that input's entry digest: 32 lowercase hex characters of truncated
 SHA-256 — for an environment input over its presence and value hash, for a path input
-over the identity-framed object-state stream (a regular file's content, mode, size,
-and modification time; a module-relative directory's membership walk, in which member
-files and symlinks carry their full state while directory objects carry membership
+over the identity-framed object-state stream (a regular file's content, mode, and
+size, with its modification time additionally bound only when the entry is
+metadata-bound; a module-relative directory's membership walk, in which member
+files and symlinks carry that same class-dependent state while directory objects
+carry membership
 and mode alone, their own size and mtime deliberately unobserved as the observation
 bracket term states; an external directory's existence
 marker) — so the combined state digest is the fold, in
@@ -137,6 +142,38 @@ fabricated identities, and an unverifiable disposition. The state participates i
 ordinary deterministic merge, so one incomplete process makes the merged evidence
 unverifiable without being confused with an explicit completed empty observation.
 
+**REQ-inputs-observation-class** (behavior): A path entry's digest MUST bind
+exactly the surface the recorded operations could expose. An identity only ever
+opened binds its content class — content, mode, size, and for a module-relative
+directory its class-dependent membership walk — never a modification time, which
+no admitted read of the object can observe: binding it would pin the record to
+the checkout that measured it while guarding nothing a subject could branch on
+(the same rationale the walk states for a directory object's own size and
+mtime). An identity a recorded stat observed is metadata-bound — the returned
+metadata includes the modification time, so its digest binds the full object
+state. A stat observed after an open upgrades the one entry in place; a merge
+of observations that saw the same identity in different classes keeps the
+metadata-bound class; identity-kind conversions preserve the class unchanged.
+The stat record's completeness is a
+producing-toolchain property: the class split is complete only when
+fd-based stat surfaces whose result escapes to the caller (os.File.Stat on
+an opened handle) reach the test log, and only when stdlib-internal stats
+whose result never escapes (ReadFile's buffer-sizing stat) stay out of it —
+logging an observation the subject cannot read would collapse the content
+class for the dominant read idiom exactly as omitting a real one
+under-pins it. The dst toolchain draws this line (public method logs,
+non-escaping internal helper does not); a toolchain that omits fd-based
+stats entirely (stock Go through 1.27) leaves an opened file's metadata
+readable unobserved, so under it a subject branching on an opened file's
+modification time can serve across an mtime change — a named residual of
+that toolchain's observation surface, bounded to same-toolchain serves by
+the consumer's toolchain pin. The observation bracket's fingerprint is outside this split and always binds
+full state: its job is span integrity — detecting any mid-span modification, a
+content-restoring one included — so the metadata the persisted-reuse identity
+drops is exactly what it must keep. Content-bound evidence therefore
+revalidates in any checkout of the same content, and only records whose
+subjects could actually observe machine circumstance stay pinned to it.
+
 **REQ-inputs-absolute-identities** (behavior): A caller combining process
 observations rooted at different module directories MUST be able to revalidate each
 completed state against its original module view and convert every module-relative
@@ -147,6 +184,19 @@ conversion may strengthen the disposition when absolute directory semantics are 
 conservative, but never weakens it. The converted states then participate in ordinary
 merge under any caller root without interpreting one module's relative path under
 another module.
+
+**REQ-inputs-relative-identities** (behavior): A caller persisting a completed
+state anchored at one module MUST be able to revalidate it and convert every
+path identity lexically under the module directory to the equivalent
+module-relative identity — external identities unchanged — without changing
+environment identities, observation classes, or suppressing unverifiability;
+the dynamic unverifiable disposition carries exactly as absolute conversion
+carries it, and a state that moved since observation refuses conversion. The
+converted state is the portable persisted form: its identities and
+content-bound digests revalidate under any checkout of the same content, so
+persisted evidence is keyed by what was measured, never by the checkout root
+that measured it. The two conversions are inverses on states: converting to
+relative and back under the same module reproduces the absolute state.
 
 **REQ-inputs-adoption** (behavior): A caller holding a persisted encoded manifest
 MUST be able to re-admit it as a completed observation under an attributable
