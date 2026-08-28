@@ -73,11 +73,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 105. gomutant: structural-shaped probe provenance (gomutant
-      docs/issues/structural-shaped-probe-provenance-gap.md) —
-      structural shapes' probe content escapes dirty judgment and
-      serve re-observation; close the stale-serve path; doc deletes
-      at close.
 - [ ] 126. gofresh: dst-tagged selections join the audit key (gofresh
       docs/issues/dst-tagged-selection-outside-audit-key.md) —
       dst-tagged build selections get default-selection audit
