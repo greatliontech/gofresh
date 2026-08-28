@@ -16,3 +16,4 @@ when its work lands (git holds history).
 | [reusable-ci-workflow](reusable-ci-workflow.md) | chunk-107 ci.yaml exists in four near-identical copies; the rc-resolution loudness contract must be fixed four times | user decision (org .github repo) |
 | [registration-audit-walk-helper-unification](registration-audit-walk-helper-unification.md) | three break-walks + three literal-element walks in the registration audit; one helper each (chunk-83 review) | with train chunk 106 |
 | [range-over-func-yield-closure](range-over-func-yield-closure.md) | ranging a function iterator reads open-world through its own desugared yield callback; corpus pins the refusal | cross-tool train chunk 124 |
+| [estate-check-red](estate-check-red.md) | own estate red: closure witness-run timeout (30m policy, 18m in one observability proof under witness env) + 28 unconsented pin rows from train commits | cross-tool train chunk 135 |

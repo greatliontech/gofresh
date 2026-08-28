@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly fleet health sweep (gofresh/gomutant/stipulator/pew estate)
+
+[Service]
+Type=oneshot
+ExecStart=%h/repos/github.com/greatliontech/gofresh/scripts/fleet-sweep-run.sh
+# The user manager's default PATH carries none of the estate tools
+# (~/.local/bin: mlock; ~/go/bin: the tool binaries) — without this
+# line every tool section fails as rc=127 at fire time, which the
+# gatherer's preflight would abort on but never sweep.
+Environment=PATH=%h/.local/bin:%h/go/bin:/usr/local/bin:/usr/bin
+# Above the worst-case inner budget (7 checks x 1h + pew 1h + judge
+# 30m plus lock waits), so systemd never SIGTERMs a mid-run sweep.
+TimeoutStartSec=12h

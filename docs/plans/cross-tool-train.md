@@ -48,7 +48,9 @@ User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
 reports): 132 inserted after 83 (coverage integrity; lands before
 108 so the canary corpus includes the shapes it fixes), 133 inserted
 after 110 (same artifact, the findings document), 134 inserted after
-133 (chartered 2026-08-27: enforcement pointers become bindings) —
+133 (chartered 2026-08-27: enforcement pointers become bindings), 135
+inserted after 109 (field-response: the sweep's first report — gofresh
+own-estate red) —
 then
 91, 92, 96, then 129, 130, 131, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
@@ -110,6 +112,16 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       content drift is unrepresentable, version lag is the one drift
       channel left); its report files field-response chunks per the
       standing doctrine.
+- [ ] 135. gofresh: own-estate repair (gofresh
+      docs/issues/estate-check-red.md — filed by the fleet sweep's
+      first report, 2026-08-27) — diagnose the closure witness-run
+      timeout (18m in TestReadOnlyObservabilityProof under the
+      witness env vs ~8m for the whole package plain: race +
+      width-cap cost, policy bound, or real regression), re-consent
+      the train commits' 28 stale pin rows per requirement with the
+      moved bodies read, and restore check green; check green then
+      re-joins every gofresh change-set gate. Band: current-arc. Doc
+      deletes at close.
 - [ ] 110. gomutant: findings-document bounds (gomutant docs/issues:
       findings-doc-unbounded-growth — 70 MB after one campaign;
       findings-inspection-cost — inspection without re-judging,
@@ -203,7 +215,10 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       startup sweep; verdict-ladder-shared-admissibility — the
       status/stat admissibility ladder collapses to one shared
       function with the per-side working-tree input) — three docs
-      delete at close.
+      delete at close. RIDES: pew
+      docs/issues/repo-level-vouch-source.md — a reviewed vouch file
+      beside the store replaces hand-mirrored flag lists; doc deletes
+      at close.
 - [ ] 91. gomutant: deferred-check-close adoption — the run-end and
       per-window producer validations run full in-process gofresh
       analysis (~25% of in-process CPU under repeated packages.Load);
