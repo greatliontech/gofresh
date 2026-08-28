@@ -102,16 +102,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band B — standing guards (the neglect-proofing layer)
 
-- [ ] 109. cross-tool: weekly fleet health sweep — scheduled (cron)
-      sweep over the machine's tool estate: store freshness (pew
-      status), check summaries (stipulator), findings-document size
-      and layer health (gomutant), binary provenance (installed
-      binaries vs repo HEADs — the skew guards refuse loudly at use;
-      the sweep catches drift before use), and shape-corpus version
-      lag (each consumer's pinned gofresh vs the corpus's latest —
-      content drift is unrepresentable, version lag is the one drift
-      channel left); its report files field-response chunks per the
-      standing doctrine.
 - [ ] 135. gofresh: own-estate repair (gofresh
       docs/issues/estate-check-red.md — filed by the fleet sweep's
       first report, 2026-08-27) — diagnose the closure witness-run
