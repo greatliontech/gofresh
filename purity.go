@@ -252,16 +252,28 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 					sym := fd.Name.Name
 					if recv := recvTypeName(fd); recv != "" {
 						sym = recv + "." + sym
-					} else if sym == "init" && fd.Recv == nil {
+					} else if fd.Recv != nil {
+						// A receiver the grammar cannot name (a type
+						// error the parser tolerates): never mint the
+						// method as a plain-function subject — the
+						// bare name would collide with a real
+						// function's, marking the wrong subject. The
+						// sibling tools skip identically. The skip
+						// covers the whole body, directives included:
+						// a declaration yielding no subject is outside
+						// the conflict refusal's scope below.
+						continue
+					} else if sym == "init" {
 						// Unaddressable by name: init subjects carry the
 						// declaration ledger's positional identity,
 						// init#<file>#<ordinal> (file base name, 0-based
 						// ordinal within the file in declaration order),
 						// so multiple inits stay distinct subjects instead
-						// of collapsing onto one ambiguous name. The gate
-						// is the receiver's absence, not its nameability -
-						// a method named init under an unnameable receiver
-						// is never an init declaration and must not skew a
+						// of collapsing onto one ambiguous name. Receiver
+						// absence is established by the branches above:
+						// a nameable receiver minted a method subject, an
+						// unnameable one skipped the declaration — so a
+						// method named init never reaches here to skew a
 						// sibling's ordinal.
 						if p.Fset == nil {
 							// Cannot mint the positional identity; skip the
@@ -526,19 +538,22 @@ func recvTypeName(fd *ast.FuncDecl) string {
 		return ""
 	}
 	t := fd.Recv.List[0].Type
-	if star, ok := t.(*ast.StarExpr); ok {
-		t = star.X
+	for {
+		switch e := t.(type) {
+		case *ast.ParenExpr: // ((*T)) — the legal parenthesized form
+			t = e.X
+		case *ast.StarExpr:
+			t = e.X
+		case *ast.IndexExpr: // Recv[T]
+			t = e.X
+		case *ast.IndexListExpr: // Recv[T, U]
+			t = e.X
+		case *ast.Ident:
+			return e.Name
+		default:
+			return ""
+		}
 	}
-	if idx, ok := t.(*ast.IndexExpr); ok { // Recv[T]
-		t = idx.X
-	}
-	if idx, ok := t.(*ast.IndexListExpr); ok { // Recv[T, U]
-		t = idx.X
-	}
-	if id, ok := t.(*ast.Ident); ok {
-		return id.Name
-	}
-	return ""
 }
 
 // dynamicVarKey identifies a package-level variable stably across the
