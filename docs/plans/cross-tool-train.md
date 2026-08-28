@@ -112,11 +112,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       moved bodies read, and restore check green; check green then
       re-joins every gofresh change-set gate. Band: current-arc. Doc
       deletes at close.
-- [ ] 110. gomutant: findings-document bounds (gomutant docs/issues:
-      findings-doc-unbounded-growth — 70 MB after one campaign;
-      findings-inspection-cost — inspection without re-judging,
-      summary O(targets)) — bound, compact, and make inspection
-      cheap; both docs delete at close.
 - [ ] 133. gomutant: evidence pins travel (gomutant docs/issues:
       machine-local-evidence-pins — bldc 2026-08-27: absolute
       runtime-input paths and host-RAM-derived oracleMemoryBytes in

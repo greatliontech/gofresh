@@ -167,9 +167,10 @@ for r in "${CORPUS_CONSUMERS[@]}"; do
 done
 
 section "gomutant findings stores (size + record summary)"
-# Inspection cost on large stores is a LIVE tracked fault (train chunk
-# 110: findings-inspection-cost) — a budget-exceeded inspection is a
-# sweep fact to report, never an estate red.
+# The findings default reads recorded facts without judging freshness
+# — seconds-class at any store size (gomutant REQ-result-inspection)
+# — so a budget-exceeded inspection is an anomaly worth a row, though
+# still a sweep fact, never an estate red.
 for r in "${FINDINGS_REPOS[@]}"; do
   [ -d "$GL/$r" ] || { echo "$r: REPO ABSENT"; continue; }
   store="$GL/$r/.gomutant"
@@ -179,7 +180,7 @@ for r in "${FINDINGS_REPOS[@]}"; do
   rc=$?
   case $rc in
     0) summary=$(echo "$out" | tail -3 | tr '\n' ' ') ;;
-    124) summary="NOT MEASURED: inspection exceeded 30s (train chunk 110 tracks inspection cost)" ;;
+    124) summary="NOT MEASURED: inspection exceeded 30s (recorded default should be seconds-class - investigate)" ;;
     3) summary="NOT MEASURED: machine lock refused (quiet wanted)" ;;
     *) summary="TOOL ERROR: $(echo "$out" | tail -1)" ;;
   esac
