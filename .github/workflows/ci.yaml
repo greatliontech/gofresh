@@ -45,6 +45,9 @@ jobs:
       # headroom, and a cold cache lands on the job ceiling, not this
       # flag. A budget overrun is a real finding (a hang, or a suite
       # outgrowing its budget) — re-measure before raising the number.
+      # The race-mode witness budget for the same suite lives at
+      # .stipulator/policy.textproto's -test.timeout with its own
+      # measured curve — when the closure proofs grow, re-measure both.
       - run: go test ./... -count=1 -timeout=30m
 
   # The pre-release leg: go.dev/dl orders by version, newest first, so

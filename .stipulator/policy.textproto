@@ -9,7 +9,24 @@ invocations {
   go {
     packages: "./..."
     race: true
-    args: "-test.timeout=30m"
+    # 60m governs the per-binary cap of the WITNESS run, which stipulator
+    # executes width-capped (2 on this 24-core host). Evidence, 2026-08-28,
+    # idle machine: the race detector measures 4.06x on the analysis-heavy
+    # observability proofs (TestReadOnlyObservabilityProof 3m42s plain vs
+    # 15m02s race, unconstrained); the plain closure package is 544s
+    # (CI-measured 2026-08-27); the fleet sweep observed 18m elapsed at the
+    # old 30m cap's kill inside that one test under the witness env (a
+    # lower bound on the unit). Baseline under THIS cap: the first check
+    # re-executed 502 witnesses — the whole 196-witness closure unit
+    # included — in 35m58s end-to-end wall (bracketed 2026-08-28
+    # 13:13:10-13:49:08 local), an upper bound on the closure unit, so it
+    # sits well inside 60m. A budget overrun here is a real finding:
+    # re-measure the witness-width-capped unit before raising the number.
+    # The plain-suite budget for the same packages lives in
+    # .github/workflows/ci.yaml with its own measured curve — when the
+    # closure proofs grow, re-measure both. The 7200s invocation budget
+    # above bounds the whole run.
+    args: "-test.timeout=60m"
     bracket_paths: "/bin/sh"
     bracket_paths: "/usr/bin/sh"
     bracket_paths: "/usr/bin/git"

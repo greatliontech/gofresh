@@ -12,7 +12,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-vouch-discharge"
-  content_hash: "60c62f2e09e547dd9d900c1845cfb5a51d96b2fc5a173fba0a62014b17b1302d"
+  content_hash: "d2ab20e6dd9dab5dd8af57e0f9398b15eff4cfaff8f4786ed0e5c96997e121c3"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVouchDischargesPinnedCulprit"
   role: BINDING_ROLE_TESTS

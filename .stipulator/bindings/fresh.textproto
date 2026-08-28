@@ -30,7 +30,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-sound"
-  content_hash: "a3f67afbbccdd0cb9205c6d7d37957dc35de3fbf217102dfa90ba7805cfad9b4"
+  content_hash: "df85450fe3441bb05fd30c2e61320e78bb001053be859661b4f177e6740996d7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
@@ -48,7 +48,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-sound"
-  content_hash: "a3f67afbbccdd0cb9205c6d7d37957dc35de3fbf217102dfa90ba7805cfad9b4"
+  content_hash: "df85450fe3441bb05fd30c2e61320e78bb001053be859661b4f177e6740996d7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
   role: BINDING_ROLE_TESTS
@@ -75,7 +75,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "d3211b723aeb31c00e9bfb1cdfa693fe1f97891738f0e45fdf08b5344f14edca"
+  content_hash: "f98e482a0e215c1c60ffd57a6d3e078b0eca899ef70737c769e358ae5d8d1d4b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestFingerprintDataShape"
   role: BINDING_ROLE_TESTS
@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "d3211b723aeb31c00e9bfb1cdfa693fe1f97891738f0e45fdf08b5344f14edca"
+  content_hash: "f98e482a0e215c1c60ffd57a6d3e078b0eca899ef70737c769e358ae5d8d1d4b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestFingerprintIsExportedData"
   role: BINDING_ROLE_PROVES

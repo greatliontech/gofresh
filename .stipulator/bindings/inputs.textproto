@@ -88,7 +88,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.hashPath"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "6406bea259e266dd515b0fb171594f22f543d5f502d81b34cfcda04e3cfd1c4a"
+  shape_hash: "af1eb101ee489b4a0d81a01eda5a68c5edc35ab006cfafcaeeda29c2b890bfcf"
 }
 
 bindings {
@@ -246,7 +246,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-fresh-mutation"
-  content_hash: "7a1f5ec5997571cb81c8fabacf3f35ab7943f3e0a49206aa3f7b65078ed53868"
+  content_hash: "fca9059eafa1ceffcb1f29d14cb8f2b4f4a42c15961bfbe07457352a94ce8875"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
@@ -255,7 +255,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-fresh-mutation"
-  content_hash: "7a1f5ec5997571cb81c8fabacf3f35ab7943f3e0a49206aa3f7b65078ed53868"
+  content_hash: "fca9059eafa1ceffcb1f29d14cb8f2b4f4a42c15961bfbe07457352a94ce8875"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
