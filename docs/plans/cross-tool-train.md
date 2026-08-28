@@ -73,13 +73,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 126. gofresh: dst-tagged selections join the audit key (gofresh
-      docs/issues/walk-dst-selection-for-audit-key.md) —
-      dst-tagged build selections get default-selection audit
-      admissions because the key cannot see tags; judged runs over
-      dst-tagged selections are imminent (stipulator's build-tagged
-      binding landed; tugboat's dst legs are the consumer); doc
-      deletes at close.
 - [ ] 93. cross-tool: parenthesized-receiver naming grammar — the
       shared receiver-naming convention (gofresh recvTypeName,
       gomutant's twin, stipulator's Go backend) cannot reduce the
