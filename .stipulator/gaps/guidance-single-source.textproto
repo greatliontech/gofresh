@@ -1,0 +1,6 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-guidance-single-source"
+reason: "gofresh has no MCP or CLI surface; the single-source invariant is enforced by each consuming repo's guidance requirement and binding"
+lands { manual { condition: "the consuming repos' guidance adoptions land their bindings (train chunk 111 legs 2-4)" } }

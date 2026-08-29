@@ -8,6 +8,13 @@ comparing a stored fingerprint against the current one. It never runs the symbol
 and never owns the result store: it answers one question — *is this still fresh?* —
 and leaves measuring and storing to the caller.
 
+Beside that one question, this module is also the fleet's shared
+substrate: infrastructure every consuming tool needs identically
+lives here once — today the tool-resident guidance format
+([guidance.md](guidance.md)) — because the fleet's tools already
+depend on this module, and a second home would mean a second
+implementation.
+
 ## Vocabulary
 
 **subject** (term): the named Go symbol whose freshness is tracked — a function
