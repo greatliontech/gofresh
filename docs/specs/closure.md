@@ -243,6 +243,19 @@ judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
 (The refusal reason's own contract, the discharge channel it names
 included, is REQ-closure-shared-dynamic-state-reason.)
+A package-level variable whose type carries none of these — a plain
+scalar or any other carrier-free type — is deliberately outside this
+net: its direct mutation is per-process-deterministic content the
+whole-graph hash already covers, and an unsafe-mediated mutation of
+it refuses on the channel it uses — a write through an
+unsafe.Pointer-typed value refuses at the subject walk (the scan
+carries that class as a diagnostic only for the observability
+proof, REQ-closure-observability-analysis, and the maximal-tier
+unverifiable judgment keeps it), while `unsafe.Slice`,
+`unsafe.String`, and the package's other operations keep the
+maximal-tier scan block, their call sites carrying no
+unsafe-pointer-typed value the walk can price; the non-Go write
+channels — assembly, `//go:linkname`, cgo — remain scan blockers.
 The audited atomic transparency governs every carrier walk of this
 judgment — the trigger above, the openness a parameter, receiver, or
 constraint term confers on its subject (REQ-closure-analysis), and

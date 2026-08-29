@@ -1559,6 +1559,21 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// price, so it must keep the scan block - the row that pins
 		// the carve's breadth.
 		{fixture: "unsafeslice", subject: "TestSliceHeader", reason: "package scan: reaches unaudited standard operation unsafe.Slice"},
+		// The scalar-global mutation boundary (the scalarglobalwrite
+		// and scalarglobalslice package docs carry the full story,
+		// the slice channel's separate-package placement included).
+		// The direct-write row is the
+		// carve's guard for this package — observable despite the
+		// sibling unsafe declarations; the admission itself is
+		// enforced at the view tier's plain-data builder test. The
+		// two unsafe rows pin the per-channel refusal: an
+		// unsafe.Pointer-typed value refuses at the walk (never the
+		// scan — the absent discriminator), and the unsafe.Slice
+		// write, carrying no such value, refuses at the scan, its
+		// only arm.
+		{fixture: "scalarglobalwrite", subject: "TestDirectWrite", observable: true},
+		{fixture: "scalarglobalwrite", subject: "TestUnsafeWrite", reason: "unsafe pointer reachable", absent: "package scan:"},
+		{fixture: "scalarglobalslice", subject: "TestSliceWrite", reason: "package scan: reaches unaudited standard operation unsafe.Slice"},
 		{fixture: "observablestat", subject: "TestStat"},
 		{fixture: "observablemutation", subject: "TestRemove"},
 		{fixture: "observableprocess", subject: "TestCommand"},
@@ -1819,7 +1834,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "harnessroot", subject: "BenchmarkProd", reason: "package scan: reaches testing.Loop"},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	} {
-		t.Run(tc.fixture, func(t *testing.T) {
+		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
 			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
 			results, err := h.ComputeObservabilityBatch([]Subject{subject})
 			if err != nil {
