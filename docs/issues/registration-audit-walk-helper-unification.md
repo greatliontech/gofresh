@@ -11,5 +11,7 @@ would collapse them; the resolver-side duplication was already
 collapsed in-chunk (resolveEnvAudit). Behavior-preserving refactor —
 the walks differ only in their gates and targets.
 
-Lands: with cross-tool train chunk 106 (the next gofresh audit-plane
-chunk; redefer at its triage if 106's scope lands elsewhere).
+Lands: rides train chunk 98 (the walk-unification band, beside
+unify-carrier-walks and unify-discharge-walks; redeferred at 106's
+triage — chunk 106's scope is the carrier/dynamic-state pricing
+plane, not the registration audit).
