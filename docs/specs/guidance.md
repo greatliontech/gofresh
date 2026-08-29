@@ -108,6 +108,13 @@ does not carry is a document defect, not a tolerated extra.
 
 ## Consuming contract
 
+The authoring convention the projections rely on: `**when:**` and
+`**example:**` prose names knobs neutrally — "the check preview",
+"the timeout" — never one surface's literal spelling or assignment
+syntax, because the help rendering shows the prose beside only that
+surface's own knob list; the knobs block owns names, and each
+knob's own prose owns its per-surface spellings.
+
 **REQ-guidance-single-source** (invariant): A consuming tool's
 tool-level served prose MUST be read from the parsed document at
 initialization — never a second literal. Per-parameter schema and
