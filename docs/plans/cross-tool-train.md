@@ -73,14 +73,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 93. cross-tool: parenthesized-receiver naming grammar — the
-      shared receiver-naming convention (gofresh recvTypeName,
-      gomutant's twin, stipulator's Go backend) cannot reduce the
-      legal parenthesized receiver form, so such methods are
-      unnameable everywhere; gofresh's purity scan additionally minted
-      them as plain-function subjects. Extend the grammar with the
-      ParenExpr unwrap in all three tools in lockstep, or record the
-      unnameable form as contract.
 - [ ] 106. gofresh: scalar-global cross-test mutation coverage
       (startup-effect-precision 0e, folded 2026-08-26) — the carrier
       net prices alias-handing carriers, and unsafe-mediated mutation
