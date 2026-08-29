@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.Hasher.ComputeObservabilityBatch"
   role: BINDING_ROLE_IMPLEMENTS
@@ -102,7 +102,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
@@ -543,7 +543,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAuditedHarnessLoggingBounds"
   role: BINDING_ROLE_TESTS
@@ -552,7 +552,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingIsNotPurityEvidence"
   role: BINDING_ROLE_TESTS
@@ -561,7 +561,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-analysis"
-  content_hash: "b52a2b9d01428e6122691bbd3137745cf26ce141f7a31397c4421288ce65682c"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestHarnessLoggingDeclarationInventory"
   role: BINDING_ROLE_TESTS
@@ -719,4 +719,13 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass"
   role: BINDING_ROLE_TESTS
   shape_hash: "faa6e28f9dbeb78084670a19298691c8a1e2b979d5043fb100d1cc20f19ece63"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "0e7f49d50df85e943fcf32ad8245893c160699172694aa168f1e518faf768fa6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestToolchainSelectionNoticeMatchesVerdict"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4f7caaafa106ef0a44c8a47ba7e47e972fef73df0f93de1ce291279c91d1d608"
 }

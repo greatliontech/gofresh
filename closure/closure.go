@@ -75,19 +75,27 @@ type Hasher struct {
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
 	buildFlags []string
-	// selectionAudited is the two-axis toolchain-audit verdict for this
-	// analysis' build selection, computed once at construction: every
-	// audited-set consultation under this Hasher answers through it, so
-	// a tag-swapped selection degrades the stdlib admissions to the
-	// ordinary fail-closed classification instead of inheriting the
-	// default selection's audit (AuditedToolchainSelection).
-	selectionAudited bool
-	progs            map[string]*program             // by package import path
-	progErrs         map[string]error                // memoized load failures, by package import path
-	lists            map[string][]listPkg            // parsed `go list -deps -test`, by package import path
-	maximalTesting   map[string]maximalEffectScan    // typed testing-runtime effects by requested package
-	maximalEffects   map[string]maximalEffectsResult // package external-effect scans by requested package
-	maximalFiles     map[string]maximalEffectScan    // per-file effect scans by absolute path
+	// selectionResolved marks the two-axis toolchain-audit verdict as
+	// computed by the constructor; the zero value refuses, so a Hasher
+	// built without construction can never enable a standard-library
+	// admission by omission — the audit's fail-closed ladder survives
+	// the zero value.
+	selectionResolved bool
+	// selectionNotice is the two-axis toolchain-audit rendering for this
+	// analysis' build selection, computed once at construction — ""
+	// exactly when the selection is audited, so verdict and text are
+	// one derivation: every audited-set consultation under this Hasher
+	// answers through SelectionAudited, and a tag-swapped selection
+	// degrades the stdlib admissions to the ordinary fail-closed
+	// classification instead of inheriting the default selection's
+	// audit (ToolchainSelectionNotice).
+	selectionNotice string
+	progs           map[string]*program             // by package import path
+	progErrs        map[string]error                // memoized load failures, by package import path
+	lists           map[string][]listPkg            // parsed `go list -deps -test`, by package import path
+	maximalTesting  map[string]maximalEffectScan    // typed testing-runtime effects by requested package
+	maximalEffects  map[string]maximalEffectsResult // package external-effect scans by requested package
+	maximalFiles    map[string]maximalEffectScan    // per-file effect scans by absolute path
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -242,8 +250,8 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 	}
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
-		selectionAudited: AuditedToolchainSelection(buildFlags, goflags, goexperiment),
-		progs:            map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
+		selectionResolved: true, selectionNotice: ToolchainSelectionNotice(buildFlags, goflags, goexperiment),
+		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{},
 	}, nil

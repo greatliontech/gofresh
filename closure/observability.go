@@ -183,7 +183,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			}
 			end := min(start+maxAttributedSubjects, len(group.subjects))
 			batch := group.subjects[start:end]
-			reachable, err := attributedReachableSets(h.ctx, h.selectionAudited, prog, batch)
+			reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
 			if err != nil {
 				return nil, err
 			}
@@ -314,7 +314,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		return Observability{}, err
 	}
 	for _, effect := range maximalEffects {
-		if maximalObservabilityBlocker(h.selectionAudited, effect) {
+		if maximalObservabilityBlocker(h.SelectionAudited(), effect) {
 			// The tier names itself: a package-scan block is the
 			// whole-package negative backstop, not the subject's own
 			// attributed flow — measurably distinct, so a corpus can
@@ -370,7 +370,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 // (REQ-closure-observability-analysis).
 func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
-	analyzer.fresh = newFreshParamAnalysis(base.h.selectionAudited, reachable)
+	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), reachable)
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
 		if idx == nil || idx.std || idx.testMain {
@@ -448,7 +448,7 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 	// flag is this tier's own consequence.
 	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), false)
 	if classified {
-		effect.observable = observableCallEffect(analyzer.h.selectionAudited, effect, site.Common(), site, analyzer.fresh)
+		effect.observable = observableCallEffect(analyzer.h.SelectionAudited(), effect, site.Common(), site, analyzer.fresh)
 		analyzer.recordExternalEffect(effect)
 	}
 }
@@ -464,7 +464,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// subject flow. Parameter crossing stays refused exactly as with a
 	// nil analysis (REQ-closure-observability-analysis).
 	if reachable.propertyHarnessAudited {
-		analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: analyzer.h.selectionAudited}
+		analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: analyzer.h.SelectionAudited()}
 	}
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)

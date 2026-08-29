@@ -111,7 +111,7 @@ func (h *Hasher) ComputeRootedFunctions(subjects []Subject) (map[Subject]RootedF
 			}
 			end := min(start+maxAttributedSubjects, len(rooted))
 			batch := rooted[start:end]
-			reachable, err := attributedReachableSets(h.ctx, h.selectionAudited, prog, batch)
+			reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
 			if err != nil {
 				return nil, err
 			}

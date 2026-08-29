@@ -27,7 +27,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 	a.rtaResolved = reachable.resolved
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
-	a.fresh = newFreshParamAnalysis(h.selectionAudited, reachable)
+	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable)
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
 			continue
@@ -59,7 +59,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		if a.rtaResolved[site] && !a.openWorld && len(targets) != 0 {
 			admitted := true
 			for target := range targets {
-				if harnessLoggingFunction(h.selectionAudited, target) {
+				if harnessLoggingFunction(h.SelectionAudited(), target) {
 					continue
 				}
 				idx := a.idxForFunction(target)
@@ -99,17 +99,17 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
-			if !ok && harnessLoggingFunction(h.selectionAudited, target) {
+			if !ok && harnessLoggingFunction(h.SelectionAudited(), target) {
 				a.recordExternalEffect(harnessLoggingEffect(functionSymbolName(target)))
 				continue
 			}
-			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(h.selectionAudited, idx.path) {
+			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(h.SelectionAudited(), idx.path) {
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
 				// admission is a property of the operation, not of the
 				// call form (REQ-closure-observability-analysis).
 				name := functionSymbolName(target)
-				if !classBPureStandard(h.selectionAudited, idx.path, name) && !auditedSyncSymbol(h.selectionAudited, idx.path, name) && !auditedPoolSymbol(h.selectionAudited, idx.path, name) && !auditedRuntimeTypeSymbol(h.selectionAudited, idx.path, name) {
+				if !classBPureStandard(h.SelectionAudited(), idx.path, name) && !auditedSyncSymbol(h.SelectionAudited(), idx.path, name) && !auditedPoolSymbol(h.SelectionAudited(), idx.path, name) && !auditedRuntimeTypeSymbol(h.SelectionAudited(), idx.path, name) {
 					effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
 					ok = true
 				}
@@ -561,7 +561,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && stdBodyCut(a.h.selectionAudited, fn, classified, classifiedOK) {
+	if idx.std && stdBodyCut(a.h.SelectionAudited(), fn, classified, classifiedOK) {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -757,11 +757,11 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		a.requestWiden("interface dispatch on unattributable state in " + caller.String())
 		return
 	}
-	if auditedHarnessLogging(a.h.selectionAudited, pkgPath, name) {
+	if auditedHarnessLogging(a.h.SelectionAudited(), pkgPath, name) {
 		a.recordExternalEffect(harnessLoggingEffect(name))
 		return
 	}
-	if auditedHarnessSubtestDriver(a.h.selectionAudited, callee) {
+	if auditedHarnessSubtestDriver(a.h.SelectionAudited(), callee) {
 		// The callback is subject flow reached through the harness's own
 		// dispatch and classified at its own sites; the driver itself is
 		// an admitted harness fact, never descended into
@@ -790,7 +790,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	effect, classified := a.classifyCalleeEffect(callee, pkgPath, name, c, callerStd)
 	if classified {
-		effect.observable = observableCallEffect(a.h.selectionAudited, effect, c, site, a.fresh)
+		effect.observable = observableCallEffect(a.h.SelectionAudited(), effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
 			return
 		}
@@ -831,7 +831,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, callerStd bool) (externalEffect, bool) {
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.selectionAudited, pkgPath) && !classBPureStandard(a.h.selectionAudited, pkgPath, name) && !auditedSyncSymbol(a.h.selectionAudited, pkgPath, name) && !auditedPoolSymbol(a.h.selectionAudited, pkgPath, name) && !auditedRuntimeTypeSymbol(a.h.selectionAudited, pkgPath, name) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !classBPureStandard(a.h.SelectionAudited(), pkgPath, name) && !auditedSyncSymbol(a.h.SelectionAudited(), pkgPath, name) && !auditedPoolSymbol(a.h.SelectionAudited(), pkgPath, name) && !auditedRuntimeTypeSymbol(a.h.SelectionAudited(), pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true
 	}
@@ -843,7 +843,7 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
 		classified = true
 	}
-	if classified && fmtFprintFamily(a.h.selectionAudited, pkgPath, name) && c.StaticCallee() == callee && len(c.Args) != 0 &&
+	if classified && fmtFprintFamily(a.h.SelectionAudited(), pkgPath, name) && c.StaticCallee() == callee && len(c.Args) != 0 &&
 		inMemoryFormattedSink(c.Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, a.fresh) {
 		// Sprint-equivalent: the writer provably pins an audited
 		// in-memory sink, so the formatted bytes never leave process

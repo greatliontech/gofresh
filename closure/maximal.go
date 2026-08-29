@@ -202,7 +202,7 @@ func (h *Hasher) maximalFileEffectsCached(path string) (maximalEffectScan, error
 	if scan, ok := h.maximalFiles[path]; ok {
 		return scan, nil
 	}
-	scan, err := maximalFileEffects(h.selectionAudited, path)
+	scan, err := maximalFileEffects(h.SelectionAudited(), path)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}

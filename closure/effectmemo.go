@@ -38,7 +38,7 @@ const effectScanStrategy = "gofresh/effect-scan@11"
 // never serve an audited consumer or vice versa.
 func (h *Hasher) effectScanScope() string {
 	scope := effectScanStrategy + " " + runtime.Version()
-	if !h.selectionAudited {
+	if !h.SelectionAudited() {
 		scope += " selection-unaudited"
 	}
 	return scope

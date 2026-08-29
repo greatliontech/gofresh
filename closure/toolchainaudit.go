@@ -247,43 +247,81 @@ func binaryExperiment() string {
 // (REQ-closure-observability-analysis's exact-version keying clause;
 // the purity tier's audited admissions answer from the same list).
 func AuditedToolchainSelection(buildFlags []string, goflags, goexperiment string) bool {
-	if !auditedToolchainSource() {
-		return false
+	return ToolchainSelectionNotice(buildFlags, goflags, goexperiment) == ""
+}
+
+// ToolchainSelectionNotice renders the two-axis audit's fail-closed
+// consequence for the analysis' effective selection, "" exactly when
+// the release and selection are both listed — the admission bool and
+// this rendering are one derivation, so the texts can never disagree
+// with the verdict. The rendering is owned here, at the same seam that
+// owns discharge-channel reasons, so every consumer serves the same
+// notice; callers prepend attribution (which invocation or
+// configuration authored the selection). The notice names the axis
+// that misses — the running release, an environment GOEXPERIMENT
+// differing from the binary's baked set, a flag defeating selection
+// classification, or the canonical selection key — with the walk that
+// would list it.
+func ToolchainSelectionNotice(buildFlags []string, goflags, goexperiment string) string {
+	return toolchainSelectionNotice(auditedToolchainSource(), runtime.Version(), binaryExperiment(), auditedToolchainSelections[runtime.Version()], buildFlags, goflags, goexperiment)
+}
+
+// toolchainSelectionNotice is the rendering over explicit axis inputs,
+// so a test can drive the worlds the exported entry cannot reach on a
+// listed toolchain (the unlisted-release branch foremost).
+func toolchainSelectionNotice(sourceListed bool, version, bakedExperiment string, listedSelections map[string]bool, buildFlags []string, goflags, goexperiment string) string {
+	const consequence = " — standard-library observation admissions are disabled (observation proofs strip and serving degrades to execution)"
+	if !sourceListed {
+		return "toolchain-selection audit: release " + version + " is not listed" + consequence + " until the release delta is walked and listed"
 	}
-	if goexperiment != "" && goexperiment != binaryExperiment() {
-		return false
+	if goexperiment != "" && goexperiment != bakedExperiment {
+		return "toolchain-selection audit: environment GOEXPERIMENT " + strconv.Quote(goexperiment) + " under " + version + " differs from the binary's baked experiment set" + consequence + "; experiment flavors are version-axis listings, never inherited"
 	}
 	effective := append(append([]string(nil), buildFlags...), strings.Fields(goflags)...)
 	key, ok := selectionAuditKey(effective)
 	if !ok {
-		return false
+		return fmt.Sprintf("toolchain-selection audit: effective build flags %q (explicit plus GOFLAGS) under %s defeat selection classification%s; an unclassifiable selection is never admitted", effective, version, consequence)
 	}
-	return auditedToolchainSelections[runtime.Version()][key]
+	if listedSelections[key] {
+		return ""
+	}
+	return fmt.Sprintf("toolchain-selection audit: selection %q under %s is unwalked%s until the selection delta is walked and listed", key, version, consequence)
+}
+
+// ToolchainSelectionNoticeResolvedContext is the resolving entry of the
+// notice for callers without a Hasher (a consumer attributing the
+// degradation at its own configuration tier): it reads the effective
+// GOFLAGS and GOEXPERIMENT under the caller's environment —
+// snapshot-first when one is supplied, one go env read otherwise — and
+// answers ToolchainSelectionNotice over them. Resolution failure
+// returns its error so the caller fails loudly instead of silently
+// losing the notice.
+func ToolchainSelectionNoticeResolvedContext(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot) (string, error) {
+	goflags, goexperiment, err := resolveSelectionEnv(ctx, dir, env, snapshot)
+	if err != nil {
+		return "", err
+	}
+	return ToolchainSelectionNotice(buildFlags, goflags, goexperiment), nil
 }
 
 // SelectionAudited reports this Hasher's two-axis toolchain-selection
-// audit verdict, computed once at construction from its build flags
-// and resolved environment: the consumer-tier scans (purity, dynamic
-// state) and the view surfaces (the unaudited notice) answer their
-// audited-set consultations from the same verdict the closure tiers
-// thread internally.
+// audit verdict — a constructor-resolved verdict with an empty notice,
+// one derivation with the rendering: the consumer-tier scans (purity,
+// dynamic state) and the view surfaces answer their audited-set
+// consultations from the same verdict the closure tiers thread
+// internally. An unresolved (zero-value) Hasher refuses.
 func (h *Hasher) SelectionAudited() bool {
-	return h.selectionAudited
+	return h.selectionResolved && h.selectionNotice == ""
 }
 
-// AuditedToolchainSelectionResolvedContext is the resolving entry of
-// the two-axis key for callers without a Hasher (the explain surface):
-// it reads the effective GOFLAGS and GOEXPERIMENT under the caller's
-// environment — snapshot-first when one is supplied, one go env read
-// otherwise — and answers AuditedToolchainSelection over them.
-// Resolution failure returns its error so the caller fails loudly
-// instead of silently losing every stdlib admission.
-func AuditedToolchainSelectionResolvedContext(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot) (bool, error) {
-	goflags, goexperiment, err := resolveSelectionEnv(ctx, dir, env, snapshot)
-	if err != nil {
-		return false, err
+// SelectionNotice is the Hasher's owned degradation rendering, ""
+// exactly when the selection is audited — the biconditional holds for
+// the unresolved zero value too, which refuses with its own notice.
+func (h *Hasher) SelectionNotice() string {
+	if !h.selectionResolved {
+		return "toolchain-selection audit: verdict unresolved — this Hasher was built without construction, so every standard-library admission refuses fail-closed"
 	}
-	return AuditedToolchainSelection(buildFlags, goflags, goexperiment), nil
+	return h.selectionNotice
 }
 
 // resolveSelectionEnv reads the two selection-bearing go-env values:

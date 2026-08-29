@@ -1294,7 +1294,15 @@ byte-identical under plain -race — and a selection whose tags swap audited
 bodies (a vendor fork's hook tag) is outside the key until its own delta
 is walked: it degrades every stdlib admission to the ordinary fail-closed
 classification, announced on the same diagnostic face as an unlisted
-release, never inheriting the default selection's audit. The audited set carries the testing harness's
+release, never inheriting the default selection's audit. The verdict's
+rendering is additionally served to consumers as one owned notice — the
+missing axis named (release, experiment, classification-defeating flag,
+or canonical selection key) with the walk that would list it, where one
+exists (an unclassifiable flag set has no listing walk and is never
+admitted), and the notice empty exactly when the selection is admitted,
+so text and verdict can never disagree — and a consuming tool can
+attribute the degradation at the tier where the selection was authored
+(its own policy or configuration record) without re-deriving the key. The audited set carries the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,
 `Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
 `Fail`, and `FailNow`, matched by package and symbol name; the admission is

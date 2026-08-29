@@ -25,3 +25,11 @@ supplied).
 
 Lands: with the next change to either reason's composition site, or
 when a field report shows one of these dead-ending an operator again.
+
+Additional face (2026-08-29, surfaced by the chunk-112 review): the
+per-refusal reasons of the purity and dynamic-state tiers carry no
+toolchain-selection attribution — under an unwalked selection the
+run-level notice is the only pointer from a refusal back to the
+selection that degraded it. Same shape as the consumer-tier problem
+chunk 112 solved (one owned rendering, callers attribute), one tier
+down; rides this filing's chunk.

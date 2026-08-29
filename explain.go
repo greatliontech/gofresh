@@ -133,11 +133,11 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 		}
 	}
 	varKey := pkgPath + "." + varName
-	audited, err := closure.AuditedToolchainSelectionResolvedContext(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags, nil)
+	notice, err := closure.ToolchainSelectionNoticeResolvedContext(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags, nil)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(audited, pkgs, pkgPath, varKey, varName, v.engine.singleSubjectExecution)
+	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.singleSubjectExecution)
 }
 
 // explainCulprit re-derives every loaded package's fact with mark

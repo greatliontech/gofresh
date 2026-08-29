@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -10002,29 +10001,36 @@ func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
 	}
 }
 
-// The unaudited-toolchain notice fires exactly once per process and
-// names the release plus the walk needed; an audited toolchain emits
-// nothing — without the notice, an unlisted release surfaces only as
-// a scatter of ordinary fail-closed refusals, the discovery shape the
+// The unaudited-toolchain notice fires exactly once per engine and
+// serves the audit's OWNED axis-naming rendering with the source
+// pointer appended; an audited selection (empty notice) emits nothing
+// — without the notice, an unlisted release surfaces only as a
+// scatter of ordinary fail-closed refusals, the discovery shape the
 // exact-version keying was built to prevent.
 func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
 	var got []string
 	var once sync.Once
-	emitUnauditedToolchainNotice(&once, true, func(d string) { got = append(got, d) })
+	emitUnauditedToolchainNotice(&once, "", func(d string) { got = append(got, d) })
 	if len(got) != 0 {
-		t.Fatalf("audited toolchain emitted a notice: %v", got)
+		t.Fatalf("audited selection emitted a notice: %v", got)
 	}
-	emitUnauditedToolchainNotice(&once, false, func(d string) { got = append(got, d) })
-	emitUnauditedToolchainNotice(&once, false, func(d string) { got = append(got, d) })
+	owned := closure.ToolchainSelectionNotice([]string{"-tags=dup"}, "", "")
+	emitUnauditedToolchainNotice(&once, owned, func(d string) { got = append(got, d) })
+	emitUnauditedToolchainNotice(&once, owned, func(d string) { got = append(got, d) })
 	if len(got) != 1 {
 		t.Fatalf("notice fired %d times, want once per engine", len(got))
 	}
 	var second sync.Once
-	emitUnauditedToolchainNotice(&second, false, func(d string) { got = append(got, d) })
+	emitUnauditedToolchainNotice(&second, owned, func(d string) { got = append(got, d) })
 	if len(got) != 2 {
 		t.Fatalf("a second engine's once did not fire independently: %d", len(got))
 	}
-	if !strings.Contains(got[0], runtime.Version()) || !strings.Contains(got[0], "toolchainaudit.go") {
-		t.Fatalf("notice does not name the release and the walk: %q", got[0])
+	// The emitted text is the owned rendering itself (axis named), plus
+	// the operator-facing source pointer.
+	if !strings.Contains(got[0], owned) || !strings.Contains(got[0], "toolchainaudit.go") {
+		t.Fatalf("notice does not serve the owned rendering with the pointer: %q", got[0])
+	}
+	if owned != "" && !strings.Contains(got[0], `selection "dup"`) {
+		t.Fatalf("owned rendering does not name the axis: %q", got[0])
 	}
 }

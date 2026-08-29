@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1433,7 +1432,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
 			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
 		})
-		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, hasher.SelectionAudited(), func(detail string) {
+		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, hasher.SelectionNotice(), func(detail string) {
 			progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
 		})
 	}
@@ -1512,18 +1511,22 @@ func observationProofEvidence(maximalClosure, assertion string, proof Observatio
 
 // emitUnauditedToolchainNotice announces an unlisted toolchain ONCE
 // PER ENGINE on the diagnostic channel: one line of each consumer
-// run's output points at the walk needed - without it, an unlisted
-// release surfaces only as a scatter of ordinary fail-closed
-// refusals, the exact discovery shape the exact-version keying was
-// built to prevent. Per-engine (not per-process) so a long-lived
+// run's output points at the missing axis - release, experiment,
+// classification-defeating flags, or unwalked selection - without
+// which the degradation surfaces only as a scatter of ordinary
+// fail-closed refusals, the exact discovery shape the exact-version
+// keying was built to prevent. Per-engine (not per-process) so a long-lived
 // server's every campaign log carries it; the once is the caller's,
 // so a consumer-less engine's emission is never spent into a void it
 // shares with a later consumer.
-func emitUnauditedToolchainNotice(once *sync.Once, audited bool, emit func(detail string)) {
-	if audited {
+func emitUnauditedToolchainNotice(once *sync.Once, notice string, emit func(detail string)) {
+	if notice == "" {
 		return
 	}
 	once.Do(func() {
-		emit(runtime.Version() + ": the release or this analysis' build selection is not in the audited list: standard-library admissions are disabled and refusals keep their ordinary fail-closed classifications until the delta — the release's, or the tag selection's — is walked and listed (closure/toolchainaudit.go)")
+		// The owned axis-naming rendering, with the operator-facing
+		// source pointer this face has always carried appended as
+		// attribution — the same decoration a consumer adds.
+		emit(notice + " (closure/toolchainaudit.go)")
 	})
 }

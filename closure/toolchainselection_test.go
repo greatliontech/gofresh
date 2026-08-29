@@ -1,9 +1,14 @@
 package closure
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // The selection axis of the toolchain-audit key: build flags
@@ -157,8 +162,8 @@ func TestSelectionAuditKeySanitizerValueForms(t *testing.T) {
 // selection dimension); the default scope stays byte-identical to the
 // pre-selection era's so existing memos keep serving.
 func TestEffectScanScopeDiscriminatesSelectionVerdict(t *testing.T) {
-	audited := (&Hasher{selectionAudited: true}).effectScanScope()
-	unaudited := (&Hasher{selectionAudited: false}).effectScanScope()
+	audited := (&Hasher{selectionResolved: true}).effectScanScope()
+	unaudited := (&Hasher{selectionResolved: true, selectionNotice: "unwalked"}).effectScanScope()
 	if audited == unaudited {
 		t.Fatal("effect-scan memo scope ignores the selection verdict — unaudited scans could serve audited consumers")
 	}
@@ -212,5 +217,103 @@ func TestUnwalkedTagSelectionRefusesObservability(t *testing.T) {
 	}
 	if o := taggedObs[subject]; o.Observable {
 		t.Fatalf("dst-tagged analysis kept the observability proof — the selection verdict never reached the admission sites: %+v", o)
+	}
+}
+
+// The exported notice is the same derivation as the admission bool —
+// "" exactly when admitted — and names the missing axis with the walk
+// that would land it, so a consumer's attribution can never disagree
+// with the verdict it explains.
+func TestToolchainSelectionNoticeMatchesVerdict(t *testing.T) {
+	if !auditedToolchainSource() {
+		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
+	}
+	for _, tc := range []struct {
+		name          string
+		flags         []string
+		goflags       string
+		goexperiment  string
+		wantFragments []string
+	}{
+		{"audited selection renders no notice", []string{"-race"}, "", "", nil},
+		{"unwalked selection names its canonical key", []string{"-tags=dup"}, "", "", []string{`selection "dup" under ` + runtime.Version(), "unwalked", "observation admissions are disabled"}},
+		{"goflags join the effective selection", nil, "-tags=dup", "", []string{`selection "dup"`}},
+		{"experiment mismatch names the axis rule", nil, "", "somefutureexp", []string{"GOEXPERIMENT", "never inherited", "under " + runtime.Version()}},
+		{"unclassifiable flags name the flag set", []string{"-tags"}, "", "", []string{"defeat selection classification", "under " + runtime.Version()}},
+	} {
+		notice := ToolchainSelectionNotice(tc.flags, tc.goflags, tc.goexperiment)
+		audited := AuditedToolchainSelection(tc.flags, tc.goflags, tc.goexperiment)
+		if (notice == "") != audited {
+			t.Errorf("%s: notice %q disagrees with verdict %v", tc.name, notice, audited)
+		}
+		if len(tc.wantFragments) == 0 && notice != "" {
+			t.Errorf("%s: unexpected notice %q", tc.name, notice)
+		}
+		for _, frag := range tc.wantFragments {
+			if !strings.Contains(notice, frag) {
+				t.Errorf("%s: notice %q missing %q", tc.name, notice, frag)
+			}
+		}
+	}
+}
+
+// The resolving notice entry reads the effective GOFLAGS and
+// GOEXPERIMENT from the caller's environment — go-env read and
+// snapshot-fed alike — and cannot silently lose the notice: this is
+// the entry a consumer without a Hasher calls, so its resolution path
+// is the chunk's actual serving surface.
+func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T) {
+	if !auditedToolchainSource() {
+		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
+	}
+	dir := t.TempDir()
+	env := append(os.Environ(), "GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
+	notice, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, env, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notice, `selection "dup"`) {
+		t.Fatalf("go-env-resolved notice lost the GOFLAGS selection: %q", notice)
+	}
+	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notice, err = ToolchainSelectionNoticeResolvedContext(context.Background(), dir, env, nil, snapshot)
+	if err != nil || !strings.Contains(notice, `selection "dup"`) {
+		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
+	}
+	clean, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, append(os.Environ(), "GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
+	if err != nil || clean != "" {
+		t.Fatalf("default selection resolved a notice: %v %q", err, clean)
+	}
+}
+
+// The release axis renders through the same core the exported entry
+// uses, driven directly so the unlisted-release world — unreachable
+// under a listed toolchain, where every other test in this file runs —
+// stays pinned.
+func TestToolchainSelectionNoticeNamesUnlistedRelease(t *testing.T) {
+	notice := toolchainSelectionNotice(false, "go9.99", "", nil, nil, "", "")
+	for _, frag := range []string{"release go9.99 is not listed", "observation admissions are disabled", "walked and listed"} {
+		if !strings.Contains(notice, frag) {
+			t.Fatalf("unlisted-release notice %q missing %q", notice, frag)
+		}
+	}
+	if toolchainSelectionNotice(true, "go9.99", "", map[string]bool{"": true}, nil, "", "") != "" {
+		t.Fatal("listed default selection rendered a notice through the core")
+	}
+}
+
+// The audit ladder survives the zero value: a Hasher built without
+// construction refuses every admission AND explains itself — the
+// verdict/text biconditional holds in the unresolved world too.
+func TestZeroHasherRefusesSelectionAudit(t *testing.T) {
+	var h Hasher
+	if h.SelectionAudited() {
+		t.Fatal("zero-value Hasher reports an audited selection — fail-open by omission")
+	}
+	if notice := h.SelectionNotice(); notice == "" || !strings.Contains(notice, "unresolved") {
+		t.Fatalf("unresolved verdict has no explaining notice: %q", notice)
 	}
 }
