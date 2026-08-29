@@ -91,7 +91,7 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band C — ergonomics, robustness, consolidation
 
-- [ ] 128. gomutant: serve carve-out consolidation (gomutant
+- [x] 128. gomutant: serve carve-out consolidation (gomutant
       docs/issues: fold-growth-into-generalized-drift,
       consolidate-reidentification-and-bucket-policy) — growth is a
       strict special case of generalized drift; one re-identification
