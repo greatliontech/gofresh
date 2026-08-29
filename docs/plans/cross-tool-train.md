@@ -127,6 +127,25 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/repo-level-vouch-source.md — a reviewed vouch file
       beside the store replaces hand-mirrored flag lists; doc deletes
       at close.
+- [ ] 136. cross-tool: retroactive automation-and-consolidation audit
+      (user directive 2026-08-29; the automation-over-configuration
+      standing directive, tugboat fb4a45b, applied to the existing
+      estate). Per tool, walk every knob, flag, env override, and
+      config surface against the derivability test — a knob whose
+      right value is derivable, detectable, or measurable at runtime
+      is dispositioned: derive it (fold small, file larger with
+      Lands), keep it with the recorded value judgment that earns it,
+      or delete it; and walk parallel mechanisms within and across
+      the tools as one consolidation scan (candidates feed the
+      existing consolidation chunks — 98-101's walk unifications —
+      or file fresh). Dispositions are the deliverable: every knob
+      and every parallel mechanism gets a recorded verdict, "none"
+      only by looking. Runs after the per-tool batches (113-115)
+      close their chartered knob work and before the D-band
+      consolidation chunks so findings fold forward. Measurement: a
+      knob this audit deletes or re-derives on a bench-armed shape
+      names its pew arms in the disposition and re-records in the
+      same change set.
 - [ ] 91. gomutant: deferred-check-close adoption — the run-end and
       per-window producer validations run full in-process gofresh
       analysis (~25% of in-process CPU under repeated packages.Load);
