@@ -2,5 +2,5 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-guidance-single-source"
-reason: "gofresh has no MCP or CLI surface; the single-source invariant is enforced by each consuming repo's guidance requirement and binding"
-lands { manual { condition: "the consuming repos' guidance adoptions land their bindings (train chunk 111 legs 2-4)" } }
+reason: "gofresh has no MCP or CLI surface; the single-source invariant is enforced by each consuming repo's guidance requirement and binding (stipulator REQ-mcp-guidance, gomutant REQ-mcp-guidance, pew REQ-pew-guidance — all landed with train chunk 111's legs)"
+lands { manual { condition: "gofresh grows an own serving surface (only then can this repo carry its own enforcement)" } }

@@ -78,17 +78,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band U — UX (MCP-first)
 
-- [ ] 111. cross-tool: tool-resident guidance — design chunk, opens
-      with a short design pass (mechanism only; the ruling itself is
-      settled): each tool answers "what does this verb do, what does
-      this knob control, when do I use which" FROM the tool, over
-      both surfaces, MCP-first — derived from the repo's own
-      specs/docs at build or serve time (single source; a binding
-      keeps served guidance and spec text from drifting), with
-      per-verb examples and decision guidance ("use X when …, prefer
-      Y when …"); the design names the shared shape all four tools
-      implement, then per-tool adoption rides as its own commits
-      inside this chunk's arc.
 - [ ] 112. cross-tool: MCP surface audit against the sharpened
       doctrine — every MCP verb re-audited: minimum strings/tokens
       that keep the LLM on point, suggestions attached to every
