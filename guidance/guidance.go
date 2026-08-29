@@ -540,6 +540,24 @@ func (d *Document) Long(surface, name string) (string, error) {
 	return b.String(), nil
 }
 
+// Help is the long rendering without its knobs: block — for a
+// surface that renders its own knob list, a CLI's flag help, where
+// the block would print every knob twice in two wordings
+// (REQ-guidance-render).
+func (d *Document) Help(surface, name string) (string, error) {
+	v, err := d.resolve(surface, name)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(v.Does)
+	b.WriteString("\n\nwhen: ")
+	b.WriteString(v.When)
+	b.WriteString("\n\nexample:\n")
+	b.WriteString(v.Example)
+	return b.String(), nil
+}
+
 // Orientation is the decision map's body, verbatim
 // (REQ-guidance-render).
 func (d *Document) Orientation() string {

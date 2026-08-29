@@ -132,6 +132,22 @@ func TestParseAndRenderProjections(t *testing.T) {
 	if !strings.Contains(rsLong, "SAMPLE decision map from the example") || !strings.Contains(rsLong, "````\n```md") {
 		t.Errorf("Long(mcp, read_spec) nested fence mangled:\n%s", rsLong)
 	}
+	// The help rendering drops exactly the knobs block.
+	help, err := doc.Help("mcp", "ephemeral")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(help, "knobs:") || strings.Contains(help, "test_pkg") {
+		t.Errorf("Help(mcp, ephemeral) carries knobs:\n%s", help)
+	}
+	for _, want := range []string{"Run one manual mutant without persisting.", "when: use ephemeral", "example:\n```sh"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("Help(mcp, ephemeral) missing %q:\n%s", want, help)
+		}
+	}
+	if _, err := doc.Help("web", "run"); err == nil {
+		t.Error("Help accepted an unknown surface")
+	}
 	if got := doc.Orientation(); got != "Use run for campaigns; use ephemeral for single probes." {
 		t.Fatalf("Orientation() = %q — the sample decision map leaked", got)
 	}

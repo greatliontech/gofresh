@@ -87,7 +87,10 @@ on that surface as its surface spelling `— prose` (or `knobs:
 none`), a `when:` block, and an `example:` block whose body starts
 on its own line so fenced code stays column-zero — exactly those
 labels, no others; the orientation rendering is the decision map's
-body verbatim. A requested surface or name the document does not
+body verbatim; and the help rendering is the long rendering without
+its knobs: block — for a surface that renders its own knob list (a
+CLI's flag help), where the block would print every knob twice in
+two wordings. A requested surface or name the document does not
 carry is an error, never an empty rendering.
 
 **REQ-guidance-coverage** (behavior): The package MUST provide the

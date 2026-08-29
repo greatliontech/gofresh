@@ -21,7 +21,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guidance-render"
-  content_hash: "4d6c64a31be4755822c5025d9b1fac16036de967f5ee0e09215a3153c07386c7"
+  content_hash: "ef77565d26ef26fe1e7482a7f064a172ca892bc78e4b54e9bf89a6b30dfa61ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseAndRenderProjections"
   role: BINDING_ROLE_TESTS
@@ -30,7 +30,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guidance-render"
-  content_hash: "4d6c64a31be4755822c5025d9b1fac16036de967f5ee0e09215a3153c07386c7"
+  content_hash: "ef77565d26ef26fe1e7482a7f064a172ca892bc78e4b54e9bf89a6b30dfa61ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseReconstructsGeneratedDocuments"
   role: BINDING_ROLE_TESTS
