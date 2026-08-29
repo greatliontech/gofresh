@@ -78,7 +78,7 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band U — UX (MCP-first)
 
-- [ ] 112. cross-tool: MCP surface audit against the sharpened
+- [x] 112. cross-tool: MCP surface audit against the sharpened
       doctrine — every MCP verb re-audited: minimum strings/tokens
       that keep the LLM on point, suggestions attached to every
       refusal/verdict where derivable. FOLDS gomutant
