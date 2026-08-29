@@ -73,12 +73,6 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
 
 ## Band A — verdict integrity (correctness)
 
-- [ ] 106. gofresh: scalar-global cross-test mutation coverage
-      (startup-effect-precision 0e, folded 2026-08-26) — the carrier
-      net prices alias-handing carriers, and unsafe-mediated mutation
-      of a NON-carrier scalar global evades it; verify how the class
-      is covered (or price it) — the chunk-86 review's recorded
-      adjacent residual.
 
 ## Band B — standing guards (the neglect-proofing layer)
 
