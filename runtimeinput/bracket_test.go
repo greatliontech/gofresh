@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // bracketTree builds a module tree with file, directory, symlink, and absent
@@ -505,4 +506,104 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 			t.Fatalf("persisted mutation at %q revalidated as unchanged (reason %q)", chosen.site, reason)
 		}
 	})
+}
+
+// A moved-bracket refusal names WHAT moved: members added or removed
+// since capture by name, and — when membership held, so a content edit
+// moved the digest — the most recently modified members, so a
+// parallel-suite interference flake carries its lead instead of only
+// the package that flinched (REQ-inputs-value-binding's attributable
+// refusal).
+func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
+	build := func(t *testing.T) (string, string) {
+		t.Helper()
+		moduleDir := t.TempDir()
+		root := filepath.Join(moduleDir, "lib")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range map[string]string{"a.go": "package lib\n", "b.go": "package lib\n\nvar B = 1\n"} {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Distinct, past mtimes so refusal-time recency ranking cannot
+		// tie with the edit below.
+		old := time.Now().Add(-time.Hour)
+		for _, name := range []string{"a.go", "b.go"} {
+			if err := os.Chtimes(filepath.Join(root, name), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return moduleDir, root
+	}
+	capture := func(t *testing.T, moduleDir string) Bracket {
+		t.Helper()
+		b, err := CaptureBracket(moduleDir, []string{"lib"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	revalidateReason := func(t *testing.T, b Bracket, moduleDir string) string {
+		t.Helper()
+		unchanged, reason, err := b.revalidate(context.Background(), moduleDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if unchanged {
+			t.Fatal("moved bracket read unchanged")
+		}
+		return reason
+	}
+
+	moduleDir, root := build(t)
+	b := capture(t, moduleDir)
+	if err := os.WriteFile(filepath.Join(root, "b.go"), []byte("package lib\n\nvar B = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reason := revalidateReason(t, b, moduleDir)
+	if !strings.Contains(reason, "recently touched: b.go") {
+		t.Fatalf("content-edit refusal = %q, want the edited member ranked first", reason)
+	}
+
+	moduleDir, root = build(t)
+	b = capture(t, moduleDir)
+	if err := os.WriteFile(filepath.Join(root, "c.go"), []byte("package lib\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if reason := revalidateReason(t, b, moduleDir); !strings.Contains(reason, "added: c.go") {
+		t.Fatalf("added-member refusal = %q, want the new member named", reason)
+	}
+
+	moduleDir, root = build(t)
+	b = capture(t, moduleDir)
+	if err := os.Remove(filepath.Join(root, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	if reason := revalidateReason(t, b, moduleDir); !strings.Contains(reason, "removed: a.go") {
+		t.Fatalf("removed-member refusal = %q, want the removed member named", reason)
+	}
+
+	// The list caps with the remainder counted, and every emitted name
+	// stays manifest-representable: an unrepresentable filename travels
+	// quoted, so the attribution can never turn the attributable
+	// refusal into a hard manifest-validation error.
+	moduleDir, root = build(t)
+	b = capture(t, moduleDir)
+	for _, name := range []string{"e1.go", "e2.go", "e3.go", "e4.go", "c\nd.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package lib\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reason = revalidateReason(t, b, moduleDir)
+	if !strings.Contains(reason, "+2 more") {
+		t.Fatalf("capped added list = %q, want the remainder counted", reason)
+	}
+	if !utf8.ValidString(reason) || strings.ContainsAny(reason, "\x00\r\n") {
+		t.Fatalf("attribution emitted a manifest-unrepresentable reason: %q", reason)
+	}
+	if !strings.Contains(reason, `"c\nd.go"`) {
+		t.Fatalf("unrepresentable filename not quoted into the lead: %q", reason)
+	}
 }

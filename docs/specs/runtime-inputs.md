@@ -314,7 +314,12 @@ object changed type, appeared, or disappeared — records an attributable
 unverifiable reason for the observation, and a recorded path identity covered by no
 root records an attributable per-identity unverifiable reason; in both cases the
 observation still constructs, converts, merges, and checks as unverifiable
-evidence, never as bound, so the failure direction is always recomputation. A
+evidence, never as bound, so the failure direction is always recomputation.
+Every constructed reason is manifest-representable BY CONSTRUCTION —
+filesystem-derived names it embeds (moved members, escaped links, unhashable
+paths) travel quoted when they carry framing bytes or invalid UTF-8 — so an
+attributable refusal can never fail manifest validation and harden into an
+error. A
 bracket captured after the process started, interpreted under a different module
 view than its capture, or revalidated with different hashing semantics is refused
 rather than read as unchanged. Environment identities require no bracket:

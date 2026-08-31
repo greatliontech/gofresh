@@ -10,7 +10,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -207,10 +209,108 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 	}
 	for i, root := range b.roots {
 		if current.roots[i].digest != root.digest {
-			return false, "observation bracket moved: " + root.id.displayPath(), nil
+			return false, "observation bracket moved: " + root.id.displayPath() + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
 		}
 	}
 	return false, "observation bracket moved", nil
+}
+
+// bracketMoveAttribution names WHAT moved inside a refused root, best
+// effort: members added or removed since capture by set difference,
+// and — when membership held, so a content edit moved the digest — the
+// most recently modified members by refusal-time stat. A moved bracket
+// refusal without the file is unactionable when the writer is another
+// process in a parallel suite; the name is the lead the investigation
+// starts from. Attribution is advisory text on an already-decided
+// refusal: stat errors just drop the entry.
+func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string {
+	const limit = 3
+	var added, removed []string
+	for rel := range now.members {
+		if !captured.members[rel] {
+			added = append(added, rel)
+		}
+	}
+	for rel := range captured.members {
+		if !now.members[rel] {
+			removed = append(removed, rel)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "added: "+cappedList(representableReasonNames(added), limit))
+	}
+	if len(removed) > 0 {
+		parts = append(parts, "removed: "+cappedList(representableReasonNames(removed), limit))
+	}
+	if len(parts) == 0 {
+		p, err := materializePath(moduleDir, captured.id)
+		if err == nil {
+			type touched struct {
+				rel string
+				mod time.Time
+			}
+			var recent []touched
+			for rel := range now.members {
+				// A directory's mtime moves whenever any direct child
+				// changes — the root and nested directories alike are
+				// pure noise as leads; the recency list names files.
+				if info, err := os.Stat(filepath.Join(p, filepath.FromSlash(rel))); err == nil && !info.IsDir() {
+					recent = append(recent, touched{rel: rel, mod: info.ModTime()})
+				}
+			}
+			sort.SliceStable(recent, func(i, j int) bool {
+				if !recent[i].mod.Equal(recent[j].mod) {
+					return recent[i].mod.After(recent[j].mod)
+				}
+				return recent[i].rel < recent[j].rel
+			})
+			if len(recent) > limit {
+				recent = recent[:limit]
+			}
+			var names []string
+			for _, t := range recent {
+				names = append(names, representableReasonName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
+			}
+			if len(names) > 0 {
+				parts = append(parts, "recently touched: "+strings.Join(names, ", "))
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " [" + strings.Join(parts, "; ") + "]"
+}
+
+// representableReasonName renders one member name safely for a
+// manifest reason: names are unconstrained filesystem bytes, and a
+// reason carrying framing bytes or invalid UTF-8 would fail manifest
+// validation — turning an attributable refusal into a hard error, the
+// wrong direction for advisory text — so an unrepresentable name
+// travels quoted.
+func representableReasonName(name string) string {
+	if utf8.ValidString(name) && !strings.ContainsAny(name, "\x00\r\n") {
+		return name
+	}
+	return strconv.Quote(name)
+}
+
+func representableReasonNames(names []string) []string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = representableReasonName(name)
+	}
+	return out
+}
+
+func cappedList(names []string, limit int) string {
+	if len(names) <= limit {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:limit], ", ") + fmt.Sprintf(", +%d more", len(names)-limit)
 }
 
 // bracketRootID normalizes one declared root to identity form: a

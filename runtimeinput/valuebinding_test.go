@@ -550,8 +550,17 @@ func TestBindingReasonsSurviveMergeUnion(t *testing.T) {
 			}
 		}
 	}
-	if !got["observation bracket moved: data"] || !got["runtime input not covered by observation bracket: other.txt"] {
-		t.Fatalf("merged reasons = %v, want both binding classes verbatim", got)
+	// The moved-bracket reason now carries its attribution suffix
+	// (the moved member named), so the class match is by prefix; the
+	// uncovered-input class stays verbatim.
+	movedClass := false
+	for reason := range got {
+		if strings.HasPrefix(reason, "observation bracket moved: data") {
+			movedClass = true
+		}
+	}
+	if !movedClass || !got["runtime input not covered by observation bracket: other.txt"] {
+		t.Fatalf("merged reasons = %v, want both binding classes", got)
 	}
 	if !merged.Unverifiable {
 		t.Fatal("binding-unverifiable union merged as bound")

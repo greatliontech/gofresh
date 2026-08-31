@@ -2062,7 +2062,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 		if err != nil {
 			unverifiable = true
 			if reason == "" {
-				reason = "unhashable runtime directory: " + path
+				reason = "unhashable runtime directory: " + representableReasonName(path)
 			}
 			return nil
 		}
@@ -2075,7 +2075,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 		if err != nil {
 			unverifiable = true
 			if reason == "" {
-				reason = "unhashable runtime directory: " + path
+				reason = "unhashable runtime directory: " + representableReasonName(path)
 			}
 			return nil
 		}
@@ -2099,7 +2099,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			if err != nil {
 				unverifiable = true
 				if reason == "" {
-					reason = "unhashable runtime directory file: " + path
+					reason = "unhashable runtime directory file: " + representableReasonName(path)
 				}
 				return nil
 			}
