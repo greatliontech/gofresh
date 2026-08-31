@@ -106,6 +106,23 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/campaign-baseline-needs-scoped-oracles.md, and
       suite-shared-fixture-bracket-flake redeferred on its sharpened
       instrumentation trigger).
+- [ ] 137. gomutant: survivor-oracle narrowing (user ruling
+      2026-08-31 on the campaign-scale fork, gomutant
+      docs/issues/campaign-baseline-needs-scoped-oracles.md): the
+      survivor verdict becomes coverage-scoped — a mutant with sound
+      coverage over its extent survives when every COVERING test
+      passed, the excluded tests' non-execution evidence recorded on
+      the finding — with carve-outs: unsound/absent coverage degrades
+      to the full run, and any extent whose execution is not
+      per-test-attributable (init/package-level/TestMain-reachable)
+      keeps the full oracle. A standing derived audit re-scores a
+      small deterministic sample of narrowed survivors under the full
+      oracle each campaign and reports the measured false-survivor
+      rate. Measurement deliverables: the chunk-113 gate campaign
+      re-run (--changed a577f0d, 81 targets / 8,720 candidates,
+      previously extrapolating to weeks) with its wall-clock and
+      verdict deltas, and the first audit sample's rate. Runs BEFORE
+      114: every later chunk's gate inherits the restored campaign.
 - [ ] 114. stipulator: runner-environment inspectability (stipulator
       docs/issues/witness-runner-environment-divergence.md) — a
       witness red only inside the runner dumps the divergence (env
