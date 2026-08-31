@@ -99,16 +99,13 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       landed 103 (gomutant 2ba8841), whose windowScores bundle and
       newSurvivor/carrySurvivor constructors are the shapes the
       consolidation builds on; both docs delete at close.
-- [ ] 113. gomutant: ergonomics and robustness batch (gomutant
-      docs/issues: graceful-interrupt-persistence,
-      refusal-exit-collapse, coverage-guided-oracle-ordering,
-      campaign-refuses-tree-change-from-rapid-failfiles,
-      staged-campaign-reports-clean-index-as-drift,
-      symbol-cutter-duality, planonly-gatherwindow-suite-hang — the
-      hang needs a mechanism-showing dump or closes unreproducible at
-      triage; suite-shared-fixture-bracket-flake, added 2026-08-27 —
-      identify the writer, then isolate mutable-fixture users) —
-      eight docs delete at close.
+- [x] 113. gomutant: ergonomics and robustness batch — landed
+      (gomutant c4093cb..4400573; gofresh 40317df; dispositions in
+      the commit records; the campaign-scale residue is the surfaced
+      user fork in gomutant
+      docs/issues/campaign-baseline-needs-scoped-oracles.md, and
+      suite-shared-fixture-bracket-flake redeferred on its sharpened
+      instrumentation trigger).
 - [ ] 114. stipulator: runner-environment inspectability (stipulator
       docs/issues/witness-runner-environment-divergence.md) — a
       witness red only inside the runner dumps the divergence (env
