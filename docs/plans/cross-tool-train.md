@@ -101,56 +101,26 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       consolidation builds on; both docs delete at close.
 - [x] 113. gomutant: ergonomics and robustness batch — landed
       (gomutant c4093cb..4400573; gofresh 40317df; dispositions in
-      the commit records; the campaign-scale residue is the surfaced
-      user fork in gomutant
-      docs/issues/campaign-baseline-needs-scoped-oracles.md, and
+      the commit records; the campaign-scale residue was ruled and
+      resolved in chunk 137 (successor residue: gomutant
+      docs/issues/own-face-gate-suite-decomposition.md), and
       suite-shared-fixture-bracket-flake redeferred on its sharpened
       instrumentation trigger).
-- [ ] 137. gomutant: survivor-oracle narrowing (user ruling
-      2026-08-31 on the campaign-scale fork, gomutant
-      docs/issues/campaign-baseline-needs-scoped-oracles.md): the
-      survivor verdict becomes coverage-scoped — a mutant with sound
-      coverage over its extent survives when every COVERING test
-      passed, the excluded tests' non-execution evidence recorded on
-      the finding — with carve-outs: unsound/absent coverage degrades
-      to the full run, and any extent whose execution is not
-      per-test-attributable (init/package-level/TestMain-reachable)
-      keeps the full oracle. A standing derived audit re-scores a
-      small deterministic sample of narrowed survivors under the full
-      oracle each campaign and reports the measured false-survivor
-      rate. FOLDED (2026-08-31, from the first landing-check launch's
-      own economics — 2h16m spent, zero targets committed, no
-      predicted cost to judge it against): (a) campaign cost model —
-      at measure time gomutant holds every input (candidate counts,
-      coverage-batch structure, measured baseline durations, the
-      audit term); --plan prints the predicted per-phase/per-window
-      schedule and total bound before any budget is spent, and the
-      progress line reconciles estimate vs actual as windows commit;
-      (b) anytime yield — windows execute cheapest-first by the
-      model's estimate so an interrupt at any point has banked the
-      most verdicts, and SIGTERM drains-with-deadline instead of
-      hard-discarding (SIGINT two-stage posture unchanged); (c)
-      baseline banking — baseline measurements and coverage profiles
-      are content-pinned evidence, persisted machine-local and
-      reused across runs; the wall-clock leash becomes a
-      machine-drift re-validation trigger, never a discard of
-      content-valid measurement; (d) the audit cap becomes
-      budget-derived — bounded by a share of the time the window's
-      narrowing measurably saved (hash-order selection kept, so the
-      cap varies only the prefix length and re-audits stay
-      prefix-stable), replacing the duration-blind fixed
-      count-per-window that prices 4 full 21-minute oracles onto a
-      window whose narrowing saved less than that. Measurement
-      deliverables: the cost model's predicted wall-clock for the
-      gate campaign vs the measured run (the good/bad verdict is
-      this comparison, stated before launch); time-to-first-committed-
-      target under (b) vs the 2h16m/0 observed; baseline reuse
-      across a relaunch under (c) (53 min measured cost of the
-      discard); the audit time share under (d); and the chunk-113
-      gate campaign re-run (--changed a577f0d) with wall-clock,
-      verdict deltas vs the preflight, and the first audit sample's
-      rate. Runs BEFORE 114: every later chunk's gate inherits the
-      restored campaign.
+- [x] 137. gomutant: survivor-oracle narrowing + campaign economics
+      — landed (gomutant 33d7863..49795ea: narrowed survivor with
+      savings-derived full-oracle audit; window cost model with
+      priced projections, completion ticks, live pace; value-ordered
+      windows; SIGTERM joins the deadline-bounded graceful drain;
+      content-pinned baseline bank with immediate-persist deposits).
+      Landing check measured and REFUSED on its own verdict: window-1
+      projection ~33h43m (79/92 narrowed — covering ≈ suite on the
+      e2e-heavy own face), pace ~217h for 129 targets/10,235
+      candidates, audit share ~10.8% ≤ 1/8, first window
+      value-ordered; stopped at 3h33m priced-upfront. Own-face gates
+      stay on ephemeral probes; the fork's unchartered (a) half files
+      as gomutant docs/issues/own-face-gate-suite-decomposition.md
+      (user decision); probe-phase visibility files for 136. Six
+      converged loops; dispositions in the commit records.
 - [ ] 114. stipulator: runner-environment inspectability (stipulator
       docs/issues/witness-runner-environment-divergence.md) — a
       witness red only inside the runner dumps the divergence (env
