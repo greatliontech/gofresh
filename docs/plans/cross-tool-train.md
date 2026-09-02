@@ -53,9 +53,36 @@ register.
   interruption loses one unit, never a run. The same rule governs
   this train's own gates: a long measurement runs once, over the
   settled tree, after the loop converges; a measurement started
-  before its inputs settle is wasted work, not diligence. Chunk 146
-  is the first application; chunk 136's audit walks every tool's
-  refusal sites against it.
+  before its inputs settle is wasted work, not diligence. Band P is
+  the application; chunk 136's scan walks what it leaves.
+- **Two surfaces, derived defaults** (user ruling 2026-09-02, sharpening
+  the MCP UX doctrine): the CLI serves a human at a terminal and the
+  MCP surface serves an LLM in a harness — different inputs, different
+  outputs, different token economics — and each is designed for its
+  reader, never one rendered through the other. Output is minimal and
+  useful: on MCP, the fewest tokens that keep the model on point (the
+  verdict, the counts that change what it does next, the actionable
+  rows, the suggestion) and nothing decorative; on the CLI, what a
+  human needs to act, no more. Per tool, per verb, the DEFAULT
+  behaviour, output, and every default value is DERIVED and recorded —
+  from the verb's purpose and the surface's reader, never inherited
+  from the other surface or from the first implementation — and
+  everything else is opt-in with a stated purpose (a knob or view that
+  cannot state its purpose is deleted). Each Band P chunk lands that
+  derivation as a table in the tool's spec (verb × surface: default
+  behaviour, default output, defaults, opt-ins with purpose) and
+  conforms the surfaces to it.
+- **The MCP surface is self-starting** (same ruling): an LLM connecting
+  to a tool must know from the surface alone what to call first, what
+  the ordinary loop is, and which verb answers which question — the
+  server instructions name the entry call and the loop concretely
+  ("start with X over the tree; then Y; Z answers why"), every tool
+  description says when to use it and what it returns, and `guidance`
+  serves the rest from the embedded document (chunk 111's mechanism)
+  — so the model never improvises a call sequence and is never sent to
+  read the repo. A surface that needs its source read to be used is a
+  defect; Band P's per-tool chunks land the entry guidance and a test
+  that pins it derives from the spec.
 
 ## Execution order
 
@@ -244,9 +271,15 @@ verdict, and records the measured wall against the audit's baseline.
       `witness_concurrency` deleted as a policy field, `no_test`
       merged into the freshness path. Spec: change.md and mcp.md gain
       the preparation, both-surface progress, cancellation, and
-      unit-persistence invariants. Close: the deferred chunk-141
-      self-host verdict runs here, once, warm. Measurement: the cold
-      30m43s / warm baselines re-measured.
+      unit-persistence invariants. Surfaces: the verb × surface
+      defaults table derived and recorded in mcp.md and the CLI
+      section of the spec (check's summary/full views re-derived for
+      the LLM reader, the CLI render for the human), the server
+      instructions naming the entry call and the loop, every tool
+      description saying when and what it returns, opt-ins each with
+      a purpose or deleted. Close: the deferred chunk-141 self-host
+      verdict runs here, once, warm. Measurement: the cold 30m43s /
+      warm baselines re-measured.
 - [ ] 156. gomutant: the per-verb prepare stage and the reporter for
       every verb (pipeline-audit gomutant.md §8's seam: `--plan`
       made whole). Prepare: the campaign lock at flag parse, `budget`
@@ -275,9 +308,15 @@ verdict, and records the measured wall against the audit's baseline.
       `windowBudget`, and the schedule minimums derived from the
       bank's measured durations; `--json` and `--jsonl` one name; the
       heartbeat literals and the six envelope caps one policy each.
-      Spec: execution.md and mcp.md gain the invariants. Measurement:
-      `--plan` over `testdata/self-host-targets.json` timed before and
-      after; the ephemeral probe path's silent stretches re-measured.
+      Spec: execution.md and mcp.md gain the invariants. Surfaces:
+      the verb × surface defaults table derived and recorded; the
+      server instructions name the entry call and the loop (run over
+      the tree, findings to inspect, ephemeral inside the adversarial
+      loop, explain for why); the `{"edits":[…]}` wrapper and every
+      input shape stated where the LLM reads them; opt-ins each with a
+      purpose or deleted. Measurement: `--plan` over
+      `testdata/self-host-targets.json` timed before and after; the
+      ephemeral probe path's silent stretches re-measured.
 - [ ] 157. pew: the package preparation record, the reporter, and
       per-arm persistence (pipeline-audit pew.md §8's seam). Prepare:
       one record per package after `go list` carrying the benchmark
@@ -302,7 +341,11 @@ verdict, and records the measured wall against the audit's baseline.
       `--threshold` derivation is spec-level and files against
       REQ-pew-sample-completeness for the user's call. Spec: spec.md
       gains the preparation, progress, cancellation, and unit-
-      persistence contract (it carries none today). Measurement:
+      persistence contract (it carries none today). Surfaces: pew has
+      no MCP surface — the chunk derives and records the CLI verb
+      defaults table and the machine (`--json`) contract as the
+      LLM-facing output, and decides whether an MCP surface is owed
+      (a genuine fork: file for the user if so). Measurement:
       whole-store `pew status` wall before and after; no bench arms
       move.
 
