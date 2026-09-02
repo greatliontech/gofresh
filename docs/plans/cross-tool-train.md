@@ -59,7 +59,9 @@ fourteen-report batch — 141 inserted after 114 (verdict/serving
 integrity outranks diagnostics), 140 after 138 (ephemeral probe
 integrity, our own loop's tooling), and the stipulator band 142–145
 after 131, with gap-covered-unknown-id folding into 114's gap fold —
-then
+and — amended 2026-09-02, same doctrine, a field report on
+staged campaigns — 146 inserted after 138 (the staged snapshot's
+external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then 95 (ecosystem-blocked, re-audited at open), with the
@@ -170,12 +172,28 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       the target module's directory, never plans unverifiable, and
       never forces the absolute-path workaround whose machine-local
       records keep attestations out of the committed findings
-      document. RIDES gomutant
+      document; and (rider, field report 2026-09-02) an absolute
+      directory is an admissible bracket path — a replace module
+      outside the repository is one declared surface, never an
+      enumeration of its files. RIDES gomutant
       docs/issues/ephemeral-test-pkg-shorthand.md — ephemeral
       --test-pkg accepts a relative package directory resolved
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
+- [ ] 146. gomutant: staged-mode external-input refusal at
+      preparation (field-response, report 2026-09-02; gomutant
+      docs/issues/staged-external-input-refuses-late-and-misnamed.md)
+      — an input the index snapshot can never vouch for (an identity
+      outside the repository) refuses its target at preparation,
+      before any mutant runs, and the refusal headlines the external
+      input with its remedy (declare the surface as a bracket path, or
+      measure unstaged) — never the unstaged-drift text over a tree
+      that carries none; the staged arm's dirty judgment realigns with
+      the results spec, under which an external identity is not git's
+      to vouch for and does not stamp dirty. Doc deletes at close.
+      Measurement surface: provenance/refusal diagnostics only — no
+      pew arms, no DST legs.
 - [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
       reports 2026-09-03; gomutant docs/issues:
       ephemeral-deletion-probes-strand-imports — an imports fix runs
