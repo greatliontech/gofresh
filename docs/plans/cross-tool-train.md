@@ -39,6 +39,23 @@ register.
   over both surfaces, derived from the specs the repos already carry
   (single source, never hand-duplicated prose). Chunk 111 designs the
   mechanism; every later surface chunk conforms.
+- **No wasted work** (user ruling 2026-09-02, binding on every open
+  chunk and on the loop that lands them): every operation is staged
+  as fail-early preparation, then an incremental measure loop.
+  Preparation is the cheap pass that derives every refusal decidable
+  from its inputs — a surface that cannot be pinned, an oracle that
+  cannot compile, a declaration that cannot resolve, a record that
+  cannot be written — and exits before any measurement runs; a
+  refusal that could have been derived at preparation and surfaces
+  after measurement is a defect, filed like any other. The loop then
+  runs per unit: check freshness (serve what is proven), measure only
+  what is not, persist before the next unit starts, repeat — so an
+  interruption loses one unit, never a run. The same rule governs
+  this train's own gates: a long measurement runs once, over the
+  settled tree, after the loop converges; a measurement started
+  before its inputs settle is wasted work, not diligence. Chunk 146
+  is the first application; chunk 136's audit walks every tool's
+  refusal sites against it.
 
 ## Execution order
 
@@ -181,19 +198,24 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
-- [ ] 146. gomutant: staged-mode external-input refusal at
-      preparation (field-response, report 2026-09-02; gomutant
+- [ ] 146. gomutant: preparation refuses everything preparation can
+      decide (field-response, report 2026-09-02, under the no-wasted-
+      work doctrine; gomutant
       docs/issues/staged-external-input-refuses-late-and-misnamed.md)
-      — an input the index snapshot can never vouch for (an identity
-      outside the repository) refuses its target at preparation,
-      before any mutant runs, and the refusal headlines the external
-      input with its remedy (declare the surface as a bracket path, or
-      measure unstaged) — never the unstaged-drift text over a tree
-      that carries none; the staged arm's dirty judgment realigns with
-      the results spec, under which an external identity is not git's
-      to vouch for and does not stamp dirty. Doc deletes at close.
-      Measurement surface: provenance/refusal diagnostics only — no
-      pew arms, no DST legs.
+      — the run's preparation pass derives every refusal decidable
+      from its inputs and exits before any mutant runs, the staged
+      snapshot's unpinnable external input being the field instance:
+      an identity outside the repository refuses its target at
+      preparation, and the refusal headlines the external input with
+      its remedy (declare the surface as a bracket path, or measure
+      unstaged) — never the unstaged-drift text over a tree that
+      carries none; the staged arm's dirty judgment realigns with the
+      results spec, under which an external identity is not git's to
+      vouch for and does not stamp dirty. The chunk walks every
+      refusal gomutant derives after measurement starts and moves
+      each preparation-decidable one forward, the spec stating the
+      invariant. Doc deletes at close. Measurement surface:
+      provenance/refusal diagnostics only — no pew arms, no DST legs.
 - [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
       reports 2026-09-03; gomutant docs/issues:
       ephemeral-deletion-probes-strand-imports — an imports fix runs
@@ -268,7 +290,11 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       right value is derivable, detectable, or measurable at runtime
       is dispositioned: derive it (fold small, file larger with
       Lands), keep it with the recorded value judgment that earns it,
-      or delete it; and walk parallel mechanisms within and across
+      or delete it; walk every refusal site of every tool against the
+      no-wasted-work doctrine — a refusal decidable at preparation
+      that surfaces after measurement is dispositioned like a knob:
+      moved forward, or its measurement dependence recorded; and walk
+      parallel mechanisms within and across
       the tools as one consolidation scan (candidates feed the
       existing consolidation chunks — 98-101's walk unifications —
       or file fresh). Dispositions are the deliverable: every knob
