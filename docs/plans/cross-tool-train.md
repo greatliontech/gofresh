@@ -165,7 +165,7 @@ latent (stipulator 96 gates, gomutant 179 gates — nothing passes
 partition, the task-runner target, and the CI seat; no production
 code moves.
 
-- [ ] 150. gofresh: self-test partition — `testing.Short()` gates on
+- [x] 150. gofresh: self-test partition — `testing.Short()` gates on
       every temp-module / `closure/fixtures/` / SSA-building test
       (~500 of ~640), the pure tier (verdict ladder, guard
       comparison, provenance core, guidance, internal/*) as the
