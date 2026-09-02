@@ -129,14 +129,24 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       as gomutant docs/issues/own-face-gate-suite-decomposition.md
       (user decision); probe-phase visibility files for 136. Six
       converged loops; dispositions in the commit records.
-- [ ] 114. stipulator: runner-environment inspectability (stipulator
-      docs/issues/witness-runner-environment-divergence.md) — a
-      witness red only inside the runner dumps the divergence (env
-      delta, cwd, limits) so the correlated variable is identified,
-      not guessed; doc deletes at close. FOLDS stipulator
-      docs/issues/timeout-kill-attribution.md — a
-      harness-timeout kill's red names the exhausted budget, not the
-      unlucky test; same diagnostics class, doc deletes at close.
+- [x] 114. stipulator: runner-environment inspectability — landed
+      (stipulator e31795d..25b7dcd + 62fc1a7, five folds: timeout
+      kills attribute the reviewed -test.timeout budget with the
+      runtime's victim roster; load failures name the
+      dependency-resolution state from the go.work/go.mod pin table;
+      verdict-flipping failures carry the runner-vs-ambient env
+      divergence, render-bounded and UTF-8-safe; claim-writing verbs
+      batch or refuse repeated flags through one alignment/refusal
+      vocabulary; gap records gain content-pin consent with
+      declare-time landing-target grammar validation and one
+      machine-owned gap writer). Five converged loops (4+5+6+4+3
+      rounds); five issue docs deleted (witness-runner-environment-
+      divergence, timeout-kill-attribution,
+      cli-repeated-flag-claims-silently-dropped,
+      gapped-requirement-spec-edits-invisible-to-pin,
+      gap-covered-unknown-id-at-declare); the bldc batch's nine
+      surviving docs retargeted onto 141-145 (stipulator 62fc1a7);
+      dispositions in the commit records.
 - [ ] 141. stipulator: verdict and serving integrity (field-response,
       bldc reports 2026-09-03; stipulator
       docs/issues/check-green-over-witness-failure.md +
