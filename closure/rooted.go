@@ -90,7 +90,7 @@ func (h *Hasher) ComputeRootedFunctions(subjects []Subject) (map[Subject]RootedF
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
-		h.emitProgress("prove", group.path)
+		h.emitUnit("prove", group.path, 1, 1)
 		prog, err := h.loadCached(group.path)
 		if err != nil {
 			return nil, err

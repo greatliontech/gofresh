@@ -3287,6 +3287,9 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 			if event.Detail == "" {
 				t.Fatalf("diagnostic phase %q carries no detail", event.Phase)
 			}
+		case "list", "hash", "typecheck", "served", "cancelled":
+			// Per-unit and served/kept reporting rides beside the
+			// step phases; pinned by TestProgressReportsUnitsServedAndKept.
 		default:
 			t.Fatalf("unknown progress phase %q", event.Phase)
 		}

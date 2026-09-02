@@ -123,6 +123,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 	if viewTestHooks.typedLoad != nil {
 		viewTestHooks.typedLoad()
 	}
+	hasher.Unit("typecheck", "", 0, len(patterns))
 	load, err := closure.LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, snapshot, patterns...)
 	if err != nil {
 		return nil, nil, err

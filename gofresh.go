@@ -478,6 +478,10 @@ var viewTestHooks struct {
 	typedLoad     func()
 	runtimeWindow func()
 	maximalBatch  func()
+	// beforeAnalysis observes the point a precise analysis is about to
+	// start, after its Hasher exists — tests cancel there to pin the
+	// kept-on-cancel report.
+	beforeAnalysis func()
 	// factScope observes the derived dynamic-state fact scope — tests
 	// pin the execution-model markers that keep option-on and
 	// option-off sessions from serving each other's facts.
@@ -503,16 +507,33 @@ func WithBuildInputs(inputs ...string) Option {
 	return func(e *Engine) { e.buildInputs = append([]string(nil), inputs...) }
 }
 
-// Progress reports the start of one long-running analysis step: Phase is
-// "observe" for a view observation pass, "runtime" for each runtime-input
-// observation pass (a check's window performs two), "load" for a package
-// program load, or "prove" for a package's observability
-// batch; Package names the package for the per-package phases. Events are
-// emitted before the step runs, carry no completion signal, and are
-// diagnostic keep-alive data, not contract.
+// Progress reports the start of one analysis step, or a fact about an
+// operation: Phase is "observe" for a view observation pass, "runtime"
+// for each runtime-input observation pass (a check's window performs
+// two), "list" for a package's dependency listing, "typecheck" for a
+// typed load (the view's shared load or a dynamic-state miss load; Total
+// is its pattern count), "load" for a package program load, "hash" for a
+// package's closure fold, "prove" for a package's observability batch
+// (one event per attribution slice, Index/Total the slice position),
+// "served" once per operation per memo class that stood in for a step —
+// Served names the class (an observability proof, an effect scan, a
+// testing scan, dynamic-state facts) and Index counts the distinct
+// packages it served from the persistent store; "cancelled" once per
+// operation that returns its caller's context error, Detail saying what
+// the operation persisted and a rerun serves; "toolchain-unaudited" and
+// "analysis-unavailable" carry their diagnostic payload in Detail. Package
+// names the package for the per-package phases; Index and Total give the
+// unit's position when the pass knows it (1-based; zero when unknown).
+// Events are emitted before the step runs, carry no completion signal,
+// and are diagnostic keep-alive data, not contract; a consumer that
+// prints Detail-bearing events prints only the diagnostics.
 type Progress struct {
 	Phase   string
 	Package string
+	Index   int
+	Total   int
+	// Served names the memo class of a "served" summary.
+	Served string
 	// Detail carries a diagnostic payload for phases that have one -
 	// the per-subject analysis-unavailable provenance included, whose
 	// walk-order-dependent content must reach the operator without

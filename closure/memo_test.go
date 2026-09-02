@@ -334,3 +334,73 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 		t.Fatalf("resumed batch results = %d, want %d", len(results), count)
 	}
 }
+
+// The pass counts what it persisted: a cold batch under a memo scope stores
+// its proof slice and the pass reports it, so the kept-on-cancel report's
+// numbers are the store's, never a constant.
+func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := memoModule(t)
+	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}, {Package: "example.com/memo", Symbol: "TestPure"}}
+	cold, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold.SetMemoScope("strategy@1|toolchain|build")
+	if _, err := cold.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if proofs, _ := cold.Persisted(); proofs != 1 {
+		t.Fatalf("cold batch persisted %d proof slices, want the one slice it stored", proofs)
+	}
+	warm, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warm.SetMemoScope("strategy@1|toolchain|build")
+	if _, err := warm.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if proofs, _ := warm.Persisted(); proofs != 0 {
+		t.Fatalf("warm batch persisted %d proof slices, want none", proofs)
+	}
+	if served := warm.ServedSummary()["observability proof"]; !served["example.com/memo"] {
+		t.Fatalf("warm batch served = %v, want the package recorded under the observability class", warm.ServedSummary())
+	}
+}
+
+// A memo entry holding only other subjects of the package serves nothing:
+// the requested subject proves and stores, and the pass records no
+// observability-proof serve for the package.
+func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := memoModule(t)
+	cold, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold.SetMemoScope("strategy@1|toolchain|build")
+	if _, err := cold.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "Pure"}}); err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling.SetMemoScope("strategy@1|toolchain|build")
+	if _, err := sibling.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "TestPure"}}); err != nil {
+		t.Fatal(err)
+	}
+	if served := sibling.ServedSummary()["observability proof"]; served["example.com/memo"] {
+		t.Fatalf("an entry holding only Pure was reported as serving TestPure: %v", sibling.ServedSummary())
+	}
+	if proofs, _ := sibling.Persisted(); proofs != 1 {
+		t.Fatalf("the unserved subject persisted %d slices, want its own one", proofs)
+	}
+}

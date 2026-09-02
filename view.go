@@ -75,7 +75,9 @@ func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir s
 	return e.newView(ctx, subjects, moduleDir, kind)
 }
 
-func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
+func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (view *View, opErr error) {
+	ctx, done := e.beginOperation(ctx)
+	defer done(&opErr)
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
@@ -222,10 +224,89 @@ type observationFacts struct {
 	testVariantLedgers map[string]closure.TestVariantLedger
 }
 
-func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (observationFacts, error) {
+// wireProgress routes a Hasher's step, unit, and diagnostic events to
+// the engine's progress callback as Progress values.
+func (e *Engine) wireProgress(hasher *closure.Hasher) {
+	hasher.OnProgress(func(phase, pkgPath string) {
+		e.progress(Progress{Phase: phase, Package: pkgPath})
+	})
+	hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
+		e.progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
+	})
+	hasher.OnUnit(func(phase, pkgPath string, index, total int) {
+		e.progress(Progress{Phase: phase, Package: pkgPath, Index: index, Total: total})
+	})
+}
+
+// opAccount accumulates, across every pass an operation performs, what
+// its Hashers persisted to the memo store and which packages the store
+// served per memo class — the facts the operation's one kept-on-cancel
+// report and its one served summary per class carry. It rides the
+// operation's context so every pass finds it without a signature.
+type opAccount struct {
+	proofs, scans int
+	served        map[string]map[string]bool
+}
+
+type opAccountKey struct{}
+
+// beginOperation opens one operation's accounting on ctx and returns the
+// finisher the operation defers: it emits the served summary (one event
+// per class) and, when the operation returns its caller's context error,
+// the kept-on-cancel report — once per operation, whatever its passes.
+func (e *Engine) beginOperation(ctx context.Context) (context.Context, func(*error)) {
+	if e.progress == nil || ctx == nil {
+		return ctx, func(*error) {}
+	}
+	if _, nested := ctx.Value(opAccountKey{}).(*opAccount); nested {
+		// A pass inside an already-accounted operation reports through
+		// that operation.
+		return ctx, func(*error) {}
+	}
+	acc := &opAccount{served: map[string]map[string]bool{}}
+	return context.WithValue(ctx, opAccountKey{}, acc), func(err *error) {
+		classes := make([]string, 0, len(acc.served))
+		for class := range acc.served {
+			classes = append(classes, class)
+		}
+		sort.Strings(classes)
+		for _, class := range classes {
+			e.progress(Progress{Phase: "served", Served: class, Index: len(acc.served[class])})
+		}
+		if err != nil && *err != nil && (errors.Is(*err, context.Canceled) || errors.Is(*err, context.DeadlineExceeded)) {
+			e.progress(Progress{Phase: "cancelled", Detail: fmt.Sprintf("%d observability proof slices and %d scans persisted this operation; a rerun serves them", acc.proofs, acc.scans)})
+		}
+	}
+}
+
+// accountPass folds one pass's Hasher into the operation's accounting.
+func accountPass(ctx context.Context, hasher *closure.Hasher) {
+	if hasher == nil {
+		return
+	}
+	acc, ok := ctx.Value(opAccountKey{}).(*opAccount)
+	if !ok {
+		return
+	}
+	proofs, scans := hasher.Persisted()
+	acc.proofs += proofs
+	acc.scans += scans
+	for class, pkgs := range hasher.ServedSummary() {
+		if acc.served[class] == nil {
+			acc.served[class] = map[string]bool{}
+		}
+		for p := range pkgs {
+			acc.served[class][p] = true
+		}
+	}
+}
+
+func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
 	if viewTestHooks.observe != nil {
 		viewTestHooks.observe()
 	}
+	var hasher *closure.Hasher
+	defer func() { accountPass(ctx, hasher) }()
 	if e.progress != nil {
 		e.progress(Progress{Phase: "observe"})
 	}
@@ -239,7 +320,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return observationFacts{}, err
 	}
-	hasher, err := closure.NewAtContextEnvSnapshot(ctx, e.dir, e.env, snapshot, e.buildFlags...)
+	hasher, err = closure.NewAtContextEnvSnapshot(ctx, e.dir, e.env, snapshot, e.buildFlags...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -252,6 +333,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		emitUnauditedToolchainNotice(&e.unauditedNotice, hasher.SelectionNotice(), func(detail string) {
 			e.progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
 		})
+		// The construction pass reports its units too: each package's
+		// listing and closure fold, the shared typed load, and every
+		// memo hit that stood in for a step — the operator sees why a
+		// warm pass is quick and where a cold one is.
+		e.wireProgress(hasher)
 	}
 	// The runtime-config guard digests the environment the measured
 	// processes run under (the producer env when declared): the runtime
@@ -491,7 +577,9 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 
 // CaptureObserved returns maximal closure evidence plus a caller-selected,
 // attributable observation proof for subject.
-func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprint, error) {
+func (v *View) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	if _, ok := v.facts.maximal[subject]; !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
@@ -512,7 +600,9 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (Fingerprin
 
 // CaptureObservedBatch captures observation proof evidence for every
 // subject, sharing one proof analysis across the set.
-func (v *View) CaptureObservedBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+func (v *View) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fingerprint, opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	if err := v.ensureObservable(ctx, v.subjects); err != nil {
 		return nil, err
 	}
@@ -611,7 +701,9 @@ func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 // not already stale, and demonstrated staleness is preferred over
 // unverifiability. Under a deferred-close engine the verdict is
 // provisional until the view validates (WithDeferredCheckClose).
-func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
+func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (verdict Verdict, opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	if _, ok := v.facts.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
@@ -630,7 +722,9 @@ func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject 
 // subjects, and caller cancellation returns the context error. Under a
 // deferred-close engine the verdicts are provisional until the view
 // validates (WithDeferredCheckClose).
-func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil observation proof context")
 	}
@@ -641,7 +735,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	if err != nil {
 		return nil, err
 	}
-	verdicts := make(map[Subject]Verdict, len(recorded))
+	verdicts = make(map[Subject]Verdict, len(recorded))
 	// Records whose staleness follows from their evidence alone are decided
 	// before the observation window opens: their verdicts never consult runtime
 	// state, so observing for them would only add cost and failure modes.
@@ -721,7 +815,9 @@ func (v *View) prepareRecorded(recorded map[Subject]Fingerprint) (map[Subject]cl
 	return closures, nil
 }
 
-func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
 	}
@@ -732,7 +828,7 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 	if err != nil {
 		return nil, err
 	}
-	verdicts := make(map[Subject]Verdict, len(recorded))
+	verdicts = make(map[Subject]Verdict, len(recorded))
 	// Evidence-only staleness is decided before the observation window opens;
 	// those verdicts never consult runtime state.
 	pending := make(map[Subject]Fingerprint, len(recorded))
@@ -876,7 +972,9 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 // context and reports ErrViewChanged when any source closure, guard, or purity
 // assertion moved. A producer calls it after execution before persisting
 // results (REQ-fresh-producer-view).
-func (v *View) Validate(ctx context.Context) error {
+func (v *View) Validate(ctx context.Context) (opErr error) {
+	ctx, done := v.engine.beginOperation(ctx)
+	defer done(&opErr)
 	v.mu.Lock()
 	v.sealed = true
 	hasObserved := len(v.capturedObserved) != 0
@@ -1437,10 +1535,12 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 // over one shared closure Hasher
 // (REQ-fresh-coherent-view attribution; equivalence per
 // REQ-closure-observability-batch-equivalence).
-func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
+func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err error) {
 	if ctx == nil {
 		return errors.New("gofresh: nil precise-analysis context")
 	}
+	var hasher *closure.Hasher
+	defer func() { accountPass(ctx, hasher) }()
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
@@ -1471,7 +1571,10 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	if viewTestHooks.snapshot != nil {
 		viewTestHooks.snapshot(v.facts.snapshot)
 	}
-	hasher, err := closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
+	hasher, err = closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
+	if viewTestHooks.beforeAnalysis != nil {
+		viewTestHooks.beforeAnalysis()
+	}
 	if err != nil {
 		return err
 	}
@@ -1484,13 +1587,8 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 	// a widened guard) must bump ObservationRTA, or cached refusals
 	// serve under semantics that no longer refuse them.
 	hasher.SetMemoScope(ObservationRTA + "|" + v.facts.guards.Toolchain + "|" + v.facts.guards.BuildConfig)
-	if progress := v.engine.progress; progress != nil {
-		hasher.OnProgress(func(phase, pkgPath string) {
-			progress(Progress{Phase: phase, Package: pkgPath})
-		})
-		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
-			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
-		})
+	if v.engine.progress != nil {
+		v.engine.wireProgress(hasher)
 	}
 	// The caller's analysis budget bounds only the precise analysis itself: the
 	// Hasher's analysis context carries the budget deadline, so exhaustion

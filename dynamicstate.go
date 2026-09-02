@@ -1012,6 +1012,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	}
 	if len(testedWithIntermediates) > 0 {
 		sort.Strings(testedWithIntermediates)
+		hasher.Unit("typecheck", "", 0, len(testedWithIntermediates))
 		graphLoad, err := closure.LoadViewGraphEnv(ctx, dir, env, buildFlags, testedWithIntermediates...)
 		if err != nil {
 			return nil, err
@@ -1078,6 +1079,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		if raw, ok := persisted[bucket][node.PkgPath]; ok {
 			var fact dynamicStateFact
 			if json.Unmarshal(raw, &fact) == nil {
+				hasher.Served("dynamic-state facts", node.PkgPath)
 				processFactCache.Store(cacheKey, fact)
 				state.facts[node.PkgPath] = append(state.facts[node.PkgPath], fact)
 				continue
@@ -1094,6 +1096,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		if viewTestHooks.dynamicStateMissLoad != nil {
 			viewTestHooks.dynamicStateMissLoad(patterns)
 		}
+		hasher.Unit("typecheck", "", 0, len(patterns))
 		missLoad, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, patterns...)
 		if err != nil {
 			return nil, err

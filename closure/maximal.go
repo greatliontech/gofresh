@@ -53,10 +53,11 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 		}
 		byPackage[subject.Package] = append(byPackage[subject.Package], subject)
 	}
-	for _, pkgPath := range packages {
+	for i, pkgPath := range packages {
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
 		}
+		h.emitUnit("hash", pkgPath, i+1, len(packages))
 		contributions, files, err := h.maximalContributionsAndFiles(pkgPath)
 		if err != nil {
 			return nil, nil, err
@@ -260,6 +261,7 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 		if k, err := h.testBinaryClosureKey(pkgPath); err == nil {
 			key = k
 			if scan, ok := loadEffectScan(testingScanDirName, scope, key); ok {
+				h.Served("testing scan", pkgPath)
 				h.maximalTesting[pkgPath] = scan
 				return scan, nil
 			}
@@ -317,6 +319,7 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 	scan.preferred = preferredEffectReason(scan.effects)
 	if key != "" {
 		storeEffectScan(testingScanDirName, scope, key, scan)
+		h.persisted.scans++
 	}
 	h.maximalTesting[pkgPath] = scan
 	return scan, nil
@@ -1036,6 +1039,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 		}
 	}
 	if stored, ok := loadEffectScan(effectScanDirName, h.effectScanScope(), key); ok {
+		h.Served("effect scan", pkg.ImportPath)
 		fold(stored)
 		deriveComposite()
 		return composite, true, nil
@@ -1064,6 +1068,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 		fileFold.preferred = selected
 	}
 	storeEffectScan(effectScanDirName, h.effectScanScope(), key, fileFold)
+	h.persisted.scans++
 	fold(fileFold)
 	deriveComposite()
 	return composite, true, nil

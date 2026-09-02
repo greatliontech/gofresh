@@ -112,6 +112,16 @@ type Hasher struct {
 	fileDigests    map[string]string                   // per-file content digests from the closure's own reads, by absolute path
 	progress       func(phase, pkgPath string)         // start-of-step keep-alive events; nil disables
 	diagnostic     func(phase, pkgPath, detail string) // payload-bearing diagnostics; nil disables
+	// unit reports a per-unit step with its position in the pass; nil
+	// disables. persisted counts what this Hasher wrote to the memo
+	// store during the pass — the kept-on-cancel report reads it.
+	unit      func(phase, pkgPath string, index, total int)
+	persisted struct{ proofs, scans int }
+	// served records, per memo class, the packages a persistent-store
+	// hit stood in for during the pass — summarized once per operation,
+	// never emitted per hit, so a warm pass over a large tree reports
+	// one line per class.
+	served map[string]map[string]bool
 	// memoScope enables the persistent observability memo when non-empty:
 	// the caller-supplied analysis identity outside the source closure
 	// (REQ-closure-observability-memo).
@@ -159,6 +169,61 @@ func (h *Hasher) emitProgress(phase, pkgPath string) {
 	if h.progress != nil {
 		h.progress(phase, pkgPath)
 	}
+}
+
+// OnUnit supplies a callback for per-unit steps that know their position
+// in the pass — a package's listing or closure fold among the pass's
+// packages, the view's typed load with its pattern count. Same
+// discipline as OnProgress: fast, synchronous, never calling back in.
+func (h *Hasher) OnUnit(f func(phase, pkgPath string, index, total int)) {
+	h.unit = f
+}
+
+// Unit is the exported face of emitUnit for the observation pass's own
+// steps outside this package (the view's typed load).
+func (h *Hasher) Unit(phase, pkgPath string, index, total int) {
+	h.emitUnit(phase, pkgPath, index, total)
+}
+
+func (h *Hasher) emitUnit(phase, pkgPath string, index, total int) {
+	if h.unit != nil {
+		h.unit(phase, pkgPath, index, total)
+	}
+}
+
+// Served records that a persistent-store memo hit stood in for a step —
+// class names the memo (an observability proof, an effect scan, a
+// testing scan, dynamic-state facts) — for the operation's one summary
+// per class (ServedSummary); in-process cache hits are not recorded.
+func (h *Hasher) Served(class, pkgPath string) {
+	if h.served == nil {
+		h.served = map[string]map[string]bool{}
+	}
+	if h.served[class] == nil {
+		h.served[class] = map[string]bool{}
+	}
+	h.served[class][pkgPath] = true
+}
+
+// ServedSummary returns, per memo class, the distinct packages a
+// persistent-store hit served during the pass.
+func (h *Hasher) ServedSummary() map[string]map[string]bool {
+	out := make(map[string]map[string]bool, len(h.served))
+	for class, pkgs := range h.served {
+		out[class] = make(map[string]bool, len(pkgs))
+		for p := range pkgs {
+			out[class][p] = true
+		}
+	}
+	return out
+}
+
+// Persisted reports what this Hasher wrote to the memo store during the
+// pass — observability proof slices and per-package scans — the facts
+// a kept-on-cancel report names, since a rerun serves every one of
+// them (REQ-closure-observability-memo's slice persistence).
+func (h *Hasher) Persisted() (proofs, scans int) {
+	return h.persisted.proofs, h.persisted.scans
 }
 
 func New() (*Hasher, error) { return NewAt("") }
@@ -1051,6 +1116,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
 	}
+	h.emitProgress("list", pkgPath)
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)

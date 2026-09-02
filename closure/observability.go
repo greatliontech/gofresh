@@ -127,12 +127,16 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 				}
 				remaining = append(remaining, subject)
 			}
+			// Served only when the entry held a requested subject: an
+			// entry holding other subjects of the package served nothing.
+			if len(remaining) < len(group.subjects) {
+				h.Served("observability proof", group.path)
+			}
 			group.subjects = remaining
 			if len(group.subjects) == 0 {
 				continue
 			}
 		}
-		h.emitProgress("prove", group.path)
 		prog, err := h.loadCached(group.path)
 		if err != nil {
 			return nil, err
@@ -161,6 +165,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		if len(group.subjects) == 0 {
 			if memoArmed {
 				storeMemo(h.memoScope, closureHash, unrooted)
+				h.persisted.proofs++
 			}
 			delete(h.progs, group.path)
 			continue
@@ -176,11 +181,14 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// from the memo (REQ-closure-observability-memo).
 		if memoArmed && len(unrooted) > 0 {
 			storeMemo(h.memoScope, closureHash, unrooted)
+			h.persisted.proofs++
 		}
+		slices := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
 		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
 			if err := h.ctx.Err(); err != nil {
 				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 			}
+			h.emitUnit("prove", group.path, start/maxAttributedSubjects+1, slices)
 			end := min(start+maxAttributedSubjects, len(group.subjects))
 			batch := group.subjects[start:end]
 			reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
@@ -217,6 +225,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 			}
 			if memoArmed {
 				storeMemo(h.memoScope, closureHash, sliceProofs)
+				h.persisted.proofs++
 			}
 		}
 		// Programs are per-package test binaries: no later group can reuse
