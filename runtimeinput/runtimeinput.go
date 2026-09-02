@@ -492,6 +492,30 @@ func WithEphemeralTempRoot(root string) TestLogOption {
 	}
 }
 
+// ValidateTestLogOptions applies the declaration options to a throwaway
+// configuration and reports the first refusal, so a producer can refuse a
+// malformed declaration — a relative guard root, a static-input root
+// outside the module — before it spawns the process whose testlog the
+// options would later ingest, instead of discovering it after the run.
+func ValidateTestLogOptions(opts ...TestLogOption) error {
+	_, err := applyTestLogOptions(opts)
+	return err
+}
+
+// applyTestLogOptions is the one application of the declaration options,
+// shared by pre-spawn validation and ingest so the two report the same
+// refusal for the same options: the first malformed declaration refuses.
+func applyTestLogOptions(opts []TestLogOption) (testLogConfig, error) {
+	var c testLogConfig
+	for _, opt := range opts {
+		opt(&c)
+		if c.err != nil {
+			return c, c.err
+		}
+	}
+	return c, nil
+}
+
 func guardRootOption(root, excludeSub string) TestLogOption {
 	return func(c *testLogConfig) {
 		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
@@ -685,12 +709,9 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 // traversal through a symlink, a path the process never ran in — can
 // admit a read against the wrong base.
 func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
-	var cfg testLogConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	if cfg.err != nil {
-		return Observation{}, cfg.err
+	cfg, err := applyTestLogOptions(opts)
+	if err != nil {
+		return Observation{}, err
 	}
 	if cfg.process == "" {
 		return Observation{}, errors.New("runtimeinputs: completed observation needs a process assertion")

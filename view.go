@@ -243,6 +243,16 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return observationFacts{}, err
 	}
+	// The toolchain-selection verdict is a construction fact: the Hasher
+	// resolved it from the snapshot it was built on, so the notice that a
+	// selection outside the audit degrades every later proof is announced
+	// here, before any load — never first on the precise-analysis path a
+	// caller may reach only after execution.
+	if e.progress != nil {
+		emitUnauditedToolchainNotice(&e.unauditedNotice, hasher.SelectionNotice(), func(detail string) {
+			e.progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
+		})
+	}
 	// The runtime-config guard digests the environment the measured
 	// processes run under (the producer env when declared): the runtime
 	// reads those keys before execution, so a moved delivered width
@@ -284,6 +294,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return observationFacts{}, err
 	}
 	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
+	// Subject existence is decided by the scan; refusing here, before
+	// the maximal fold reads and hashes every contributing file, is
+	// preparation — the fold below cannot change the answer.
+	for _, subject := range subjects {
+		if !known[subject] {
+			return observationFacts{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
+		}
+	}
+	if viewTestHooks.maximalBatch != nil {
+		viewTestHooks.maximalBatch()
+	}
 	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
 	if err != nil {
 		return observationFacts{}, err
@@ -329,9 +350,6 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 	}
 	for _, subject := range subjects {
-		if !known[subject] {
-			return observationFacts{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
-		}
 		maximal := computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]
 		if openWorld[subject] {
 			maximal.Unverifiable = true
@@ -619,6 +637,10 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	closures, err := v.prepareRecorded(recorded)
+	if err != nil {
+		return nil, err
+	}
 	verdicts := make(map[Subject]Verdict, len(recorded))
 	// Records whose staleness follows from their evidence alone are decided
 	// before the observation window opens: their verdicts never consult runtime
@@ -626,16 +648,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	pending := make(map[Subject]Fingerprint, len(recorded))
 	positives := make(map[Subject]bool, len(recorded))
 	for subject, rec := range recorded {
-		if err := validateRecordedKind(rec); err != nil {
-			return nil, err
-		}
-		if rec.ResultKind != v.kind {
-			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
-		}
-		cl, ok := v.facts.maximal[subject]
-		if !ok {
-			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-		}
+		cl := closures[subject]
 		// The shared evidence ladder (core, compartment, fail-closed
 		// pre-partition tiers) decides evidence-only staleness once for
 		// every check surface (recordedEvidenceVerdict).
@@ -656,6 +669,9 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	// bind to a source interval the close verifies stable - the opening
 	// observation verified a prefix of the same interval
 	// (REQ-fresh-coherent-view's record/compare asymmetry).
+	if viewTestHooks.runtimeWindow != nil {
+		viewTestHooks.runtimeWindow()
+	}
 	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
 	if err != nil {
 		return nil, err
@@ -680,17 +696,15 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	return finish()
 }
 
-func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-	if ctx == nil {
-		return nil, errors.New("gofresh: nil analysis context")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	verdicts := make(map[Subject]Verdict, len(recorded))
-	// Evidence-only staleness is decided before the observation window opens;
-	// those verdicts never consult runtime state.
-	pending := make(map[Subject]Fingerprint, len(recorded))
+// prepareRecorded is the preparation pass every check surface runs
+// before deciding anything or opening a runtime-input window: every
+// recorded fingerprint's kind and membership are validated first, so a
+// malformed record refuses the batch before any verdict is decided or
+// any window is paid — never after the records ahead of it were judged.
+// It returns each record's closure, so the deciding loops read a
+// validated membership rather than re-indexing the facts.
+func (v *View) prepareRecorded(recorded map[Subject]Fingerprint) (map[Subject]closure.Closure, error) {
+	closures := make(map[Subject]closure.Closure, len(recorded))
 	for subject, rec := range recorded {
 		if err := validateRecordedKind(rec); err != nil {
 			return nil, err
@@ -702,6 +716,28 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		if !ok {
 			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 		}
+		closures[subject] = maximal
+	}
+	return closures, nil
+}
+
+func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil analysis context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	closures, err := v.prepareRecorded(recorded)
+	if err != nil {
+		return nil, err
+	}
+	verdicts := make(map[Subject]Verdict, len(recorded))
+	// Evidence-only staleness is decided before the observation window opens;
+	// those verdicts never consult runtime state.
+	pending := make(map[Subject]Fingerprint, len(recorded))
+	for subject, rec := range recorded {
+		maximal := closures[subject]
 		// The shared evidence ladder (core, compartment, fail-closed
 		// pre-partition tiers) decides evidence-only staleness once for
 		// every check surface (recordedEvidenceVerdict).
@@ -721,6 +757,9 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 	// bind to a source interval the close verifies stable - the opening
 	// observation verified a prefix of the same interval
 	// (REQ-fresh-coherent-view's record/compare asymmetry).
+	if viewTestHooks.runtimeWindow != nil {
+		viewTestHooks.runtimeWindow()
+	}
 	runtimeBefore, err := v.observeRuntimeInputs(ctx, pending)
 	if err != nil {
 		return nil, err
@@ -1071,10 +1110,10 @@ func (v *View) validateObserved(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	current, err := v.newSeededValidationView(ctx)
-	if err != nil {
-		return err
-	}
+	// Preparation: what the validation needs from the sealed view is
+	// known before any re-observation — a proof-less view or a subject
+	// with no completed observation attached refuses here, never after a
+	// full observation pass has been paid.
 	v.mu.RLock()
 	subjects := make([]Subject, 0, len(v.capturedObserved))
 	expected := make(map[Subject]closure.Observability, len(v.capturedObserved))
@@ -1089,6 +1128,13 @@ func (v *View) validateObserved(ctx context.Context) error {
 	v.mu.RUnlock()
 	if len(subjects) == 0 {
 		return errors.New("gofresh: no captured observation proof")
+	}
+	if err := requireCompletedAttachments(attached, subjects); err != nil {
+		return err
+	}
+	current, err := v.newSeededValidationView(ctx)
+	if err != nil {
+		return err
 	}
 	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
 		return err
@@ -1246,6 +1292,19 @@ func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fi
 	return verdict
 }
 
+// requireCompletedAttachments is the one statement of what a validation
+// needs attached per subject — a completed observation with its manifest
+// and digest — shared by the preparation check and the comparison so the
+// two cannot drift.
+func requireCompletedAttachments(attached map[Subject]runtimeinput.State, subjects []Subject) error {
+	for _, subject := range subjects {
+		if state := attached[subject]; !state.OK || state.Manifest == "" || state.Digest == "" {
+			return fmt.Errorf("gofresh: subject %s.%s has no attached completed observation", subject.Package, subject.Symbol)
+		}
+	}
+	return nil
+}
+
 func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
 	// One evaluation per distinct encoded manifest per pass: the observed
 	// state is a function of (manifest, module, env) alone, so subjects
@@ -1253,12 +1312,12 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 	// check window carries, on the producer path. The memo is per-call
 	// on purpose: the second validation pass must re-evaluate to prove
 	// the inputs stable across the re-analysis window.
+	if err := requireCompletedAttachments(attached, subjects); err != nil {
+		return err
+	}
 	observedByManifest := map[string]runtimeinput.State{}
 	for _, subject := range subjects {
 		state := attached[subject]
-		if !state.OK || state.Manifest == "" || state.Digest == "" {
-			return fmt.Errorf("gofresh: subject %s.%s has no attached completed observation", subject.Package, subject.Symbol)
-		}
 		observed, evaluated := observedByManifest[state.Manifest]
 		if !evaluated {
 			var err error
@@ -1431,9 +1490,6 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) error {
 		})
 		hasher.OnDiagnostic(func(phase, pkgPath, detail string) {
 			progress(Progress{Phase: phase, Package: pkgPath, Detail: detail})
-		})
-		emitUnauditedToolchainNotice(&v.engine.unauditedNotice, hasher.SelectionNotice(), func(detail string) {
-			progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
 		})
 	}
 	// The caller's analysis budget bounds only the precise analysis itself: the

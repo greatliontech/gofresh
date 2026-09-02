@@ -1037,14 +1037,9 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			// The pinned fact path below derives it or fails loudly.
 			continue
 		}
-		if node.Class == closure.PinnedPackage && (node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test") {
-			// A test variant of a module-cache-resident package: the view
-			// packages are the only test-expanded ones, and a subject
-			// package inside the read-only cache has no runnable tests to
-			// vouch for it — name the refusal rather than surfacing it as
-			// a coverage gap.
-			return nil, fmt.Errorf("gofresh: dynamic-state scan: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
-		}
+		// A test variant of a module-cache-resident view package was
+		// refused by the scan's preparation over this same listing; a
+		// node reaching here is an uncovered package, never that case.
 		return nil, fmt.Errorf("gofresh: dynamic-state scan did not cover package %s", node.ImportPath)
 	}
 

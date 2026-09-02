@@ -471,6 +471,13 @@ var viewTestHooks struct {
 	// dynamicStateMissLoad observes the batched typed load of
 	// version-pinned packages whose dynamic-state facts missed the memo.
 	dynamicStateMissLoad func(patterns []string)
+	// typedLoad observes every typed package load an observation pass
+	// performs; runtimeWindow every runtime-input window a check opens;
+	// maximalBatch every maximal-closure fold — tests pin that a
+	// preparation refusal fires before each of them.
+	typedLoad     func()
+	runtimeWindow func()
+	maximalBatch  func()
 	// factScope observes the derived dynamic-state fact scope — tests
 	// pin the execution-model markers that keep option-on and
 	// option-off sessions from serving each other's facts.

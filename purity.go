@@ -90,6 +90,18 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 	for _, pkgPath := range pkgPaths {
 		requested[pkgPath] = true
 	}
+	// A test variant of a module-cache-resident view package: the view
+	// packages are the only test-expanded ones, and a subject package
+	// inside the read-only cache has no runnable tests to vouch for it —
+	// refused from the listing, before the typed load below is paid, and
+	// named rather than surfaced as a coverage gap. A pinned view package
+	// with no test files carries no variant and derives through the
+	// pinned-fact path as before.
+	for _, node := range meta {
+		if node.Class == closure.PinnedPackage && node.ForTest != "" && requested[node.ForTest] && (node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test") {
+			return nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
+		}
+	}
 	patterns := append([]string(nil), pkgPaths...)
 	seenPattern := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
@@ -107,6 +119,9 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 		}
 		seenPattern[node.PkgPath] = true
 		patterns = append(patterns, node.PkgPath)
+	}
+	if viewTestHooks.typedLoad != nil {
+		viewTestHooks.typedLoad()
 	}
 	load, err := closure.LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, snapshot, patterns...)
 	if err != nil {
