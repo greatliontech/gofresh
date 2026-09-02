@@ -186,7 +186,7 @@ code moves.
       the self-host path from bit-rotting; made genuinely cheap and
       complete by 156); the stale `findings.json.campaign` /
       `.lock` residue removed. Measurement: none.
-- [ ] 152. stipulator: self-test partition — finish the `Short()`
+- [x] 152. stipulator: self-test partition — finish the `Short()`
       gating in `internal/backends/golang` (245 tests, ~64 gates) so
       `go test -short ./...` is the seconds-class tier; `task
       test:short`; CI keeps the full tier; the dangling CI-seat
