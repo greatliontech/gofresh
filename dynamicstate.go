@@ -667,9 +667,14 @@ var processFactCache sync.Map
 // construction: their declaration side is excluded and toolchain source
 // cannot reach module variables (imports are acyclic).
 type viewDynamicState struct {
-	// facts by type-checker package path; test-variant facts merge into the
-	// same key exactly as their compilations collapse there.
+	// facts by type-checker package path, one view package's cone —
+	// set on a composition; test-variant facts merge into the same key
+	// exactly as their compilations collapse there.
 	facts map[string][]dynamicStateFact
+	// cones holds, per view package, the facts of its own test-binary
+	// graph — the only facts any judgment or lookup for that package
+	// reads (REQ-closure-shared-dynamic-state).
+	cones map[string]map[string][]dynamicStateFact
 	// downgraded maps each package whose graph carries mutated shared
 	// dynamic state — every subject of such a package is unverifiable —
 	// to one culprit description naming the owning package and variable.
@@ -693,13 +698,14 @@ type viewDynamicState struct {
 	// reachability re-judgment filters under the single-subject
 	// attestation (REQ-closure-shared-dynamic-state).
 	rootCulprits map[string][]dynCulprit
-	// culpritSites maps each culprit variable key to its marking-site
+	// culpritSites maps each view package, then each culprit variable
+	// key its graph carries, to the marking-site
 	// inventory: the attributed function and method sites, and whether
 	// any mark lacks attribution — nested literals, init-flow refusals,
 	// deferral failures, malformed arms, crossed links, callable
 	// env-carrying registrations — an unattributed mark foreclosing the
 	// reachability discharge fail-closed.
-	culpritSites map[string]culpritSiteSet
+	culpritSites map[string]map[string]culpritSiteSet
 }
 
 // dischargeUnreachableCulprits applies the single-subject reachability
@@ -742,8 +748,11 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 		}
 		surviving := ""
 		dischargedKeys := map[string]bool{}
+		// Every culprit the inventory names has a site entry (the
+		// composition records both together); the zero value would
+		// discharge, so the pairing is load-bearing.
 		for _, culprit := range state.rootCulprits[subject.Package] {
-			sites := state.culpritSites[culprit.key]
+			sites := state.culpritSites[subject.Package][culprit.key]
 			if sites.unattributed {
 				surviving = culprit.text
 				break
@@ -834,7 +843,7 @@ func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynam
 		surviving := ""
 		dischargedKeys := map[string]bool{}
 		for _, culprit := range state.rootCulprits[path] {
-			sites := state.culpritSites[culprit.key]
+			sites := state.culpritSites[path][culprit.key]
 			if sites.unattributed {
 				surviving = culprit.text
 				break
@@ -927,10 +936,11 @@ type culpritSiteSet struct {
 }
 
 // methodDirectives resolves a promoted method's purity and externality
-// directives from its declaring package's fact — the declaration keys, empty
-// when absent. Toolchain source is not an authoring surface for gofresh
-// directives, so standard-library methods resolve to none by construction.
-func (s *viewDynamicState) methodDirectives(m *types.Func) (pureKey, externalKey string) {
+// directives from its declaring package's fact inside the view package's
+// own cone — the declaration keys, empty when absent. Toolchain source is
+// not an authoring surface for gofresh directives, so standard-library
+// methods resolve to none by construction.
+func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (pureKey, externalKey string) {
 	if s == nil || m == nil || m.Pkg() == nil {
 		return "", ""
 	}
@@ -947,7 +957,7 @@ func (s *viewDynamicState) methodDirectives(m *types.Func) (pureKey, externalKey
 		return "", ""
 	}
 	key := named.Obj().Name() + "." + m.Name()
-	for _, fact := range s.facts[m.Pkg().Path()] {
+	for _, fact := range s.cones[viewPackage][m.Pkg().Path()] {
 		if pureKey == "" {
 			pureKey = fact.PureMethods[key]
 		}
@@ -963,7 +973,13 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if err != nil {
 		return nil, err
 	}
-	state := &viewDynamicState{facts: map[string][]dynamicStateFact{}, downgraded: map[string]string{}}
+	state := &viewDynamicState{downgraded: map[string]string{}, cones: map[string]map[string][]dynamicStateFact{}}
+	// Facts are gathered view-wide by listing — the loads are shared —
+	// and read only through a view package's own cone below.
+	factsByListing := map[string]dynamicStateFact{}
+	record := func(listing, _ string, fact dynamicStateFact) {
+		factsByListing[listing] = fact
+	}
 
 	// Mutable-local facts come from the pass's own typed load — content
 	// observed every pass, never cached (REQ-closure-mutable-local). The
@@ -989,7 +1005,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			continue
 		}
 		matched[listing] = true
-		state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
+		record(listing, pkg.PkgPath, dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
 	}
 	// An intermediate recompilation ("r [a.test]") exists only inside a test
 	// binary's graph: it is scanned from its own compilation — test-added
@@ -1027,7 +1043,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				return
 			}
 			matched[listing] = true
-			state.facts[pkg.PkgPath] = append(state.facts[pkg.PkgPath], dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
+			record(listing, pkg.PkgPath, dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
 		})
 	}
 	for _, node := range meta {
@@ -1066,7 +1082,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		bucket := buckets[node.Pin]
 		cacheKey := factScope + "\x00" + bucket + "\x00" + node.PkgPath
 		if cached, ok := processFactCache.Load(cacheKey); ok {
-			state.facts[node.PkgPath] = append(state.facts[node.PkgPath], cached.(dynamicStateFact))
+			record(node.ImportPath, node.PkgPath, cached.(dynamicStateFact))
 			continue
 		}
 		if persisted[bucket] == nil {
@@ -1081,7 +1097,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			if json.Unmarshal(raw, &fact) == nil {
 				hasher.Served("dynamic-state facts", node.PkgPath)
 				processFactCache.Store(cacheKey, fact)
-				state.facts[node.PkgPath] = append(state.facts[node.PkgPath], fact)
+				record(node.ImportPath, node.PkgPath, fact)
 				continue
 			}
 		}
@@ -1117,7 +1133,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			if !ok {
 				return nil, fmt.Errorf("gofresh: dynamic-state scan did not load pinned package %s", node.PkgPath)
 			}
-			state.facts[node.PkgPath] = append(state.facts[node.PkgPath], fact)
+			record(node.ImportPath, node.PkgPath, fact)
 			if unkeyable[node.Pin] {
 				continue
 			}
@@ -1135,6 +1151,52 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 	}
 
+	// Compose per view package over its own cone
+	// (REQ-closure-shared-dynamic-state): the view-wide gathering above
+	// shares the loads, the judgment never shares a mark.
+	for _, viewPackage := range viewPackages {
+		coneMeta, coneFacts := dynamicStateCone(meta, nodesByListing, factsByListing, viewPackage)
+		state.cones[viewPackage] = coneFacts
+		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject)
+		if reason := cone.downgraded[viewPackage]; reason != "" {
+			state.downgraded[viewPackage] = reason
+		}
+		if discharges := cone.vouchDischarges[viewPackage]; discharges != "" {
+			if state.vouchDischarges == nil {
+				state.vouchDischarges = map[string]string{}
+			}
+			state.vouchDischarges[viewPackage] = discharges
+		}
+		if attested := cone.attestationDischarges[viewPackage]; attested != "" {
+			if state.attestationDischarges == nil {
+				state.attestationDischarges = map[string]string{}
+			}
+			state.attestationDischarges[viewPackage] = attested
+		}
+		if culprits := cone.rootCulprits[viewPackage]; len(culprits) > 0 {
+			if state.rootCulprits == nil {
+				state.rootCulprits = map[string][]dynCulprit{}
+				state.culpritSites = map[string]map[string]culpritSiteSet{}
+			}
+			state.rootCulprits[viewPackage] = culprits
+			state.culpritSites[viewPackage] = cone.culpritSites[viewPackage]
+		}
+	}
+	return state, nil
+}
+
+// composeDynamicState runs the shared-dynamic-state judgment for one view
+// package over the facts of that package's own test-binary graph — the
+// analyzed program, and the only one whose mutation sites can execute
+// in the process that runs the package's subjects. The marks, the
+// deferral fixed points, the discharge channels, and the naming walk
+// all read the cone alone, so a view batching several packages yields
+// for each exactly the judgment its solitary view yields, and a
+// package's outputs are a pure function of its own graph
+// (REQ-closure-shared-dynamic-state, REQ-closure-scan-memo).
+func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject bool) *viewDynamicState {
+	state := &viewDynamicState{facts: facts, downgraded: map[string]string{}}
+	viewPackages := []string{viewPackage}
 	// Compose: the demonstrated-mutation and escape unions across the
 	// graph, the declaring package's opacity intersection, then per-node
 	// declaration matching and reachability from each view package's
@@ -1952,7 +2014,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	// survivor set lifts it (REQ-closure-shared-dynamic-state).
 	if len(pkgCulprits) > 0 {
 		state.rootCulprits = map[string][]dynCulprit{}
-		state.culpritSites = map[string]culpritSiteSet{}
+		state.culpritSites = map[string]map[string]culpritSiteSet{viewPackage: {}}
 		var collectOrdered func(listing string, seen map[string]bool, acc *[]dynCulprit)
 		collectOrdered = func(listing string, seen map[string]bool, acc *[]dynCulprit) {
 			if seen[listing] {
@@ -1992,11 +2054,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		for _, culprits := range state.rootCulprits {
 			for _, culprit := range culprits {
-				if _, done := state.culpritSites[culprit.key]; done {
+				if _, done := state.culpritSites[viewPackage][culprit.key]; done {
 					continue
 				}
 				fns := siteFns[culprit.key]
-				state.culpritSites[culprit.key] = culpritSiteSet{
+				state.culpritSites[viewPackage][culprit.key] = culpritSiteSet{
 					fns: fns,
 					// A siteless mark is a bookkeeping hole, never a
 					// discharge: fail-closed with the unattributed class.
@@ -2100,7 +2162,51 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if len(evidenceDischarged) > 0 {
 		state.attestationDischarges = collectReachable(evidenceDischarged)
 	}
-	return state, nil
+	return state
+}
+
+// dynamicStateCone selects the metadata nodes and the facts of one view
+// package's test-binary graph out of a view-wide gathering: the nodes
+// reachable over imports from the package's own listings (its plain
+// compilation, its test variants, and the intermediate recompilations
+// they induce), with each listing's fact folded under its type-checker
+// package path exactly as the solitary derivation would fold it.
+func dynamicStateCone(meta []closure.GraphPackage, byListing map[string]closure.GraphPackage, factsByListing map[string]dynamicStateFact, viewPackage string) ([]closure.GraphPackage, map[string][]dynamicStateFact) {
+	in := map[string]bool{}
+	var visit func(listing string)
+	visit = func(listing string) {
+		if in[listing] {
+			return
+		}
+		node, ok := byListing[listing]
+		if !ok {
+			return
+		}
+		in[listing] = true
+		for _, imported := range node.Imports {
+			visit(imported)
+		}
+	}
+	// Two root families: the package's plain compilation, and every
+	// listing its test binary induces (both test variants, the
+	// intermediate recompilations, the generated test main).
+	for _, node := range meta {
+		if (node.PkgPath == viewPackage && node.ForTest == "") || node.ForTest == viewPackage {
+			visit(node.ImportPath)
+		}
+	}
+	var cone []closure.GraphPackage
+	facts := map[string][]dynamicStateFact{}
+	for _, node := range meta {
+		if !in[node.ImportPath] {
+			continue
+		}
+		cone = append(cone, node)
+		if fact, ok := factsByListing[node.ImportPath]; ok {
+			facts[node.PkgPath] = append(facts[node.PkgPath], fact)
+		}
+	}
+	return cone, facts
 }
 
 // pinnedBuckets derives, per pinned module, the memo bucket completing its

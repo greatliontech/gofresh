@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -82,6 +83,39 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
 func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, singleSubject, packageProcess bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+	// The scan memo: a view package whose scan the persistent store
+	// already holds under this scope and its current package scan key
+	// serves its subjects' outputs whole and takes no part in the typed
+	// load, the derivation, or the discharges below — every output is a
+	// pure function of the package's typed test-binary program, which
+	// the key pins byte for byte (REQ-closure-scan-memo). A key that
+	// cannot derive, or an entry that cannot load, recomputes.
+	scanScope := scanMemoScope(factScope, vouches)
+	if viewTestHooks.scanMemoOff {
+		scanScope = ""
+	}
+	served := map[string]packageScanEntry{}
+	keys := map[string]string{}
+	var misses []string
+	for _, pkgPath := range pkgPaths {
+		key, err := hasher.PackageScanKey(pkgPath)
+		if err == nil {
+			keys[pkgPath] = key
+			var entry packageScanEntry
+			if closure.LoadScanFacts(scanScope, key, &entry) && entry.Version == scanEntryVersion {
+				served[pkgPath] = entry
+				hasher.Served("scan", pkgPath)
+				continue
+			}
+		}
+		misses = append(misses, pkgPath)
+	}
+	if len(misses) == 0 {
+		return scanFromEntries(served), nil, nil
+	}
+	// Every listing, load, and derivation below reads the misses' graph
+	// alone; a served package's cone costs the pass nothing.
+	pkgPaths = misses
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
 		return nil, nil, err
@@ -157,7 +191,116 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 			return nil, nil, err
 		}
 	}
+	// Persist each missed package's outputs now that the discharges have
+	// finished shaping them, then fold the served packages' in.
+	for _, pkgPath := range pkgPaths {
+		if key := keys[pkgPath]; key != "" {
+			closure.StoreScanFacts(scanScope, key, entryOf(scan, pkgPath))
+		}
+	}
+	mergeEntries(scan, served)
 	return scan, load, nil
+}
+
+// scanEntryVersion versions the persisted scan entry's shape; a shape
+// change recomputes rather than misreading an older entry.
+const scanEntryVersion = 1
+
+// scanMemoScope is the scan memo's scope: the fact scope (strategy,
+// toolchain, build configuration, execution attestations) joined with
+// the sorted vouch set, since a vouch is load-bearing for the discharges
+// the entry records.
+func scanMemoScope(factScope string, vouches map[string]bool) string {
+	if factScope == "" {
+		return ""
+	}
+	keys := make([]string, 0, len(vouches))
+	for v := range vouches {
+		keys = append(keys, v)
+	}
+	sort.Strings(keys)
+	return factScope + "|vouches:" + strings.Join(keys, ",")
+}
+
+// subjectScanEntry is one subject's scan outputs as persisted.
+type subjectScanEntry struct {
+	Pure                     bool   `json:"pure,omitempty"`
+	OpenWorld                bool   `json:"openWorld,omitempty"`
+	External                 bool   `json:"external,omitempty"`
+	DowngradeReason          string `json:"downgradeReason,omitempty"`
+	VouchDischarges          string `json:"vouchDischarges,omitempty"`
+	AttestationDischarges    string `json:"attestationDischarges,omitempty"`
+	PackageProcessDischarges string `json:"packageProcessDischarges,omitempty"`
+	Ambiguous                string `json:"ambiguous,omitempty"`
+}
+
+// packageScanEntry is one view package's scan outputs as persisted: every
+// subject the scan knew in the package, by symbol.
+type packageScanEntry struct {
+	Version  int                         `json:"version"`
+	Subjects map[string]subjectScanEntry `json:"subjects"`
+}
+
+// entryOf projects the scan's outputs for one package into its entry.
+func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
+	entry := packageScanEntry{Version: scanEntryVersion, Subjects: map[string]subjectScanEntry{}}
+	for subject := range scan.known {
+		if subject.Package != pkgPath {
+			continue
+		}
+		entry.Subjects[subject.Symbol] = subjectScanEntry{
+			Pure: scan.pure[subject], OpenWorld: scan.openWorld[subject], External: scan.external[subject],
+			DowngradeReason: scan.downgradeReason[subject], VouchDischarges: scan.vouchDischarges[subject],
+			AttestationDischarges: scan.attestationDischarges[subject], PackageProcessDischarges: scan.packageProcessDischarges[subject],
+			Ambiguous: scan.ambiguous[subject],
+		}
+	}
+	return entry
+}
+
+// mergeEntries folds served packages' entries into a scan.
+func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
+	for pkgPath, entry := range served {
+		for symbol, e := range entry.Subjects {
+			subject := Subject{Package: pkgPath, Symbol: symbol}
+			scan.known[subject] = true
+			if e.Pure {
+				scan.pure[subject] = true
+			}
+			if e.OpenWorld {
+				scan.openWorld[subject] = true
+			}
+			if e.External {
+				scan.external[subject] = true
+			}
+			if e.DowngradeReason != "" {
+				scan.downgradeReason[subject] = e.DowngradeReason
+			}
+			if e.VouchDischarges != "" {
+				scan.vouchDischarges[subject] = e.VouchDischarges
+			}
+			if e.AttestationDischarges != "" {
+				scan.attestationDischarges[subject] = e.AttestationDischarges
+			}
+			if e.PackageProcessDischarges != "" {
+				scan.packageProcessDischarges[subject] = e.PackageProcessDischarges
+			}
+			if e.Ambiguous != "" {
+				scan.ambiguous[subject] = e.Ambiguous
+			}
+		}
+	}
+}
+
+// scanFromEntries builds a scan entirely from served entries.
+func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
+	scan := &subjectScan{
+		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]bool{}, external: map[Subject]bool{},
+		downgradeReason: map[Subject]string{}, vouchDischarges: map[Subject]string{}, attestationDischarges: map[Subject]string{},
+		packageProcessDischarges: map[Subject]string{}, ambiguous: map[Subject]string{},
+	}
+	mergeEntries(scan, served)
+	return scan
 }
 
 // subjectScan is one observation pass's subject-walk result: enumeration,
@@ -348,7 +491,7 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(audited, sig) {
 						openWorld[subject] = true
 					}
-					pureKey, externalKey := state.methodDirectives(method)
+					pureKey, externalKey := state.methodDirectives(pkgPath, method)
 					if pureKey != "" && externalKey != "" && scanErr == nil {
 						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", pureKey)
 					}

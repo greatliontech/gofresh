@@ -241,6 +241,14 @@ descriptor cluster under the caller's attestation,
 or the reachability judgments — the attestation-scoped per-subject
 judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
+The judgment is per package graph: the program that can mutate the
+variable is the subject package's own test binary, so the marks that
+open an owning package for a subject, the deferrals they resolve
+against, and the discharges that lift them are derived from the facts
+of that package's graph alone — a mutation linked only by another view
+package's binary opens nothing — and a view batching several packages
+MUST yield for each exactly the judgment its solitary view yields (the
+dynamic-state form of REQ-closure-observability-batch-equivalence).
 (The refusal reason's own contract, the discharge channel it names
 included, is REQ-closure-shared-dynamic-state-reason.)
 A package-level variable whose type carries none of these — a plain
@@ -603,8 +611,13 @@ single-subject one — it bounds WHICH binary runs, never how many
 subjects share it — and the single-subject judgment takes precedence
 where both hold (each is sound under its own model; neither dominates
 the other's discharges); without either attestation no reachability judgment
-applies, because an unattested consumer may run the subject through
-any binary at all, whose roots the analysis never saw. Package
+applies, because an unattested consumer may run the subject under any
+root set at all — a harness the analysis never saw — so no rooted
+flow bounds the sites a prior subject executed; the analyzed program
+itself stays the subject package's own graph, the code the maximal
+closure prices, exactly as the whole-graph judgment above assumes — a
+consumer linking foreign code into the subject's process is outside
+the fingerprint's model altogether, the foreign bytes being in no key. Package
 initialization stays outside the rooted set on the same ground —
 with no root reaching a site, no prior subject wrote it, and
 initialization remains a function of the hashed source, the priced
@@ -1517,11 +1530,14 @@ is a pure function of its key's complete input identity: the caller's scope
 configuration) plus the module's version pin and the version signature of every
 pinned module reachable from its packages, its type environment's complete
 version surface (the standard library rides the toolchain guard). A
-mutable-local package's facts are never memoized — its source carries no
-version signal (REQ-closure-mutable-local) — and derive fresh from each
-observation pass's own load; a process-lifetime cache is sound exactly for
-keyed pinned facts and never holds a mutable-local derivation, so no stale
-process state can override newer local source. A pinned module whose import
+mutable-local package's facts are never memoized by version — its source
+carries no version signal (REQ-closure-mutable-local) — and derive fresh
+from each observation pass's own load, or serve as part of a view
+package's whole scan under the package scan key of REQ-closure-scan-memo,
+whose content digest is the signal a version cannot give; a
+process-lifetime cache is sound exactly for keyed pinned facts and never
+holds a mutable-local derivation, so no stale process state can override
+newer local source. A pinned module whose import
 cone reaches any mutable-local node is unkeyable — part of its type
 environment carries no version signal — and its facts derive fresh every
 pass, entering no cache layer: a pinned key must never launder mutable-local
@@ -1587,6 +1603,29 @@ the observability memo's discipline verbatim: a sibling user-cache
 directory, atomic writes, silent recomputation on any miss, corruption, or
 key mismatch, deletable wholesale at any time; changing scan semantics —
 the testing classification table included — bumps the scan-strategy
+version.
+
+**REQ-closure-scan-memo** (behavior): A view package's scan — the
+shared-dynamic-state facts of its typed test-binary program, the
+directive, dynamic-signature, external, and ambiguity marks of every
+subject the package declares, and the discharges the caller's vouches and
+execution attestations carried for them — MAY be served whole from a
+persistent memo, because every output is a pure function of its key's
+complete input identity — the shared-dynamic-state judgment reads the
+package's own graph and nothing of its sibling view packages
+(REQ-closure-shared-dynamic-state): the fact-strategy version and the code guards
+(toolchain and build configuration), the execution attestations, and the
+caller's vouch set — the scope — plus the package scan key: the maximal
+closure hash joined with the test-variant compartment identity, which
+pins every mutable-local byte of the test binary's graph and every pinned
+version it is built from (the standard library rides the toolchain
+guard). A served package takes no part in the pass's typed load, its
+derivation, or its discharges; the load runs over the missed packages
+alone. A memo hit is output-equivalent to recomputation. The memo is a
+cache, never a record — the observability memo's discipline verbatim: a
+sibling user-cache directory, atomic writes, silent recomputation on any
+miss, corruption, key mismatch, or entry-shape mismatch, deletable
+wholesale at any time; changing scan semantics bumps the fact-strategy
 version.
 
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the

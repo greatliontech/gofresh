@@ -62,6 +62,10 @@ func runScan(t *testing.T, scope, dir string, pkgPaths ...string) scanResult {
 
 func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pkgPaths ...string) scanResult {
 	t.Helper()
+	// These scans pin the derivation over a poisoned in-process fact
+	// cache; the scan memo would serve the first scan's outputs whole.
+	viewTestHooks.scanMemoOff = true
+	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +262,7 @@ func (Widget) External() int { return 2 }
 		t.Fatalf("fact lost method directives: %+v", restored)
 	}
 
-	state := &viewDynamicState{facts: map[string][]dynamicStateFact{"example.com/factsrc": {restored}}}
+	state := &viewDynamicState{cones: map[string]map[string][]dynamicStateFact{"example.com/factsrc": {"example.com/factsrc": {restored}}}}
 	widget, ok := plain.Scope().Lookup("Widget").(*types.TypeName)
 	if !ok {
 		t.Fatal("Widget type missing")
@@ -267,7 +271,7 @@ func (Widget) External() int { return 2 }
 	var pureKey, externalKey string
 	for i := 0; i < methods.Len(); i++ {
 		method := methods.At(i).Obj().(*types.Func)
-		p, x := state.methodDirectives(method)
+		p, x := state.methodDirectives("example.com/factsrc", method)
 		if method.Name() == "Pure" {
 			pureKey = p
 		}
@@ -470,6 +474,11 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	viewTestHooks.scanMemoOff = true
+	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
@@ -584,6 +593,11 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	viewTestHooks.scanMemoOff = true
+	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeMappedDepModule(t)
 	const mapper = "golang.org/x/sys/unix.mapper"
@@ -1257,6 +1271,11 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	viewTestHooks.scanMemoOff = true
+	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeSemverDepModule(t)
 	const ghost = "golang.org/x/mod/semver.Ghost"
@@ -1445,6 +1464,11 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	viewTestHooks.scanMemoOff = true
+	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"

@@ -18,3 +18,4 @@ when its work lands (git holds history).
 | [range-over-func-yield-closure](range-over-func-yield-closure.md) | ranging a function iterator reads open-world through its own desugared yield callback; corpus pins the refusal | cross-tool train chunk 124 |
 | [fixture-tier-parallelism](fixture-tier-parallelism.md) | the full tier is child-process-bound and serial; `t.Parallel()` needs a shared-state audit first (`t.Setenv` in 12 files, global memo roots) | when the full tier's measured wall crosses 15m, or the next change to the closure fixtures' shared state |
 | [shortgates-pin-shared-home](shortgates-pin-shared-home.md) | the fast-tier gate pin is three byte-identical copies across the repos; one exported gofresh package, each pin a call | chunk 154's release, consumers bumping in 155 and 156 |
+| [memo-scope-axes](memo-scope-axes.md) | the persistent memos join their scope strings by hand at three sites; one typed scope value with declared axes | chunk 154 |

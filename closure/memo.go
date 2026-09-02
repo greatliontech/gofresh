@@ -79,6 +79,38 @@ func (h *Hasher) testBinaryClosureKey(pkgPath string) (string, error) {
 	return key, nil
 }
 
+// PackageScanKey is the complete content identity of one view package's
+// typed test-binary program — the maximal closure hash joined with the
+// test-variant compartment identity — the key a scan of that program is
+// a pure function under (REQ-closure-scan-memo). It is the observability
+// and testing-scan memos' key, exported for the view's scan memo.
+func (h *Hasher) PackageScanKey(pkgPath string) (string, error) {
+	return h.testBinaryClosureKey(pkgPath)
+}
+
+// scanFactsDirName is the view scan memo's sibling user-cache directory:
+// one entry per (scope, package scan key) holding the package's scan
+// outputs (REQ-closure-scan-memo).
+const scanFactsDirName = "scanfacts"
+
+// LoadScanFacts returns the persisted scan outputs for (scope, key) into
+// payload; false on any failure — the memo is a cache, never a record.
+func LoadScanFacts(scope, key string, payload any) bool {
+	if scope == "" || key == "" {
+		return false
+	}
+	return cachefile.Load(scanFactsDirName, scope, key, payload)
+}
+
+// StoreScanFacts persists one package's scan outputs under (scope, key)
+// with an atomic replace; failures are silent.
+func StoreScanFacts(scope, key string, payload any) {
+	if scope == "" || key == "" {
+		return
+	}
+	cachefile.Store(scanFactsDirName, scope, key, payload)
+}
+
 // groupMemo resolves one package group's memo: the closure key keying
 // it and the already-proven subjects. A key-derivation failure
 // disables the memo for the group - fail-open to recomputation.

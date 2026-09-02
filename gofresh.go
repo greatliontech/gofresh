@@ -482,6 +482,11 @@ var viewTestHooks struct {
 	// start, after its Hasher exists — tests cancel there to pin the
 	// kept-on-cancel report.
 	beforeAnalysis func()
+	// scanMemoOff disables the view scan memo (REQ-closure-scan-memo) so
+	// derivation tests that poison the in-process fact cache between two
+	// scans — a seam with no production analogue, since a pinned fact
+	// moves only when its key does — exercise the derivation itself.
+	scanMemoOff bool
 	// factScope observes the derived dynamic-state fact scope — tests
 	// pin the execution-model markers that keep option-on and
 	// option-off sessions from serving each other's facts.
