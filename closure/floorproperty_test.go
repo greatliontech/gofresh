@@ -56,6 +56,9 @@ func floorModule(t testing.TB, seed uint64) (string, []Subject) {
 // and the hash is sensitive to every mutable closure file (editing any
 // package on the subject's import chain moves the subject's hash).
 func FuzzMaximalClosureFloor(f *testing.F) {
+	if testing.Short() {
+		f.Skip("builds a module fixture and runs the engine over it")
+	}
 	f.Add(uint64(0))
 	f.Add(uint64(7))
 	f.Add(uint64(42))

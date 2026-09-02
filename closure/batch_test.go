@@ -19,6 +19,9 @@ import (
 const batchIsolationPackage = "github.com/greatliontech/gofresh/closure/fixtures/batchisolation"
 
 func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,9 @@ func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 }
 
 func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +97,9 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 }
 
 func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +125,9 @@ func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
 }
 
 func TestTier2WidensInitializedMutableGlobalDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +142,9 @@ func TestTier2WidensInitializedMutableGlobalDispatch(t *testing.T) {
 }
 
 func TestAttributedRTARootMasks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +179,9 @@ func TestAttributedRTARootMasks(t *testing.T) {
 }
 
 func TestAttributedRTAHonorsCancellationDuringTraversal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +198,9 @@ func TestAttributedRTAHonorsCancellationDuringTraversal(t *testing.T) {
 }
 
 func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +239,9 @@ func (c *cancelAfterContext) Err() error {
 }
 
 func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/batchbound\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -256,6 +280,9 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 }
 
 func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	subjects := []Subject{
 		{Package: batchIsolationPackage, Symbol: "TestStandardDynamic"},
 		{Package: batchIsolationPackage, Symbol: "Production"},
@@ -374,6 +401,9 @@ func TestWidenReasonIsDeterministic(t *testing.T) {
 // panicked on — its concrete counterparts enter through their own
 // instantiation sites (REQ-closure-analysis).
 func TestAttributedRTASkipsTypeParameterShapes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)

@@ -43,6 +43,9 @@ func countTestingScanLoads(t *testing.T) *int {
 // results — an effect-free scan included — and without a caller scope the
 // memo stays disabled.
 func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := testingScanModule(t)
 	if err := os.MkdirAll(filepath.Join(dir, "plain"), 0o755); err != nil {
@@ -183,6 +186,9 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 // source, so the compartment axis participates — and a corrupt entry
 // recomputes silently.
 func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := testingScanModule(t)
 	loads := countTestingScanLoads(t)

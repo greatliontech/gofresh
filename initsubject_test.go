@@ -28,6 +28,9 @@ func writeInitFixture(t *testing.T, dir string, files map[string]string) {
 // anything in the subject's closure moves, and a change outside every
 // init's reach and outside the subject's own reach leaves it valid.
 func TestInitSubjectsCapturePositionally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeInitFixture(t, dir, map[string]string{
 		"go.mod": "module example.com/initfix\n\ngo 1.26\n",
@@ -144,6 +147,9 @@ func init() { registry = append(registry, "second") }
 // the file's inits, or a file with none - refuses at view construction
 // with the named subject, exactly like any unknown symbol.
 func TestInitSubjectUnknownOrdinalRefuses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeInitFixture(t, dir, map[string]string{
 		"go.mod": "module example.com/initmiss\n\ngo 1.26\n",
@@ -171,6 +177,9 @@ func TestNothing(t *testing.T) {}
 // every subject's closure - but the key still names the same
 // declaration and re-capture succeeds.)
 func TestInitSubjectIdentityStableAcrossOtherFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module example.com/initstable\n\ngo 1.26\n",
@@ -226,6 +235,9 @@ func TestN(t *testing.T) {
 // init keeps ordinal 0; the ordinal the skew would have produced does
 // not exist.
 func TestInitOrdinalIgnoresUnnameableReceiverMethod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeInitFixture(t, dir, map[string]string{
 		"go.mod": "module example.com/initrecv\n\ngo 1.26\n",

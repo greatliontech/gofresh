@@ -22,6 +22,9 @@ import (
 // reachability) - stay blocked
 // (REQ-closure-observability-analysis's audited-set boundary).
 func TestAuditedPureWideningAndExclusions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for _, sub := range []string{"pure", "flagged", "mirrored"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -143,6 +146,9 @@ func TestRegistered(t *testing.T) {
 // their classifications
 // (REQ-closure-observability-analysis's audited-set boundary).
 func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for _, sub := range []string{"values", "calendar", "stamp", "clock", "mirror"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -373,6 +379,9 @@ func TestAuditedHarnessLoggingBounds(t *testing.T) {
 // projection: the admission is observation evidence, never purity
 // evidence.
 func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -428,6 +437,9 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 // declarations, so a drifting toolchain fails here instead of silently
 // widening the admission (REQ-closure-observability-analysis).
 func TestHarnessLoggingDeclarationInventory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// Source mode is load-bearing: export data materializes only the
 	// exported surface, and the admission must refuse an audited-name
 	// method on an unexported body-local type too.
@@ -485,6 +497,9 @@ func TestHarnessLoggingDeclarationInventory(t *testing.T) {
 // A drifting toolchain fails here instead of silently widening
 // (REQ-closure-observability-analysis).
 func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo
 	pkgs, err := packages.Load(&packages.Config{Mode: mode}, "testing")
 	if err != nil {

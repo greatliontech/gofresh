@@ -13,6 +13,9 @@ import (
 // alike (REQ-closure-batch-equivalence: sharing changes cost, never
 // evidence).
 func TestContributionMemoServesWhatAMissDerives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/memo\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -99,6 +102,9 @@ func TestModulePinIsCacheRelativeAndSlashCanonical(t *testing.T) {
 // batch entry must start from an empty memo, or an edit between calls
 // could serve a prior generation's contribution.
 func TestBatchEntriesDiscardStaleContributionEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/memo\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)

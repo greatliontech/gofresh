@@ -17,6 +17,9 @@ import (
 // symbols carrying //gofresh:pure — a function and a method (named "Type.Method") —
 // and leaves their directive-less neighbours unmarked.
 func TestScanPureDirectives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -58,6 +61,9 @@ func TestScanPureDirectives(t *testing.T) {
 // the scan must succeed rather than manufacture an ambiguity from
 // variant-dependent keys.
 func TestScanAcceptsUniverseMethodAcrossTestVariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -94,6 +100,9 @@ func TestScanAcceptsUniverseMethodAcrossTestVariants(t *testing.T) {
 // never appear as subjects of the tested package, and a top-level symbol name
 // shared between the two packages is two distinct subjects, not an ambiguity.
 func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}

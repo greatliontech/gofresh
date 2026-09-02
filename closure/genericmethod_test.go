@@ -10,6 +10,9 @@ import (
 // must analyze like any parameterized subject — the field failure was
 // "unsupported analysis shape: Int" wherever a closure reached one.
 func TestAttributedAnalysisCoversGenericMethods(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/gm\n\ngo 1.27\n",
@@ -62,6 +65,9 @@ func TestUse(t *testing.T) {
 // Rand.N is a generic method on go1.27) must not lose its whole
 // target to one edge.
 func TestAttributedAnalysisSurvivesStdlibGenericMethods(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/gms\n\ngo 1.27\n",

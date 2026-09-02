@@ -63,6 +63,9 @@ func Unrelated() string { return "quiet" }
 // precision the open-world wall cost (REQ-closure-analysis's
 // parameterized-subject arm).
 func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
 	compute := func(body string) (tier2Result, Observability) {
 		t.Helper()
@@ -120,6 +123,9 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 // the narrowing does not cover, and a specific interface term makes the
 // parameter itself a dynamic carrier (REQ-closure-analysis).
 func TestUnboundedConstraintsStayOpenWorld(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	for name, decl := range map[string]string{
 		"comparable":     "func Sum[T comparable](a, b T) T {\n\t_ = helper(1)\n\treturn a\n}\n\nfunc UseSum() int { return Sum(1, 2) + 2 }",
 		"method-bearing": "type Stringy interface {\n\t~int\n\tString() string\n}\n\ntype myInt int\n\nfunc (m myInt) String() string { return \"m\" }\n\nfunc Sum[T Stringy](a, b T) int {\n\t_ = helper(1)\n\t_ = a.String()\n\treturn 3\n}\n\nfunc UseSum() int { return Sum(myInt(1), myInt(2)) }",
@@ -152,6 +158,9 @@ func TestUnboundedConstraintsStayOpenWorld(t *testing.T) {
 // by TestBoundedGenericRootsInstantiationFlow's negative arm —
 // instantiation-only content stays out (REQ-closure-analysis).
 func TestBoundedGenericWithoutInstantiationKeepsOriginFold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	orphan := strings.Replace(boundedBody, "func UseSum() int { return Sum(1, 2) }", "func UseSum() int { return 3 }", 1)
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
 	compute := func(body string) tier2Result {
@@ -185,6 +194,9 @@ func TestBoundedGenericWithoutInstantiationKeepsOriginFold(t *testing.T) {
 // attributed traversal yields exactly the solo analysis: instantiation
 // roots attribute under the subject's own mask, never a sibling's.
 func TestBoundedGenericBatchEquivalence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeBoundedFixture(t, boundedBody)
 	sum := Subject{Package: "example.com/bounded", Symbol: "Sum"}
 	unrelated := Subject{Package: "example.com/bounded", Symbol: "Unrelated"}
@@ -262,6 +274,9 @@ func (t Tagged) TagUniq() string { return "tag" }
 `
 
 func TestBoundedGenericRootsInstantiationFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	subject := Subject{Package: "example.com/bounded", Symbol: "Sum"}
 	compute := func(body string) tier2Result {
 		t.Helper()
@@ -298,6 +313,9 @@ func TestBoundedGenericRootsInstantiationFlow(t *testing.T) {
 // (REQ-closure-analysis's parameterized-subject arm,
 // REQ-closure-observability-analysis).
 func TestBoundedGenericObservabilitySeesInstantiationEffects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	const effectBody = `package bounded
 
 type Number interface{ ~int | ~float64 }
@@ -340,6 +358,9 @@ func (t Tagged) TagUniq() string { return fns["a"]() }
 // open - a recursive type set is never proven bounded
 // (REQ-closure-analysis's parameterized-subject arm).
 func TestRecursiveConstraintsTerminateOpen(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	for name, decl := range map[string]string{
 		"self":   "func Sum[A interface{ ~[]A }](a A) int {\n\t_ = helper(1)\n\treturn 1\n}\n\nfunc UseSum() int { return 1 + fixtureConstant - fixtureConstant }",
 		"mutual": "func Sum[A interface{ ~[]B }, B interface{ ~[]A }](a A, b B) int {\n\t_ = helper(1)\n\treturn 1\n}\n\nfunc UseSum() int { return 1 + fixtureConstant - fixtureConstant }",
@@ -369,6 +390,9 @@ func TestRecursiveConstraintsTerminateOpen(t *testing.T) {
 // unanalyzed effect (REQ-closure-observability-analysis's no-false-valid
 // direction).
 func TestBoundedGenericOriginEscapeEffectsStayVisible(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	body := `package bounded
 
 import "os"

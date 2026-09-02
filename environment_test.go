@@ -89,6 +89,9 @@ func viewUsesSource(t *testing.T, engine *Engine, fixture workspaceEnvironmentFi
 }
 
 func TestWithEnvSelectsWorkspaceSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	t.Setenv("GOWORK", fixture.goWork)
 
@@ -105,6 +108,9 @@ func TestWithEnvSelectsWorkspaceSource(t *testing.T) {
 }
 
 func TestEnginesWithDifferentEnvironmentsConstructViewsConcurrently(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	standalone, err := New(WithDir(fixture.consumer), WithEnv(environmentWith(map[string]string{"GOWORK": "off"})...))
 	if err != nil {
@@ -148,6 +154,9 @@ func TestEnginesWithDifferentEnvironmentsConstructViewsConcurrently(t *testing.T
 }
 
 func TestWithEnvCopiesNormalizesAndRejectsAmbiguity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	env := environmentWith(map[string]string{"GOWORK": "off"})
 	option := WithEnv(env...)
@@ -193,6 +202,9 @@ func TestWithEnvCopiesNormalizesAndRejectsAmbiguity(t *testing.T) {
 }
 
 func TestDefaultEnvironmentIsCapturedAtNew(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	t.Setenv("GOWORK", "off")
 	standalone, err := New(WithDir(fixture.consumer))
@@ -209,6 +221,9 @@ func TestDefaultEnvironmentIsCapturedAtNew(t *testing.T) {
 }
 
 func TestWithEnvDoesNotSelectGoLauncherFromSuppliedPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	env := environmentWith(map[string]string{"GOWORK": "off", "PATH": filepath.Join(t.TempDir(), "missing")})
 	engine, err := New(WithDir(fixture.consumer), WithEnv(env...))
@@ -221,6 +236,9 @@ func TestWithEnvDoesNotSelectGoLauncherFromSuppliedPath(t *testing.T) {
 }
 
 func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/driverenv\n\ngo 1.26.4\n"), 0o644); err != nil {
 		t.Fatal(err)

@@ -55,6 +55,9 @@ func ledgerAt(t *testing.T, dir, pkgPath string) TestVariantLedger {
 // subject's core maximal hash (REQ-closure-view-maximal,
 // REQ-closure-test-variant-compartment).
 func TestSiblingTestAdditionMovesCompartmentNotCore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	files := map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      "package partition\n\nfunc F() int { return 1 }\nfunc G() int { return 2 }\n",
@@ -83,6 +86,9 @@ func TestSiblingTestAdditionMovesCompartmentNotCore(t *testing.T) {
 // A production edit keeps today's semantics: the core moves; the compartment,
 // whose files are untouched, does not (REQ-closure-view-maximal).
 func TestProductionEditMovesCoreNotCompartment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	files := map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      "package partition\n\nfunc F() int { return 1 }\n",
@@ -109,6 +115,9 @@ func TestProductionEditMovesCoreNotCompartment(t *testing.T) {
 // already-present package moves only the compartment
 // (REQ-closure-test-variant-compartment).
 func TestNewTestOnlyDependencyMovesCore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	files := map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      "package partition\n\nfunc F() int { return 1 }\n",
@@ -146,6 +155,9 @@ func TestNewTestOnlyDependencyMovesCore(t *testing.T) {
 // A package with no test files has the defined constant compartment identity,
 // stable across recomputation (REQ-closure-test-variant-compartment).
 func TestNoTestPackageCompartmentIsStableEmptyIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeTestVariantModule(t, map[string]string{
 		"go.mod":  "module example.com/notest\n\ngo 1.26\n",
 		"main.go": "package notest\n\nfunc F() int { return 1 }\n",
@@ -172,6 +184,9 @@ func TestNoTestPackageCompartmentIsStableEmptyIdentity(t *testing.T) {
 // compartment and the ledger with their declarations and file header
 // (REQ-closure-test-variant-compartment).
 func TestExternalTestPackageFilesEnterCompartmentAndLedger(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":      "module example.com/external\n\ngo 1.26\n",
 		"external.go": "package external\n\nfunc F() int { return 1 }\n",
@@ -203,6 +218,9 @@ func TestExternalTestPackageFilesEnterCompartmentAndLedger(t *testing.T) {
 // ledger entry without moving the existing ones or the file header
 // (REQ-closure-test-variant-compartment).
 func TestLedgerNamesTheEditedAndAppendedDeclarations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	const original = "package ledger\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F() != 1 {\n\t\tt.Fatal(\"broken\")\n\t}\n}\n"
 	dir := writeTestVariantModule(t, map[string]string{
 		"go.mod":         "module example.com/ledger\n\ngo 1.26\n",
@@ -262,6 +280,9 @@ func TestLedgerNamesTheEditedAndAppendedDeclarations(t *testing.T) {
 // file, whatever order declarations appear in source
 // (REQ-closure-test-variant-compartment).
 func TestTestVariantLedgerIsDeterministicallySorted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeTestVariantModule(t, map[string]string{
 		"go.mod":    "module example.com/sorted\n\ngo 1.26\n",
 		"sorted.go": "package sorted\n\nfunc F() int { return 1 }\n",
@@ -305,6 +326,9 @@ func TestTestVariantLedgerIsDeterministicallySorted(t *testing.T) {
 // core: batch results equal independent per-subject computation for both
 // hashes (REQ-closure-batch-equivalence).
 func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// a and b share the dependency node: the batch derives its
 	// contribution once and both packages' closures consume it — the
 	// equivalence against independent computation pins that sharing
@@ -362,6 +386,9 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 // still describes it, and hashing must stay fail-safe over it
 // (REQ-closure-view-maximal).
 func TestDependencyPackageNamedLikeExternalTestKeepsItsCoreContribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	files := map[string]string{
 		"go.mod":           "module example.com/m\n\ngo 1.26\n",
 		"foo/foo.go":       "package foo\n\nfunc F() int { return 1 }\n",
@@ -395,6 +422,9 @@ func TestDependencyPackageNamedLikeExternalTestKeepsItsCoreContribution(t *testi
 // undiscriminated — while the same files also sit in the compartment
 // (REQ-closure-test-variant-compartment whole-dir-widening exception).
 func TestWidenedCoreKeepsTestFilesUndiscriminated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if runtime.GOARCH != "amd64" {
 		t.Skip("opaque-asm fixture is amd64-only")
 	}
@@ -436,6 +466,9 @@ func TestWidenedCoreKeepsTestFilesUndiscriminated(t *testing.T) {
 // defeats inertness like any embedded member's
 // (REQ-closure-test-variant-compartment compiled-vs-embedded split).
 func TestEmbeddedGoFixtureIsDataNotSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":              "module example.com/embedded\n\ngo 1.26\n",
 		"embedded.go":         "package embedded\n\nfunc F() int { return 1 }\n",
@@ -483,6 +516,9 @@ func TestEmbeddedGoFixtureIsDataNotSource(t *testing.T) {
 // moves bytes an unchanged test reads as data, so the delta is never inert
 // (REQ-closure-test-variant-compartment dual membership).
 func TestCompiledAndEmbeddedTestFileFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":         "module example.com/dual\n\ngo 1.26\n",
 		"dual.go":        "package dual\n\nfunc F() int { return 1 }\n",
@@ -517,6 +553,9 @@ func TestCompiledAndEmbeddedTestFileFailsClosed(t *testing.T) {
 // diffs to an inert added-only delta, and editing that test's body flips the
 // judgment (REQ-closure-test-variant-compartment).
 func TestLedgerDeltaOverRealLedgers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	const original = "package delta\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F() != 1 {\n\t\tt.Fatal(\"broken\")\n\t}\n}\n"
 	dir := writeTestVariantModule(t, map[string]string{
 		"go.mod":        "module example.com/delta\n\ngo 1.26\n",

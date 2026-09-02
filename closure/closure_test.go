@@ -22,6 +22,9 @@ import (
 )
 
 func TestPropHashFilesSensitive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	write := func(name, content string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -57,6 +60,9 @@ func TestPropHashFilesSensitive(t *testing.T) {
 }
 
 func TestContribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
 
 	// Excluded: stdlib, pseudo-package, synthesized test main.
@@ -151,6 +157,9 @@ func TestContribution(t *testing.T) {
 // a header an .s file includes, or a file no build list names — moves the
 // contribution, and so the maximal hash the subject widens to.
 func TestAssemblyPackageHashesWholeDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "defs.inc", "#define RETVAL $1\n")
 	writeFile(t, dir, "asm.s", "#include \"defs.inc\"\nTEXT ·asmEntry(SB), NOSPLIT, $0-0\n\tMOVQ RETVAL, AX\n\tRET\n")
@@ -195,6 +204,9 @@ func TestAssemblyPackageHashesWholeDirectory(t *testing.T) {
 // (REQ-closure-blindspot downgrade arm), so outside-directory content can
 // never silently narrow a verdict.
 func TestAssemblyUnresolvedIncludeHashesWholeDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	outside := t.TempDir()
 	writeFile(t, outside, "defs.inc", "#define RETVAL $1\n")
@@ -219,6 +231,9 @@ func TestAssemblyUnresolvedIncludeHashesWholeDirectory(t *testing.T) {
 }
 
 func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "include"), 0o755); err != nil {
 		t.Fatal(err)
@@ -249,6 +264,9 @@ func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
 }
 
 func TestContributionCgoOutsideIncludeRootFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "cfg")
@@ -276,6 +294,9 @@ func TestContributionCgoOutsideIncludeRootFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -303,6 +324,9 @@ func TestContributionCgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
 // rather than failing closed, both for quoted (`"stdio.h"`) and angle-bracket
 // (`<stdio.h>`, `<sys/types.h>`) forms. The package's own C source is still hashed.
 func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for _, inc := range []string{`"stdio.h"`, `<stdio.h>`, `<sys/types.h>`} {
 		t.Run(inc, func(t *testing.T) {
 			dir := t.TempDir()
@@ -346,6 +370,9 @@ func TestContributionCgoSystemIncludeSkipped(t *testing.T) {
 // the local-replace false-valid: without it, `#include "api.h"` via the outside-
 // module `-I` root would be skipped and an api.h edit would report valid.
 func TestContributionCgoNonPackageIncludeRootFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	parent := t.TempDir()
 	mod := filepath.Join(parent, "mod")
 	dir := filepath.Join(mod, "pkg")
@@ -377,6 +404,9 @@ func TestContributionCgoNonPackageIncludeRootFailsClosed(t *testing.T) {
 // version-pinned dependency (REQ-closure-mutable-local) whose C headers ride the cache guard, so it is
 // allowed rather than failing closed.
 func TestContributionCgoCacheIncludeRootAllowed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	cache := t.TempDir()
 	dir := t.TempDir()
 	dep := filepath.Join(cache, "dep@v1.0.0", "include")
@@ -401,6 +431,9 @@ func TestContributionCgoCacheIncludeRootAllowed(t *testing.T) {
 }
 
 func TestContributionCgoNestedIncIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -424,6 +457,9 @@ func TestContributionCgoNestedIncIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoNestedSoHeaderIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -447,6 +483,9 @@ func TestContributionCgoNestedSoHeaderIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoNestedVersionedSoIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -470,6 +509,9 @@ func TestContributionCgoNestedVersionedSoIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoSplicedIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -492,6 +534,9 @@ func TestContributionCgoSplicedIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoGoPreambleSplicedIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -514,6 +559,9 @@ func TestContributionCgoGoPreambleSplicedIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoImportFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -536,6 +584,9 @@ func TestContributionCgoImportFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoSymlinkIncludeDirFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "cfg")
@@ -565,6 +616,9 @@ func TestContributionCgoSymlinkIncludeDirFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoSymlinkIncludeDirDotDotFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "outside")
@@ -594,6 +648,9 @@ func TestContributionCgoSymlinkIncludeDirDotDotFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoIncludeRootSymlinkDotDotFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "outside")
@@ -624,6 +681,9 @@ func TestContributionCgoIncludeRootSymlinkDotDotFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoMacroIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -646,6 +706,9 @@ func TestContributionCgoMacroIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoCommentedIncludeDirectiveFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -668,6 +731,9 @@ func TestContributionCgoCommentedIncludeDirectiveFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoMultilineCommentedIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -691,6 +757,9 @@ func TestContributionCgoMultilineCommentedIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoCharConstantDoesNotHideInclude(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -713,6 +782,9 @@ func TestContributionCgoCharConstantDoesNotHideInclude(t *testing.T) {
 }
 
 func TestContributionCgoRawStringFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -735,6 +807,9 @@ func TestContributionCgoRawStringFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoHeaderRawStringFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -758,6 +833,9 @@ func TestContributionCgoHeaderRawStringFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoObjectFileNotScannedAsIncludeSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"_cgo_export.h\"\nvoid bridge(void) { GoCallback(); }\n")
@@ -776,6 +854,9 @@ func TestContributionCgoObjectFileNotScannedAsIncludeSource(t *testing.T) {
 }
 
 func TestContributionCgoReferencedObjectIncludeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include \"local.o\"\nvoid bridge(void) { GoCallback(); }\n")
@@ -794,6 +875,9 @@ func TestContributionCgoReferencedObjectIncludeFailsClosed(t *testing.T) {
 }
 
 func TestContributionCgoSymlinkHeaderHashesTarget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "cfg")
@@ -866,6 +950,9 @@ func TestPropSourceFilesComplete(t *testing.T) {
 }
 
 func TestPropMutableLocalContentSensitivity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "p.go")
 	if err := os.WriteFile(path, []byte("package p\nconst Value = 1\n"), 0o644); err != nil {
@@ -909,6 +996,9 @@ func TestParseListError(t *testing.T) {
 // and cross-module classification (a src: contribution for the main module,
 // cache: for benchfmt). maximalHash is the A′ widening target (REQ-closure-blindspot).
 func TestMaximalHashReal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -932,6 +1022,9 @@ func TestMaximalHashReal(t *testing.T) {
 // same. The efficiency claim is that N benchmarks in a package pay one listing;
 // the observable proxy is memo identity.
 func TestListMemoizes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -958,6 +1051,9 @@ func TestListMemoizes(t *testing.T) {
 }
 
 func TestListUsesBuildFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/tagged\n\ngo 1.26\n")
 	writeFile(t, dir, "selected_default.go", "//go:build !special\n\npackage tagged\n\nfunc Selected() int { return 1 }\n")
@@ -991,6 +1087,9 @@ func TestListUsesBuildFlags(t *testing.T) {
 // the root index held only Benchmark*/TestMain, so a production symbol was
 // reported "not found".
 func TestAnalysisRootsAnySubject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1044,6 +1143,9 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 // declares must be refused, never silently resolved to the dependency's
 // closure.
 func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	writeTriangle := func(t *testing.T, aSource, rSource string) string {
 		t.Helper()
 		dir := t.TempDir()
@@ -1129,6 +1231,9 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 // package prefix stripped), resolves through both value- and pointer-receiver
 // method sets, roots at that specific method, and errors on a missing method name.
 func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1161,6 +1266,9 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 // name (Box[T] → "Box"), and each method roots at its own closure. SSA
 // materializes the receiver, so no deferral is needed.
 func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1190,6 +1298,9 @@ func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 // its closure and it stays verifiable. Rooting the test main unconditionally (the
 // prior behavior) would wrongly mark the production subject unverifiable.
 func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1219,6 +1330,9 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 // dispatch. The analysis roots linked startup code so the registering package
 // source is hashed even though the benchmark never names it directly.
 func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1242,6 +1356,9 @@ func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 }
 
 func TestReachIncludesTestMainRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1257,6 +1374,9 @@ func TestReachIncludesTestMainRoot(t *testing.T) {
 }
 
 func TestAnalysisReachStaysSubjectPrecise(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1295,6 +1415,9 @@ func TestBuildIndexTrustsGoListStandardForDotlessModule(t *testing.T) {
 }
 
 func TestExternalTestBenchmarkRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1315,6 +1438,9 @@ func TestExternalTestBenchmarkRoots(t *testing.T) {
 // naming the package and records the "reaches non-standard assembly" effect
 // that makes the subject unverifiable and blocks its observability proof.
 func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	requireConservative := func(t *testing.T, a *tier2Analyzer, pkgID string) {
 		t.Helper()
 		if !a.widen || a.widenReason != "non-toolchain assembly in "+pkgID {
@@ -1372,6 +1498,9 @@ func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
 }
 
 func TestStdWrapperClassBUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1387,6 +1516,9 @@ func TestStdWrapperClassBUnverifiable(t *testing.T) {
 }
 
 func TestStdCallbackMethodStaysReached(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1402,6 +1534,9 @@ func TestStdCallbackMethodStaysReached(t *testing.T) {
 }
 
 func TestAnalysisReachesUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	// Every benchmark here reaches a Class-B external dependence in its closure
 	// (file I/O, filesystem/path mutation, or network), so the closure is
 	// unverifiable with the matching reason. File I/O is
@@ -1477,6 +1612,9 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 }
 
 func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -1501,6 +1639,9 @@ func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
 }
 
 func TestReadOnlyObservabilityProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -1857,6 +1998,9 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 // and the poison must be right independent of which tier's verdict
 // surfaces first.
 func TestFlagRegistrationFacts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -1917,6 +2061,9 @@ func TestOrdinaryOpenFileRequiresZeroFlags(t *testing.T) {
 }
 
 func TestOpenFileFlagsUseSelectedGOOS(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	env := append([]string(nil), os.Environ()...)
 	found := false
 	for i, entry := range env {
@@ -1950,6 +2097,9 @@ func TestOpenFileFlagsUseSelectedGOOS(t *testing.T) {
 }
 
 func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -1976,6 +2126,9 @@ func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
 }
 
 func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	// The corpus spans every disposition class the observability fixtures pin —
 	// observable subjects, startup and subject effect rejections, callback and
 	// concurrency escapes, mutation and process effects — with several subjects
@@ -2067,6 +2220,9 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 }
 
 func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false, nil, nil); !errors.Is(err, context.Canceled) {
@@ -2102,6 +2258,9 @@ func (c *cancelProvenanceContext) Err() error {
 }
 
 func TestTier2ReflectWidens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2117,6 +2276,9 @@ func TestTier2ReflectWidens(t *testing.T) {
 }
 
 func TestTier2GenericInterfaceEscapeAnalyzesMethodBody(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2139,6 +2301,9 @@ func TestTier2GenericInterfaceEscapeAnalyzesMethodBody(t *testing.T) {
 }
 
 func TestTier2ConstGroupAnalyzesWithoutWiden(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2160,6 +2325,9 @@ func TestTier2ConstGroupAnalyzesWithoutWiden(t *testing.T) {
 // is unverifiable via the "reaches non-standard assembly" effect that blocks
 // its observability proof. The assembly is never analyzed for call targets.
 func TestNonToolchainAssemblyWidensAndBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2214,6 +2382,9 @@ func TestHasExternalCgo(t *testing.T) {
 }
 
 func TestTier2CgoCallbackSourceWidens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "include"), 0o755); err != nil {
 		t.Fatal(err)
@@ -2246,6 +2417,9 @@ func TestTier2CgoCallbackSourceWidens(t *testing.T) {
 // skip on the Tier-2 addReachedPackageFiles path (which shares cgoEscapingInclude):
 // a `<stdio.h>` system header is skipped, the package C source is still hashed.
 func TestTier2CgoSystemIncludeSkipped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
 	writeFile(t, dir, "bridge.c", "#include <stdio.h>\nvoid bridge(void) { GoCallback(); }\n")
@@ -2269,6 +2443,9 @@ func TestTier2CgoSystemIncludeSkipped(t *testing.T) {
 }
 
 func TestTier2CgoOutsideIncludeRootFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	outside := filepath.Join(root, "cfg")
@@ -2301,6 +2478,9 @@ func TestTier2CgoOutsideIncludeRootFailsClosed(t *testing.T) {
 }
 
 func TestTier2CgoRelativeIncludeEscapeFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "pkg")
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -2575,6 +2755,9 @@ func TestTier2CacheInitTraversesMutableReference(t *testing.T) {
 }
 
 func TestImportBindingAnalyzesWithoutWiden(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2590,6 +2773,9 @@ func TestImportBindingAnalyzesWithoutWiden(t *testing.T) {
 }
 
 func TestTier2ASMTargetInterfaceInvokeWidens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2605,6 +2791,9 @@ func TestTier2ASMTargetInterfaceInvokeWidens(t *testing.T) {
 }
 
 func TestTier2GenericPostRTAInvokeWidens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2620,6 +2809,9 @@ func TestTier2GenericPostRTAInvokeWidens(t *testing.T) {
 }
 
 func TestTier2ReflectReferenceScansClassB(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2755,6 +2947,9 @@ func TestUnsafePointerBasicTypeIsDetected(t *testing.T) {
 }
 
 func TestLinknameLocalTargetResolvesWithoutWiden(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2795,6 +2990,9 @@ func TestTier2ReverseLinknameTargetEnqueued(t *testing.T) {
 }
 
 func TestBuildIndexVarLinknameHashesGenDeclDoc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "p.go")
 	const source = `package p
@@ -2831,6 +3029,9 @@ var linked int
 }
 
 func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)

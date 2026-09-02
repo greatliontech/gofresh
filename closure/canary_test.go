@@ -17,6 +17,9 @@ import (
 // release flipping a disposition in either direction is a red canary
 // here. Runs under the CI matrix's next-rc leg like every test.
 func TestLanguageShapeCanaries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	for _, entry := range shapecorpus.Entries() {
 		t.Run(entry.Name, func(t *testing.T) {
 			dir := t.TempDir()

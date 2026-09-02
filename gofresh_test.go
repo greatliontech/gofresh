@@ -146,6 +146,9 @@ func FuzzDecideSound(f *testing.F) {
 // TestEngineNeverInfersPurity pins REQ-purity-responsibility: a default engine treats
 // no subject as pure — purity is only ever an explicit input, never inferred.
 func TestEngineNeverInfersPurity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	e, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -211,6 +214,9 @@ const methodPkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubje
 // pure (reaches no external dependence) so the clean verdict is Valid, not
 // Unverifiable.
 func TestCaptureCheckRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -259,6 +265,9 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 // buildconfig when checked by an engine that used one, so a build-invocation change
 // is caught.
 func TestBuildFlagsAffectVerdict(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -285,12 +294,18 @@ func TestBuildFlagsAffectVerdict(t *testing.T) {
 }
 
 func TestBuildInputsRejectFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := New(WithBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "WithBuildFlags") {
 		t.Fatalf("flag-shaped opaque input accepted: %v", err)
 	}
 }
 
 func TestBuildFlagsRejectOverlay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	flags := []string{"-overlay=overlay.json"}
 	if _, err := New(WithBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("engine accepted overlay: %v", err)
@@ -304,6 +319,9 @@ func TestBuildFlagsRejectOverlay(t *testing.T) {
 // closure and purity surfaces. The same tag that produced the result selects every
 // analyzed declaration; an unselected file cannot contribute code or confer purity.
 func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -362,6 +380,9 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 // reaches an unverifiable dependence is Unverifiable by default, and Valid when the
 // engine is given a purity predicate that asserts it.
 func TestAssumePureOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -408,6 +429,9 @@ func TestAssumePureOverride(t *testing.T) {
 // directory the process does not run inside fingerprints that tree's
 // subjects — the analyzed tree is an input, never a cwd coupling.
 func TestWithDirOutOfTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -446,6 +470,9 @@ func TestWithDirOutOfTree(t *testing.T) {
 }
 
 func TestDefaultDirIsFrozenAtEngineConstruction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	original, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -472,6 +499,9 @@ func TestDefaultDirIsFrozenAtEngineConstruction(t *testing.T) {
 // refuses guard capture in a different tree — an incoherent fingerprint
 // (closure from one tree, environment from another) is never produced.
 func TestWithDirCoherence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -486,6 +516,9 @@ func TestWithDirCoherence(t *testing.T) {
 }
 
 func TestDefaultDirCoherence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	e, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -496,6 +529,9 @@ func TestDefaultDirCoherence(t *testing.T) {
 }
 
 func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	root := t.TempDir()
 	base := filepath.Join(root, "base")
 	other := filepath.Join(root, "other")
@@ -524,6 +560,9 @@ func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
 // assertion confers nothing (and records no attribution), and a real source
 // change still reports stale — externality never masks guard information.
 func TestExternalDirectiveWithholdsReuse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -573,6 +612,9 @@ func TestExternalDirectiveWithholdsReuse(t *testing.T) {
 // (REQ-external-precedence): one declaration carrying both //gofresh:pure and
 // //gofresh:external fails observation rather than picking a winner.
 func TestExternalDirectiveConflictRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -622,6 +664,9 @@ func TestExternalDirectiveImmuneToObservationEvidence(t *testing.T) {
 // fixture package: exact-form directives on functions and methods mark their
 // subjects, near-miss forms do not.
 func TestExternalDirectiveFixtureScan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -660,6 +705,9 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 // subject of the scan does not brick its dependents; scanning the conflicted
 // package itself refuses.
 func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}

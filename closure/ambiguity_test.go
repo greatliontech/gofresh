@@ -14,6 +14,9 @@ import (
 // while sibling subjects of the same package analyze normally
 // (REQ-closure-analysis's subject-local ambiguity arm).
 func TestAmbiguousRootDegradesSubjectLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":           "module example.com/ambroot\n\ngo 1.26\n",

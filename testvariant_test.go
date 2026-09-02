@@ -34,6 +34,9 @@ const partitionTest = "package partition\n\nimport \"testing\"\n\nfunc TestF(t *
 // core is unmoved, only the compartment drifted, and the consumer — not
 // gofresh — decides what that means (REQ-closure-test-variant-compartment).
 func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -74,6 +77,9 @@ func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 // editing the recorded test itself moves the compartment, not the core, and
 // the verdict says so (REQ-closure-test-variant-compartment).
 func TestTestFileSubjectBodyLivesInCompartment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -105,6 +111,9 @@ func TestTestFileSubjectBodyLivesInCompartment(t *testing.T) {
 // pre-partition core CAN match is a package with no test files
 // (REQ-closure-test-variant-compartment).
 func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":  "module example.com/notest\n\ngo 1.26\n",
 		"main.go": "package notest\n\nfunc F() int { return 1 }\n",
@@ -158,6 +167,9 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 // valid, equally without analysis (REQ-closure-test-variant-compartment,
 // REQ-fresh-hierarchical-check).
 func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -223,6 +235,9 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 // the core ("closure"), the compartment being compared only under an equal
 // core (REQ-closure-test-variant-compartment, REQ-fresh-hierarchical-check).
 func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,
@@ -276,6 +291,9 @@ func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 // coherent data (REQ-closure-test-variant-compartment,
 // REQ-fresh-coherent-view).
 func TestViewServesTestVariantLedgerFromItsSnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writePartitionModule(t, map[string]string{
 		"go.mod":            "module example.com/partition\n\ngo 1.26\n",
 		"partition.go":      partitionProduction,

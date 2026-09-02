@@ -20,6 +20,9 @@ import (
 // issues, this count moves without any sharing regression; recalibrate the
 // expected count against a single packages.Load before suspecting the code.
 func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	realGo, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +73,9 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 // moves on an x/tools upgrade, recalibrate against a single packages.Load
 // before suspecting the batching.
 func TestViewObservationPassBatchesToolchainProbes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	realGo, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)

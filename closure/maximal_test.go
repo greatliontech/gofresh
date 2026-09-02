@@ -10,6 +10,9 @@ import (
 )
 
 func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/maximal\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -49,6 +52,9 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 }
 
 func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/opaqueasm"
 	subject := Subject{Package: pkg, Symbol: "BenchmarkOpaqueASM"}
 	h, err := NewAt("..")
@@ -76,6 +82,9 @@ func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T)
 }
 
 func TestComputeMaximalBatchConservativelyMarksExternalPackageCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/external\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -99,6 +108,9 @@ func TestComputeMaximalBatchConservativelyMarksExternalPackageCode(t *testing.T)
 }
 
 func TestComputeMaximalBatchConservativelyMarksDotImportedExternalCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/dotexternal\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -121,6 +133,9 @@ func TestComputeMaximalBatchConservativelyMarksDotImportedExternalCode(t *testin
 }
 
 func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for _, tc := range []struct {
 		name   string
 		source string
@@ -252,6 +267,9 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 }
 
 func TestMaximalTestingMethodClassificationUsesHarnessReceiver(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	filename := filepath.Join(dir, "wrapper_test.go")
 	source := "package wrapper\n\nimport \"testing\"\n\ntype Config struct{}\nfunc (Config) Setenv() {}\nfunc TestConfig(t *testing.T) { var config Config; config.Setenv() }\n"
@@ -268,6 +286,9 @@ func TestMaximalTestingMethodClassificationUsesHarnessReceiver(t *testing.T) {
 }
 
 func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/wrapper\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -293,6 +314,9 @@ func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
 }
 
 func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/wrapper\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -321,6 +345,9 @@ func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
 }
 
 func TestComputeMaximalBatchDoesNotClassifyUnrelatedPackageMethod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/wrapper\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -346,6 +373,9 @@ func TestComputeMaximalBatchDoesNotClassifyUnrelatedPackageMethod(t *testing.T) 
 }
 
 func TestComputeMaximalBatchConservativelyMarksNonGoEdges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for _, tc := range []struct {
 		name   string
 		goFile string
@@ -425,6 +455,9 @@ func TestPreferredReasonOrdersRankThenLexicographic(t *testing.T) {
 }
 
 func TestMaximalFileEffectsRetainAllFactsAndLegacyDiagnostic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	filename := filepath.Join(dir, "effects.go")
 	source := `package effects
@@ -470,6 +503,9 @@ func F() {
 // no effect-bearing use (REQ-closure-observability-analysis's
 // cause-preference order).
 func TestMaximalUnauditedOperationNamesThePreferredDiagnostic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	write := func(name, source string) string {
 		t.Helper()
@@ -568,6 +604,9 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 }
 
 func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -587,6 +626,9 @@ func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 // part of the closure a subject exercises, so editing only the data file
 // moves the maximal hash.
 func TestMaximalHashCoversEmbeddedData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/embedhash\n\ngo 1.26\n")
 	writeFile(t, dir, "embed.go", "package embedhash\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar data string\n\nfunc Data() string { return data }\n")

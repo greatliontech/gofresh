@@ -169,10 +169,11 @@ code moves.
       every temp-module / `closure/fixtures/` / SSA-building test
       (~500 of ~640), the pure tier (verdict ladder, guard
       comparison, provenance core, guidance, internal/*) as the
-      default `go test -short ./...` in seconds; every fixture test
-      redirects `SetMemoRoot` to a per-test temp dir (the suite writes
-      the user's real effect-scan cache today — pipeline-audit
-      gofresh.md §6); `t.Parallel()` on the child-process-bound
+      default `go test -short ./...` in seconds; the memo cache
+      isolated from the user's real cache per package run (verified
+      already so — `TestMain` in root and closure; the audit's
+      contrary claim corrected) and per test wherever a test asserts
+      memo state; `t.Parallel()` on the child-process-bound
       fixture tier; a Taskfile with `test:short`, `test`, `vet`
       (gofresh is the one repo without one — folds gofresh
       docs/issues/reusable-ci-workflow.md's Taskfile half); CI runs

@@ -17,6 +17,9 @@ import (
 // (REQ-inputs-path-identities): a recording staled by a moved runtime input
 // reports which input moved, not one opaque word.
 func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}

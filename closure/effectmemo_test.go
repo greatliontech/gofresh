@@ -36,6 +36,9 @@ func pinnedFixture(t *testing.T, h *Hasher) (listPkg, string) {
 // once serves from the persistent memo with no file reads — proven by
 // deleting the files and serving the identical scan from a fresh Hasher.
 func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
@@ -147,6 +150,9 @@ func hasEffectReason(effects []externalEffect, reason string) bool {
 // preferred diagnostics, and a package-level fact folding in first. Both the
 // miss-path derivation and the memo hit must equal the flat per-item fold.
 func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
@@ -255,6 +261,9 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 // change, and the Go/cgo partition each miss, and a corrupt entry
 // recomputes silently.
 func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	scan := maximalEffectScan{
 		preferred:        "reaches net (network I/O)",
@@ -300,6 +309,9 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 // lexicographically least fallback, package-wide
 // (REQ-closure-observability-analysis's cause-preference order).
 func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {

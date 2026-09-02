@@ -28,6 +28,9 @@ func explainView(t *testing.T, dir, pkgPath, varName string) Chain {
 
 //gofresh:pure
 func TestExplainChains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	goMod := "module example.com/explain\n\ngo 1.26\n"
 
 	t.Run("environment-audit chain reaches the refusing expression", func(t *testing.T) {
@@ -317,6 +320,9 @@ func TestExplainChains(t *testing.T) {
 
 //gofresh:pure
 func TestExplainDeferralChains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	goMod := "module example.com/explain\n\ngo 1.26\n"
 
 	t.Run("unproven argument deferral names the callee parameter", func(t *testing.T) {
@@ -522,6 +528,9 @@ func TestExplainChainBound(t *testing.T) {
 
 //gofresh:pure
 func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// The normal analysis path constructs no chains: a view derivation
 	// over a refusing culprit leaves the explain hooks unarmed, and the
 	// on-demand re-derivation disarms them on return
@@ -558,6 +567,9 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 
 //gofresh:pure
 func TestExplainChainBoundsSurfaceDerivation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// A derivation whose environment-audit path is deeper than the
 	// link cap bounds end-to-end: the omitted remainder is counted and
 	// the innermost refusal survives the bound (REQ-explain-bounded).

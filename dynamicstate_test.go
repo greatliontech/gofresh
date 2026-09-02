@@ -84,6 +84,9 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 // fact-equivalent scan results throughout; a scope change recomputes
 // (REQ-closure-dynamic-state-memo).
 func TestDynamicStateFactsServePinnedPackagesWithoutLoading(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -139,6 +142,9 @@ func TestDynamicStateFactsServePinnedPackagesWithoutLoading(t *testing.T) {
 // directives from the deserialized fact (REQ-closure-dynamic-state-memo,
 // REQ-purity-directive, REQ-external-directive).
 func TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/factsrc\n\ngo 1.26\n",
@@ -305,6 +311,9 @@ func (Widget) External() int { return 2 }
 // different variable confers nothing (REQ-vouch-discharge,
 // REQ-vouch-recorded).
 func TestVouchDischargesPinnedCulprit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -458,6 +467,9 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 // poisoned graph refuses naming the culprit (REQ-vouch-input,
 // REQ-vouch-recorded).
 func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
@@ -569,6 +581,9 @@ func writeMappedDepModule(t *testing.T) string {
 // discharge covers exactly the audited name
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeMappedDepModule(t)
 	const mapper = "golang.org/x/sys/unix.mapper"
@@ -688,6 +703,9 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 // fail-closed until its source is audited — exactly the memoization
 // set's rule (REQ-closure-shared-dynamic-state).
 func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
@@ -756,6 +774,9 @@ func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 // audited shape (a bookkeeping map plus function fields, written
 // through a pointer-receiver mapping call) at the audited import path.
 func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, content := range map[string]string{
@@ -806,6 +827,9 @@ func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 // own judgment — the discharge covers exactly the audited variable
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
@@ -884,6 +908,9 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 // code the caller can edit is fixed, not audited
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, content := range map[string]string{
@@ -923,6 +950,9 @@ func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
 // subject mutating through it stays verifiable with no attestation and
 // no discharge record (REQ-closure-shared-dynamic-state).
 func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/acct\n\ngo 1.26\n",
@@ -948,6 +978,9 @@ func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
 // walk substitutes the semantic type, it never exempts the variable
 // (REQ-closure-shared-dynamic-state).
 func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/hooks\n\ngo 1.26\n",
@@ -976,6 +1009,9 @@ func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
 // so the culprit MUST still be seen through the alias
 // (REQ-closure-shared-dynamic-state).
 func TestAtomicTransparencyThroughAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/aliased\n\ngo 1.26\n",
@@ -1007,6 +1043,9 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 // transparency never crosses a definition boundary
 // (REQ-closure-shared-dynamic-state).
 func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/wrapped\n\ngo 1.26\n",
@@ -1032,6 +1071,9 @@ func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 // when *T would — a data-only pointee leaves the subject closed, a
 // dynamic-carrying pointee opens it.
 func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/params\n\ngo 1.26\n",
@@ -1062,6 +1104,9 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 // by-value carrier whose reads copy — no escape-class downgrade
 // (REQ-closure-shared-dynamic-state).
 func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/beside\n\ngo 1.26\n",
@@ -1088,6 +1133,9 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 // toolchain's source, and no name-shaped sibling inherits it
 // (REQ-closure-shared-dynamic-state).
 func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":     "module example.com/homebrew\n\ngo 1.26\n",
@@ -1113,6 +1161,9 @@ func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 // covers exactly the code its author edits and reviews — the inverse of
 // the vouch boundary (REQ-closure-shared-dynamic-state).
 func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
@@ -1203,6 +1254,9 @@ func writeSemverDepModule(t *testing.T) string {
 // (REQ-purity-observation-separation, REQ-closure-shared-dynamic-state,
 // REQ-vouch-recorded).
 func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeSemverDepModule(t)
 	const ghost = "golang.org/x/mod/semver.Ghost"
@@ -1312,6 +1366,9 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 // reaching only the later-walked package still carries the acceptance
 // (REQ-vouch-recorded).
 func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}", "golang.org/x/mod").Output()
 	if err != nil {
@@ -1385,6 +1442,9 @@ func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
 // the observed capture still records the discharge like the plain one
 // (REQ-vouch-recorded).
 func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
@@ -1460,6 +1520,9 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 // like every malformed-fact arm — and the downgrade names the declared
 // key (REQ-closure-shared-dynamic-state).
 func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1512,6 +1575,9 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 // link in the declaring package's fact
 // (REQ-closure-shared-dynamic-state).
 func TestCarrierAliasLinkRecorded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":     "module example.com/xesc\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Hooks = map[string]func() int{\"a\": one}\n\nvar Alias = Hooks\n\nfunc Count() int { return len(Hooks) }\n",
@@ -1540,6 +1606,9 @@ func TestCarrierAliasLinkRecorded(t *testing.T) {
 // records no link - the callee's value is not the argument's backing
 // (REQ-closure-shared-dynamic-state).
 func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":     "module example.com/xesc\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc pick(m map[string][]func() int) map[string][]func() int { return m }\n\nvar Picked = pick(Hooks)\n\nfunc init() {\n\tHooks[\"a\"] = Inner\n}\n\nfunc Count() int { return len(Hooks) }\n",
@@ -1571,6 +1640,9 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 // key too - one backing under every name it carries
 // (REQ-closure-shared-dynamic-state).
 func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1611,6 +1683,9 @@ func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 // an aliasing key refuses the linked origin
 // (REQ-closure-shared-dynamic-state).
 func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1648,6 +1723,9 @@ func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
 // trusted: every key the fact declares marks mutated — fail-closed like
 // every malformed-fact arm (REQ-closure-shared-dynamic-state).
 func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1685,6 +1763,9 @@ func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
 // not trusted: every key the fact declares marks mutated — fail-closed
 // like every malformed-fact arm (REQ-closure-shared-dynamic-state).
 func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1722,6 +1803,9 @@ func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
 // not trusted: every key the fact declares marks mutated — fail-closed
 // like every malformed-fact arm (REQ-closure-shared-dynamic-state).
 func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
@@ -1760,6 +1844,9 @@ func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
 // carrying fact declares mutated — fail-closed
 // (REQ-closure-shared-dynamic-state).
 func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	cases := []struct {
 		name   string
 		poison func(fact *dynamicStateFact)
@@ -1897,6 +1984,9 @@ func TestPinnedBucketsExcludeModulesReachingMutableLocalSource(t *testing.T) {
 // a mutable-local derivation (REQ-closure-mutable-local,
 // REQ-closure-dynamic-state-memo).
 func TestDynamicStateLocalFactsDeriveFreshEachScan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	depSource := "package dep\n\nvar Hook func()\n"
@@ -1974,6 +2064,9 @@ func writeFileProxyModule(t *testing.T, proxyDir, modPath, version string, files
 // key (REQ-closure-dynamic-state-memo; the H-shaped violation of the fact
 // invariant).
 func TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
@@ -2042,6 +2135,9 @@ func TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass(t *testin
 // does not compile because it references test-added declarations
 // (REQ-closure-dynamic-state-memo, REQ-closure-shared-dynamic-state).
 func TestIntermediateRecompilationsScanFromTheirOwnCompilation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, content := range map[string]string{

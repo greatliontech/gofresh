@@ -12,6 +12,9 @@ import (
 // sibling of the same package analyzes normally (REQ-closure-analysis's
 // missing-root subject-local degradation arm).
 func TestMissingRootDegradesSubjectLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/external\n\ngo 1.26\n")
 	writeFile(t, dir, "external.go", "package external\n\nfunc Ok() bool { return true }\n")

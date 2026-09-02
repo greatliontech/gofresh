@@ -179,6 +179,9 @@ func TestEffectScanScopeDiscriminatesSelectionVerdict(t *testing.T) {
 // (the verdict threads from construction to the admission sites, not
 // merely honored as a parameter).
 func TestUnwalkedTagSelectionRefusesObservability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	if !auditedToolchainSource() {
 		t.Skip("running toolchain not in the audited-release list")
 	}
@@ -263,6 +266,9 @@ func TestToolchainSelectionNoticeMatchesVerdict(t *testing.T) {
 // the entry a consumer without a Hasher calls, so its resolution path
 // is the chunk's actual serving surface.
 func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	if !auditedToolchainSource() {
 		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
 	}

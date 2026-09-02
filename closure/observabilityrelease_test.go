@@ -8,6 +8,9 @@ import "testing"
 // memory follows the largest single binary, never the batch's package
 // count.
 func TestObservabilityBatchReleasesPrograms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	subjects := []Subject{
 		{Package: base + "observable", Symbol: "TestReadFile"},
@@ -37,6 +40,9 @@ func TestObservabilityBatchReleasesPrograms(t *testing.T) {
 // the all-unrooted exit: the group loaded a program to discover its
 // subjects cannot root, and that program is released like any other.
 func TestObservabilityBatchReleasesProgramOnUnrootedGroup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observable"
 	h, err := New()
 	if err != nil {

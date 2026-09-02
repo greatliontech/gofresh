@@ -42,6 +42,9 @@ func UseBoth() int {
 // the type-parameter list itself, which a params-only walk misses, and
 // refuses open-world.
 func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeBoundedViewFixture(t)
 	const pkg = "example.com/boundedview"
 	engine, err := New(WithDir(dir))

@@ -55,6 +55,9 @@ func UseInt() string { return Key[int](1) }
 // dispatch concretely; a parameterized body is not a runtime dispatch
 // surface, but its source is still the subject's content).
 func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	dir := writeGenericFixture(t, genericFixtureBody)
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Key"}
@@ -116,6 +119,9 @@ func UseInt() string { return Key[int](1) }
 // dropping the instantiations from traversal would let an effectful generic
 // read as observable - the flattering direction.
 func TestAttributedAnalysisSeesEffectsThroughInstantiations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	dir := writeGenericFixture(t, `package generic
 
 import (
@@ -161,6 +167,9 @@ func UseEffect() string { return Effectful[int](1) }
 // A parameterized subject nothing instantiates still analyzes: its own
 // source remains its content, and the analysis neither panics nor errors.
 func TestAttributedAnalysisCoversUninstantiatedGenericSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	dir := writeGenericFixture(t, genericFixtureBody+`
 // Orphan has no instantiation anywhere in the binary.
 func Orphan[K comparable](k K) string {
@@ -216,6 +225,9 @@ func orphanProbe() string { return os.Getenv("ORPHAN") }
 // out of production paths - degrades to per-subject unavailability upstream,
 // never a crash.
 func TestAttributedAnalysisConvertsUnsupportedShapesToErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeGenericFixture(t, genericFixtureBody)
 	h, err := NewAt(dir)
 	if err != nil {
@@ -240,6 +252,9 @@ func TestAttributedAnalysisConvertsUnsupportedShapesToErrors(t *testing.T) {
 // refined hash missing every callee (REQ-closure-analysis's
 // parameterized-subject arm; the reviewer-demonstrated gap).
 func TestZeroParameterGenericSubjectIsForcedOpenWorld(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	const body = `package generic
 
 import "os"
@@ -280,6 +295,9 @@ func UseInt() string {
 // parameters - the RecvTypeParams arm of parameterizedBody - and its
 // callee edits move the refined closure exactly as for generic functions.
 func TestGenericMethodSubjectIsForcedOpenWorld(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	const body = `package generic
 
 import "os"
@@ -326,6 +344,9 @@ func UseInt() string {
 // it — the bldc field campaign's "unsupported analysis shape: T",
 // 567/1164 targets dark (REQ-closure-analysis).
 func TestAttributedAnalysisSkipsParameterizedInstances(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	dir := writeGenericFixture(t, `package generic
 
 import "fmt"
@@ -376,6 +397,9 @@ func UseInt() string { return Outer[int](1) }
 // review's H1) and its walk crashed on a nil MethodValue for the
 // embedded interface's method (H2) - both must analyze clean now.
 func TestAttributedAnalysisSkipsLocalTypeInstances(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	dir := writeGenericFixture(t, `package generic
 
 type Iface interface{ M() }

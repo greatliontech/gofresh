@@ -13,6 +13,9 @@ import (
 // functions; an ordinal naming no declaration errors with the subject
 // named.
 func TestInitSubjectRootsResolvePositionally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/initroot\n\ngo 1.26\n")
 	writeFile(t, dir, "a.go", `package initroot

@@ -77,6 +77,9 @@ func writeObservedViewModule(t *testing.T) string {
 }
 
 func TestUnavailableObservationAnalysisIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":      "module example.com/external\n\ngo 1.26\n",
@@ -168,6 +171,9 @@ func TestExternal(t *testing.T) {
 }
 
 func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -237,6 +243,9 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 // verdict, never a partial answer — even when the record's evidence alone
 // already decided staleness.
 func TestCheckObservedPropagatesCancellationMidCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -276,6 +285,9 @@ func TestCheckObservedPropagatesCancellationMidCheck(t *testing.T) {
 // ingest — so the repo-root read idiom no longer blocks the proof, and
 // with it the plain tier's file-I/O rescue.
 func TestObservedProofAdmitsParentTraversalIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/traversal\n\ngo 1.26\n",
@@ -311,6 +323,9 @@ func TestObservedProofAdmitsParentTraversalIdentity(t *testing.T) {
 }
 
 func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -409,6 +424,9 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 }
 
 func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -454,6 +472,9 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 }
 
 func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -475,6 +496,9 @@ func TestViewSourceFilesReturnsMaximalMutableInputs(t *testing.T) {
 }
 
 func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
 		"go.mod":  "module example.com/view\n\ngo 1.26\n",
@@ -553,6 +577,9 @@ func TestBatchedViewPreservesSubjectFingerprintsAndSourceFiles(t *testing.T) {
 }
 
 func TestEngineCheckUsesFreshView(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	t.Setenv("GOGC", "100")
@@ -588,6 +615,9 @@ func TestEngineCheckUsesFreshView(t *testing.T) {
 }
 
 func TestCodeViewOmitsMeasurementGuards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -614,6 +644,9 @@ func TestCodeViewOmitsMeasurementGuards(t *testing.T) {
 }
 
 func TestResultKindIsBoundToFingerprint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -653,6 +686,9 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 }
 
 func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -694,6 +730,9 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 }
 
 func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for _, dep := range []string{"dep-a", "dep-b"} {
 		depDir := filepath.Join(dir, dep)
@@ -736,6 +775,9 @@ func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
 }
 
 func TestNewViewRejectsSourceChangeDuringConstruction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	var change sync.Once
@@ -763,6 +805,9 @@ func TestNewViewRejectsSourceChangeDuringConstruction(t *testing.T) {
 // named through the per-file digests the closure's own reads produced —
 // "changed <path>", never a bare refusal.
 func TestConstructionDriftNamesTheChangedFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	var change sync.Once
@@ -794,6 +839,9 @@ func TestConstructionDriftNamesTheChangedFile(t *testing.T) {
 // a test-only file is named through the digests the compartment computation
 // itself produced, exactly like a core member.
 func TestConstructionDriftNamesTheChangedCompartmentFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	if err := os.WriteFile(filepath.Join(dir, "extra_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) { _ = F() }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -824,6 +872,9 @@ func TestConstructionDriftNamesTheChangedCompartmentFile(t *testing.T) {
 }
 
 func TestViewDetectsAddedInitializer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nvar Value int\nfunc F() int { return Value }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -843,6 +894,9 @@ func TestViewDetectsAddedInitializer(t *testing.T) {
 }
 
 func TestViewDiscoversSourcePurity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\n//gofresh:pure\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -867,6 +921,9 @@ func TestViewDiscoversSourcePurity(t *testing.T) {
 }
 
 func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\ntype Inner struct{}\n\n//gofresh:pure\nfunc (Inner) M() { _, _ = os.ReadFile(\"fixture\") }\n\ntype Outer struct{ Inner }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "Outer.M"}
 	engine, err := New(WithDir(dir))
@@ -905,6 +962,9 @@ func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
 }
 
 func TestImportedPromotedMethodInheritsPurityDirective(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"example.com/view/dep\"\n\ntype Outer struct { dep.Inner }\n")
 	if err := os.Mkdir(filepath.Join(dir, "dep"), 0o755); err != nil {
 		t.Fatal(err)
@@ -944,6 +1004,9 @@ func TestImportedPromotedMethodInheritsPurityDirective(t *testing.T) {
 // attribution — while the view itself builds (the refusal is scoped to
 // the subject, REQ-purity-directive).
 func TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n")
 	if err := os.WriteFile(filepath.Join(dir, "external_test.go"), []byte("package view_test\n\n//gofresh:pure\nfunc F() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -974,6 +1037,9 @@ func TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally(t *testing.T) 
 }
 
 func TestSourcePurityRemainsPortableWhenProducerAlsoAsserts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\n//gofresh:pure\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	producer, err := New(WithDir(dir), WithAssumePure(func(candidate Subject) bool { return candidate == subject }))
@@ -1001,6 +1067,9 @@ func TestSourcePurityRemainsPortableWhenProducerAlsoAsserts(t *testing.T) {
 }
 
 func TestMalformedPurityAttributionCannotOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\nfunc F() { _, _ = os.ReadFile(\"fixture\") }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	producer, err := New(WithDir(dir))
@@ -1026,6 +1095,9 @@ func TestMalformedPurityAttributionCannotOverride(t *testing.T) {
 }
 
 func TestViewMarksCallerSuppliedCallbackUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F(fn func() int) int { return fn() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1050,6 +1122,9 @@ func TestViewMarksCallerSuppliedCallbackUnverifiable(t *testing.T) {
 }
 
 func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F[T func() int](fn T) int { return fn() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1074,6 +1149,9 @@ func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
 }
 
 func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// Rebind mutates the callback global outside initialization, making
 	// it process-shared dynamic state (REQ-closure-shared-dynamic-state).
 	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n\nfunc Rebind(f func()) { Callback = f }\n")
@@ -1103,6 +1181,9 @@ func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
 // caller can edit is fixed, not vouched — the downgrade stands and no
 // discharge is recorded (REQ-vouch-dependency-boundary).
 func TestVouchConfersNothingOnMutableLocalState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nfunc F() { Callback() }\n\nfunc Rebind(f func()) { Callback = f }\n")
 	engine, err := New(WithDir(dir), WithDynamicStateVouches("", "example.com/view.Callback"))
 	if err != nil {
@@ -1144,6 +1225,9 @@ func TestVouchConfersNothingOnMutableLocalState(t *testing.T) {
 // initializer, and the subject checks valid instead of downgrading
 // (REQ-closure-shared-dynamic-state).
 func TestImmutableCallbackGlobalChecksValid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nvar Callback = func() {}\n\nvar ErrSentinel = error(nil)\n\nfunc F() { Callback() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1168,6 +1252,9 @@ func TestImmutableCallbackGlobalChecksValid(t *testing.T) {
 }
 
 func TestMutableCallbackGlobalFromDependencyPropagates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"example.com/view/dep\"\n\nfunc F() { dep.Run() }\n")
 	if err := os.Mkdir(filepath.Join(dir, "dep"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1198,6 +1285,9 @@ func TestMutableCallbackGlobalFromDependencyPropagates(t *testing.T) {
 }
 
 func TestMaximalOrdinaryTestHarnessIsVerifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n")
 	if err := os.WriteFile(filepath.Join(dir, "ordinary_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1228,6 +1318,9 @@ func TestMaximalOrdinaryTestHarnessIsVerifiable(t *testing.T) {
 // is classified by that target, not widened: the observation proof names the
 // resolved testing.TempDir effect.
 func TestResolvedStandardInterfaceTargetIsClassified(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n")
 	source := "package view\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { var value interface{ TempDir() string } = t; _ = value.TempDir() }\n"
 	if err := os.WriteFile(filepath.Join(dir, "interface_test.go"), []byte(source), 0o644); err != nil {
@@ -1252,6 +1345,9 @@ func TestResolvedStandardInterfaceTargetIsClassified(t *testing.T) {
 }
 
 func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"time\"\n\nfunc F() int64 { return time.Now().UnixNano() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1280,6 +1376,9 @@ func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
 }
 
 func TestRuntimeBackedSyncOperationIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// sync.Map stands outside the audited synchronization and pooling
 	// sets, so its runtime-backed operations keep the
 	// unaudited-standard refusal (REQ-closure-shared-dynamic-state).
@@ -1310,6 +1409,9 @@ func TestRuntimeBackedSyncOperationIsUnverifiable(t *testing.T) {
 // resolved target — the observation proof names os.Getenv — never widened
 // into a blanket refusal.
 func TestExternalCallbackFromStandardLibraryIsClassified(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport (\"os\"; \"regexp\")\n\nfunc F() string { return regexp.MustCompile(\".\").ReplaceAllStringFunc(\"X\", os.Getenv) }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1330,6 +1432,9 @@ func TestExternalCallbackFromStandardLibraryIsClassified(t *testing.T) {
 }
 
 func TestRuntimeAddressExposureIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"reflect\"\n\nfunc F() uintptr { value := 0; return reflect.ValueOf(&value).Pointer() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1354,6 +1459,9 @@ func TestRuntimeAddressExposureIsUnverifiable(t *testing.T) {
 }
 
 func TestUnsafePointerAddressInputIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"unsafe\"\n\nvar Address uintptr\nfunc F() byte { return *(*byte)(unsafe.Pointer(Address)) }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1378,6 +1486,9 @@ func TestUnsafePointerAddressInputIsUnverifiable(t *testing.T) {
 }
 
 func TestCPUDispatchedMathIsUnverifiableForCodeResult(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"math\"\n\nfunc F() uint64 { return math.Float64bits(math.Exp(1.25)) }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1402,6 +1513,9 @@ func TestCPUDispatchedMathIsUnverifiableForCodeResult(t *testing.T) {
 }
 
 func TestStandardGlobalStateIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport \"os\"\n\nfunc F() int { return len(os.Args) }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1430,6 +1544,9 @@ func TestStandardGlobalStateIsUnverifiable(t *testing.T) {
 }
 
 func TestViewFreezesRelativeModuleDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	original, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1465,6 +1582,9 @@ func TestViewFreezesRelativeModuleDirectory(t *testing.T) {
 }
 
 func TestFormattedReaderInputIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport (\"fmt\"; \"os\")\n\nfunc F() int { var value int; _, _ = fmt.Fscan(os.Stdin, &value); return value }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1489,6 +1609,9 @@ func TestFormattedReaderInputIsUnverifiable(t *testing.T) {
 }
 
 func TestBenchmarkIterationCountIsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n")
 	if err := os.WriteFile(filepath.Join(dir, "benchmark_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc BenchmarkF(b *testing.B) { _ = b.N }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1523,6 +1646,9 @@ func TestBenchmarkIterationCountIsUnverifiable(t *testing.T) {
 // never scanned — even a body of resolved instructions refuses — so
 // runtime-dependent instructions can never slip through unaudited.
 func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F()\n")
 	assembly := "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRDTSC\n\tRET\n"
 	if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
@@ -1551,6 +1677,9 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 // least of the package's native findings under the shared
 // cause-preference order.
 func TestSystemObjectRemainsOpaque(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "view.syso"), []byte("opaque system object"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1581,6 +1710,9 @@ func TestSystemObjectRemainsOpaque(t *testing.T) {
 }
 
 func TestExternalStandardLinknameTargetBlocksObservationProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport _ \"unsafe\"\n\n//go:linkname nanotime runtime.nanotime\nfunc nanotime() int64\n\nfunc F() int64 { return nanotime() }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1603,6 +1735,9 @@ func TestExternalStandardLinknameTargetBlocksObservationProof(t *testing.T) {
 // A production function named TestMain is an ordinary subject: the
 // observability analysis roots it instead of refusing it as harness setup.
 func TestProductionFunctionNamedTestMainIsAnalyzable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc TestMain() {}\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -1623,6 +1758,9 @@ func TestProductionFunctionNamedTestMainIsAnalyzable(t *testing.T) {
 }
 
 func TestProductionTestMainSignatureIsNotHarnessSetup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nimport (\"os\"; \"testing\")\n\nfunc TestMain(m *testing.M) { _, _ = os.ReadFile(\"fixture\") }\n")
 	if err := os.WriteFile(filepath.Join(dir, "view_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1685,6 +1823,9 @@ func TestBatchMarksRuntimeInputDriftStale(t *testing.T) {
 // reads the same record stale. The runtime-inputs contract's
 // same-environment-as-the-producing-process rule, made declarable.
 func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	producerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
 	state, err := runtimeinput.FromTestLogEnv([]byte("getenv GOFRESH_TEST_WIDTH\n"), dir, dir, producerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
@@ -1756,6 +1897,9 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 // scheduling behavior moves with no other guard moving - while an
 // equal producer env checks valid (WithProducerEnv).
 func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	base := make([]string, 0, len(os.Environ()))
@@ -1802,6 +1946,9 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 // construction instead of letting stale evidence serve against
 // artifacts the producer processes never ran with (WithProducerEnv).
 func TestProducerEnvConstructionRefusals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	base := make([]string, 0, len(os.Environ()))
 	for _, entry := range os.Environ() {
@@ -1864,6 +2011,9 @@ func TestRuntimeInputDriftIsSubjectLocal(t *testing.T) {
 }
 
 func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -1897,6 +2047,9 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 }
 
 func TestRuntimeInputCheckDetectsMovementBetweenSnapshots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -1964,6 +2117,9 @@ func TestRuntimeInputDriftDoesNotOverrideStale(t *testing.T) {
 }
 
 func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -2013,6 +2169,9 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 // deferred engine's check serves the provisional verdict and the same
 // edit refuses at validation, discarding it.
 func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -2158,6 +2317,9 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 }
 
 func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\nfunc G() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -2211,6 +2373,9 @@ func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
 }
 
 func TestCaptureObservedBatchReturnsContextErrorAtAnalysisBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2238,6 +2403,9 @@ func TestCaptureObservedBatchReturnsContextErrorAtAnalysisBoundary(t *testing.T)
 // there is no precise-analysis rescue of a drifted core
 // (REQ-fresh-hierarchical-check).
 func TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\nfunc G() int { return 2 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2298,6 +2466,9 @@ func TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis(t *testing.T) {
 
 // A cancelled caller context refuses an observed capture before any work.
 func TestObservedCaptureHonorsCancelledContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2316,6 +2487,9 @@ func TestObservedCaptureHonorsCancelledContext(t *testing.T) {
 }
 
 func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -2391,6 +2565,9 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 }
 
 func TestObservedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2410,6 +2587,9 @@ func TestObservedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
 }
 
 func TestObservedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	goenv := filepath.Join(t.TempDir(), "goenv")
@@ -2435,6 +2615,9 @@ func TestObservedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
 }
 
 func TestCancelledObservedCaptureDoesNotWaitForViewLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2466,6 +2649,9 @@ func TestCancelledObservedCaptureDoesNotWaitForViewLock(t *testing.T) {
 }
 
 func TestObservedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2496,6 +2682,9 @@ func TestObservedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *te
 }
 
 func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	// The purity assertion flips during Validate's final re-observation
@@ -2535,6 +2724,9 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 }
 
 func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2567,6 +2759,9 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 // the view must refuse at its publication boundary, never publish into a
 // sealed view.
 func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2603,6 +2798,9 @@ func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
 }
 
 func TestObservedCaptureIsConcurrentSafe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))
@@ -2652,6 +2850,9 @@ func TestObservedCaptureIsConcurrentSafe(t *testing.T) {
 // carrying a sibling's proof — even with internally consistent evidence — is
 // never served through the observation lift.
 func TestObservationProofBindsSubjectIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -2700,6 +2901,9 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 }
 
 func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":             "module example.com/batch\n\ngo 1.26\n",
@@ -2861,6 +3065,9 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 }
 
 func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// The undrifted finish must re-observe the runtime window and stale a
 	// record whose runtime input moved mid-check even when the before state
 	// agreed with the recording. The drifted case pins evidence-only
@@ -2948,6 +3155,9 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 }
 
 func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	budgeted, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond))
@@ -2994,6 +3204,9 @@ func TestValidationComparesObservationProofsByAvailabilityClass(t *testing.T) {
 }
 
 func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -3031,6 +3244,9 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 }
 
 func TestProgressReportsAnalysisPhases(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// A fresh cache: the observability memo legitimately swallows the
 	// prove phase on a hit, and this test pins the fresh-analysis
 	// sequence.
@@ -3110,6 +3326,9 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 }
 
 func TestDriftBracketsObserveOncePerSide(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	fixture := filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
@@ -3173,6 +3392,9 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 // knob position changes a verdict - the store is a cache, never a
 // record (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
 func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	source := "package view\n\nvar Hooks = map[string]func(){\"k\": func() {}}\n\nfunc F() int { return len(Hooks) }\n"
 	verdictUnder := func(t *testing.T, configure func(t *testing.T)) Status {
 		t.Helper()
@@ -3230,6 +3452,9 @@ func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 // disabled store persists nothing while serving scan-equivalent
 // results (REQ-closure-dynamic-state-memo).
 func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	forbidden := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", forbidden)
 	t.Cleanup(func() { SetMemoRoot("") })
@@ -3282,6 +3507,9 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 // flow; one program-code caller anywhere poisons the proof
 // (REQ-closure-shared-dynamic-state's cross-package init-only class).
 func TestCrossPackageInitOnlyRegistration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	files := map[string]string{
 		"go.mod":       "module example.com/xreg\n\ngo 1.26\n",
 		"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc NewKey(name string) string {\n\tHooks[name] = func() {}\n\treturn name\n}\n\nvar _ = NewKey(\"own\")\n\nfunc Count() int { return len(Hooks) }\n",
@@ -3392,6 +3620,9 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 // composition, cross-package included), and a leak-free range binding
 // over the loop body (REQ-closure-shared-dynamic-state).
 func TestCarrierEscapeDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	goMod := "module example.com/xesc\n\ngo 1.26\n"
 	t.Run("escape through a proven function stays escaped", func(t *testing.T) {
 		files := map[string]string{
@@ -7556,6 +7787,9 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 // construction through the same shape keeps it
 // (REQ-closure-shared-dynamic-state).
 func TestProvenInitFlowStoresAuditedForObjectClosure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	t.Run("non-audited store through a proven function breaks the closure", func(t *testing.T) {
 		files := map[string]string{
 			"go.mod":       "module example.com/xop\n\ngo 1.26\n",
@@ -7703,6 +7937,9 @@ func captureCheck(t *testing.T, dir string, subject Subject, opts ...Option) Ver
 // mutator, a pointer-receiver method VALUE bind, and read-aliasing of
 // a map-carried hook set.
 func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for name, source := range map[string]string{
 		"package-level funclit mutator":      "package view\n\nvar Hook = func() {}\n\nvar Rebind = func() { Hook = func() {} }\n\nfunc F() { Rebind() }\n",
 		"pointer-receiver method value bind": "package view\n\ntype Registry struct{ hook func() }\n\nfunc (r *Registry) Set(f func()) { r.hook = f }\n\nvar Reg Registry\n\nfunc F() { set := Reg.Set; set(func() {}) }\n",
@@ -7739,6 +7976,9 @@ func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
 // an errors.New sentinel stays closed through an escape
 // (REQ-closure-shared-dynamic-state).
 func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for name, source := range map[string]string{
 		"sentinel escape into errors.Is":              "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() bool { return errors.Is(nil, ErrX) }\n",
 		"sentinel comparison":                         "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\nvar ErrY = errors.New(\"y\")\n\nfunc F() bool { return ErrX == ErrY }\n",
@@ -7796,6 +8036,9 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 // (REQ-closure-shared-dynamic-state), and the refusal names the owning
 // package and variable (REQ-closure-shared-dynamic-state-reason).
 func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"sentinel rebind": {
 			source:  "package view\n\nimport \"errors\"\n\nvar ErrX = errors.New(\"x\")\n\nfunc F() { ErrX = errors.New(\"y\") }\n",
@@ -8039,6 +8282,9 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 // (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestPoolingDischargeRequiresSingleSubjectAttestation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	source := "package view\n\nimport \"sync\"\n\nvar pool sync.Pool\n\ntype fast struct{}\n\nfunc (fast) Work() int { return 1 }\n\ntype slow struct{}\n\nfunc (slow) Work() int { return 2 }\n\nfunc Plant() { pool.Put(slow{}) }\n\nfunc F() int {\n\tpool.Put(fast{})\n\tif w, ok := pool.Get().(interface{ Work() int }); ok {\n\t\treturn w.Work()\n\t}\n\treturn 0\n}\n"
 	dir := writeViewModule(t, source)
 	attested := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
@@ -8060,6 +8306,9 @@ func TestPoolingDischargeRequiresSingleSubjectAttestation(t *testing.T) {
 // outcome can distinguish subject orders
 // (REQ-closure-shared-dynamic-state).
 func TestContentProvenPoolDischargesWithoutAttestation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, source := range map[string]string{
 		"get and put":         "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\t*b = (*b)[:0]\n\tn := cap(*b)\n\tbufs.Put(b)\n\treturn n\n}\n",
 		"deferred put":        "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
@@ -8086,6 +8335,9 @@ func TestContentProvenPoolDischargesWithoutAttestation(t *testing.T) {
 // statically exactly T (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestContentProvenPoolNonConformingShapesKeepAttestationRequirement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	conformingDecl := "var bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n"
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"exported pool": {
@@ -8206,6 +8458,9 @@ func TestContentProvenPoolNonConformingShapesKeepAttestationRequirement(t *testi
 // unproven pool keeps the downgrade (REQ-vouch-recorded,
 // REQ-closure-shared-dynamic-state).
 func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	pooled := "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n"
@@ -8279,6 +8534,9 @@ func TestSingleSubjectAttestationRecordedOnEvidence(t *testing.T) {
 // pooling idiom leaves the package closed and the subject verifiable
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedPoolingGetPutDoesNotDowngrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, source := range map[string]string{
 		"pool var get and put":           "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\t*b = (*b)[:0]\n\tn := cap(*b)\n\tbufs.Put(b)\n\treturn n\n}\n",
 		"deferred put":                   "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { b := make([]byte, 0, 64); return &b }}\n\nfunc F() int {\n\tb := bufs.Get().(*[]byte)\n\tdefer bufs.Put(b)\n\treturn cap(*b)\n}\n",
@@ -8307,6 +8565,9 @@ func TestAuditedPoolingGetPutDoesNotDowngrade(t *testing.T) {
 // pricing (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestAuditedPoolingEveryOtherUseKeepsFailClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"pool rebinding": {
 			source:  "package view\n\nimport \"sync\"\n\nvar bufs = sync.Pool{New: func() any { return new(int) }}\n\nfunc F() { bufs = sync.Pool{} }\n",
@@ -8363,6 +8624,9 @@ func TestAuditedPoolingEveryOtherUseKeepsFailClosed(t *testing.T) {
 // idiom leaves the package closed and its escapes are not mutation
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedTypeOfConstructionKeepsObjectClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, source := range map[string]string{
 		"type-cache var escape discharges": "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(bytesType) != nil }\n",
 		"chained view method discharges":   "package view\n\nimport \"reflect\"\n\nvar elemType = reflect.TypeOf([]byte{}).Elem()\n\nfunc use(t reflect.Type) reflect.Type { return t }\n\nfunc F() bool { return use(elemType) != nil }\n",
@@ -8385,6 +8649,9 @@ func TestAuditedTypeOfConstructionKeepsObjectClosed(t *testing.T) {
 // still refuses (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestAuditedTypeOfConstructionBounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"rebinding stays mutation": {
 			source:  "package view\n\nimport \"reflect\"\n\nvar bytesType = reflect.TypeOf([]byte{})\n\nfunc F() { bytesType = reflect.TypeOf(\"\") }\n",
@@ -8412,6 +8679,9 @@ func TestAuditedTypeOfConstructionBounds(t *testing.T) {
 // a sibling object-closed variable — whatever the declaration order
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedErrorfConstructionKeepsObjectClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, source := range map[string]string{
 		"wrapped sentinel discharges": "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"base\")\n\nvar Wrapped = fmt.Errorf(\"%w: bound\", Base)\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Wrapped) != nil }\n",
 		"sentinel family discharges":  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar ErrProposalDropped = errors.New(\"raft proposal dropped\")\n\nvar ErrProposalDroppedLogBound = fmt.Errorf(\"%w: log bound\", ErrProposalDropped)\n\nvar ErrProposalDroppedQuorumGate = fmt.Errorf(\"%w: quorum gate\", ErrProposalDropped)\n\nfunc use(err error) error { return err }\n\nfunc F() bool {\n\treturn use(ErrProposalDroppedLogBound) != use(ErrProposalDroppedQuorumGate)\n}\n",
@@ -8437,6 +8707,9 @@ func TestAuditedErrorfConstructionKeepsObjectClosed(t *testing.T) {
 // (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestAuditedErrorfConstructionBounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, tc := range map[string]struct{ source, culprit string }{
 		"local argument refuses": {
 			source:  "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Wrapped error\n\nfunc init() {\n\te := errors.New(\"base\")\n\tWrapped = fmt.Errorf(\"%w: bound\", e)\n}\n\nfunc use(err error) error { return err }\n\nfunc F() bool { return use(Wrapped) != nil }\n",
@@ -8472,6 +8745,9 @@ func TestAuditedErrorfConstructionBounds(t *testing.T) {
 // (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestCompositeAddressCapturesFreshObjectOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	t.Run("closed element discharges", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\ntype box struct{ err error }\n\nfunc F() *box { return &box{err: E} }\n")
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
@@ -8502,6 +8778,9 @@ func TestCompositeAddressCapturesFreshObjectOnly(t *testing.T) {
 // method call keeps the fail-closed escape
 // (REQ-closure-shared-dynamic-state).
 func TestObjectClosedMethodCallDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	for name, source := range map[string]string{
 		"errors.New var method call":   "package view\n\nimport \"errors\"\n\nvar E = errors.New(\"x\")\n\nfunc F() string { return E.Error() }\n",
 		"wrapped var method call":      "package view\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar Base = errors.New(\"x\")\n\nvar Wrapped = fmt.Errorf(\"%w: y\", Base)\n\nfunc F() string { return Wrapped.Error() }\n",
@@ -8541,6 +8820,9 @@ func TestObjectClosedMethodCallDischarges(t *testing.T) {
 // (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestObjectClosedReExportCrossesPackages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	check := func(t *testing.T, files map[string]string) Verdict {
 		t.Helper()
 		dir := writeModuleTree(t, files)
@@ -8614,6 +8896,9 @@ func TestObjectClosedReExportCrossesPackages(t *testing.T) {
 // subject's evidence; either leg alone confers nothing
 // (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
 func TestSingleSubjectDirectiveDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	// The arming call is rooted in the subject: the directive's
 	// remaining role after the reachability scoping is exactly
 	// rooted-but-subject-own state (an unrooted armer discharges by
@@ -8684,6 +8969,9 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 // (REQ-closure-shared-dynamic-state,
 // REQ-closure-shared-dynamic-state-reason).
 func TestReachabilityScopedDischarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	memoTree := map[string]string{
 		"go.mod":     "module example.com/view\n\ngo 1.26\n",
 		"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
@@ -8826,6 +9114,9 @@ func TestReachabilityScopedDischarge(t *testing.T) {
 // unaudited linkname keeps the opaque floor
 // (REQ-closure-blindspot).
 func TestAuditedLinknameFloorNamesTrueReason(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Run("audited linkname unmasks the remaining effects", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\nimport \"unsafe\"\n\n//go:linkname runtimeGetAuxv runtime.getAuxv\nfunc runtimeGetAuxv() []uintptr\n\nfunc F() int {\n\tp := unsafe.Pointer(&struct{}{})\n\t_ = p\n\treturn len(runtimeGetAuxv())\n}\n")
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
@@ -8851,6 +9142,9 @@ func TestAuditedLinknameFloorNamesTrueReason(t *testing.T) {
 // unaudited runtime), and for hand-written sibling variables, every
 // mark stands (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
 func TestGeneratedProtoClusterDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("populates a module cache and runs the engine over a temporary module")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
@@ -9006,6 +9300,9 @@ func TestGeneratedProtoHeaderTokenBound(t *testing.T) {
 // needs no foreign-code rule of its own
 // (REQ-closure-shared-dynamic-state).
 func TestForeignCodePackageKeepsTypeLevelDowngrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nvar Hook = func() {}\n\nfunc F() { Hook() }\n")
 	if err := os.WriteFile(filepath.Join(dir, "empty_amd64.s"), []byte("// nothing\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -9038,6 +9335,9 @@ func TestForeignCodePackageKeepsTypeLevelDowngrade(t *testing.T) {
 // (REQ-fresh-coherent-view's record/compare asymmetry). Drift detection is
 // intact: an edit between capture and validation still refuses.
 func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc Sum(a, b int) int { return a + b }\n")
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -9087,6 +9387,9 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 // single (REQ-fresh-coherent-view's record/compare asymmetry). Drift
 // between capture and validation still refuses through the seeded read.
 func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -9162,6 +9465,9 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 // mutation campaign runs). REQ-fresh-coherent-view: nothing the sibling
 // serves is re-read.
 func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/sibling\n\ngo 1.26\n",
@@ -9318,6 +9624,9 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 // A drifted tree refuses a sibling's validation exactly as any view's:
 // sharing the parent's recorded facts never weakens the compare side.
 func TestSiblingValidationRefusesDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/siblingdrift\n\ngo 1.26\n",
@@ -9360,6 +9669,9 @@ func TestSiblingValidationRefusesDrift(t *testing.T) {
 // every production feeder arrives pre-sorted, so no integration path
 // can discriminate the recipe's own sort.
 func TestSiblingCrossPackageClosureValidatesUnchangedTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod": "module example.com/siblingdeps\n\ngo 1.26\n",
@@ -9426,6 +9738,9 @@ func TestSortedUniqueUnionCanonicalizes(t *testing.T) {
 // movement across the window stays detected
 // (REQ-inputs-guard's per-record evaluation collapsed per phase).
 func TestRuntimeInputManifestEvaluationSharedPerPhase(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n")
 	f := Subject{Package: "example.com/view", Symbol: "F"}
 	g := Subject{Package: "example.com/view", Symbol: "G"}
@@ -9475,6 +9790,9 @@ func TestRuntimeInputManifestEvaluationSharedPerPhase(t *testing.T) {
 // import path's shape - the path heuristic classified every dotless
 // module standard and silently disabled the whole startup walk for it.
 func TestDotlessModuleKeepsStartupRefusals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":  "module probe\n\ngo 1.26\n",
@@ -9511,6 +9829,9 @@ func TestDotlessModuleKeepsStartupRefusals(t *testing.T) {
 // dispatched from a harness frame stays in the test-main walk (its
 // blocking effect refuses).
 func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Run("flag registration judged", func(t *testing.T) {
 		dir := t.TempDir()
 		for name, content := range map[string]string{
@@ -9586,6 +9907,9 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 // before and one after the re-analysis, never one per subject - the
 // check window's amplification collapse on the producer path.
 func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":           "module example.com/observed\n\ngo 1.26\n",
@@ -9647,6 +9971,9 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 // needed. Fail-closed on a rooted arming site, a benchmark root
 // included, and on an ambiguous harness-named root.
 func TestBinaryScopedReachabilityDischarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	wireTree := func(appTest string) map[string]string {
 		tree := map[string]string{
 			"go.mod":       "module example.com/view\n\ngo 1.26\n",
@@ -9786,6 +10113,9 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 // and an encloser referenced from program code — another literal — no
 // named caller carries (REQ-closure-shared-dynamic-state).
 func TestLiteralBorneSiteForeclosures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
+	}
 	t.Run("init-reachable encloser forecloses", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\nvar hooks = map[string]func(){}\n\nvar stash func()\n\nvar _ = arm()\n\nfunc arm() int {\n\tstash = func() { hooks[\"k\"] = nil }\n\treturn 0\n}\n\nfunc F() int { return len(hooks) }\n")
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
@@ -9882,6 +10212,9 @@ func TestLiteralBorneSiteForeclosures(t *testing.T) {
 // facts (REQ-closure-dynamic-state-memo,
 // REQ-closure-shared-dynamic-state).
 func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	capture := func(opts ...Option) string {
@@ -9922,6 +10255,9 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 // attaches through the sibling must see identical fingerprints
 // (REQ-closure-shared-dynamic-state's recording arm).
 func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	const quiet = "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n"
 	dir := writeModuleTree(t, map[string]string{
 		"go.mod":          "module example.com/view\n\ngo 1.26\n",
@@ -9964,6 +10300,9 @@ func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
 // observation-strategy refusal
 // (REQ-closure-dynamic-state-memo's serving arm).
 func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := New(WithDir(dir))

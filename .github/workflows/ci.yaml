@@ -35,6 +35,15 @@ jobs:
           go-version: stable
       - run: go build ./...
       - run: go vet ./...
+      # The fast tier first: the engine's code without the engine over a
+      # tree. Every fixture-driven run and observability proof is
+      # -short-gated, so this step fails on a code defect before the
+      # minutes-class tier below spends its budget. Measured 2026-09-02
+      # on the 24-core dev host, warm build cache: ~8s wall for root +
+      # closure. On a cold runner cache the step is build-bound (130
+      # test binaries, 120 of them closure/fixtures packages) — that
+      # build is reused by the full step, so it is moved, not added.
+      - run: go test -short ./... -count=1 -timeout=5m
       # Suite budget measured 2026-08-27 on the 24-core dev host under
       # UPSTREAM stock go1.27.0 (fork-vs-stock measured at n=1 per arm:
       # -2.1..-4.4% on the three long suites, +19% on pew's 83s arm —

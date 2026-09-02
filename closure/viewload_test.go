@@ -11,6 +11,9 @@ import (
 // private load — same effects, no second typed load inside the pass
 // (REQ-fresh-coherent-view: one load per observation pass).
 func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/viewload\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -66,6 +69,9 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 // private load with identical semantics rather than failing or silently
 // skipping the scan.
 func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/viewloadmiss\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)

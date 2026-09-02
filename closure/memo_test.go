@@ -37,6 +37,9 @@ func TestPure(t *testing.T) {
 // same scope and unchanged source emits no load or prove events and
 // returns identical dispositions.
 func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := memoModule(t)
 	subjects := []Subject{
@@ -86,6 +89,9 @@ func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
 // The memo misses on a different scope and on changed source: the key is
 // the complete input identity (REQ-closure-observability-memo).
 func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := memoModule(t)
 	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
@@ -176,6 +182,9 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 // an edit between calls on one Hasher could key persistent memo entries
 // under a prior generation's identity.
 func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := memoModule(t)
 	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
@@ -253,6 +262,9 @@ func (c cancelWhenDirNonEmpty) Err() error {
 // mid-group forfeits only the interrupted slice's proofs — every
 // completed slice persists and a later pass serves it from the memo.
 func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 	dir := t.TempDir()

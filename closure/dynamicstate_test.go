@@ -8,6 +8,9 @@ import (
 // A dynamic-state fact entry serves only under its exact scope and bucket —
 // the key IS the freshness (REQ-closure-dynamic-state-memo).
 func TestDynamicStateFactStoreMissesOnScopeAndBucketChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	facts := map[string]json.RawMessage{"example.com/dep": json.RawMessage(`{"mutates":["example.com/dep.Hook"]}`)}
 	StoreDynamicStateFacts("scope-a", "modpath@v1|cone", facts)

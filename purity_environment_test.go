@@ -8,6 +8,9 @@ import (
 )
 
 func TestPurityScanUsesSuppliedEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	write := func(name, contents string) {
 		t.Helper()

@@ -17,6 +17,9 @@ import (
 // analysis configuration, so re-reading go env would cost two process
 // executions per capture batch and could only agree.
 func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
@@ -48,6 +51,9 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 // GOENV redirects the go command's env file to a sandbox path, so the
 // user's real configuration is never touched.
 func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	goenv := filepath.Join(t.TempDir(), "goenv")

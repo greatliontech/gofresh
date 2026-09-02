@@ -34,6 +34,9 @@ func TestAuditedPropertyHarnessVersion(t *testing.T) {
 // widens when one does not
 // (REQ-closure-observability-analysis).
 func TestPropertyHarnessAudit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := t.TempDir()
 	for _, sub := range []string{"rapid", "prop", "prop/propinit", "prop/propmain", "prop/propquiet"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {

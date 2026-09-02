@@ -13,6 +13,9 @@ import (
 // the innermost refusing expression — a permutation is a different
 // derivation and must not pass (REQ-explain-chain's "names, in order").
 func TestExplainChainLinkOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc inner() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\nfunc gen() map[string]handler {\n\treturn inner()\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -55,6 +58,9 @@ func TestExplainChainLinkOrder(t *testing.T) {
 // leads the chain: the registration store site is named first
 // (REQ-explain-chain's "names, in order, the registration store site").
 func TestExplainChainStoreLinkLeads(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod": "module example.com/explain\n\ngo 1.26\n",
 		"reg/reg.go": `package reg
@@ -86,6 +92,9 @@ func Count() int { return len(Registry) }
 // refusing expression: the chain ends at the edges — no refusal link,
 // the deepest link an edge (REQ-explain-chain's edge termination).
 func TestExplainChainCycleEndsAtEdges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\ntype handler func(n int) int\n\nfunc gen(depth int) []handler {\n\tif depth > 0 {\n\t\treturn more(depth - 1)\n\t}\n\treturn nil\n}\n\nfunc more(depth int) []handler {\n\treturn gen(depth)\n}\n\nvar Registry = gen(3)\n\nfunc Count() int { return len(Registry) }\n",
@@ -113,6 +122,9 @@ func TestExplainChainCycleEndsAtEdges(t *testing.T) {
 // fixturable hermetically: a replaced dep loads with syntax and a
 // parse-broken dep refuses the whole view.)
 func TestExplainChainReplacedDepIsInScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	files := map[string]string{
 		"go.mod":         "module example.com/explain\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./depstub\n",
 		"depstub/go.mod": "module example.com/dep\n\ngo 1.26\n",
@@ -151,6 +163,9 @@ func TestExplainChainReplacedDepIsInScope(t *testing.T) {
 // loads with syntax and a parse-broken dependency refuses the whole
 // view (see TestExplainChainReplacedDepIsInScope).
 func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	const culprit = "example.com/reg.Registry"
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
@@ -176,6 +191,9 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 // resolved condition, and an unresolved insertion claim's own edges
 // chain onward (REQ-explain-chain; the chunk-83 review's M1).
 func TestExplainEnvAuditInsertionChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	const culprit = "example.com/reg.Registry"
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
@@ -216,6 +234,9 @@ func TestExplainEnvAuditInsertionChain(t *testing.T) {
 // and the deepest deciding site kept (REQ-explain-bounded's deferral
 // arm).
 func TestExplainDeferralChainBound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	var b strings.Builder
 	b.WriteString("package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar sink []entry\n\n")
 	for i := 0; i < 30; i++ {

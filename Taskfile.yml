@@ -1,0 +1,34 @@
+version: "3"
+
+tasks:
+  default:
+    deps: [check]
+
+  build:
+    desc: Build all packages
+    cmds:
+      - go build ./...
+
+  vet:
+    desc: Static analysis
+    cmds:
+      - go vet ./...
+
+  test:short:
+    desc: "The fast tier: the engine's code without the engine over a tree (seconds; the inner-loop gate)"
+    cmds:
+      - go test -short -count=1 ./...
+
+  test:
+    desc: "The full tier: fixture-driven engine runs and observability proofs (minutes; the merge gate, budget in .github/workflows/ci.yaml)"
+    cmds:
+      - go test -count=1 -timeout=30m ./...
+
+  tidy:
+    desc: Tidy modules
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Vet + the fast tier
+    deps: [vet, test:short]

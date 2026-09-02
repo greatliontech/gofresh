@@ -67,6 +67,9 @@ func TestExternal(t *testing.T) {
 // with refused capture — unverifiable evidence naming both declarations
 // (REQ-purity-directive's refusal, scoped to the subject it is about).
 func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
 	engine, err := New(WithDir(dir))
@@ -98,6 +101,9 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 // the reason names both declarations so the repair (rename one) is
 // actionable without spelunking.
 func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
 	engine, err := New(WithDir(dir))
@@ -145,6 +151,9 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 // the assertion names one declarer taking responsibility, and the
 // identity has two (REQ-purity-directive, REQ-purity-responsibility).
 func TestAmbiguousSubjectCallerAssertionConfersNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
 	engine, err := New(WithDir(dir), WithAssumePure(func(Subject) bool { return true }))
@@ -169,6 +178,9 @@ func TestAmbiguousSubjectCallerAssertionConfersNothing(t *testing.T) {
 // a collapsed identity would let one declaration vouch for the other
 // (REQ-purity-directive, REQ-purity-responsibility).
 func TestAmbiguousSubjectDirectiveConfersNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeSharedHelperFixture(t)
 	internal := filepath.Join(dir, "internal_test.go")
 	content, err := os.ReadFile(internal)
@@ -212,6 +224,9 @@ func TestAmbiguousSubjectDirectiveConfersNothing(t *testing.T) {
 // way: the collapsed identity's evidence names the ambiguity, never one
 // declaration's externality (REQ-purity-directive's refusal scope).
 func TestAmbiguousSubjectExternalDirectiveConfersNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	dir := writeSharedHelperFixture(t)
 	external := filepath.Join(dir, "external_test.go")
 	content, err := os.ReadFile(external)

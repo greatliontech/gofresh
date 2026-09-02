@@ -8,6 +8,9 @@ import (
 )
 
 func TestNewAtContextEnvRejectsExternalPackageDriver(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "GOPACKAGESDRIVER=") {
