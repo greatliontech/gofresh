@@ -228,6 +228,12 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       entry point compiling the corpus at the amendment; the remedy
       in the message). Both docs delete at close. Measurement
       surface: none.
+      RIDER (bldc report 2026-09-02, slotted at 114 close): the
+      attestation-cell refusal and explain-on-uncovered name the
+      reclassification remedy (stipulator
+      docs/issues/attestation-refusal-names-no-reclassification.md;
+      doc deletes at close).
+
 - [ ] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
       stipulator docs/issues/refines-multiple-targets.md — refines
       admits a target list, canonical form ordering it, impact and
