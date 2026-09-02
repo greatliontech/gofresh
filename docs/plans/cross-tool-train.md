@@ -195,7 +195,7 @@ code moves.
       resolved — the check verdict's seat is the weekly sweep and the
       chunk close-out, stated where the pointer was. Measurement:
       none.
-- [ ] 153. pew: self-test partition — the pure helpers of `cmd/pew`
+- [x] 153. pew: self-test partition — the pure helpers of `cmd/pew`
       and `internal/*` as the `-short` tier (under 2 s); the ~20
       unstubbed `runRun`/`runPackage` sites, the `gc`/`stat` fixture
       modules, and the git fixtures `-short`-gated (extending the
