@@ -178,7 +178,7 @@ code moves.
       (gofresh is the one repo without one — folds gofresh
       docs/issues/reusable-ci-workflow.md's Taskfile half); CI runs
       the full tier at its measured budget. Measurement: none.
-- [ ] 151. gomutant: self-test partition — `task test:short`
+- [x] 151. gomutant: self-test partition — `task test:short`
       (`go test -short ./...`, the 179 existing gates: ~436 of 615
       tests, no subprocess), `task test` unchanged as the merge gate,
       `task test:selfhost-plan` (`gomutant run --plan --targets
