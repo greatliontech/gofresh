@@ -43,16 +43,20 @@ register.
 ## Execution order
 
 User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
-126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 115, then
+126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 138, 115, then
 — amended 2026-08-27 under the field-response doctrine (bldc campaign
 reports): 132 inserted after 83 (coverage integrity; lands before
 108 so the canary corpus includes the shapes it fixes), 133 inserted
 after 110 (same artifact, the findings document), 134 inserted after
 133 (chartered 2026-08-27: enforcement pointers become bindings), 135
 inserted after 109 (field-response: the sweep's first report — gofresh
-own-estate red) —
+own-estate red), and — amended 2026-09-03 under the same doctrine
+(consumer-observed reports) — 138 inserted after 114 (workspace
+path-resolution defect with findings-integrity fallout) and 139
+inserted after 130 (delta-line survivor view; beside the carry gate's
+records work) —
 then
-91, 92, 96, then 129, 130, 131, then the precision/discharge band
+91, 92, 96, then 129, 130, 139, 131, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then 95 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
@@ -129,6 +133,21 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/timeout-kill-attribution.md — a
       harness-timeout kill's red names the exhausted budget, not the
       unlucky test; same diagnostics class, doc deletes at close.
+- [ ] 138. gomutant: workspace-relative path resolution
+      (field-response, consumer reports 2026-09-03; gomutant
+      docs/issues/bracket-path-module-relative-in-workspace.md) — a
+      relative --bracket-path resolves against the invocation's --dir
+      (or workspace root), one declared surface for every module's
+      oracles, so an in-tree file spelled relatively never joins onto
+      the target module's directory, never plans unverifiable, and
+      never forces the absolute-path workaround whose machine-local
+      records keep attestations out of the committed findings
+      document. RIDES gomutant
+      docs/issues/ephemeral-test-pkg-shorthand.md — ephemeral
+      --test-pkg accepts a relative package directory resolved
+      against the loaded set, matching the --dir default. Both docs
+      delete at close. Measurement surface: diagnostics/CLI
+      resolution only — no pew arms, no DST legs.
 - [ ] 115. pew: verdict-surface batch (pew docs/issues:
       gitblob-linked-worktree-object-lookup — pew run fails in linked
       worktrees; ab-worktree-placement-escape — operator escape +
@@ -184,6 +203,19 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/semantic-closure-in-the-carry-gate.md) — adopt
       129's identity at both poles of the carry gate; doc deletes at
       close.
+- [ ] 139. gomutant: delta-line survivor view (field-response,
+      consumer report 2026-09-03; gomutant
+      docs/issues/delta-line-survivor-view.md) — a --changed
+      campaign's summary and result rows gain a changed-lines filter
+      (survivors on the delta's added lines counted and listed
+      distinctly from the symbol's pre-existing remainder), and
+      findings rows gain a run identity so an inspection scopes to
+      one campaign's records without re-deriving the measured set;
+      doc deletes at close. The run-identity half is records-shape
+      work on the v11 document — splitting it from the cheaper filter
+      is a triage-gate call at 139.1. Measurement surface: no new pew
+      arms; whole-store pew status at close re-judges the findings
+      reader arms if the records shape moves.
 - [ ] 131. stipulator: one identity walk, two windows (stipulator
       docs/issues/identity-walk-two-trackers.md) — attachment and
       extent answer "whose block is this" via two independent reset
