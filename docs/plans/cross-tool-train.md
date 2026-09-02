@@ -43,7 +43,7 @@ register.
 ## Execution order
 
 User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
-126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 138, 115, then
+126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 141, 138, 140, 115, then
 — amended 2026-08-27 under the field-response doctrine (bldc campaign
 reports): 132 inserted after 83 (coverage integrity; lands before
 108 so the canary corpus includes the shapes it fixes), 133 inserted
@@ -54,9 +54,13 @@ own-estate red), and — amended 2026-09-03 under the same doctrine
 (consumer-observed reports) — 138 inserted after 114 (workspace
 path-resolution defect with findings-integrity fallout) and 139
 inserted after 130 (delta-line survivor view; beside the carry gate's
-records work) —
+records work); and — amended 2026-09-03, same doctrine, the bldc
+fourteen-report batch — 141 inserted after 114 (verdict/serving
+integrity outranks diagnostics), 140 after 138 (ephemeral probe
+integrity, our own loop's tooling), and the stipulator band 142–145
+after 131, with gap-covered-unknown-id folding into 114's gap fold —
 then
-91, 92, 96, then 129, 130, 139, 131, then the precision/discharge band
+91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then 95 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
@@ -133,6 +137,20 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/timeout-kill-attribution.md — a
       harness-timeout kill's red names the exhausted budget, not the
       unlucky test; same diagnostics class, doc deletes at close.
+- [ ] 141. stipulator: verdict and serving integrity (field-response,
+      bldc reports 2026-09-03; stipulator
+      docs/issues/check-green-over-witness-failure.md +
+      docs/issues/property-suite-witness-serving.md). 141.1 reproduces
+      the green-over-named-failure shape against the current verdict
+      fold — the witness path judges no suite health by design, so the
+      question is what a witnessFailureHeadings entry must do to the
+      canonical verdict — then fixes or regression-pins it. The
+      serving leg is spec-tier: a classifier-derived property-witness
+      class lowers or disables freshness serving so a random-seeded
+      witness re-executes every check (the flake-pinned-until-inputs-
+      move stance stays for example witnesses). Both docs delete at
+      close. Measurement surface: verdict/diagnostics only — no pew
+      arms, no DST legs.
 - [ ] 138. gomutant: workspace-relative path resolution
       (field-response, consumer reports 2026-09-03; gomutant
       docs/issues/bracket-path-module-relative-in-workspace.md) — a
@@ -148,6 +166,21 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
+- [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
+      reports 2026-09-03; gomutant docs/issues:
+      ephemeral-deletion-probes-strand-imports — an imports fix runs
+      over the mutant before compiling (a probe declares no import
+      intent), the result saying which happened;
+      ephemeral-blind-spots-stated-and-refused — a target file no
+      measured test compiled is a REFUSAL, never a survivor, and the
+      three blind spots enter the ephemeral guidance with the
+      mutate-the-guard's-input workaround beside them;
+      ephemeral-compiler-crash-retry — a compiler signal death retries
+      once or marks "compiler crashed — re-run to confirm";
+      ephemeral-batch-wrapper-undiscoverable — the {"edits": [...]}
+      wrapper named in guidance and refusal, or the bare array
+      accepted). Four docs delete at close. Measurement surface:
+      probe-path diagnostics only — no pew arms, no DST legs.
 - [ ] 115. pew: verdict-surface batch (pew docs/issues:
       gitblob-linked-worktree-object-lookup — pew run fails in linked
       worktrees; ab-worktree-placement-escape — operator escape +
@@ -158,6 +191,41 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       docs/issues/repo-level-vouch-source.md — a reviewed vouch file
       beside the store replaces hand-mirrored flag lists; doc deletes
       at close.
+- [ ] 142. stipulator: clause-granular binding claims (bldc report
+      2026-09-03; stipulator
+      docs/issues/clause-granular-binding-claims.md) — a binding
+      names the clause it witnesses (ordinal or spec-admitted label),
+      and coverage reports the unclaimed clauses of an otherwise-bound
+      requirement as a distinct "bound, clauses unclaimed" bucket —
+      the consumer's own H-graded false-green channel retired
+      upstream; doc deletes at close. Spec-format + coverage + both
+      surfaces. Measurement surface: none.
+- [ ] 143. stipulator: consent provenance (bldc report 2026-09-03;
+      stipulator docs/issues/content-hash-function-versioning.md) — a
+      hash-function move is its own recorded state ("rehash",
+      bulk-re-pinnable without editorial consent) or the pin records
+      the declaring document's blob hash beside the content hash, so
+      a re-consent over unchanged text is self-evidently that. RIDES
+      docs/issues/pin-req-unchanged-text-wording.md ("text unchanged;
+      nothing to re-consent" over "pins current"). Both docs delete
+      at close. Measurement surface: none.
+- [ ] 144. stipulator: CLI query parity (bldc report 2026-09-03;
+      stipulator docs/issues/cli-verify-view-path-and-explain.md) —
+      CLI verify gains --view/--path and the explain verb lands on
+      the CLI, so "what claims this symbol" is a query, never a grep
+      over the record format. RIDES
+      docs/issues/normative-keyword-lint-timing-and-remedy.md (a lint
+      entry point compiling the corpus at the amendment; the remedy
+      in the message). Both docs delete at close. Measurement
+      surface: none.
+- [ ] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
+      stipulator docs/issues/refines-multiple-targets.md — refines
+      admits a target list, canonical form ordering it, impact and
+      coverage reading every edge — +
+      docs/issues/supersede-removed-source-one-step.md — the
+      removed-source supersede is one step: a dispose mode or compile
+      admitting a supersedes edge into the tombstones-or-pending
+      set). Both docs delete at close. Measurement surface: none.
 - [ ] 136. cross-tool: retroactive automation-and-consolidation audit
       (user directive 2026-08-29; the automation-over-configuration
       standing directive, tugboat fb4a45b, applied to the existing
