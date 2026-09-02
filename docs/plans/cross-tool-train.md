@@ -59,7 +59,35 @@ register.
 
 ## Execution order
 
-User-confirmed 2026-08-26: 103, 107, 83, 108, 82, 94, 109, 110, 105,
+Replanned 2026-09-02 (user ruling: no wasted work; audit the four
+repos, consolidate the behaviour, and only then run the tools against
+the work). The audit is docs/plans/pipeline-audit/ (delete-on-close).
+The order from here: **Band T first** — 150, 151, 152, 153 (the
+self-test partition per repo: the code of every tool testable in
+seconds without running the tool over a tree) — then **Band P** —
+154 (gofresh: the observation pass gains a preparation pass, a
+persistent contribution memo, and a per-package tick; release),
+155 (stipulator), 156 (gomutant), 157 (pew) — each the tool's
+operations restaged as fail-early preparation, then the incremental
+check-freshness / measure / persist loop per unit, the operator told
+throughout, on both surfaces, with every preparation-decidable refusal
+moved forward and the audit's knob dispositions landed in the same
+seam — then the deferred self-host verdicts (141's, re-run once over
+the settled tree under 155's warm, reporting check), then the field
+band as previously ordered: 138, 140, 115, then 142, 143, 144, 145,
+then 136 (rescoped: the consolidation scan and the refusal-site walk
+that Band P leaves), then the rest as recorded below.
+
+Standing rule from the ruling, binding on the loop: a long
+measurement (self-host check, campaign, full fixture suite) runs
+ONCE, over the settled tree, after the adversarial loop converges;
+the loop's own gates ride Band T's fast tier plus ephemeral probes.
+While Band P is open, no chunk's close waits on a tool-on-itself run
+of a tool Band P has not yet restaged — the verdict is deferred to
+that chunk's close and named in the commit record.
+
+Previous order (user-confirmed 2026-08-26, kept for the field band's
+relative sequence): 103, 107, 83, 108, 82, 94, 109, 110, 105,
 126, 93, 106, then the UX pair 111, 112, then 128, 113, 114, 141, 138, 140, 115, then
 — amended 2026-08-27 under the field-response doctrine (bldc campaign
 reports): 132 inserted after 83 (coverage integrity; lands before
@@ -97,6 +125,186 @@ noise-class at that length; the budgets carry the stock numbers);
 runner-class factors are measured, not assumed
 (core count probed 2026-08-27: ~1.04x on the dominant child-process
 workloads, godst-hosted; cold cache lands on the job ceiling).
+
+## Band T — self-test partition (the tools' code testable without the tools)
+
+Audit evidence: docs/plans/pipeline-audit/*.md §6. Every repo's plain
+suite is one package of fixture-driven executions (gofresh `closure`
+544s of 555s; gomutant root 966s of 971s; stipulator
+`internal/backends/golang` 1327s of 1333s; pew `cmd/pew` 83s of 84s),
+and the `-short` partition that would give a seconds-class tier is
+latent (stipulator 96 gates, gomutant 179 gates — nothing passes
+`-short`) or absent (gofresh 0, pew 1). Each chunk below lands the
+partition, the task-runner target, and the CI seat; no production
+code moves.
+
+- [ ] 150. gofresh: self-test partition — `testing.Short()` gates on
+      every temp-module / `closure/fixtures/` / SSA-building test
+      (~500 of ~640), the pure tier (verdict ladder, guard
+      comparison, provenance core, guidance, internal/*) as the
+      default `go test -short ./...` in seconds; every fixture test
+      redirects `SetMemoRoot` to a per-test temp dir (the suite writes
+      the user's real effect-scan cache today — pipeline-audit
+      gofresh.md §6); `t.Parallel()` on the child-process-bound
+      fixture tier; a Taskfile with `test:short`, `test`, `vet`
+      (gofresh is the one repo without one — folds gofresh
+      docs/issues/reusable-ci-workflow.md's Taskfile half); CI runs
+      the full tier at its measured budget. Measurement: none.
+- [ ] 151. gomutant: self-test partition — `task test:short`
+      (`go test -short ./...`, the 179 existing gates: ~436 of 615
+      tests, no subprocess), `task test` unchanged as the merge gate,
+      `task test:selfhost-plan` (`gomutant run --plan --targets
+      testdata/self-host-targets.json` — the only cheap way to keep
+      the self-host path from bit-rotting; made genuinely cheap and
+      complete by 156); the stale `findings.json.campaign` /
+      `.lock` residue removed. Measurement: none.
+- [ ] 152. stipulator: self-test partition — finish the `Short()`
+      gating in `internal/backends/golang` (245 tests, ~64 gates) so
+      `go test -short ./...` is the seconds-class tier; `task
+      test:short`; CI keeps the full tier; the dangling CI-seat
+      pointer (`.github/workflows/ci.yaml:39` cites a
+      docs/issues/ci-seat-for-the-check-verdict that does not exist)
+      resolved — the check verdict's seat is the weekly sweep and the
+      chunk close-out, stated where the pointer was. Measurement:
+      none.
+- [ ] 153. pew: self-test partition — the pure helpers of `cmd/pew`
+      and `internal/*` as the `-short` tier (under 2 s); the ~20
+      unstubbed `runRun`/`runPackage` sites, the `gc`/`stat` fixture
+      modules, and the git fixtures `-short`-gated (extending the
+      existing `execute`/`build` seams where the case needs only
+      process ordering); the analysis canaries unconditional in CI,
+      gated locally. Measurement: none.
+
+## Band P — the operation pipeline contract (no wasted work)
+
+Audit evidence: docs/plans/pipeline-audit/*.md §§2–5, 8. Four
+structures recur in every repo: refusals live where their data is
+convenient, not where it is first available; the progress reporter is
+built for one surface or one verb and the rest inherit nothing;
+freshness is decided after the expensive setup it could have
+replaced; persistence granularity was solved once and not propagated.
+One root sits under all of them: the engine's observation pass has no
+freshness of its own, so every consumer pays a full observation before
+it can serve. Each chunk restages one tool's operations as **prepare →
+(per unit: check freshness → measure only what is not proven → persist
+before the next unit) → report**, the spec stating the contract as
+invariants — prepare refuses everything preparation can decide, before
+any measurement; progress on both surfaces (phase, unit k/N, why this
+unit executes rather than serves, measured pace; interruption names
+what was kept); unit-level persistence (an interruption loses at most
+one unit); cancellation is a context cancel on every surface — and
+lands the audit's knob dispositions in the same seam. Each closes by
+running the restaged tool over its own tree ONCE, warm, as the
+verdict, and records the measured wall against the audit's baseline.
+
+- [ ] 154. gofresh: the observation pass gains a preparation pass,
+      a contribution memo, and a unit tick (pipeline-audit
+      gofresh.md §8's seam: `observeView` and `observationFacts`).
+      Preparation: listing, package classification, subject
+      existence, and recorded-record shape resolved before any typed
+      load (the seven late refusals of §2 move to it; the
+      toolchain-selection verdict is announced at `New`; producer
+      declarations are validated pre-spawn in `CaptureProducerFrame`).
+      Freshness: a persistent per-file contribution memo keyed as the
+      effect-scan memo is, so "did any recorded identity move?" is
+      answered from persisted digests before the load; the served-
+      versus-measured decision per package inside the pass. Progress:
+      a per-package tick through `Hasher.OnProgress` on the load and
+      hash phases, a served event on the memo-hit path, and the
+      kept-on-cancel report (which slices, which scans are on disk).
+      Batches return partial verdict maps beside the first error
+      instead of nil. Knobs: the four classification roots derived
+      from the engine's own `EnvSnapshot`; `DisableMemos` deleted;
+      `WithAnalysisBudget` derived from observed per-package cost;
+      `maxAttributedSubjects` measured. Spec: closure.md and
+      overview.md gain the preparation, progress, and partial-batch
+      invariants. Release; 155–157 bump. Measurement: the pipeline-
+      audit baseline (two observations per view; 3m42s proof) re-
+      measured at close.
+- [ ] 155. stipulator: the prepared policy capture, the CLI reporter,
+      and unit persistence (pipeline-audit stipulator.md §8's seam).
+      One `capturePolicy` at the top of every witness-consuming
+      operation carrying the validated policy (the four static checks
+      move from `NormalizeInvocation` into `validateConfig`), the
+      normalized invocations and obligation universe (built once —
+      today four `NormalizeInvocation` and four `discoverUniverse`
+      sites, ~fifteen `go env` and twelve `go list` spawns before a
+      test runs), the coverage policy (its cell-duplication refusal
+      fires before execution in all five consumers), the resolved
+      scope and the caller's view/bucket/filter vocabulary (validated
+      pre-run on every verb, the `toolCheck` shape), and the record-
+      hygiene half of verification before the run; `gate`/`verify`
+      share one resolver child. Freshness before the typed loads
+      (consumes 154). Reporter: the `progress` sink installed in
+      `cmd/root.go` as it is in the MCP server, per-unit lines
+      naming why a subject executes rather than serves, a measured
+      pace line, `signal.NotifyContext` in `main.go` with the kept
+      report; `--full` installs per invocation. Knobs: policy
+      `timeout` default derived from the store's recorded walls,
+      `witness_concurrency` deleted as a policy field, `no_test`
+      merged into the freshness path. Spec: change.md and mcp.md gain
+      the preparation, both-surface progress, cancellation, and
+      unit-persistence invariants. Close: the deferred chunk-141
+      self-host verdict runs here, once, warm. Measurement: the cold
+      30m43s / warm baselines re-measured.
+- [ ] 156. gomutant: the per-verb prepare stage and the reporter for
+      every verb (pipeline-audit gomutant.md §8's seam: `--plan`
+      made whole). Prepare: the campaign lock at flag parse, `budget`
+      and `runs` and the attestation reason and the retarget pair and
+      the scratch/vouch parse and the exemptions/findings documents
+      all refused before `LoadContextSelection`, the bracket preflight
+      at `Tree.Run`'s entry over every module root, the ephemeral
+      zero-match refusal from the loaded set, `--targets`/`--changed`
+      refused together on `run` as on `discover`; `--plan` reaches
+      every refusal and pays no producer union. FOLDS chunk 146 (the
+      staged snapshot's unpinnable external input refuses at
+      preparation, headlined as the external input with its remedy;
+      the staged dirty judgment realigns with the results spec —
+      gomutant docs/issues/staged-external-input-refuses-late-and-
+      misnamed.md deletes at close). Freshness: one batched view set
+      threaded to `findings --judge`, `explain`, and the closure
+      signpost (the inspection path gets the union `run` already
+      has); the signpost bounded and reported; `Store.Update`'s
+      per-commit whole-document rewrite replaced by a per-record
+      overlay so a campaign's persistence is O(unit). Reporter: the
+      CLI `ephemeral` and `findings --judge` and the tree load get
+      the phases, ticks, and interruption summary `run` has;
+      `run`'s coverage-probe phase ticks and projects (FOLDS gomutant
+      docs/issues/probe-phase-cost-invisible.md; deletes at close).
+      Knobs: `--progress-interval`, the two baseline leashes,
+      `windowBudget`, and the schedule minimums derived from the
+      bank's measured durations; `--json` and `--jsonl` one name; the
+      heartbeat literals and the six envelope caps one policy each.
+      Spec: execution.md and mcp.md gain the invariants. Measurement:
+      `--plan` over `testdata/self-host-targets.json` timed before and
+      after; the ephemeral probe path's silent stretches re-measured.
+- [ ] 157. pew: the package preparation record, the reporter, and
+      per-arm persistence (pipeline-audit pew.md §8's seam). Prepare:
+      one record per package after `go list` carrying the benchmark
+      declarations, the validated store destinations (label, path,
+      name, duplicates, store-covered and overlapping sources), the
+      GOFLAGS/PGO digest and sampled GOVERSION for every module, and
+      the single typed view — the thirteen late refusals of §2 fire
+      there; `ab` builds every side, captures every guard, and
+      refuses a guard mismatch (as spec §12 already says) before its
+      first iteration. Freshness: serve-what-is-proven is the default
+      (`--stale` inverted to an explicit `--all`), the freshness view
+      reused for capture instead of discarded. Persistence: per arm,
+      with the drift and HEAD gates re-derived per arm; `ab`'s
+      `--out` and `gc`'s report written incrementally. Reporter: a
+      pew-owned progress seam (phase, package k/N, arm k/N, pace),
+      engine keep-alives no longer dropped, `signal.NotifyContext`
+      with the kept report. Knobs: `ab --benchmem` deleted (always
+      on, as `run`), `--assume-pure`/`--impure` merged into the source
+      directives, the three `--vouch` flags merged into the repo-level
+      vouch file (rides with 115's rider), `--pin`'s CPU list derived
+      from sysfs with the switch kept; `--count`/`--benchtime`/
+      `--threshold` derivation is spec-level and files against
+      REQ-pew-sample-completeness for the user's call. Spec: spec.md
+      gains the preparation, progress, cancellation, and unit-
+      persistence contract (it carries none today). Measurement:
+      whole-store `pew status` wall before and after; no bench arms
+      move.
 
 ## Band A — verdict integrity (correctness)
 
@@ -166,7 +374,11 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       gap-covered-unknown-id-at-declare); the bldc batch's nine
       surviving docs retargeted onto 141-145 (stipulator 62fc1a7);
       dispositions in the commit records.
-- [ ] 141. stipulator: verdict and serving integrity (field-response,
+- [ ] 141. (converged 2026-09-02 — three review rounds, fourteen
+      probes killed, package suites green; committed with its
+      self-host verdict DEFERRED to chunk 155's close under the
+      replan's standing rule; the checkbox closes there)
+      stipulator: verdict and serving integrity (field-response,
       bldc reports 2026-09-03; stipulator
       docs/issues/check-green-over-witness-failure.md +
       docs/issues/property-suite-witness-serving.md). 141.1 reproduces
@@ -198,39 +410,10 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
-- [ ] 146. gomutant: preparation refuses everything preparation can
-      decide (field-response, report 2026-09-02, under the no-wasted-
-      work doctrine; gomutant
-      docs/issues/staged-external-input-refuses-late-and-misnamed.md)
-      — the run's preparation pass derives every refusal decidable
-      from its inputs and exits before any mutant runs, the staged
-      snapshot's unpinnable external input being the field instance:
-      an identity outside the repository refuses its target at
-      preparation, and the refusal headlines the external input with
-      its remedy (declare the surface as a bracket path, or measure
-      unstaged) — never the unstaged-drift text over a tree that
-      carries none; the staged arm's dirty judgment realigns with the
-      results spec, under which an external identity is not git's to
-      vouch for and does not stamp dirty. The chunk walks every
-      refusal gomutant derives after measurement starts and moves
-      each preparation-decidable one forward, the spec stating the
-      invariant. Doc deletes at close. Measurement surface:
-      provenance/refusal diagnostics only — no pew arms, no DST legs.
-- [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
-      reports 2026-09-03; gomutant docs/issues:
-      ephemeral-deletion-probes-strand-imports — an imports fix runs
-      over the mutant before compiling (a probe declares no import
-      intent), the result saying which happened;
-      ephemeral-blind-spots-stated-and-refused — a target file no
-      measured test compiled is a REFUSAL, never a survivor, and the
-      three blind spots enter the ephemeral guidance with the
-      mutate-the-guard's-input workaround beside them;
-      ephemeral-compiler-crash-retry — a compiler signal death retries
-      once or marks "compiler crashed — re-run to confirm";
-      ephemeral-batch-wrapper-undiscoverable — the {"edits": [...]}
-      wrapper named in guidance and refusal, or the bare array
-      accepted). Four docs delete at close. Measurement surface:
-      probe-path diagnostics only — no pew arms, no DST legs.
+- [ ] 146. FOLDED into chunk 156 (Band P, 2026-09-02): the staged
+      snapshot's external-input refusal is one instance of the
+      prepare-stage invariant 156 lands; the field report's doc rides
+      156's close.
 - [ ] 115. pew: verdict-surface batch (pew docs/issues:
       gitblob-linked-worktree-object-lookup — pew run fails in linked
       worktrees; ab-worktree-placement-escape — operator escape +
@@ -290,21 +473,23 @@ workloads, godst-hosted; cold cache lands on the job ceiling).
       right value is derivable, detectable, or measurable at runtime
       is dispositioned: derive it (fold small, file larger with
       Lands), keep it with the recorded value judgment that earns it,
-      or delete it; walk every refusal site of every tool against the
-      no-wasted-work doctrine — a refusal decidable at preparation
-      that surfaces after measurement is dispositioned like a knob:
-      moved forward, or its measurement dependence recorded; and walk
-      parallel mechanisms within and across
+      or delete it; and walk parallel mechanisms within and across
       the tools as one consolidation scan (candidates feed the
       existing consolidation chunks — 98-101's walk unifications —
-      or file fresh). Dispositions are the deliverable: every knob
-      and every parallel mechanism gets a recorded verdict, "none"
-      only by looking. Runs after the per-tool batches (113-115)
-      close their chartered knob work and before the D-band
-      consolidation chunks so findings fold forward. Measurement: a
-      knob this audit deletes or re-derives on a bench-armed shape
-      names its pew arms in the disposition and re-records in the
-      same change set.
+      or file fresh). RESCOPED 2026-09-02: the knob inventory and the
+      refusal-site walk were done by the pipeline audit
+      (docs/plans/pipeline-audit/*.md §§2, 5) and their dispositions
+      land in Band P (154–157); this chunk keeps the consolidation
+      scan — the parallel mechanisms the audit and the ledgers name
+      (stipulator consolidation-ledger-train-114, gomutant
+      rescore-mechanism-unification and
+      run-scoped-services-through-options, pew's three bench-dir
+      resolvers and its verdict ladder, gofresh's four walk
+      unifications) — and re-walks every knob Band P kept, "none"
+      only by looking. Runs after Band P and before the D-band
+      consolidation chunks. Measurement: a knob this audit deletes or
+      re-derives on a bench-armed shape names its pew arms in the
+      disposition and re-records in the same change set.
 - [ ] 91. gomutant: deferred-check-close adoption — the run-end and
       per-window producer validations run full in-process gofresh
       analysis (~25% of in-process CPU under repeated packages.Load);
