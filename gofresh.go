@@ -412,6 +412,29 @@ const (
 	Unverifiable Status = "unverifiable"
 )
 
+// UnknownSubjectsError is a view's refusal for subjects the selected
+// source does not declare: every such subject of the batch at once,
+// each once, in request order. At construction it is the preparation
+// refusal (REQ-fresh-preparation); from any post-construction
+// re-observation — Validate, an observed capture, a check window's
+// close — it means a subject of a built view vanished since
+// construction. A caller that recorded subjects narrows its batch by
+// exactly this set.
+type UnknownSubjectsError struct {
+	Subjects []Subject
+}
+
+func (e *UnknownSubjectsError) Error() string {
+	if len(e.Subjects) == 1 {
+		return fmt.Sprintf("gofresh: subject %s.%s not found in selected source", e.Subjects[0].Package, e.Subjects[0].Symbol)
+	}
+	names := make([]string, 0, len(e.Subjects))
+	for _, s := range e.Subjects {
+		names = append(names, s.Package+"."+s.Symbol)
+	}
+	return fmt.Sprintf("gofresh: subjects %s not found in selected source", strings.Join(names, ", "))
+}
+
 // Verdict is the freshness answer for one subject's fingerprint. Reason names the
 // first failing guard for Stale, or the unverifiable dependence for Unverifiable.
 type Verdict struct {

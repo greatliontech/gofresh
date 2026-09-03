@@ -375,11 +375,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
 	// Subject existence is decided by the scan; refusing here, before
 	// the maximal fold reads and hashes every contributing file, is
-	// preparation — the fold below cannot change the answer.
+	// preparation — the fold below cannot change the answer. The
+	// refusal names every unknown subject of the batch at once, so a
+	// caller narrows its batch in one step (REQ-fresh-preparation).
+	var unknown []Subject
 	for _, subject := range subjects {
 		if !known[subject] {
-			return observationFacts{}, fmt.Errorf("gofresh: subject %s.%s not found in selected source", subject.Package, subject.Symbol)
+			unknown = append(unknown, subject)
 		}
+	}
+	if len(unknown) > 0 {
+		return observationFacts{}, &UnknownSubjectsError{Subjects: unknown}
 	}
 	if viewTestHooks.maximalBatch != nil {
 		viewTestHooks.maximalBatch()

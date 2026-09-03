@@ -2,6 +2,8 @@ package gofresh
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,11 +28,34 @@ func TestUnknownSubjectRefusesBeforeTheMaximalFold(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "NoSuch"}}, dir)
-	if err == nil || !strings.Contains(err.Error(), "not found in selected source") {
-		t.Fatalf("unknown subject = %v, want the not-found refusal", err)
+	if err == nil || err.Error() != "gofresh: subject example.com/view.NoSuch not found in selected source" {
+		t.Fatalf("unknown subject = %v, want the not-found refusal in its one-subject wording", err)
 	}
 	if folded {
 		t.Fatal("the maximal fold ran before the unknown subject refused")
+	}
+	// The refusal names every unknown subject of the batch at once, each
+	// once in request order, beside the known ones it does not name —
+	// one narrowing step for the caller.
+	_, err = engine.NewView(context.Background(), []Subject{
+		{Package: "example.com/view", Symbol: "NoSuch"},
+		{Package: "example.com/view", Symbol: "F"},
+		{Package: "example.com/view", Symbol: "NoSuchEither"},
+		{Package: "example.com/view", Symbol: "NoSuch"},
+	}, dir)
+	var unknown *UnknownSubjectsError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("batch with two unknown subjects = %v, want the typed refusal", err)
+	}
+	want := []Subject{{Package: "example.com/view", Symbol: "NoSuch"}, {Package: "example.com/view", Symbol: "NoSuchEither"}}
+	if !reflect.DeepEqual(unknown.Subjects, want) {
+		t.Fatalf("unknown subjects = %v, want %v", unknown.Subjects, want)
+	}
+	if !strings.Contains(err.Error(), "NoSuch, ") || !strings.Contains(err.Error(), "NoSuchEither") {
+		t.Fatalf("refusal %q does not name every unknown subject", err)
+	}
+	if folded {
+		t.Fatal("the maximal fold ran before the unknown subjects refused")
 	}
 }
 

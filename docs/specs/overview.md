@@ -280,10 +280,12 @@ inputs it already holds — the package listing, the recorded record's shape, ki
 and membership, the attachment set, the caller's declarations — MUST fire before
 the operation pays any cost the refusal makes moot: before the typed load, the
 closure fold, the observation window, or any process it spawns for work the
-refusal moots. A refusal that
-surfaces after such a cost is wasted work the caller could not avoid, and the
-partial result it interrupts is never a partial verdict (REQ-fresh-context):
-preparation refuses the whole batch before any window opens.
+refusal moots. A refusal that surfaces after such a cost is wasted work the
+caller could not avoid, and the partial result it interrupts is never a partial
+verdict (REQ-fresh-context): preparation refuses the whole batch before any
+window opens, and a refusal decided per subject — a subject the selected source
+does not declare — names every such subject of the batch at once, each once, in
+the batch's request order, so the caller narrows its batch in one step.
 
 **REQ-fresh-progress** (behavior): An operation MUST report, through the caller's
 progress sink, each unit of work at the moment it begins — an observation pass,
