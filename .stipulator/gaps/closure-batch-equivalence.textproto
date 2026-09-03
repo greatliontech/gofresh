@@ -1,7 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-batch-equivalence"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "9e1a4a09163cb76ef01b2a3f144774a4f445bb0dae41477111bb2ce67763616e"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

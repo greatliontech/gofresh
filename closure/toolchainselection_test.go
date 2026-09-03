@@ -272,8 +272,12 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if !auditedToolchainSource() {
 		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
 	}
+	// The ambient environment carries GOENV, as a witness runner's does:
+	// the settings below are replaced, never appended, or the
+	// environment normalizer refuses the doubled key.
+	t.Setenv("GOENV", "warm")
 	dir := t.TempDir()
-	env := append(os.Environ(), "GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
+	env := environmentWith("GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
 	notice, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, env, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +293,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if err != nil || !strings.Contains(notice, `selection "dup"`) {
 		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
 	}
-	clean, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, append(os.Environ(), "GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
+	clean, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
 	if err != nil || clean != "" {
 		t.Fatalf("default selection resolved a notice: %v %q", err, clean)
 	}
@@ -322,4 +326,21 @@ func TestZeroHasherRefusesSelectionAudit(t *testing.T) {
 	if notice := h.SelectionNotice(); notice == "" || !strings.Contains(notice, "unresolved") {
 		t.Fatalf("unresolved verdict has no explaining notice: %q", notice)
 	}
+}
+
+// environmentWith is the ambient environment with the given settings
+// replacing any ambient value of the same key.
+func environmentWith(settings ...string) []string {
+	override := map[string]bool{}
+	for _, setting := range settings {
+		key, _, _ := strings.Cut(setting, "=")
+		override[key] = true
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		if key, _, _ := strings.Cut(entry, "="); !override[key] {
+			env = append(env, entry)
+		}
+	}
+	return append(env, settings...)
 }
