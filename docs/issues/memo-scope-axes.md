@@ -17,10 +17,8 @@ The listing memo adds a fourth site (closure/listingmemo.go), and the
 four memos each carry their own Load/Store wrapper pair over the shared
 cache-file mechanism — one memo type parameterised by directory and
 payload would replace them. Adjacent to the same collapse: the listing
-memo's verification and the closure fold's hashFiles read and digest
-the same bytes in one pass; a shared path→digest cache holding the full
-digest (the fold's) alongside the truncated one would halve the warm
-read cost.
+record's derivation still reads and digests bytes outside the pass's
+once-per-call read.
 
 Two axis mismatches the one-scope-channel design produces today: the
 typed testing-effect scan's scope inherits the observability
@@ -32,6 +30,15 @@ leaves the scan memo serving and every view package paying a private
 typed load for its testing scan. Neither serves a stale output (the
 scan entry persists nothing the testing scan derives); both are cost
 the typed axes would make explicit.
+
+The per-file memos (file scan, compartment parse) are one
+load/serve/record/flush shape written twice over a per-directory
+entry; a generic per-directory memo type would collapse them and align
+with the observability memo's merge discipline. Five file-read paths
+now exist — the Hasher's once-per-call read, the listing record's
+derivation, the cgo include walk, the bare per-file scan, and the
+compartment's own source — three of them digesting the bytes the fold
+digests; one read path per pass is the collapse.
 
 Adjacent, same altitude: the dynamic-state derivation's result type
 serves two roles — the per-pass state (per-view-package cones,

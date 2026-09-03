@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/closure/internal/digest"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/closure/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/buildflags"
@@ -113,6 +112,8 @@ type Hasher struct {
 	variantScope   map[string]testvariant.Identity
 	testVariants   map[string]testvariant.Identity     // test-variant compartments by requested package
 	fileDigests    map[string]string                   // per-file content digests from the closure's own reads, by absolute path
+	contents       map[string]fileBytes                // per-file bytes and digest, read once per batch call (readFile); nil outside one
+	fileMemo       *fileMemos                          // the per-file effect-scan and compartment-parse memos
 	progress       func(phase, pkgPath string)         // start-of-step keep-alive events; nil disables
 	diagnostic     func(phase, pkgPath, detail string) // payload-bearing diagnostics; nil disables
 	// unit reports a per-unit step with its position in the pass; nil
@@ -198,7 +199,7 @@ func (h *Hasher) emitUnit(phase, pkgPath string, index, total int) {
 // Served records that a persistent-store memo hit stood in for a step —
 // class names the memo (an observability proof, an effect scan, a
 // testing scan, dynamic-state facts, a package scan, a dependency
-// listing) — for the operation's one summary
+// listing, a file scan, a compartment parse) — for the operation's one summary
 // per class (ServedSummary); in-process cache hits are not recorded.
 func (h *Hasher) Served(class, pkgPath string) {
 	if h.served == nil {
@@ -339,7 +340,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 		selectionResolved: true, selectionNotice: ToolchainSelectionNotice(buildFlags, goflags, goexperiment),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
-		fileDigests: map[string]string{},
+		fileDigests: map[string]string{}, fileMemo: newFileMemos(),
 	}, nil
 }
 
@@ -475,10 +476,11 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	identity, cached := h.variantScope[pkgPath]
 	if !cached {
 		var err error
-		identity, err = testvariant.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests)
+		identity, err = testvariant.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath})
 		if err != nil {
 			return nil, nil, err
 		}
+		h.flushFileMemos()
 		if h.variantScope != nil {
 			h.variantScope[pkgPath] = identity
 		}
@@ -506,6 +508,11 @@ var analysisTestHooks struct {
 	// fallback load, so tests pin that a shared view load or a memo hit is
 	// actually consumed instead.
 	testingTypeOwnLoad func(pkgPath string)
+	// fileParse observes a per-file effect scan actually parsing, and
+	// variantParse a compartment member's ledger derivation, so tests
+	// pin that the persistent per-file memos served instead.
+	fileParse    func(path string)
+	variantParse func(name string)
 }
 
 // resetCallScope arms the per-batch-call memos: one call observes one
@@ -516,6 +523,10 @@ func (h *Hasher) resetCallScope() {
 	h.contribs = map[string]depContribution{}
 	h.testBinaryKeys = map[string]string{}
 	h.variantScope = map[string]testvariant.Identity{}
+	// The bytes a call reads are that call's tree generation: the cache
+	// is armed here and dropped when the call returns (the batch entries
+	// defer it), so no later entry can fold bytes an earlier call saw.
+	h.contents = map[string]fileBytes{}
 }
 
 // modulePin is the version-pin identity every persistent memo and
@@ -630,7 +641,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	files = listing.UniqueStrings(files)
-	fh, err := hashFiles(p.Dir, files, h.fileDigests)
+	fh, err := h.hashFiles(p.Dir, files)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1108,20 +1119,30 @@ func (h *Hasher) underCache(dir string) bool {
 }
 
 func hashFiles(dir string, files []string, digests map[string]string) (string, error) {
+	return hashFilesWith(dir, files, digests, readBytes)
+}
+
+// hashFiles is the fold over the Hasher's once-per-pass reads: the same
+// bytes the effect scan and the compartment ledger consume.
+func (h *Hasher) hashFiles(dir string, files []string) (string, error) {
+	return hashFilesWith(dir, files, h.fileDigests, h.readFile)
+}
+
+func hashFilesWith(dir string, files []string, digests map[string]string, read func(string) (fileBytes, error)) (string, error) {
 	sort.Strings(files)
 	hasher := sha256.New()
 	for _, f := range files {
 		path := filepath.Join(dir, f)
-		content, err := os.ReadFile(path)
+		fb, err := read(path)
 		if err != nil {
 			return "", fmt.Errorf("closure: read %s: %w", path, err)
 		}
-		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
+		fmt.Fprintf(hasher, "%s\x00%x\n", f, fb.sum)
 		if digests != nil {
 			// The per-file digest rides to the Hasher's memo so naming
 			// consumers reuse the exact bytes this hash was built over
 			// instead of re-reading (FileDigest).
-			digests[path] = digest.Content(content)
+			digests[path] = fb.digest()
 		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil))[:32], nil

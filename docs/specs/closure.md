@@ -96,7 +96,13 @@ exactly. A subject declared in a test file has its own body in the
 compartment, so an edited recorded test moves the compartment — that is the
 partition working, not a leak. A package whose core contribution widens to its
 whole directory (non-toolchain assembly, cgo callback blind spots) may keep test files
-in the core as well: sound, merely undiscriminated. The compartment's
+in the core as well: sound, merely undiscriminated. A compiled member's
+ledger derivation — its declarations and header — MAY be served from a
+persistent memo under the member's name and content digest, scoped by
+a parse-strategy version and the toolchain identity and batched per
+package directory, because it is a pure function of those bytes; the compartment hash itself is recomputed
+from the bytes every pass, and the memo follows the observability
+memo's discipline verbatim. The compartment's
 declaration ledger is a read surface over the same bytes the compartment hash
 folded, derived by syntax-only parsing at the view's observation — never a
 re-read that could straddle a later edit — and served at capture and at check:
@@ -1573,12 +1579,17 @@ no types (the typed testing-effect scan is separately governed).
 Package-level effect facts — assembly, system objects, cgo linkage
 metadata — are functions of the live listing's build configuration, which
 the key does not carry: every pass recomputes them from the listing in hand
-and they are never persisted. A mutable-local package's files are never
+and they are never persisted. A mutable-local package's fold is never
 served from this memo — the classification is the resolved source living
 outside the module cache, and any version the listing reports for a
-replacement does not attest that source — every pass re-reads them. A
-memo hit is byte-equivalent to recomputation — the
-effect set, its order, and the preferred diagnostic alike. The memo is a
+replacement does not attest that source — every pass re-reads every
+file; what MAY serve for such a file is its own per-file scan, under
+the file's content digest joined with this memo's scope, because the
+scan is a pure function of the bytes the digest names: the bytes are
+read and digested every pass, the parse alone is served, and the entries
+batch per package directory. A memo hit is byte-equivalent to
+recomputation — the effect set, its order, and the preferred diagnostic
+alike. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
 sibling directory under the consumer-controlled store, atomic writes,
 silent recomputation on any miss, corruption, or key mismatch, deletable

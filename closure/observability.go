@@ -91,6 +91,7 @@ type packageBatch struct {
 func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
 	// One call observes one tree generation; a later call re-observes.
 	h.resetCallScope()
+	defer func() { h.contents = nil }()
 	results := make(map[Subject]Observability, len(subjects))
 	byPackage := map[string]*packageBatch{}
 	var groups []*packageBatch

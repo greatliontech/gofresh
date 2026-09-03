@@ -524,7 +524,7 @@ func WithBuildInputs(inputs ...string) Option {
 // "served" once per operation per memo class that stood in for a step —
 // Served names the class (an observability proof, an effect scan, a
 // testing scan, dynamic-state facts, a package scan, a dependency
-// listing) and Index counts the distinct
+// listing, a file scan, a compartment parse) and Index counts the distinct
 // packages it served from the persistent store; "cancelled" once per
 // operation that returns its caller's context error, Detail saying what
 // the operation persisted and a rerun serves; "toolchain-unaudited" and

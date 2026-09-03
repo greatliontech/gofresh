@@ -368,28 +368,66 @@ func OwnVariantOf(p listing.Package, pkgPath, baseDir string) bool {
 // whole-content header, because its bytes also feed unchanged code as data
 // and any movement in them must defeat inertness. An empty file set yields
 // EmptyTestVariantClosure and an empty ledger.
-func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool, digests map[string]string) (Identity, error) {
+// Source supplies a file's bytes and their SHA-256 sum — a Hasher's
+// once-per-pass reads, or the file system directly when nil.
+type Source interface {
+	ReadFile(path string) ([]byte, [32]byte, error)
+}
+
+type osSource struct{}
+
+func (osSource) ReadFile(path string) ([]byte, [32]byte, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, [32]byte{}, err
+	}
+	return content, sha256.Sum256(content), nil
+}
+
+// ParseMemo serves a compiled member's derivation — its declarations and
+// header — under the member's name and content digest, and records a
+// fresh one: the derivation is a pure function of the bytes, so a served
+// entry is exactly what parsing would yield.
+type ParseMemo interface {
+	Parsed(name, digest string) ([]TestVariantDeclaration, TestVariantFileHeader, bool)
+	Record(name, digest string, declarations []TestVariantDeclaration, header TestVariantFileHeader)
+}
+
+func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[string]bool, digests map[string]string, source Source, memo ParseMemo) (Identity, error) {
+	if source == nil {
+		source = osSource{}
+	}
 	files = listing.UniqueStrings(append([]string(nil), files...))
 	sort.Strings(files)
 	hasher := sha256.New()
 	var ledger TestVariantLedger
 	for _, f := range files {
 		path := filepath.Join(dir, f)
-		content, err := os.ReadFile(path)
+		content, sum, err := source.ReadFile(path)
 		if err != nil {
 			return Identity{}, fmt.Errorf("closure: read %s: %w", path, err)
 		}
-		fmt.Fprintf(hasher, "%s\x00%x\n", f, sha256.Sum256(content))
+		fmt.Fprintf(hasher, "%s\x00%x\n", f, sum)
+		contentDigest := digest.FromSum(sum)
 		if digests != nil {
 			// Compartment members are observed source identities like any
 			// core member: their per-file digests ride to the Hasher's memo
 			// (FileDigest) so drift naming covers them without a re-read.
-			digests[path] = digest.Content(content)
+			digests[path] = contentDigest
 		}
 		if compiledGo[f] {
-			declarations, header, err := parseTestVariantFile(f, content)
-			if err != nil {
-				return Identity{}, err
+			declarations, header, served := []TestVariantDeclaration(nil), TestVariantFileHeader{}, false
+			if memo != nil {
+				declarations, header, served = memo.Parsed(f, contentDigest)
+			}
+			if !served {
+				declarations, header, err = parseTestVariantFile(f, content)
+				if err != nil {
+					return Identity{}, err
+				}
+				if memo != nil {
+					memo.Record(f, contentDigest, declarations, header)
+				}
 			}
 			ledger.Declarations = append(ledger.Declarations, declarations...)
 			if embeddedData[f] {
@@ -397,7 +435,7 @@ func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[st
 				// their granularity, but the header is the whole content,
 				// marked Embedded — an edit anywhere in the file moves the
 				// bytes some unchanged declaration reads.
-				header = TestVariantFileHeader{File: f, Hash: digest.Content(content), Embedded: true}
+				header = TestVariantFileHeader{File: f, Hash: contentDigest, Embedded: true}
 			}
 			ledger.FileHeaders = append(ledger.FileHeaders, header)
 			continue
@@ -405,7 +443,7 @@ func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[st
 		// Every non-compiled member — embedded data whatever its name, and
 		// non-Go compiled inputs — has no declarations; its whole content is
 		// its header identity, marked Embedded so movement defeats inertness.
-		ledger.FileHeaders = append(ledger.FileHeaders, TestVariantFileHeader{File: f, Hash: digest.Content(content), Embedded: true})
+		ledger.FileHeaders = append(ledger.FileHeaders, TestVariantFileHeader{File: f, Hash: contentDigest, Embedded: true})
 	}
 	sort.Slice(ledger.Declarations, func(i, j int) bool {
 		return lessDeclaration(ledger.Declarations[i], ledger.Declarations[j])
@@ -478,6 +516,9 @@ func mergedNames(a, b []string) []string {
 // one declaration entry per top-level function, method, init, var, const, and
 // type name, plus the file header over the non-declaration remainder. Import
 // declarations belong to the header remainder, not the declaration list.
+// The derivation is persisted per member under closure's
+// variantParseStrategy: any change here that can move a declaration
+// hash, a reference list, or a header bumps that version.
 func parseTestVariantFile(name string, content []byte) ([]TestVariantDeclaration, TestVariantFileHeader, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, name, content, parser.ParseComments|parser.SkipObjectResolution)

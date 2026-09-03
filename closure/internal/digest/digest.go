@@ -8,6 +8,11 @@ import (
 )
 
 func Content(content []byte) string {
-	sum := sha256.Sum256(content)
+	return FromSum(sha256.Sum256(content))
+}
+
+// FromSum is Content over a sum already computed — the one truncation
+// every consumer shares.
+func FromSum(sum [32]byte) string {
 	return hex.EncodeToString(sum[:])[:32]
 }

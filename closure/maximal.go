@@ -38,6 +38,7 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 	}
 	// One call observes one tree generation; a later call re-observes.
 	h.resetCallScope()
+	defer func() { h.contents = nil }()
 	results := make(map[Subject]Closure, len(subjects))
 	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)
@@ -178,13 +179,14 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			if err := h.contextErr(); err != nil {
 				return nil, "", err
 			}
-			scan, err := h.maximalFileEffectsCached(filepath.Join(pkg.Dir, name))
+			scan, err := h.maximalFileEffectsCached(pkg.ImportPath, filepath.Join(pkg.Dir, name))
 			if err != nil {
 				return nil, "", err
 			}
 			record(scan)
 		}
 	}
+	h.flushFileMemos()
 	// The maximal diagnostic owes the shared cause-preference order:
 	// one selection over the whole candidate pool, rank strata with the
 	// lexicographic tie-break; the import fallback
@@ -197,16 +199,48 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 	return effects, selected, nil
 }
 
-// maximalFileEffectsCached memoizes one file's effect scan within a Hasher: a
-// file shared by several packages' closures is read and parsed once.
-func (h *Hasher) maximalFileEffectsCached(path string) (maximalEffectScan, error) {
+// maximalFileEffectsCached memoizes one file's effect scan within a Hasher
+// — a file shared by several packages' closures is read and parsed once
+// — and serves it from the persistent per-file memo under the file's
+// content digest when the store holds it: the bytes are read and
+// digested every pass, the parse only on a miss
+// (REQ-closure-effect-scan-memo).
+func (h *Hasher) maximalFileEffectsCached(pkgPath, path string) (maximalEffectScan, error) {
 	if scan, ok := h.maximalFiles[path]; ok {
 		return scan, nil
 	}
-	scan, err := maximalFileEffects(h.SelectionAudited(), path)
+	dir := filepath.Dir(path)
+	if h.underCache(dir) {
+		// A module-cache file: immutable under its pin, folded by the
+		// package-level effect-scan memo, and read only when that memo
+		// misses — it takes no per-file entry and no place in the
+		// call's content cache.
+		scan, err := maximalFileEffects(h.SelectionAudited(), path)
+		if err != nil {
+			return maximalEffectScan{}, err
+		}
+		h.maximalFiles[path] = scan
+		return scan, nil
+	}
+	fb, err := h.readFile(path)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
+	if scan, ok, stored := h.fileScan(dir, fb.digest()); ok {
+		if stored {
+			h.Served("file scan", pkgPath)
+		}
+		h.maximalFiles[path] = scan
+		return scan, nil
+	}
+	if analysisTestHooks.fileParse != nil {
+		analysisTestHooks.fileParse(path)
+	}
+	scan, err := maximalFileEffectsContent(h.SelectionAudited(), path, fb.content)
+	if err != nil {
+		return maximalEffectScan{}, err
+	}
+	h.recordFileScan(dir, fb.digest(), scan)
 	h.maximalFiles[path] = scan
 	return scan, nil
 }
@@ -384,6 +418,11 @@ func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
+	return maximalFileEffectsContent(audited, filename, content)
+}
+
+// maximalFileEffectsContent is the scan over bytes already read.
+func maximalFileEffectsContent(audited bool, filename string, content []byte) (maximalEffectScan, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
 	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
@@ -1051,7 +1090,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 		if err := h.contextErr(); err != nil {
 			return maximalEffectScan{}, false, err
 		}
-		scan, err := h.maximalFileEffectsCached(filepath.Join(pkg.Dir, name))
+		scan, err := h.maximalFileEffectsCached(pkg.ImportPath, filepath.Join(pkg.Dir, name))
 		if err != nil {
 			return maximalEffectScan{}, false, err
 		}

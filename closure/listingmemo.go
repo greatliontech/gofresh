@@ -151,11 +151,11 @@ func (h *Hasher) loadListing(pkgPath string) ([]listPkg, bool) {
 	}
 	digests := make(map[string]string, len(rec.Files))
 	for path, want := range rec.Files {
-		content, err := os.ReadFile(path)
+		fb, err := h.readFile(path)
 		if err != nil {
 			return nil, false
 		}
-		got := digest.Content(content)
+		got := fb.digest()
 		if got != want {
 			return nil, false
 		}
