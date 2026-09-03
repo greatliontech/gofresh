@@ -1628,6 +1628,42 @@ miss, corruption, key mismatch, or entry-shape mismatch, deletable
 wholesale at any time; changing scan semantics bumps the fact-strategy
 version.
 
+**REQ-closure-listing-memo** (behavior): A package's dependency listing — the
+toolchain's own account of the test binary's graph, from which every
+closure fold, package scan key, and graph metadata of a pass derives —
+MAY be served from a persistent memo, because the listing is a
+deterministic function of inputs the memo can re-verify: the scope — the
+pass's environment snapshot (toolchain, module cache, build
+configuration, flags in the environment), the working directory, and the
+build flags — and, recorded beside the stored listing, every file-system
+input the listing consulted: for every mutable-local package directory
+in the graph its entry names and the bytes of every source-kind regular
+file (build constraints and import lines live there; an excluded file's
+edit can include it; a non-regular or dangling entry contributes its
+name alone, as the toolchain reads no byte of it), the entry names of every directory under its embed
+patterns' roots (membership the listing resolves), the module files
+of every module the module graph reads — go.mod and go.sum of each
+module contributing a package (a vendored node rides the vendor tree),
+of every module the workspace uses, and the go.mod of every local
+replacement target those files name, package or no package of it in
+the listing — the vendor manifest of the main module and, under a
+workspace, of the workspace root, the workspace file and its sum file
+as the environment resolved them or the workspace file's absence along
+the directory's ancestors, and the absence of a module
+file between the working directory and the main module root; the
+toolchain-generated test main is scaffolding outside the model;
+version-pinned modules are immutable under the pin go.sum carries, and
+the standard library rides the toolchain in the snapshot. A hit re-verifies every recorded input
+byte for byte — the served listing IS the listing a spawn would produce
+— and any difference, unreadable input, or unmodellable pass (no
+snapshot, a flag naming a module file outside the model, no main module
+containing the working directory, a module or workspace file the build
+cannot parse — reported as a diagnostic) spawns the toolchain; the record's
+own shape is part of its scope, so an entry of another shape is never
+decoded. Cache, never record: the observability memo's discipline
+verbatim — user-cache sibling, atomic writes, silent recomputation on any
+miss, corruption, or entry-shape mismatch, deletable wholesale.
+
 **REQ-closure-mutable-local** (invariant): A mutable-local dependency reached by the
 subject MUST be hashed by its source content, never pinned by module version — such
 source resolves to a working directory with no version or checksum signal, so pinning

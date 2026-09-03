@@ -31,11 +31,16 @@ type Package struct {
 	SwigCXXFiles []string
 	SysoFiles    []string
 	EmbedFiles   []string
-	CgoLDFLAGS   []string
-	Imports      []string
-	ForTest      string
-	Module       *Module
-	Error        *Error
+	// The embed patterns of the package and its test variants: the
+	// listing memo records the trees they resolve over.
+	EmbedPatterns      []string
+	TestEmbedPatterns  []string
+	XTestEmbedPatterns []string
+	CgoLDFLAGS         []string
+	Imports            []string
+	ForTest            string
+	Module             *Module
+	Error              *Error
 }
 
 // IsGeneratedTestMainFor reports the toolchain-generated test main of

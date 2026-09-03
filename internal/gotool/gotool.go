@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/processenv"
@@ -74,6 +75,32 @@ type EnvSnapshot struct {
 	JSON []byte
 	// values are the parsed settings for single-key reads.
 	values map[string]string
+}
+
+// Identity renders the snapshot's settings as one canonical string —
+// sorted key=value lines — leaving out GOGCCFLAGS, which embeds a
+// per-invocation temporary path and selects no source (the compiler
+// and CGO settings it is probed from are settings of their own); two
+// snapshots of one environment render identically.
+func (s *EnvSnapshot) Identity() string {
+	if s == nil {
+		return ""
+	}
+	keys := make([]string, 0, len(s.values))
+	for k := range s.values {
+		if k != "GOGCCFLAGS" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(s.values[k])
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // Value returns one parsed go-env setting ("" when absent).

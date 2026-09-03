@@ -522,11 +522,14 @@ func WithBuildInputs(inputs ...string) Option {
 // (one event per attribution slice, Index/Total the slice position),
 // "served" once per operation per memo class that stood in for a step —
 // Served names the class (an observability proof, an effect scan, a
-// testing scan, dynamic-state facts) and Index counts the distinct
+// testing scan, dynamic-state facts, a package scan, a dependency
+// listing) and Index counts the distinct
 // packages it served from the persistent store; "cancelled" once per
 // operation that returns its caller's context error, Detail saying what
 // the operation persisted and a rerun serves; "toolchain-unaudited" and
-// "analysis-unavailable" carry their diagnostic payload in Detail. Package
+// "analysis-unavailable" carry their diagnostic payload in Detail, as
+// does "listing-unmodelled" (a module file this build cannot parse
+// leaves a package's listing spawned every pass). Package
 // names the package for the per-package phases; Index and Total give the
 // unit's position when the pass knows it (1-based; zero when unknown).
 // Events are emitted before the step runs, carry no completion signal,

@@ -90,12 +90,15 @@ type Hasher struct {
 	// classification instead of inheriting the default selection's
 	// audit (ToolchainSelectionNotice).
 	selectionNotice string
-	progs           map[string]*program             // by package import path
-	progErrs        map[string]error                // memoized load failures, by package import path
-	lists           map[string][]listPkg            // parsed `go list -deps -test`, by package import path
-	maximalTesting  map[string]maximalEffectScan    // typed testing-runtime effects by requested package
-	maximalEffects  map[string]maximalEffectsResult // package external-effect scans by requested package
-	maximalFiles    map[string]maximalEffectScan    // per-file effect scans by absolute path
+	progs           map[string]*program  // by package import path
+	progErrs        map[string]error     // memoized load failures, by package import path
+	lists           map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	// snapshot is the pass's env snapshot when the caller supplied one —
+	// the listing memo's scope identity; nil leaves that memo inert.
+	snapshot       *gotool.EnvSnapshot
+	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
+	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
+	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -193,7 +196,8 @@ func (h *Hasher) emitUnit(phase, pkgPath string, index, total int) {
 
 // Served records that a persistent-store memo hit stood in for a step —
 // class names the memo (an observability proof, an effect scan, a
-// testing scan, dynamic-state facts) — for the operation's one summary
+// testing scan, dynamic-state facts, a package scan, a dependency
+// listing) — for the operation's one summary
 // per class (ServedSummary); in-process cache hits are not recorded.
 func (h *Hasher) Served(class, pkgPath string) {
 	if h.served == nil {
@@ -262,10 +266,26 @@ func NewAtContextEnvBracket(ctx context.Context, dir string, env []string, snaps
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, nil); err != nil {
+	// The live probe is the pass's own snapshot: GOFLAGS validates from
+	// it, and the listing memo scopes by it, so a bracket's entries never
+	// persist under an environment the bracket's loads did not run in.
+	live, err := gotool.TakeEnvSnapshot(ctx, dir, normalized)
+	if err != nil {
 		return nil, err
 	}
-	return NewAtContextEnvSnapshot(ctx, dir, env, snapshot, buildFlags...)
+	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, live); err != nil {
+		return nil, err
+	}
+	h, err := NewAtContextEnvSnapshot(ctx, dir, env, snapshot, buildFlags...)
+	if err != nil {
+		return nil, err
+	}
+	// The construction snapshot keeps its documented GOMODCACHE contract
+	// (classification agrees with the view); the live snapshot scopes
+	// the memo, and its identity carries GOMODCACHE, so no entry crosses
+	// a moved module cache.
+	h.snapshot = live
+	return h, nil
 }
 
 // NewAtContextEnvSnapshot is NewAtContextEnv resolving GOMODCACHE and
@@ -314,7 +334,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
 	return &Hasher{
-		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...),
+		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
 		selectionResolved: true, selectionNotice: ToolchainSelectionNotice(buildFlags, goflags, goexperiment),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
@@ -323,9 +343,10 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 }
 
 // FileDigest returns the truncated content digest of one absolute source
-// path exactly as this Hasher's own closure reads computed it — the same
-// bytes every compared closure hash was built over — so a consumer naming
-// moved identities never re-reads a file the closure already digested.
+// path exactly as this Hasher's own reads — the closure fold's, or the
+// listing memo's verification of the same tree — computed it, so a
+// consumer naming moved identities never re-reads a file the pass
+// already digested.
 func (h *Hasher) FileDigest(path string) (string, bool) {
 	digest, ok := h.fileDigests[path]
 	return digest, ok
@@ -1116,6 +1137,11 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
 	}
+	if pkgs, ok := h.loadListing(pkgPath); ok {
+		h.Served("listing", pkgPath)
+		h.lists[pkgPath] = pkgs
+		return pkgs, nil
+	}
 	h.emitProgress("list", pkgPath)
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
@@ -1129,5 +1155,6 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 		return nil, err
 	}
 	h.lists[pkgPath] = pkgs
+	h.storeListing(pkgPath, pkgs)
 	return pkgs, nil
 }
