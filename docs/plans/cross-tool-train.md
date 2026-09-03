@@ -256,8 +256,6 @@ verdict, and records the measured wall against the audit's baseline.
       audit baseline (two observations per view; 3m42s proof) re-
       measured at close.
 - [ ] 155. stipulator: the prepared policy capture, the CLI reporter,
-      At the bump: the fast-tier gate pin collapses to gofresh's
-      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       and unit persistence (pipeline-audit stipulator.md §8's seam).
       One `capturePolicy` at the top of every witness-consuming
       operation carrying the validated policy (the four static checks
@@ -289,9 +287,9 @@ verdict, and records the measured wall against the audit's baseline.
       a purpose or deleted. Close: the deferred chunk-141 self-host
       verdict runs here, once, warm. Measurement: the cold 30m43s /
       warm baselines re-measured.
+      At the bump to v0.94.0: the fast-tier gate pin collapses to
+      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
 - [ ] 156. gomutant: the per-verb prepare stage and the reporter for
-      At the bump: the fast-tier gate pin collapses to gofresh's
-      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       every verb (pipeline-audit gomutant.md §8's seam: `--plan`
       made whole). Prepare: the campaign lock at flag parse, `budget`
       and `runs` and the attestation reason and the retarget pair and
@@ -328,9 +326,9 @@ verdict, and records the measured wall against the audit's baseline.
       purpose or deleted. Measurement: `--plan` over
       `testdata/self-host-targets.json` timed before and after; the
       ephemeral probe path's silent stretches re-measured.
+      At the bump to v0.94.0: the fast-tier gate pin collapses to
+      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
 - [ ] 157. pew: the package preparation record, the reporter, and
-      At the bump: the fast-tier gate pin collapses to gofresh's
-      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       per-arm persistence (pipeline-audit pew.md §8's seam). Prepare:
       one record per package after `go list` carrying the benchmark
       declarations, the validated store destinations (label, path,
@@ -361,7 +359,8 @@ verdict, and records the measured wall against the audit's baseline.
       (a genuine fork: file for the user if so). Measurement:
       whole-store `pew status` wall before and after; no bench arms
       move.
-
+      At the bump to v0.94.0: the fast-tier gate pin collapses to
+      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
 ## Band A — verdict integrity (correctness)
 
 
