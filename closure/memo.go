@@ -11,17 +11,17 @@ import "github.com/greatliontech/gofresh/closure/internal/cachefile"
 // (REQ-closure-observability-memo, REQ-closure-testing-scan-memo). An
 // empty scope leaves those memos inert — every pass recomputes. Those
 // memos live under the consumer-controlled store root (the user cache
-// by default; SetMemoRoot/DisableMemos); a missing, unreadable, or
-// corrupt entry recomputes silently - the key IS the freshness, so no
-// entry is ever trusted beyond it.
+// by default; SetMemoRoot); a missing, unreadable, or corrupt entry
+// recomputes silently - the key IS the freshness, so no entry is ever
+// trusted beyond it.
 func (h *Hasher) SetMemoScope(scope string) {
 	h.memoScope = scope
 }
 
 // SetMemoRoot redirects the persistent memo store - one knob covering
-// every memo class: effect scans, observability proofs, and
-// dynamic-state facts. The empty string restores the user cache
-// directory default and re-enables a disabled store. Set at process
+// every memo class: effect scans, observability proofs, dynamic-state
+// facts, package scans, listings, and per-file derivations. The empty
+// string restores the user cache directory default. Set at process
 // start, before any analysis runs. The store is a cache, never a
 // record: no knob position changes a verdict, only what is recomputed
 // (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
@@ -29,14 +29,7 @@ func SetMemoRoot(dir string) {
 	cachefile.SetRoot(dir)
 }
 
-// DisableMemos turns memo persistence off process-wide - loads miss
-// and stores drop, for hermetic environments that forbid user-cache
-// writes. Only recomputation cost changes.
-func DisableMemos() {
-	cachefile.Disable()
-}
-
-// observabilityDirName is the observability memo's sibling user-cache
+// observabilityDirName is the observability memo's sibling store
 // directory under the shared cache-file mechanism.
 const observabilityDirName = "observability"
 
@@ -91,7 +84,7 @@ func (h *Hasher) PackageScanKey(pkgPath string) (string, error) {
 	return h.testBinaryClosureKey(pkgPath)
 }
 
-// scanFactsDirName is the view scan memo's sibling user-cache directory:
+// scanFactsDirName is the view scan memo's sibling store directory:
 // one entry per (scope, package scan key) holding the package's scan
 // outputs (REQ-closure-scan-memo).
 const scanFactsDirName = "scanfacts"

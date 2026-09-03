@@ -99,7 +99,7 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 // (cache-never-record, REQ-closure-dynamic-state-memo). Entries batch per
 // (scope, bucket): one file holds every package fact of one pinned module.
 
-// dynamicStateDirName is the dynamic-state memo's sibling user-cache
+// dynamicStateDirName is the dynamic-state memo's sibling store
 // directory under the shared cache-file mechanism.
 const dynamicStateDirName = "dynamicstate"
 

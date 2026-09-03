@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -3391,9 +3390,9 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	}
 }
 
-// One knob redirects or disables every persistent memo class, and no
-// knob position changes a verdict - the store is a cache, never a
-// record (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
+// One knob redirects every persistent memo class, and no knob position
+// changes a verdict - the store is a cache, never a record
+// (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo).
 func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -3435,25 +3434,11 @@ func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 	if got != base {
 		t.Fatalf("redirected store changed the verdict: %v vs %v", got, base)
 	}
-
-	forbidden := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", forbidden)
-	got = verdictUnder(t, func(t *testing.T) {
-		restore(t)
-		DisableMemos()
-	})
-	if got != base {
-		t.Fatalf("disabled store changed the verdict: %v vs %v", got, base)
-	}
-	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
-		t.Fatalf("disabled store still wrote %d user-cache entries", len(entries))
-	}
 }
 
 // The redirect contains every persistent write - a pinned-dep fact scan
-// lands under the redirected root, never the user cache - and a
-// disabled store persists nothing while serving scan-equivalent
-// results (REQ-closure-dynamic-state-memo).
+// lands under the redirected root, never the user cache
+// (REQ-closure-dynamic-state-memo).
 func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -3477,30 +3462,6 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
 		t.Fatalf("redirect leaked %d entries into the user cache", len(entries))
-	}
-
-	countFiles := func(root string) int {
-		n := 0
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err == nil && !d.IsDir() {
-				n++
-			}
-			return nil
-		})
-		return n
-	}
-	before := countFiles(redirected)
-	DisableMemos()
-	processFactCache = sync.Map{}
-	second := runScan(t, DynamicStateStrategy+"|knob-disabled|cfg", dir, pkg)
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("disabled store is not scan-equivalent:\n first %+v\n second %+v", first, second)
-	}
-	if after := countFiles(redirected); after != before {
-		t.Fatalf("disabled store still wrote: %d files before, %d after", before, after)
-	}
-	if entries, err := os.ReadDir(filepath.Join(forbidden, "gofresh")); err == nil && len(entries) > 0 {
-		t.Fatalf("disabled store wrote %d user-cache entries", len(entries))
 	}
 }
 

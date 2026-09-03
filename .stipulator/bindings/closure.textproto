@@ -597,7 +597,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "37fcda9d043768abf70d3db09aa71a8dd449e46e953e1453446b98f5c4904d9f"
+  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoServesEquivalentProofsWithoutLoading"
   role: BINDING_ROLE_TESTS
@@ -606,7 +606,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "37fcda9d043768abf70d3db09aa71a8dd449e46e953e1453446b98f5c4904d9f"
+  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS
@@ -615,7 +615,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "37fcda9d043768abf70d3db09aa71a8dd449e46e953e1453446b98f5c4904d9f"
+  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoKeepsCompletedSlicesOnDeadline"
   role: BINDING_ROLE_TESTS
@@ -651,7 +651,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "dc968adceb73a956849d4c17808abc7a82120b782d10de55e09dceec35e85b3d"
+  content_hash: "7877af5308c04baa2893891b2dbe5cd76c6bd604a004524ae228083d2bd0d001"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoServesWithoutTypeLoad"
   role: BINDING_ROLE_TESTS
@@ -660,7 +660,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "dc968adceb73a956849d4c17808abc7a82120b782d10de55e09dceec35e85b3d"
+  content_hash: "7877af5308c04baa2893891b2dbe5cd76c6bd604a004524ae228083d2bd0d001"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS

@@ -22,7 +22,7 @@ import (
 // a pass merges its misses in once per package
 // (REQ-closure-effect-scan-memo, REQ-closure-test-variant-compartment).
 
-// fileScanDirName and variantParseDirName are the two memos' user-cache
+// fileScanDirName and variantParseDirName are the two memos' store
 // directories.
 const (
 	fileScanDirName     = "filescan"

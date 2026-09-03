@@ -33,7 +33,7 @@ import (
 // never a record: any mismatch, corruption, or unreadable input
 // recomputes silently.
 
-// listingDirName is the listing memo's user-cache directory.
+// listingDirName is the listing memo's store directory.
 const listingDirName = "listing"
 
 // listingRecordVersion moves whenever the input model changes; the

@@ -1509,10 +1509,10 @@ version pins, per REQ-closure-mutable-local and REQ-closure-pinned-dep). A memo 
 byte-equivalent to recomputation — including recorded unrooted-subject
 dispositions — and a full-group hit skips the program load entirely. The
 memo is a cache, never a record: it lives under the user cache directory by
-default — the consumer may redirect the store root or disable persistence
-process-wide through one knob covering every memo class, and no knob position
-changes a verdict, only what is recomputed — writes atomically, and a missing,
-unreadable, corrupt, or key-mismatched entry recomputes silently; no entry is
+default — the consumer may redirect the store root through one knob covering
+every memo class, and no knob position changes a verdict, only what is
+recomputed — writes atomically, and a missing, unreadable, corrupt, or
+key-mismatched entry recomputes silently; no entry is
 trusted beyond its key — the key IS the freshness. Entries accumulate one per closure version and the cache is
 deletable wholesale at any time. Proofs persist as each attribution slice
 completes: an analysis deadline expiring mid-group forfeits only the
@@ -1610,11 +1610,11 @@ disabled, and a closure-hash derivation failure disables it for that
 package — fail-open to recomputation. A memo hit is byte-equivalent to
 recomputation — the effect set, its order, and the preferred diagnostic
 alike, an effect-free scan included. The memo is a cache, never a record —
-the observability memo's discipline verbatim: a sibling user-cache
-directory, atomic writes, silent recomputation on any miss, corruption, or
-key mismatch, deletable wholesale at any time; changing scan semantics —
-the testing classification table included — bumps the scan-strategy
-version.
+the observability memo's discipline verbatim: a sibling directory of the
+consumer-controlled store, atomic writes, silent recomputation on any miss,
+corruption, or key mismatch, deletable wholesale at any time; changing scan
+semantics — the testing classification table included — bumps the
+scan-strategy version.
 
 **REQ-closure-scan-memo** (behavior): A view package's scan — the
 shared-dynamic-state facts of its typed test-binary program, the
@@ -1634,10 +1634,10 @@ guard). A served package takes no part in the pass's typed load, its
 derivation, or its discharges; the load runs over the missed packages
 alone. A memo hit is output-equivalent to recomputation. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
-sibling user-cache directory, atomic writes, silent recomputation on any
-miss, corruption, key mismatch, or entry-shape mismatch, deletable
-wholesale at any time; changing scan semantics bumps the fact-strategy
-version.
+sibling directory of the consumer-controlled store, atomic writes, silent
+recomputation on any miss, corruption, key mismatch, or entry-shape
+mismatch, deletable wholesale at any time; changing scan semantics bumps
+the fact-strategy version.
 
 **REQ-closure-listing-memo** (behavior): A package's dependency listing — the
 toolchain's own account of the test binary's graph, from which every

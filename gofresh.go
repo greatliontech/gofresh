@@ -65,16 +65,14 @@ type Subject struct {
 }
 
 // SetMemoRoot redirects gofresh's persistent memo store - one knob
-// covering every memo class (effect scans, observability proofs,
-// dynamic-state facts). Empty restores the user-cache default and
-// re-enables a disabled store. The store is a cache, never a record:
-// no knob position changes a verdict, only what is recomputed. Set at
-// process start, before any Engine runs.
+// covering every memo class (observability proofs, effect and testing
+// scans, dynamic-state facts, package scans, listings, per-file scans
+// and compartment derivations). Empty restores the user-cache default.
+// The store is a cache, never a record: no knob position changes a
+// verdict, only what is recomputed,
+// and a hermetic environment that forbids user-cache writes redirects
+// it to scratch. Set at process start, before any Engine runs.
 func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
-
-// DisableMemos turns memo persistence off process-wide, for hermetic
-// environments that forbid user-cache writes.
-func DisableMemos() { closure.DisableMemos() }
 
 // DynamicStateStrategy identifies the shared-dynamic-state fact derivation
 // whose per-package facts the persistent memo serves for version-pinned

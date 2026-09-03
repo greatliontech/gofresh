@@ -115,7 +115,7 @@ func effectScanKey(pin, importPath string, goFiles, cgoFiles []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// effectScanDirName and testingScanDirName are the two sibling user-cache
+// effectScanDirName and testingScanDirName are the two sibling store
 // directories one scan-memo mechanism serves: the syntactic per-file fold
 // (REQ-closure-effect-scan-memo) and the typed testing-effect scan
 // (REQ-closure-testing-scan-memo).
