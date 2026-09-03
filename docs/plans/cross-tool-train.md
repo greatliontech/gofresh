@@ -53,8 +53,14 @@ register.
   interruption loses one unit, never a run. The same rule governs
   this train's own gates: a long measurement runs once, over the
   settled tree, after the loop converges; a measurement started
-  before its inputs settle is wasted work, not diligence. Band P is
-  the application; chunk 136's scan walks what it leaves.
+  before its inputs settle is wasted work, not diligence. A
+  verification whose cost is itself the defect under repair — the
+  stipulator check's serial per-witness spawn, 1h47m over gofresh at
+  chunk 154, chunk 155's target — runs once per chunk over the
+  released tree, its verdict recorded in the closing commit; the
+  change sets inside the chunk gate on the fast tier, the ephemeral
+  probes, and the full tier. Band P is the application; chunk 136's
+  scan walks what it leaves.
 - **Two surfaces, derived defaults** (user ruling 2026-09-02, sharpening
   the MCP UX doctrine): the CLI serves a human at a terminal and the
   MCP surface serves an LLM in a harness — different inputs, different
@@ -225,7 +231,7 @@ lands the audit's knob dispositions in the same seam. Each closes by
 running the restaged tool over its own tree ONCE, warm, as the
 verdict, and records the measured wall against the audit's baseline.
 
-- [ ] 154. gofresh: the observation pass gains a preparation pass,
+- [x] 154. gofresh: the observation pass gains a preparation pass,
       a contribution memo, and a unit tick (pipeline-audit
       gofresh.md §8's seam: `observeView` and `observationFacts`).
       Preparation: listing, package classification, subject
@@ -250,6 +256,8 @@ verdict, and records the measured wall against the audit's baseline.
       audit baseline (two observations per view; 3m42s proof) re-
       measured at close.
 - [ ] 155. stipulator: the prepared policy capture, the CLI reporter,
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       and unit persistence (pipeline-audit stipulator.md §8's seam).
       One `capturePolicy` at the top of every witness-consuming
       operation carrying the validated policy (the four static checks
@@ -282,6 +290,8 @@ verdict, and records the measured wall against the audit's baseline.
       verdict runs here, once, warm. Measurement: the cold 30m43s /
       warm baselines re-measured.
 - [ ] 156. gomutant: the per-verb prepare stage and the reporter for
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       every verb (pipeline-audit gomutant.md §8's seam: `--plan`
       made whole). Prepare: the campaign lock at flag parse, `budget`
       and `runs` and the attestation reason and the retarget pair and
@@ -319,6 +329,8 @@ verdict, and records the measured wall against the audit's baseline.
       `testdata/self-host-targets.json` timed before and after; the
       ephemeral probe path's silent stretches re-measured.
 - [ ] 157. pew: the package preparation record, the reporter, and
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
       per-arm persistence (pipeline-audit pew.md §8's seam). Prepare:
       one record per package after `go list` carrying the benchmark
       declarations, the validated store destinations (label, path,
