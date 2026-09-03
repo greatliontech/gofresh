@@ -37,7 +37,10 @@ import (
 // first-audited into the source-only set, the godst delta verified
 // build-tag-inert for the audited surface) landed with the go1.27
 // listing. The walks' method is whole-dir: each audited package's
-// non-test SOURCE FILES are read in full — platform-split files
+// non-test SOURCE FILES are read in full, and so are the files of the
+// implementation packages an audited package delegates its bodies to
+// (encoding/json's encoding/json/v2 and jsontext under go1.27's
+// baseline jsonv2) — platform-split files
 // included, exactly as the dst.12–dst.14 records below name their
 // plan9/illumos/windows deltas — so a GOOS/GOARCH selection of an
 // audited package selects among walked files and needs no key axis;
@@ -47,6 +50,36 @@ var auditedToolchainReleases = map[string]bool{
 	// Stock go1.27.0 (the CI matrix's toolchain), audited by the
 	// go1.26.0→go1.27.0 delta walk.
 	"go1.27.0": true,
+	// Stock go1.27.1 (the CI matrix's toolchain since 2026-09-03),
+	// audited by the go1.27.0→go1.27.1 delta walk over the two stock
+	// source trees, both from the dl tool: the point release's non-test delta is seventeen entries —
+	// fourteen Go files and cmd's module metadata — of which three lie
+	// on the audited surface. net/http/transfer.go: a body read treats
+	// reaching EOF as success rather than an error; the class-B
+	// admission classifies net/http's operations as external effects
+	// whatever their bodies return, so the bar is untouched.
+	// encoding/json/v2_stream.go: selected — jsonv2 is baseline-on in
+	// go1.27, so encoding/json (audited pure) compiles its v2-backed
+	// files and delegates into encoding/json/v2 and jsontext, which the
+	// walk therefore covers as the package's implementation — the
+	// delta returns an io.ErrUnexpectedEOF from the reader as-is instead
+	// of re-shaping it: error plumbing over operands, no ambient
+	// acquisition. encoding/json/v2/arshal_default.go: the stringified
+	// "null" check moves ahead of the unquote in the legacy-semantics
+	// decode path: value computation over operands, no new channel.
+	// encoding/json/v2/doc.go's delta is prose. Every other changed
+	// file is outside the audited surface (cmd/compile, one vendored
+	// analysis pass, database/sql, debug/elf, internal/buildcfg, simd);
+	// every audited package's remaining non-test source is
+	// byte-identical between the releases; the race selection walk
+	// re-verified over the go1.27.1 tree — no audited package carries a
+	// non-test file constrained on a tag the -race selection sets.
+	"go1.27.1": true,
+	// The nodwarf5-experiment build of the same source: verified over
+	// source alone — no standard-library file outside
+	// internal/goexperiment gates on the experiment in the 1.27.1 tree,
+	// exactly the ground the 1.27.0 flavour's entry rests on.
+	"go1.27.1 X:nodwarf5": true,
 	// The nodwarf5-experiment build of the same source (the system
 	// toolchain): DWARF-only experiment, no build-tagged source
 	// selection in the audited surface.
@@ -129,6 +162,8 @@ var auditedToolchainReleases = map[string]bool{
 // (docs/issues/walk-dst-selection-for-audit-key.md).
 var auditedToolchainSelections = map[string]map[string]bool{
 	"go1.27.0":            {"": true, "race": true},
+	"go1.27.1":            {"": true, "race": true},
+	"go1.27.1 X:nodwarf5": {"": true, "race": true},
 	"go1.27.0 X:nodwarf5": {"": true, "race": true},
 	"go1.27.0-dst.10":     {"": true, "race": true},
 	"go1.27.0-dst.11":     {"": true, "race": true},
