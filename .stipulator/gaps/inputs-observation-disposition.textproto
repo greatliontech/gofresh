@@ -3,4 +3,5 @@
 
 requirement_id: "REQ-inputs-observation-disposition"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "18429e9a83a022fb88f094dcc3df31185d6419af229b230499e2e4a00018e482"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

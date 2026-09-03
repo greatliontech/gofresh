@@ -88,17 +88,10 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket}
 }
 
-// ClassificationRoots are the guard-covered and ephemeral roots a
-// producer's environment pins: toolchain and module-cache reads
-// classify guard-covered, the build cache rides toolchain-mediated
-// observational equivalence, and the temp root is ephemeral (its own
-// identity and absent deeper reads admit; present deeper reads stay
-// observed). Empty fields declare nothing.
-type ClassificationRoots struct {
-	Toolchain     string
-	ModuleCache   string
-	BuildCache    string
-	EphemeralTemp string
+// producerTestHooks lets tests land a cancellation between the facade's
+// entry check and the roots resolution.
+var producerTestHooks struct {
+	beforeRoots func()
 }
 
 // ScratchNamespace declares one in-module run-scratch namespace for the
@@ -120,7 +113,14 @@ type ProducerIngest struct {
 	// IncompleteReason is the caller's process-health verdict: empty
 	// exactly when the process provably completed and flushed its log.
 	IncompleteReason string
-	Roots            ClassificationRoots
+	// ScratchRoot declares a per-run scratch root the producer minted
+	// for the process and keeps out of the environment it ingests (an
+	// environment read of it would record per-run noise); it stands in
+	// for the temp root the environment's TMPDIR would otherwise
+	// resolve. Every other classification root — the toolchain, the
+	// module cache, the build cache, and the temp root itself when this
+	// is empty — is resolved from the environment, never declared.
+	ScratchRoot string
 	// ExcludedPaths extends the facade-owned ingest exclusions - the
 	// module-root listing "." (the bracket never covers the root's own
 	// listing, so its identity moves under unrelated tooling) and the
@@ -137,8 +137,9 @@ type ProducerIngest struct {
 // capture, a headerless capture, a frame with no bracket, an
 // environment whose PWD does not name the package directory (all three
 // producers spawn in the package directory; a parent-inherited PWD
-// would silently misclassify every cwd-anchored read), and an
-// ingestion failure. A provably flushed log ingests as the completed
+// would silently misclassify every cwd-anchored read), an environment
+// under which the toolchain cannot answer for the classification
+// roots, and an ingestion failure. A provably flushed log ingests as the completed
 // observation under the assembled option set. The returned reason is
 // the process's effective incompleteness, empty exactly when the
 // observation completed (REQ-inputs-producer-facade).
@@ -189,22 +190,38 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 			return incomplete(fmt.Sprintf("process environment PWD %q does not name the package directory %s the frame was captured for", pwd, f.PkgDir))
 		}
 	}
+	if producerTestHooks.beforeRoots != nil {
+		producerTestHooks.beforeRoots()
+	}
+	roots, err := resolveRoots(ctx, f.Root, f.PkgDir, normalized)
+	if err != nil {
+		if ctx.Err() != nil {
+			// The caller's cancellation, not an environment fault: no
+			// durable record names the environment for it.
+			return Observation{}, "", ctx.Err()
+		}
+		return incomplete(fmt.Sprintf("classification roots unresolved under the process environment: %v", err))
+	}
 	opts := []TestLogOption{
 		WithCompletedProcess(in.Identity),
 		WithBracket(*f.bracket),
 		WithExcludedPaths(append([]string{".", ".git"}, in.ExcludedPaths...)...),
 	}
-	if in.Roots.Toolchain != "" {
-		opts = append(opts, WithToolchainRoot(in.Roots.Toolchain))
+	if roots.toolchain != "" {
+		opts = append(opts, withToolchainRoot(roots.toolchain))
 	}
-	if in.Roots.ModuleCache != "" {
-		opts = append(opts, WithModuleCacheRoot(in.Roots.ModuleCache))
+	if roots.moduleCache != "" {
+		opts = append(opts, withModuleCacheRoot(roots.moduleCache))
 	}
-	if in.Roots.BuildCache != "" {
-		opts = append(opts, WithBuildCacheRoot(in.Roots.BuildCache))
+	if roots.buildCache != "" {
+		opts = append(opts, withBuildCacheRoot(roots.buildCache))
 	}
-	if in.Roots.EphemeralTemp != "" {
-		opts = append(opts, WithEphemeralTempRoot(in.Roots.EphemeralTemp))
+	temp := in.ScratchRoot
+	if temp == "" {
+		temp = roots.temp
+	}
+	if temp = usableTempRoot(temp, f.Root); temp != "" {
+		opts = append(opts, withEphemeralTempRoot(temp))
 	}
 	for _, namespace := range in.ScratchNamespaces {
 		opts = append(opts, WithScratchNamespace(namespace.Dir, namespace.Pattern))

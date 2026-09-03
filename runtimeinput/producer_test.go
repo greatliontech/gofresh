@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 func producerModule(t *testing.T) (string, string) {
@@ -182,17 +184,18 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 	})
 }
 
-// The declaration vocabulary assembles: classification roots and
+// The declaration vocabulary assembles: a minted scratch root and
 // scratch namespaces reach the ingest options - pinned through the
-// ephemeral-root admission dropping the root's identity
+// ephemeral-root admission dropping the root's identity, against an
+// environment whose own temp root lies elsewhere
 // (REQ-inputs-producer-facade).
 func TestProducerFacadeAssemblesDeclarations(t *testing.T) {
 	root, pkgDir := producerModule(t)
 	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
 	scratch := t.TempDir()
 	logPath := writeTestlog(t, "open "+filepath.Join(scratch, "sub", "x")+"\n")
-	env := []string{"PWD=" + pkgDir}
-	with, reason, err := frame.Observe(context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env, Roots: ClassificationRoots{EphemeralTemp: scratch}})
+	env := producerEnv(pkgDir, "TMPDIR="+t.TempDir())
+	with, reason, err := frame.Observe(context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env, ScratchRoot: scratch})
 	if err != nil || reason != "" {
 		t.Fatalf("observe = reason %q, err %v", reason, err)
 	}
@@ -245,5 +248,169 @@ func TestProducerFrameResolvesSymlinkedRoot(t *testing.T) {
 	})
 	if err != nil || reason != "" {
 		t.Fatalf("link-path PWD refused: reason %q, err %v", reason, err)
+	}
+}
+
+// producerEnv is a complete producer environment for pkgDir: the
+// toolchain-resolving settings of the test process, PWD pinned to the
+// package directory, and the given overrides.
+func producerEnv(pkgDir string, overrides ...string) []string {
+	values := map[string]string{"PWD": pkgDir, "GOENV": "off", "GOFLAGS": ""}
+	for _, entry := range os.Environ() {
+		key, value, _ := strings.Cut(entry, "=")
+		switch key {
+		case "PATH", "HOME", "GOROOT", "GOMODCACHE", "GOCACHE", "GOPATH", "GOTOOLCHAIN", "XDG_CACHE_HOME":
+			values[key] = value
+		}
+	}
+	for _, entry := range overrides {
+		key, value, _ := strings.Cut(entry, "=")
+		values[key] = value
+	}
+	env := make([]string, 0, len(values))
+	for key, value := range values {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+// manifestOf observes logText under env through frame and returns the
+// completed manifest, failing the test on any incomplete shape.
+func manifestOf(t *testing.T, frame ProducerFrame, env []string, logText string) string {
+	t.Helper()
+	observation, reason, err := frame.Observe(context.Background(), writeTestlog(t, logText), ProducerIngest{Identity: "worker", Env: env})
+	if err != nil || reason != "" {
+		t.Fatalf("observe = reason %q, err %v", reason, err)
+	}
+	state, err := CompletedState(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state.Manifest
+}
+
+// The guard-covered roots are resolved from the process environment: a
+// read inside the toolchain the environment names records nothing, while
+// the same read of an undeclared tree is observed (REQ-inputs-guard-covered).
+func TestProducerFacadeResolvesGuardRootsFromTheEnvironment(t *testing.T) {
+	root, pkgDir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
+	env := producerEnv(pkgDir)
+	goroot, err := gotool.RunInContextEnv(context.Background(), pkgDir, env, "env", "GOROOT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := filepath.Join(strings.TrimSpace(string(goroot)), "VERSION")
+	if _, err := os.Stat(pinned); err != nil {
+		t.Skipf("toolchain carries no VERSION file: %v", err)
+	}
+	empty := manifestOf(t, frame, env, "")
+	if got := manifestOf(t, frame, env, "open "+pinned+"\n"); got != empty {
+		t.Fatal("a read under the environment's GOROOT was observed; the root was not resolved from the environment")
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := manifestOf(t, frame, env, "open "+outside+"\n"); got == empty {
+		t.Fatal("a read outside every root recorded nothing")
+	}
+	// The module cache and the build cache resolve the same way: a read
+	// of extracted module content or a cache object under the roots the
+	// environment names records nothing.
+	modCache, buildCache := t.TempDir(), t.TempDir()
+	modFile := filepath.Join(modCache, "example.com", "dep@v1.0.0", "dep.go")
+	cacheObject := filepath.Join(buildCache, "ab", "abcd-d")
+	for _, path := range []string{modFile, cacheObject} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cacheEnv := producerEnv(pkgDir, "GOMODCACHE="+modCache, "GOCACHE="+buildCache)
+	cacheEmpty := manifestOf(t, frame, cacheEnv, "")
+	if manifestOf(t, frame, cacheEnv, "open "+modFile+"\n") != cacheEmpty {
+		t.Fatal("a read under the environment's GOMODCACHE was observed")
+	}
+	if manifestOf(t, frame, cacheEnv, "open "+cacheObject+"\n") != cacheEmpty {
+		t.Fatal("a read under the environment's GOCACHE was observed")
+	}
+	if manifestOf(t, frame, env, "open "+modFile+"\n") == empty {
+		t.Fatal("a read under another environment's module cache recorded nothing")
+	}
+	// A cache the environment places at the tree root (or containing
+	// it) declares no root: the tree's own content stays observed.
+	data := filepath.Join(pkgDir, "data.txt")
+	if err := os.WriteFile(data, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, inTree := range []string{root, filepath.Dir(root)} {
+		treeEnv := producerEnv(pkgDir, "GOMODCACHE="+inTree)
+		if manifestOf(t, frame, treeEnv, "open "+data+"\n") == manifestOf(t, frame, treeEnv, "") {
+			t.Fatalf("GOMODCACHE=%s admitted a read of the tree's own content", inTree)
+		}
+	}
+}
+
+// A cancelled context is the caller's cancellation, never an
+// environment fault recorded as an incomplete observation — at the
+// entry, and again when the cancellation lands inside the roots
+// resolution, where the toolchain's failure would otherwise be blamed
+// on the environment.
+func TestProducerFacadeReportsCancellationAsTheCallersError(t *testing.T) {
+	root, pkgDir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, reason, err := frame.Observe(ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir)})
+	if err == nil || reason != "" {
+		t.Fatalf("observe = reason %q, err %v; want the context error", reason, err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	producerTestHooks.beforeRoots = cancel
+	defer func() { producerTestHooks.beforeRoots = nil }()
+	// An environment the memo has never seen, so the resolution spawns
+	// under the cancelled context.
+	_, reason, err = frame.Observe(ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir, "GOFLAGS=-tags=cancelled")})
+	if err == nil || reason != "" {
+		t.Fatalf("mid-observation cancellation: reason %q, err %v; want the context error", reason, err)
+	}
+}
+
+// The temp root is the environment's TMPDIR: an absent deeper read under
+// it records nothing, an in-tree TMPDIR declares no root, and an
+// environment under which the toolchain cannot answer fails closed with
+// a named reason (REQ-inputs-ephemeral-root, REQ-inputs-producer-facade).
+func TestProducerFacadeResolvesTheTempRootFromTheEnvironment(t *testing.T) {
+	root, pkgDir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
+	scratch := t.TempDir()
+	read := "open " + filepath.Join(scratch, "sub", "x") + "\n"
+	env := producerEnv(pkgDir, "TMPDIR="+scratch)
+	if manifestOf(t, frame, env, read) != manifestOf(t, frame, env, "") {
+		t.Fatal("an absent read under the environment's TMPDIR was observed")
+	}
+	elsewhere := producerEnv(pkgDir, "TMPDIR="+t.TempDir())
+	if manifestOf(t, frame, elsewhere, read) == manifestOf(t, frame, elsewhere, "") {
+		t.Fatal("a read under another environment's scratch recorded nothing")
+	}
+	inTree := filepath.Join(root, "scratch")
+	if err := os.MkdirAll(inTree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inTreeEnv := producerEnv(pkgDir, "TMPDIR="+inTree)
+	inTreeRead := "open " + filepath.Join(inTree, "sub", "x") + "\n"
+	if manifestOf(t, frame, inTreeEnv, inTreeRead) == manifestOf(t, frame, inTreeEnv, "") {
+		t.Fatal("an in-tree TMPDIR declared an ephemeral root")
+	}
+	broken := producerEnv(pkgDir, "GOTOOLCHAIN=go9.99.99+auto")
+	if _, err := gotool.RunInContextEnv(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
+		t.Skip("the toolchain answers under an invalid GOTOOLCHAIN; no failing environment to pin")
+	}
+	_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: broken})
+	if err != nil || !strings.Contains(reason, "classification roots unresolved") {
+		t.Fatalf("reason = %q, err %v", reason, err)
 	}
 }

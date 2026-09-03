@@ -187,7 +187,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.Validate"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "afe69646f85d6d75f0634aeaf65794e6302902f279160de70dc9f71b41d534ea"
+  shape_hash: "6c8f95ec88d61705d16f185270b8d378c47980ee21cccb581a007314e38b8869"
 }
 
 bindings {

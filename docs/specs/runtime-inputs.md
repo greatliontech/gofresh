@@ -102,7 +102,9 @@ undisclosed.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
-while merge, dirty inspection, or a current check observes inputs. Merge revalidates
+while merge, dirty inspection, or a current check observes inputs — the
+classification roots' resolution inputs and their process-lifetime memo included, as
+REQ-inputs-guard-covered states. Merge revalidates
 every completed child state against its one merge-time view before unioning their
 identities, rejecting children finalized under values that no longer agree; Gofresh
 also re-observes around a check to detect ordinary drift. It cannot prove the absence
@@ -454,12 +456,19 @@ path they ride with.
 Environment identities are never excludable through path exclusions.
 
 **REQ-inputs-guard-covered** (behavior): Observation construction from a test-harness
-log MUST accept three classes of caller-declared guard-covered root — the producing
+log MUST classify under three classes of guard-covered root — the producing
 toolchain's GOROOT; the producing environment's GOMODCACHE covering its
 version-addressed extracted module trees while its `cache/` download subtree (version
 lists, lock files: mutable metadata no guard pins) stays observed; and the producing
-environment's GOCACHE, its discovered `fuzz` corpus excepted — each a clean
-absolute path from the same environment the producing run used. The build
+environment's GOCACHE, its discovered `fuzz` corpus excepted — each resolved by the
+producer facade from the process environment the ingest carries, as the toolchain
+reports it for that environment in the package directory the process ran in (the
+same environment the producing run used, by construction; a setting that is unset,
+disabled, or not a clean absolute path declares no root of its class; a root that
+lies inside, equals, or contains the tree — in its given or resolved form — declares
+none, since it would admit the tree's own content as guard-covered; and an
+environment under which the toolchain cannot answer fails the observation closed with
+a named reason). The build
 cache's admission is toolchain-mediated observational equivalence rather than
 per-object immutability: everything else under it, the mutable action index and
 its bookkeeping included, is machinery whose consumption through the go
@@ -486,11 +495,17 @@ trees by immutable version pinning, the closure model's own collapse for stdlib 
 cached dependencies — so re-observing it adds no protection and forfeits reuse; a
 subject depending on a covered tree's *metadata* beyond what the covering guard pins
 is outside the collapse and outside the admitted observation set alike. The caller's
-soundness inputs are exactly two, and their blast radius is stated: a declared root
-that does not correspond to the producing environment's directory silently vacates
-observation for everything beneath it, and the declared roots' link topology rides the
-same hold-still span REQ-inputs-observation-coherence already places on the caller —
-guards pin covered content, never the shape of the path that reached it.
+soundness inputs are exactly two, and their blast radius is stated: the environment
+it ingests must be the one the run resolved its roots under — a producer that
+withholds a setting the resolution reads (a minted scratch TMPDIR kept out of the
+recorded environment) declares the resulting root instead, and any other divergence
+silently vacates observation for everything beneath a root the run never used — and
+the resolution's own inputs (the toolchain the environment's PATH names, its
+configuration file, the module and workspace files that select a toolchain) together
+with the roots' link topology ride the same hold-still span
+REQ-inputs-observation-coherence already places on the caller, the process-lifetime
+memo of a resolution included — guards pin covered content, never the shape of the
+path that reached it.
 
 **REQ-inputs-static-inputs** (behavior): Observation construction from a
 test-harness log MUST accept caller-declared static-input roots — each a
@@ -529,8 +544,15 @@ metadata beyond what the caller's record pins is outside the admitted
 observation set, exactly as covered-tree metadata dependence already is.
 
 **REQ-inputs-ephemeral-root** (behavior): Observation construction from a
-test-harness log MUST accept caller-declared ephemeral temp roots — the
-producing environment's temp directories, each a clean absolute path — whose
+test-harness log MUST classify under the producing environment's ephemeral temp
+root — what the run's own temp-directory resolution named: TMPDIR when set, the
+platform default otherwise, resolved by the producer facade from the process
+environment the ingest carries, or the per-run scratch root a producer minted for
+the process and keeps out of the environment it ingests (an environment read of it
+would record per-run noise), which it declares instead; a root lying inside the
+tree, in its given or resolved form, declares nothing (a module-interior ephemeral
+root would admit reads the bracket exists to observe, and its absence only costs
+re-observation) — whose
 OWN identity, in its declared or resolved form, records neither a path
 identity nor a per-path disposition: temp-tree creation machinery stats the
 root to mint fresh per-run subtrees, no state a subject observes flows from
@@ -635,18 +657,22 @@ unrelated tooling) beside the caller's tool-bookkeeping exclusions,
 requires the process environment's PWD to name the frame's package
 directory (producers spawn in the package directory; a
 parent-inherited PWD silently misclassifies every cwd-anchored read),
-assembles the completed-process, bracket, exclusion,
-classification-root, and scratch-namespace options from the caller's
-declarations, and ingests the process environment verbatim (a rebuilt
-environment loses fidelity the classification depends on). Every
-non-completing shape fails closed to an incomplete observation
-carrying its reason in one canonical order - the caller's
+resolves the classification roots from the process environment (one
+toolchain query per package directory and environment, memoized for
+the process) and the caller's scratch-root declaration, assembles the
+completed-process, bracket, exclusion, classification-root, and
+scratch-namespace options, and ingests the process environment
+verbatim (a rebuilt environment loses fidelity the classification
+depends on). Every non-completing shape fails closed to an incomplete
+observation carrying its reason in one canonical order - the caller's
 process-health verdict, an unattached, unreadable or missing capture,
 a headerless capture, a bracketless frame, a PWD that does not name
-the package directory, an ingestion failure - never a lost
-observation. The caller owns identity, environment, health, and the
-declaration vocabulary; the facade owns everything else, so the next
-producer is correct by construction.
+the package directory, an environment under which the toolchain
+cannot answer, an ingestion failure - never a lost observation. The
+caller owns identity, environment, health, and the declaration
+vocabulary — exclusions, scratch namespaces, a minted scratch root;
+the facade owns everything else, so the next producer is correct by
+construction.
 
 **REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
 the unix contentless sink device; on platforms whose sink is not an absolute

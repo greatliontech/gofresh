@@ -46,7 +46,7 @@ func TestGuardCoveredRootsSkipPinnedReads(t *testing.T) {
 	}
 	log := "open " + pinned + "\nstat " + pinned + "\n"
 
-	obs := completedFromLog(t, dir, log, WithToolchainRoot(root))
+	obs := completedFromLog(t, dir, log, withToolchainRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestGuardCoveredOverlappingRootsConsultBeyondFirstMatch(t *testing.T) {
 
 	// Inner root first: it admits the path, its resolution escapes it,
 	// and the outer root then admits the whole chain.
-	obs := completedFromLog(t, dir, log, WithToolchainRoot(inner), WithToolchainRoot(outer))
+	obs := completedFromLog(t, dir, log, withToolchainRoot(inner), withToolchainRoot(outer))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestGuardCoveredOverlappingRootsConsultBeyondFirstMatch(t *testing.T) {
 	}
 
 	// The inner declaration alone stays observed: the escape is real.
-	only := completedFromLog(t, dir, log, WithToolchainRoot(inner))
+	only := completedFromLog(t, dir, log, withToolchainRoot(inner))
 	onlyState, err := CompletedState(only)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestGuardCoveredOverlappingRootsConsultBeyondFirstMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	hopLog := "open " + hop + "\n"
-	hopObs := completedFromLog(t, dir, hopLog, WithToolchainRoot(inner), WithToolchainRoot(outer))
+	hopObs := completedFromLog(t, dir, hopLog, withToolchainRoot(inner), withToolchainRoot(outer))
 	hopState, err := CompletedState(hopObs)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestGuardCoveredOverlappingRootsConsultBeyondFirstMatch(t *testing.T) {
 	if hopState.Unverifiable {
 		t.Fatalf("out-and-back chain not recovered by the outer root: %s", hopState.Reason)
 	}
-	hopOnly := completedFromLog(t, dir, hopLog, WithToolchainRoot(inner))
+	hopOnly := completedFromLog(t, dir, hopLog, withToolchainRoot(inner))
 	hopOnlyState, err := CompletedState(hopOnly)
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		if err := os.Symlink(inside, link); err != nil {
 			t.Fatal(err)
 		}
-		obs := completedFromLog(t, dir, "open "+link+"\n", WithToolchainRoot(root))
+		obs := completedFromLog(t, dir, "open "+link+"\n", withToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
 			t.Fatal(err)
@@ -189,7 +189,7 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		}
 	})
 	t.Run("escape out of root is observed", func(t *testing.T) {
-		obs := completedFromLog(t, t.TempDir(), "open "+escape+"\n", WithToolchainRoot(root))
+		obs := completedFromLog(t, t.TempDir(), "open "+escape+"\n", withToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
 			t.Fatal(err)
@@ -207,7 +207,7 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		traversal := root + "/deplink/../dep/d.go"
-		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", WithToolchainRoot(root))
+		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", withToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
 			t.Fatal(err)
@@ -222,7 +222,7 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		// the read is provably inside the root: covered by the guard,
 		// never a recorded observation.
 		traversal := root + "/dep/../dep/d.go"
-		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", WithToolchainRoot(root))
+		obs := completedFromLog(t, t.TempDir(), "open "+traversal+"\n", withToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
 			t.Fatal(err)
@@ -232,7 +232,7 @@ func TestGuardCoveredResolutionIsFailClosed(t *testing.T) {
 		}
 	})
 	t.Run("missing path under root is observed", func(t *testing.T) {
-		obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "gone.go")+"\n", WithToolchainRoot(root))
+		obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "gone.go")+"\n", withToolchainRoot(root))
 		st, err := CompletedState(obs)
 		if err != nil {
 			t.Fatal(err)
@@ -260,7 +260,7 @@ func TestGuardCoveredSymlinkedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := "open " + filepath.Join(link, "a.go") + "\nopen " + pinned + "\n"
-	obs := completedFromLog(t, t.TempDir(), log, WithToolchainRoot(link))
+	obs := completedFromLog(t, t.TempDir(), log, withToolchainRoot(link))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestGuardCoveredSymlinkedRoot(t *testing.T) {
 // or unclean roots are refused at construction.
 func TestGuardCoveredRootValidation(t *testing.T) {
 	for _, bad := range []string{"", "relative/root", "/unclean//root", "/trail/"} {
-		_, err := FromTestLog([]byte(""), t.TempDir(), ".", WithCompletedProcess("package-test-binary:x"), WithToolchainRoot(bad))
+		_, err := FromTestLog([]byte(""), t.TempDir(), ".", WithCompletedProcess("package-test-binary:x"), withToolchainRoot(bad))
 		if err == nil || !strings.Contains(err.Error(), "guard-covered root") {
 			t.Fatalf("root %q accepted: %v", bad, err)
 		}
@@ -309,7 +309,7 @@ func TestModuleCacheRootExcludesDownloadCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	obs := completedFromLog(t, t.TempDir(), "open "+extracted+"\nopen "+metadata+"\n", WithModuleCacheRoot(root))
+	obs := completedFromLog(t, t.TempDir(), "open "+extracted+"\nopen "+metadata+"\n", withModuleCacheRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestGuardCoveredRefusesOutAndBackChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "hopdir", "f.go")+"\n", WithToolchainRoot(root))
+	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "hopdir", "f.go")+"\n", withToolchainRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +377,7 @@ func TestGuardCoveredRelativeAfterChdirStaysObserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := "chdir " + sub + "\nopen f.go\n"
-	obs := completedFromLog(t, t.TempDir(), log, WithToolchainRoot(root))
+	obs := completedFromLog(t, t.TempDir(), log, withToolchainRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -399,7 +399,7 @@ func TestGuardCoveredRelativeAfterChdirStaysObserved(t *testing.T) {
 // reads lexically under it stay observed.
 func TestGuardCoveredUnresolvableRootDeclaresNothing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "never-created")
-	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "f.go")+"\n", WithToolchainRoot(root))
+	obs := completedFromLog(t, t.TempDir(), "open "+filepath.Join(root, "f.go")+"\n", withToolchainRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 	}
 	log := "open " + derived + "\nopen " + index + "\nopen " + trim + "\nstat " + derived + "\n"
 
-	obs := completedFromLog(t, dir, log, WithBuildCacheRoot(root))
+	obs := completedFromLog(t, dir, log, withBuildCacheRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -457,7 +457,7 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 	if err := os.WriteFile(seed, []byte("interesting input"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obsFuzz := completedFromLog(t, dir, "open "+seed+"\n", WithBuildCacheRoot(root))
+	obsFuzz := completedFromLog(t, dir, "open "+seed+"\n", withBuildCacheRoot(root))
 	stFuzz, err := CompletedState(obsFuzz)
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	obs = completedFromLog(t, dir, "open "+link+"\n", WithBuildCacheRoot(root))
+	obs = completedFromLog(t, dir, "open "+link+"\n", withBuildCacheRoot(root))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -507,7 +507,7 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 	}
 
 	// A relative root is refused exactly as the sibling classes refuse it.
-	if _, err := FromTestLog([]byte("open x\n"), dir, dir, WithBuildCacheRoot("relative/path")); err == nil {
+	if _, err := FromTestLog([]byte("open x\n"), dir, dir, withBuildCacheRoot("relative/path")); err == nil {
 		t.Fatal("relative build-cache root accepted")
 	}
 }
@@ -526,7 +526,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	}
 	log := "stat " + root + "\nopen " + root + "\n"
 
-	obs := completedFromLog(t, dir, log, WithEphemeralTempRoot(root))
+	obs := completedFromLog(t, dir, log, withEphemeralTempRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -543,7 +543,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	}
 
 	// One level deeper is outside the admission.
-	obs = completedFromLog(t, dir, "open "+deeper+"\n", WithEphemeralTempRoot(root))
+	obs = completedFromLog(t, dir, "open "+deeper+"\n", withEphemeralTempRoot(root))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -570,7 +570,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 		t.Fatal("undeclared temp root recorded nothing")
 	}
 
-	if _, err := FromTestLog([]byte("open x\n"), dir, dir, WithEphemeralTempRoot("relative/tmp")); err == nil {
+	if _, err := FromTestLog([]byte("open x\n"), dir, dir, withEphemeralTempRoot("relative/tmp")); err == nil {
 		t.Fatal("relative ephemeral root accepted")
 	}
 
@@ -581,7 +581,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	obs = completedFromLog(t, dir, "open "+real+"\n", WithEphemeralTempRoot(link))
+	obs = completedFromLog(t, dir, "open "+real+"\n", withEphemeralTempRoot(link))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -597,7 +597,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	// An unresolvable root declares nothing: a read of that very
 	// identity still records.
 	gone := filepath.Join(t.TempDir(), "never-created")
-	obs = completedFromLog(t, dir, "open "+gone+"\n", WithEphemeralTempRoot(gone))
+	obs = completedFromLog(t, dir, "open "+gone+"\n", withEphemeralTempRoot(gone))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -624,7 +624,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	}
 	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
 		WithCompletedProcess("package-test-binary:guard"), WithBracket(interiorBracket),
-		WithEphemeralTempRoot(interior)); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
+		withEphemeralTempRoot(interior)); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
 		t.Fatalf("module-interior ephemeral root error = %v", err)
 	}
 	// An UNRESOLVABLE interior root refuses identically: the declared
@@ -635,7 +635,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	}
 	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
 		WithCompletedProcess("package-test-binary:guard"), WithBracket(missingBracket),
-		WithEphemeralTempRoot(filepath.Join(dir, "missing"))); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
+		withEphemeralTempRoot(filepath.Join(dir, "missing"))); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
 		t.Fatalf("unresolvable interior root error = %v", err)
 	}
 }
@@ -789,14 +789,14 @@ func TestVolatileOSPathsClassifyLexically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), WithEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+	if _, err := FromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), withEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
 		t.Fatalf("ephemeral root under /proc accepted: %v", err)
 	}
 
 	// A guard root under a volatile OS root is skipped like an
 	// unresolvable declaration: the read stays refused as volatile,
 	// never admitted recordless through the declared root.
-	obsGuard := completedFromLog(t, dir, "open /proc/stat\n", WithToolchainRoot("/proc"))
+	obsGuard := completedFromLog(t, dir, "open /proc/stat\n", withToolchainRoot("/proc"))
 	stGuard, err := CompletedState(obsGuard)
 	if err != nil {
 		t.Fatal(err)
@@ -881,7 +881,7 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	gone := filepath.Join(root, "run123", "deep", "data.txt")
-	obs := completedFromLog(t, dir, "open "+gone+"\nstat "+filepath.Join(root, "run123")+"\n", WithEphemeralTempRoot(root))
+	obs := completedFromLog(t, dir, "open "+gone+"\nstat "+filepath.Join(root, "run123")+"\n", withEphemeralTempRoot(root))
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -902,7 +902,7 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 	if err := os.WriteFile(kept, []byte("outlived the run"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs = completedFromLog(t, dir, "open "+kept+"\n", WithEphemeralTempRoot(root))
+	obs = completedFromLog(t, dir, "open "+kept+"\n", withEphemeralTempRoot(root))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -925,7 +925,7 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	obs = completedFromLog(t, dir, "open "+filepath.Join(link, "gone.txt")+"\n", WithEphemeralTempRoot(root))
+	obs = completedFromLog(t, dir, "open "+filepath.Join(link, "gone.txt")+"\n", withEphemeralTempRoot(root))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -948,7 +948,7 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 	if err := os.RemoveAll(target); err != nil {
 		t.Fatal(err)
 	}
-	obs = completedFromLog(t, dir, "open "+filepath.Join(dangle, "gone.txt")+"\n", WithEphemeralTempRoot(root))
+	obs = completedFromLog(t, dir, "open "+filepath.Join(dangle, "gone.txt")+"\n", withEphemeralTempRoot(root))
 	st, err = CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -1179,7 +1179,7 @@ func TestEphemeralRootNeverSwallowsModuleInteriorReads(t *testing.T) {
 		"open " + filepath.Join(outer, "gone", "scratch.txt") + "\n"
 	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
-		WithEphemeralTempRoot(outer))
+		withEphemeralTempRoot(outer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1213,7 +1213,7 @@ func TestEphemeralRootRefusesAliasRouteIntoModule(t *testing.T) {
 	log := "open " + filepath.Join(outer, "alias", "pkg", "sb-1", "out.txt") + "\n"
 	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
-		WithEphemeralTempRoot(outer))
+		withEphemeralTempRoot(outer))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,9 +13,9 @@ func TestValidateTestLogOptionsRefusesMalformedDeclarationsPreSpawn(t *testing.T
 		opt  TestLogOption
 		want string
 	}{
-		{"relative toolchain root", WithToolchainRoot("relative/go"), "clean absolute path"},
-		{"unclean module cache root", WithModuleCacheRoot("/tmp/../tmp/mod"), "clean absolute path"},
-		{"relative temp root", WithEphemeralTempRoot("tmp"), "clean absolute path"},
+		{"relative toolchain root", withToolchainRoot("relative/go"), "clean absolute path"},
+		{"unclean module cache root", withModuleCacheRoot("/tmp/../tmp/mod"), "clean absolute path"},
+		{"relative temp root", withEphemeralTempRoot("tmp"), "clean absolute path"},
 		{"absolute static-input root", WithStaticInputRoot("/abs/corpus"), "module-relative"},
 		{"escaping static-input root", WithStaticInputRoot("../corpus"), "proper in-module surface"},
 	} {
@@ -24,12 +24,12 @@ func TestValidateTestLogOptionsRefusesMalformedDeclarationsPreSpawn(t *testing.T
 			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
 		}
 	}
-	if err := ValidateTestLogOptions(WithToolchainRoot("/usr/local/go"), WithStaticInputRoot("testdata/corpus")); err != nil {
+	if err := ValidateTestLogOptions(withToolchainRoot("/usr/local/go"), WithStaticInputRoot("testdata/corpus")); err != nil {
 		t.Errorf("well-formed declarations refused: %v", err)
 	}
 	// Pre-spawn validation and ingest apply the options through one path:
 	// two malformed declarations name the same (first) refusal on both.
-	opts := []TestLogOption{WithToolchainRoot("relative/go"), WithStaticInputRoot("/abs/corpus")}
+	opts := []TestLogOption{withToolchainRoot("relative/go"), WithStaticInputRoot("/abs/corpus")}
 	pre := ValidateTestLogOptions(opts...)
 	_, ingest := FromTestLogEnv(nil, "/tmp/m", "/tmp/m", nil, opts...)
 	if pre == nil || ingest == nil || pre.Error() != ingest.Error() {

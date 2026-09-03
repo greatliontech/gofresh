@@ -3,4 +3,5 @@
 
 requirement_id: "REQ-fresh-commit-independent"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "7bb3360450f8a60923a5cf060035d19a351f448c25de60d99a264f728ac2bcd4"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

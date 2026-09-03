@@ -433,28 +433,28 @@ func WithBracket(bracket Bracket) TestLogOption {
 	}
 }
 
-// WithToolchainRoot declares the producing toolchain's GOROOT as a
+// withToolchainRoot declares the producing toolchain's GOROOT as a
 // guard-covered root (REQ-inputs-guard-covered): a clean absolute path
 // resolved from the same environment the producing run used. Reads provably
 // inside it record neither a path identity nor a per-path disposition — the
 // toolchain guard already pins that content, the closure model's own stdlib
 // collapse. The skip is fail-closed: symlink chains touching anything outside
 // the root, ambiguous resolutions, and missing objects stay observed.
-func WithToolchainRoot(root string) TestLogOption {
+func withToolchainRoot(root string) TestLogOption {
 	return guardRootOption(root, "")
 }
 
-// WithModuleCacheRoot declares the producing environment's GOMODCACHE as a
+// withModuleCacheRoot declares the producing environment's GOMODCACHE as a
 // guard-covered root (REQ-inputs-guard-covered) for its version-addressed
 // extracted module trees, which immutable version pinning already covers. The
 // download cache subtree (`cache/`) holds mutable metadata no guard pins —
 // version lists, lock files — and stays observed. The same fail-closed
 // resolution rules as the toolchain root apply.
-func WithModuleCacheRoot(root string) TestLogOption {
+func withModuleCacheRoot(root string) TestLogOption {
 	return guardRootOption(root, "cache")
 }
 
-// WithBuildCacheRoot declares the producing environment's GOCACHE as a
+// withBuildCacheRoot declares the producing environment's GOCACHE as a
 // guard-covered root (REQ-inputs-guard-covered), its discovered `fuzz`
 // corpus excepted. The admission is toolchain-mediated observational
 // equivalence, not per-object immutability: everything else under the
@@ -469,11 +469,11 @@ func WithModuleCacheRoot(root string) TestLogOption {
 // -fuzz run consumes semantically, derivable from nothing the
 // fingerprint pins. The same fail-closed resolution rules as the
 // toolchain root apply.
-func WithBuildCacheRoot(root string) TestLogOption {
+func withBuildCacheRoot(root string) TestLogOption {
 	return guardRootOption(root, "fuzz")
 }
 
-// WithEphemeralTempRoot declares one of the producing environment's temp
+// withEphemeralTempRoot declares one of the producing environment's temp
 // directories as an ephemeral root (REQ-inputs-ephemeral-root): the root's
 // OWN identity — declared or resolved form — records nothing, because
 // temp-tree creation machinery stats it to mint fresh per-run subtrees and
@@ -482,7 +482,7 @@ func WithBuildCacheRoot(root string) TestLogOption {
 // nothing — per-run scratch by construction — while a deeper read still
 // present at ingest stays observed, and an unresolvable root declares
 // nothing.
-func WithEphemeralTempRoot(root string) TestLogOption {
+func withEphemeralTempRoot(root string) TestLogOption {
 	return func(c *testLogConfig) {
 		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 			c.err = fmt.Errorf("runtimeinputs: ephemeral temp root must be a clean absolute path, got %q", root)
@@ -494,9 +494,10 @@ func WithEphemeralTempRoot(root string) TestLogOption {
 
 // ValidateTestLogOptions applies the declaration options to a throwaway
 // configuration and reports the first refusal, so a producer can refuse a
-// malformed declaration — a relative guard root, a static-input root
-// outside the module — before it spawns the process whose testlog the
-// options would later ingest, instead of discovering it after the run.
+// malformed declaration — a static-input root outside the module, a
+// scratch namespace with a malformed pattern, an empty exclusion —
+// before it spawns the process whose testlog the options would later
+// ingest, instead of discovering it after the run.
 func ValidateTestLogOptions(opts ...TestLogOption) error {
 	_, err := applyTestLogOptions(opts)
 	return err

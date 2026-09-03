@@ -70,7 +70,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.CheckObserved"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "a4646e643d2568ea2d391cd0008bf4e49060baaa7b9381eb05151daa9a4ce1ba"
+  shape_hash: "599466af58ed87c151bd3b032a7cb2328916c37c48238cdc0286026e274239f4"
 }
 
 bindings {
