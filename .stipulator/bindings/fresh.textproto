@@ -315,3 +315,84 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cdbf14b3984c8132d18bf53e7e0ce2f74baa5849259b565c8d98d01e9938370f"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-preparation"
+  content_hash: "fd3c491e446a56eeec43841e29b893d93f138205d23bb86f54e5cfdac419a24d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestUnknownSubjectRefusesBeforeTheMaximalFold"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "331b83968597bb764caf7887f748b1f406dfd2f6566505602b2bae8139bfd8d6"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-preparation"
+  content_hash: "fd3c491e446a56eeec43841e29b893d93f138205d23bb86f54e5cfdac419a24d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestModuleCacheViewPackageRefusesBeforeTheTypedLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8f38656ad44ce6a3687268467ac955382539337716b44abd49f262e8ef0b7d8f"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-preparation"
+  content_hash: "fd3c491e446a56eeec43841e29b893d93f138205d23bb86f54e5cfdac419a24d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestMalformedRecordRefusesTheBatchBeforeAnyWindow"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ce939b397ad7147a09752c1071ce3b0b9851d564e20d37a7ebc94505c41b958"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-preparation"
+  content_hash: "fd3c491e446a56eeec43841e29b893d93f138205d23bb86f54e5cfdac419a24d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestMissingAttachmentRefusesBeforeTheValidationObservation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "38c580ac8ac2a9087ba89b6c18eb064d66e45c6429657d8f43a24aab9dbb4c74"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-preparation"
+  content_hash: "fd3c491e446a56eeec43841e29b893d93f138205d23bb86f54e5cfdac419a24d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestToolchainSelectionNoticeAnnouncedAtViewConstruction"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "15756fb849f60a3ee2bb9a0ca81be153ab754136cf43dedad14116b452277751"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-progress"
+  content_hash: "f62fb486886d40e675d71cf8053a430ca271ab65b6df47b2305ebb6c2fe470ea"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestProgressReportsUnitsServedAndKept"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0e988e322b7123db1ae6183fb82a0b22cebeb322297d4749311f3d084e4e9c54"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-progress"
+  content_hash: "f62fb486886d40e675d71cf8053a430ca271ab65b6df47b2305ebb6c2fe470ea"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestOperationBoundaryReportsOncePerOperation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5be6cc5c64a0f5aad0ef59baf9aa52e7e90e87ed0d0c516721a6eebc2fb61904"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-progress"
+  content_hash: "f62fb486886d40e675d71cf8053a430ca271ab65b6df47b2305ebb6c2fe470ea"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestScanMemoServesTheWholeScanWithoutATypedLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "26abcbebe0df6b7d9e86ed04194007176d396c0500481312f358512078804af7"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-progress"
+  content_hash: "f62fb486886d40e675d71cf8053a430ca271ab65b6df47b2305ebb6c2fe470ea"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestProgressReportsAnalysisPhases"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9a187903c1562c9d4a9c046655ed059b8dad5525a4861fd1bf0f5bb5a4d48c5c"
+}

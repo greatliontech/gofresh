@@ -152,16 +152,29 @@ func TestToolchainSelectionNoticeAnnouncedAtViewConstruction(t *testing.T) {
 	if _, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); err != nil {
 		t.Fatal(err)
 	}
-	notices := 0
-	for _, e := range events {
-		if e.Phase == "toolchain-unaudited" {
+	notices, firstNotice, firstWork := 0, -1, -1
+	for i, e := range events {
+		switch e.Phase {
+		case "toolchain-unaudited":
 			notices++
+			if firstNotice < 0 {
+				firstNotice = i
+			}
 			if e.Detail == "" {
 				t.Fatal("notice carries no detail")
+			}
+		case "list", "typecheck", "hash", "load", "prove":
+			if firstWork < 0 {
+				firstWork = i
 			}
 		}
 	}
 	if notices != 1 {
 		t.Fatalf("toolchain-unaudited notices at construction = %d, want exactly one (once per engine)", notices)
+	}
+	// Announced before any paid step, never first on a path reached
+	// after one.
+	if firstWork >= 0 && firstNotice > firstWork {
+		t.Fatalf("the notice (event %d) followed the first paid step (event %d): %+v", firstNotice, firstWork, events)
 	}
 }

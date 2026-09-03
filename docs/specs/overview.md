@@ -275,6 +275,26 @@ attempt still seals its original view against later capture. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
 expressed through a caller-supplied analysis budget, never through cancellation.
 
+**REQ-fresh-preparation** (invariant): Every refusal an operation can decide from
+inputs it already holds — the package listing, the recorded record's shape, kind,
+and membership, the attachment set, the caller's declarations — MUST fire before
+the operation pays any cost the refusal makes moot: before the typed load, the
+closure fold, the observation window, or any process it spawns for work the
+refusal moots. A refusal that
+surfaces after such a cost is wasted work the caller could not avoid, and the
+partial result it interrupts is never a partial verdict (REQ-fresh-context):
+preparation refuses the whole batch before any window opens.
+
+**REQ-fresh-progress** (behavior): An operation MUST report, through the caller's
+progress sink, each unit of work at the moment it begins — an observation pass,
+a runtime-input observation, a package's listing, typed load, program load,
+closure fold, and observability slice — naming the unit and, where the
+operation knows it, its position among the operation's units; once per operation
+and memo class, the distinct packages a persistent memo served in place of a unit;
+and, when an operation returns its caller's context error, what it persisted
+before stopping, so a rerun's served set is known. Progress events are keep-alive
+facts about work, never verdict evidence.
+
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's
 maximal closure or its package's test-variant compartment and their view-wide

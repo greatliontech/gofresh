@@ -165,7 +165,7 @@ func (h *Hasher) emitDiagnostic(phase, pkgPath, detail string) {
 // OnProgress supplies a callback invoked synchronously at the start of each
 // long-running analysis step: "load" before a package program load, "prove"
 // before a package's observability batch. The callback must be fast; events
-// are diagnostic keep-alive data, not contract.
+// are keep-alive facts about work, never verdict evidence.
 func (h *Hasher) OnProgress(f func(phase, pkgPath string)) {
 	h.progress = f
 }

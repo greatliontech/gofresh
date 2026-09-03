@@ -531,9 +531,10 @@ func WithBuildInputs(inputs ...string) Option {
 // leaves a package's listing spawned every pass). Package
 // names the package for the per-package phases; Index and Total give the
 // unit's position when the pass knows it (1-based; zero when unknown).
-// Events are emitted before the step runs, carry no completion signal,
-// and are diagnostic keep-alive data, not contract; a consumer that
-// prints Detail-bearing events prints only the diagnostics.
+// Events are emitted before the step runs and carry no completion
+// signal; they are keep-alive facts about work, never verdict evidence
+// (REQ-fresh-progress); a consumer that prints Detail-bearing events
+// prints only the diagnostics.
 type Progress struct {
 	Phase   string
 	Package string
