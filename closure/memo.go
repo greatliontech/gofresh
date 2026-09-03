@@ -2,20 +2,22 @@ package closure
 
 import "github.com/greatliontech/gofresh/closure/internal/cachefile"
 
-// SetMemoScope arms every persistent closure memo that needs the
+// SetAnalysisScope arms every persistent closure memo that needs the
 // caller's guards — the observability proofs and the typed
 // testing-effect scan — under scope, the analysis identity outside the
-// source closure: the caller supplies the proof-strategy version and the
-// code guards, and each memo key adds the package test-binary closure
-// hash, completing the pure function's input identity
-// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo). An
-// empty scope leaves those memos inert — every pass recomputes. Those
+// source closure: the Hasher reads its proof-strategy version and its
+// code guards (the fact strategy, the attestations, and the vouches key
+// the derivations the observation pass performs beside the Hasher), and
+// each memo key adds the package test-binary closure hash, completing
+// the pure function's input identity (REQ-closure-observability-memo,
+// REQ-closure-testing-scan-memo). The zero scope leaves those memos
+// inert — every pass recomputes. Those
 // memos live under the consumer-controlled store root (the user cache
 // by default; SetMemoRoot); a missing, unreadable, or corrupt entry
 // recomputes silently - the key IS the freshness, so no entry is ever
 // trusted beyond it.
-func (h *Hasher) SetMemoScope(scope string) {
-	h.memoScope = scope
+func (h *Hasher) SetAnalysisScope(scope AnalysisScope) {
+	h.scope = scope
 }
 
 // SetMemoRoot redirects the persistent memo store - one knob covering
@@ -111,12 +113,12 @@ func StoreScanFacts(scope, key string, payload any) {
 // it and the already-proven subjects. A key-derivation failure
 // disables the memo for the group - fail-open to recomputation.
 func (h *Hasher) groupMemo(pkgPath string) (closureHash string, proofs map[string]Observability) {
-	if h.memoScope == "" {
+	if h.scope.Proofs() == "" {
 		return "", nil
 	}
 	key, err := h.testBinaryClosureKey(pkgPath)
 	if err != nil {
 		return "", nil
 	}
-	return key, loadMemo(h.memoScope, key)
+	return key, loadMemo(h.scope.Proofs(), key)
 }

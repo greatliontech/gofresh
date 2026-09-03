@@ -146,7 +146,8 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// fact — a production symbol can be unreachable as a root of its
 		// external-test binary — so it degrades to an unavailable proof for
 		// that subject alone and never denies a sibling's analysis.
-		memoArmed := h.memoScope != "" && closureHash != ""
+		memoScope := h.scope.Proofs()
+		memoArmed := memoScope != "" && closureHash != ""
 		unrooted := map[string]Observability{}
 		rooted := group.subjects[:0:0]
 		for _, subject := range group.subjects {
@@ -165,7 +166,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		group.subjects = rooted
 		if len(group.subjects) == 0 {
 			if memoArmed {
-				storeMemo(h.memoScope, closureHash, unrooted)
+				storeMemo(memoScope, closureHash, unrooted)
 				h.persisted.proofs++
 			}
 			delete(h.progs, group.path)
@@ -181,7 +182,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// slice, and the next pass serves every completed slice's proofs
 		// from the memo (REQ-closure-observability-memo).
 		if memoArmed && len(unrooted) > 0 {
-			storeMemo(h.memoScope, closureHash, unrooted)
+			storeMemo(memoScope, closureHash, unrooted)
 			h.persisted.proofs++
 		}
 		slices := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
@@ -225,7 +226,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 				sliceProofs[subject.Symbol] = result
 			}
 			if memoArmed {
-				storeMemo(h.memoScope, closureHash, sliceProofs)
+				storeMemo(memoScope, closureHash, sliceProofs)
 				h.persisted.proofs++
 			}
 		}

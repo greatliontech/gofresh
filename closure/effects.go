@@ -6,7 +6,9 @@ type externalEffectKind uint8
 // refusal names the highest-ranked blocking effect under effectCauseRank
 // with this order as the tie-break — so inserting or reordering members,
 // and any rank-table edit that can move a RECORDED reason text, owe an
-// ObservationRTA bump (the recorded-evidence versioning clause); a
+// ObservationRTA bump (the recorded-evidence versioning clause) — and,
+// because the persisted effect and testing scans store the kind as its
+// number, an effectScanStrategy and a testingScanStrategy bump too; a
 // re-stratification provably touching no recorded class states that
 // exemption in its commit message instead.
 const (

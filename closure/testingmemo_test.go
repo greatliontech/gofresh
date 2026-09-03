@@ -58,7 +58,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("strategy@1|toolchain|build")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
 	derived, err := first.maximalTestingTypeEffects("example.com/tscan")
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second.SetMemoScope("strategy@1|toolchain|build")
+	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
 	served, err := second.maximalTestingTypeEffects("example.com/tscan")
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	third.SetMemoScope("strategy@1|toolchain|build")
+	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
 	emptyDerived, err := third.maximalTestingTypeEffects("example.com/tscan/plain")
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fourth.SetMemoScope("strategy@1|toolchain|build")
+	fourth.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
 	emptyServed, err := fourth.maximalTestingTypeEffects("example.com/tscan/plain")
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broken.SetMemoScope("strategy@1|toolchain|build")
+	broken.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
 	broken.lists["example.com/tscan"] = []listPkg{{
 		ImportPath: "example.com/tscan",
 		Dir:        filepath.Join(dir, "missing"),
@@ -197,7 +197,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("scope-a")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	before, err := first.maximalTestingTypeEffects("example.com/tscan")
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherScope.SetMemoScope("scope-b")
+	otherScope.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-b"})
 	if _, err := otherScope.maximalTestingTypeEffects("example.com/tscan"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moved.SetMemoScope("scope-a")
+	moved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	after, err := moved.maximalTestingTypeEffects("example.com/tscan")
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +263,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recomputed.SetMemoScope("scope-a")
+	recomputed.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	if _, err := recomputed.maximalTestingTypeEffects("example.com/tscan"); err != nil {
 		t.Fatal(err)
 	}

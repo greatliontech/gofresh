@@ -126,10 +126,11 @@ type Hasher struct {
 	// never emitted per hit, so a warm pass over a large tree reports
 	// one line per class.
 	served map[string]map[string]bool
-	// memoScope enables the persistent observability memo when non-empty:
-	// the caller-supplied analysis identity outside the source closure
+	// scope is the caller's analysis identity outside the source closure,
+	// set once per pass; every guard-scoped memo renders its own scope
+	// from it, and the zero value leaves them inert
 	// (REQ-closure-observability-memo).
-	memoScope string
+	scope AnalysisScope
 	// viewLoad, when set, is the observation pass's shared typed load; the
 	// testing-type effect scan reads it instead of performing its own load
 	// (REQ-fresh-coherent-view: one load per pass, no same-pass mixture).

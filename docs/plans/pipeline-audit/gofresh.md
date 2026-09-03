@@ -76,7 +76,7 @@ Interruption: cancellation is honored densely (`view.go:81,113,120,166,300`, `cl
 | `WithDir` `:653`, `WithEnv` `:663`, `SetMemoRoot` `:73` | api | `os.Getwd()`, `os.Environ()`, `os.UserCacheDir()` | derived defaults already applied | keep |
 | `WithProducerEnv` `:694` | api | = `WithEnv` | no | keep |
 | `DisableMemos` `:77` / `closure/memo.go:32` | api | enabled | **yes** — every store failure is already silent and harmless (`cachefile.go:118-156`) | delete (or keep purely as a hermeticity assertion) |
-| `Hasher.SetMemoScope`, `Hasher.UseViewLoad`, `Hasher.BoundAnalysis` | api (internal) | — | derived at their one call site | merge |
+| `Hasher.SetAnalysisScope`, `Hasher.UseViewLoad`, `Hasher.BoundAnalysis` | api (internal) | — | derived at their one call site | merge |
 | `Hasher.OnProgress`/`OnDiagnostic` | api | nil | sinks | keep |
 | `maxAttributedSubjects = 64` `closure/observability.go:78` | const | 64 | **measurable** — fixes RTA batch width and memo persistence granularity; a memory/latency tradeoff observable at runtime | derive |
 | `show = 3` `view.go:1170`, `limit = 3` `view.go:1218`, `cappedList` limit `bracket.go:309` | const | 3 | display caps | merge |

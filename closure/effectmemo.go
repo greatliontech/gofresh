@@ -52,16 +52,13 @@ func (h *Hasher) effectScanScope() string {
 const testingScanStrategy = "gofresh/testing-scan@3"
 
 // testingScanScope completes the typed scan's analysis identity outside
-// the source closure: its own strategy version plus the caller-supplied
-// memo scope, which carries the code guards — toolchain and build
-// configuration — the type environment depends on
-// (REQ-closure-testing-scan-memo). Empty when the caller set no scope:
+// the source closure: its own strategy version plus the code guards —
+// toolchain and build configuration — the type environment depends on,
+// read from the caller's analysis scope
+// (REQ-closure-testing-scan-memo). Empty when the caller set no guards:
 // the memo stays disabled.
 func (h *Hasher) testingScanScope() string {
-	if h.memoScope == "" {
-		return ""
-	}
-	return testingScanStrategy + "|" + h.memoScope
+	return h.scope.TestingScan()
 }
 
 // effectScanPayload is one package's persisted effect scan — the shared

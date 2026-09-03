@@ -579,7 +579,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestIntermediateRecompilationsScanFromTheirOwnCompilation"
   role: BINDING_ROLE_TESTS
@@ -588,7 +588,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateLocalFactsDeriveFreshEachScan"
   role: BINDING_ROLE_TESTS
@@ -651,7 +651,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "7877af5308c04baa2893891b2dbe5cd76c6bd604a004524ae228083d2bd0d001"
+  content_hash: "a0b1d0433ad9bd7802d0d19d26578c4bff0e1788d32a738e0615585f03d2d75b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoServesWithoutTypeLoad"
   role: BINDING_ROLE_TESTS
@@ -660,7 +660,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "7877af5308c04baa2893891b2dbe5cd76c6bd604a004524ae228083d2bd0d001"
+  content_hash: "a0b1d0433ad9bd7802d0d19d26578c4bff0e1788d32a738e0615585f03d2d75b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS
@@ -669,7 +669,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateFactsServePinnedPackagesWithoutLoading"
   role: BINDING_ROLE_TESTS
@@ -678,7 +678,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives"
   role: BINDING_ROLE_TESTS
@@ -687,7 +687,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestDynamicStateFactStoreMissesOnScopeAndBucketChange"
   role: BINDING_ROLE_TESTS
@@ -696,7 +696,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedBucketsMoveWithImportConeVersions"
   role: BINDING_ROLE_TESTS
@@ -705,7 +705,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedBucketsExcludeModulesReachingMutableLocalSource"
   role: BINDING_ROLE_TESTS
@@ -714,7 +714,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "b74569103ecd86c6cd950a1cbfb35c2e5007bf9afb444886053037c654dc8e08"
+  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass"
   role: BINDING_ROLE_TESTS

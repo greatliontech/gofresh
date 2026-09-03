@@ -8,7 +8,6 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -71,7 +70,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, "", dir, env, buildFlags, nil, nil, false, false, pkgPaths...)
+	scan, _, err := scanViewSubjects(ctx, hasher, closure.AnalysisScope{}, dir, env, buildFlags, nil, pkgPaths...)
 	return scan, err
 }
 
@@ -82,7 +81,15 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, vouches map[string]bool, singleSubject, packageProcess bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+	// The scope is the one source of the attestations and the vouches:
+	// what keys a memo is what the derivation applies.
+	factScope := scope.Facts()
+	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
+	vouches := make(map[string]bool, len(scope.Vouches))
+	for _, v := range scope.Vouches {
+		vouches[v] = true
+	}
 	// The scan memo: a view package whose scan the persistent store
 	// already holds under this scope and its current package scan key
 	// serves its subjects' outputs whole and takes no part in the typed
@@ -90,7 +97,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 	// pure function of the package's typed test-binary program, which
 	// the key pins byte for byte (REQ-closure-scan-memo). A key that
 	// cannot derive, or an entry that cannot load, recomputes.
-	scanScope := scanMemoScope(factScope, vouches)
+	scanScope := scope.Scan()
 	if viewTestHooks.scanMemoOff {
 		scanScope = ""
 	}
@@ -205,22 +212,6 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, factScope, di
 // scanEntryVersion versions the persisted scan entry's shape; a shape
 // change recomputes rather than misreading an older entry.
 const scanEntryVersion = 1
-
-// scanMemoScope is the scan memo's scope: the fact scope (strategy,
-// toolchain, build configuration, execution attestations) joined with
-// the sorted vouch set, since a vouch is load-bearing for the discharges
-// the entry records.
-func scanMemoScope(factScope string, vouches map[string]bool) string {
-	if factScope == "" {
-		return ""
-	}
-	keys := make([]string, 0, len(vouches))
-	for v := range vouches {
-		keys = append(keys, v)
-	}
-	sort.Strings(keys)
-	return factScope + "|vouches:" + strings.Join(keys, ",")
-}
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {

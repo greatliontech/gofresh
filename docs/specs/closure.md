@@ -1532,8 +1532,10 @@ variable identities its code mutates after initialization
 (REQ-closure-shared-dynamic-state), and its method-directive declarations — MAY
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
-(the fact-strategy version and the code guards — toolchain and build
-configuration) plus the module's version pin and the version signature of every
+(the fact-strategy version, the code guards — toolchain and build
+configuration — and the execution attestations, which change what a fact
+records, so attested and unattested sessions never serve each other's
+facts) plus the module's version pin and the version signature of every
 pinned module reachable from its packages, its type environment's complete
 version surface (the standard library rides the toolchain guard). A
 mutable-local package's facts are never memoized by version — its source
@@ -1599,13 +1601,12 @@ included — bumps the scan-strategy version.
 **REQ-closure-testing-scan-memo** (behavior): A package's typed
 testing-effect scan MAY be served from a persistent memo, because the scan
 is a pure function of its key's complete input identity: the scan-strategy
-version plus the caller-supplied memo scope — which carries the code
-guards, toolchain and build configuration, that the type environment
-depends on — plus the package test-binary closure hash, which pins every
-mutable source byte the environment is built from. The caller-supplied
-scope is the observability memo's scope: one scope channel arms every
-closure memo that needs the caller's guards. A hit serves before any
-type-environment load; without a caller-supplied scope the memo is
+version plus the code guards — toolchain and build configuration — that
+the type environment depends on, plus the package test-binary closure
+hash, which pins every mutable source byte the environment is built from.
+The guards come from the caller's one analysis scope, set once per
+pass, which arms every closure memo that needs them. A hit serves
+before any type-environment load; without the caller's guards the memo is
 disabled, and a closure-hash derivation failure disables it for that
 package — fail-open to recomputation. A memo hit is byte-equivalent to
 recomputation — the effect set, its order, and the preferred diagnostic

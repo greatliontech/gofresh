@@ -355,33 +355,20 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// guard-derived scope — so no two derivations of one pass can straddle
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
-	// The memo scope is the analysis identity outside the source closure
-	// — the proof-strategy version and the code guards, exactly the
-	// bracket's — and it arms the typed testing-effect scan memo for this
-	// pass's closure folds (REQ-closure-testing-scan-memo); without it
-	// every fold would recompute the scan through a private typed load.
-	hasher.SetMemoScope(ObservationRTA + "|" + guards.Toolchain + "|" + guards.BuildConfig)
-	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
-	if e.singleSubjectExecution {
-		// The single-subject attestation changes what the derived facts
-		// RECORD — the audited pooling set's discharge happens at fact
-		// recording time — so the option is part of the fact identity:
-		// option-on and option-off sessions must never serve each
-		// other's persisted or in-process facts
-		// (REQ-closure-dynamic-state-memo).
-		factScope += "|single-subject-execution"
-	}
-	if e.packageProcessExecution {
-		// The package-process attestation gates only the scan-time
-		// binary-scoped discharge, but the option-identity discipline
-		// holds regardless: option-on and option-off sessions never
-		// serve each other's facts (REQ-closure-dynamic-state-memo).
-		factScope += "|package-process-execution"
-	}
+	// The analysis scope is the identity outside the source closure —
+	// the strategy versions, the code guards, the attestations, the
+	// vouches — set once for the pass: it arms every memo the closure
+	// folds consult (the typed testing-effect scan included, without
+	// which every fold would recompute the scan through a private typed
+	// load) and keys the facts and the scan below
+	// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo,
+	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
+	scope := e.analysisScope(guards)
+	hasher.SetAnalysisScope(scope)
 	if viewTestHooks.factScope != nil {
-		viewTestHooks.factScope(factScope)
+		viewTestHooks.factScope(scope.Facts())
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, factScope, e.dir, e.env, e.buildFlags, snapshot, e.dynamicStateVouches, e.singleSubjectExecution, e.packageProcessExecution, packages...)
+	scan, _, err := scanViewSubjects(ctx, hasher, scope, e.dir, e.env, e.buildFlags, snapshot, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -1584,15 +1571,16 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	if err != nil {
 		return err
 	}
-	// The observability memo's scope is the analysis identity outside the
-	// source closure: the proof-strategy version plus the code guards.
-	// The memo key completes with the package test-binary closure hash
-	// inside the Hasher (REQ-closure-observability-memo). Since the
-	// per-subject isolation landed, SHAPE REFUSALS memoize too - a
-	// change to the analyzer's shape capability (a new admitted shape,
-	// a widened guard) must bump ObservationRTA, or cached refusals
-	// serve under semantics that no longer refuse them.
-	hasher.SetMemoScope(ObservationRTA + "|" + v.facts.guards.Toolchain + "|" + v.facts.guards.BuildConfig)
+	// The bracket's analysis scope is the view's: the same identity
+	// outside the source closure the observation pass set, so its
+	// memos and the pass's are one store. The observability memo's key
+	// completes with the package test-binary closure hash inside the
+	// Hasher (REQ-closure-observability-memo). Since the per-subject
+	// isolation landed, SHAPE REFUSALS memoize too - a change to the
+	// analyzer's shape capability (a new admitted shape, a widened
+	// guard) must bump ObservationRTA, or cached refusals serve under
+	// semantics that no longer refuse them.
+	hasher.SetAnalysisScope(v.engine.analysisScope(v.facts.guards))
 	if v.engine.progress != nil {
 		v.engine.wireProgress(hasher)
 	}
@@ -1689,4 +1677,22 @@ func emitUnauditedToolchainNotice(once *sync.Once, notice string, emit func(deta
 		// attribution — the same decoration a consumer adds.
 		emit(notice + " (closure/toolchainaudit.go)")
 	})
+}
+
+// analysisScope is the pass's analysis identity outside the source
+// closure under guards: the strategy versions, the code guards, the
+// execution attestations — each changes what a derived fact records,
+// so attested and unattested sessions never serve each other's facts
+// (REQ-closure-dynamic-state-memo) — and the caller's vouch set.
+func (e *Engine) analysisScope(guards guard.Guards) closure.AnalysisScope {
+	vouches := make([]string, 0, len(e.dynamicStateVouches))
+	for v := range e.dynamicStateVouches {
+		vouches = append(vouches, v)
+	}
+	return closure.AnalysisScope{
+		ProofStrategy: ObservationRTA, FactStrategy: DynamicStateStrategy,
+		Toolchain: guards.Toolchain, BuildConfig: guards.BuildConfig,
+		SingleSubject: e.singleSubjectExecution, PackageProcess: e.packageProcessExecution,
+		Vouches: vouches,
+	}
 }

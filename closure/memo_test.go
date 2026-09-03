@@ -52,7 +52,7 @@ func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("strategy@1|toolchain|build")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	cold, err := first.ComputeObservabilityBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second.SetMemoScope("strategy@1|toolchain|build")
+	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	loads := 0
 	second.OnProgress(func(phase, _ string) {
 		if phase == "load" || phase == "prove" {
@@ -100,7 +100,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("scope-a")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	if _, err := first.ComputeObservabilityBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherScope.SetMemoScope("scope-b")
+	otherScope.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-b"})
 	loads := 0
 	otherScope.OnProgress(func(phase, _ string) {
 		if phase == "load" {
@@ -134,7 +134,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moved.SetMemoScope("scope-a")
+	moved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	loads = 0
 	moved.OnProgress(func(phase, _ string) {
 		if phase == "load" {
@@ -162,7 +162,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMoved.SetMemoScope("scope-a")
+	testMoved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	loads = 0
 	testMoved.OnProgress(func(phase, _ string) {
 		if phase == "load" {
@@ -193,7 +193,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("scope-a")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	if _, err := first.ComputeObservabilityBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second.SetMemoScope("scope-a")
+	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	second.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
 	loads := 0
 	second.OnProgress(func(phase, _ string) {
@@ -226,7 +226,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	third.SetMemoScope("scope-a")
+	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
 	third.variantScope = map[string]testvariant.Identity{"example.com/memo": {Hash: "stale-compartment"}}
 	batched, err := third.ComputeMaximalBatch(subjects)
@@ -284,7 +284,7 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.SetMemoScope("scope-a")
+	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	memoFiles := filepath.Join(cacheRoot, "gofresh", "observability")
 	first.ctx = cancelWhenDirNonEmpty{dir: memoFiles}
 	if _, err := first.ComputeObservabilityBatch(subjects); err == nil {
@@ -325,7 +325,7 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second.SetMemoScope("scope-a")
+	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	results, err := second.ComputeObservabilityBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cold.SetMemoScope("strategy@1|toolchain|build")
+	cold.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	if _, err := cold.ComputeObservabilityBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	warm.SetMemoScope("strategy@1|toolchain|build")
+	warm.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	if _, err := warm.ComputeObservabilityBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	cold.SetMemoScope("strategy@1|toolchain|build")
+	cold.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	if _, err := cold.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "Pure"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	sibling.SetMemoScope("strategy@1|toolchain|build")
+	sibling.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build"})
 	if _, err := sibling.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "TestPure"}}); err != nil {
 		t.Fatal(err)
 	}
