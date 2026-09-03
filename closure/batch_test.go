@@ -246,12 +246,21 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/batchbound\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The first slice's last subject and the second slice's first both
+	// dispatch through an interface variable no walk closes, so each
+	// refusal is the subject's own: a slice wider than the mask would
+	// shift the first's bit off the word and prove it observable, and a
+	// walk that dropped the second slice would do the same to the other.
 	var source strings.Builder
-	source.WriteString("package batchbound\n\n")
+	source.WriteString("package batchbound\n\nvar Sink interface{ M() }\n\n")
 	subjects := make([]Subject, maxAttributedSubjects+1)
 	for i := range subjects {
 		symbol := fmt.Sprintf("F%d", i)
-		fmt.Fprintf(&source, "func %s() int { return %d }\n", symbol, i)
+		if i == len(subjects)-1 || i == maxAttributedSubjects-1 {
+			fmt.Fprintf(&source, "func %s() int { Sink.M(); return %d }\n", symbol, i)
+		} else {
+			fmt.Fprintf(&source, "func %s() int { return %d }\n", symbol, i)
+		}
 		subjects[i] = Subject{Package: "example.com/batchbound", Symbol: symbol}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "batchbound.go"), []byte(source.String()), 0o644); err != nil {
@@ -276,6 +285,31 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	}
 	if got[last] != want[last] {
 		t.Fatalf("boundary subject proof = %+v, independent = %+v", got[last], want[last])
+	}
+	if got[last].Observable || got[last].Reason == "" {
+		t.Fatalf("the second slice's subject lost its own refusal: %+v", got[last])
+	}
+	edge := subjects[maxAttributedSubjects-1]
+	if got[edge].Observable || got[edge].Reason == "" {
+		t.Fatalf("the first slice's last subject lost its bit: %+v", got[edge])
+	}
+	if !got[subjects[0]].Observable {
+		t.Fatalf("a pure first-slice subject was refused: %+v", got[subjects[0]])
+	}
+	// The rooted inventories slice on the same width over the whole
+	// batch: a subject past the word would report a complete inventory
+	// with nothing in it, which discharges everything.
+	rooted, err := h.ComputeRootedFunctions(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof := rooted[subjects[0]]; !proof.Complete || len(proof.Fns) == 0 {
+		t.Fatalf("a pure subject's rooted inventory is not a complete, non-empty set: %+v", proof)
+	}
+	for _, subject := range []Subject{edge, last} {
+		if proof := rooted[subject]; proof.Complete && len(proof.Fns) == 0 {
+			t.Fatalf("%s: a complete but empty rooted inventory", subject.Symbol)
+		}
 	}
 }
 

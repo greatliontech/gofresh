@@ -75,7 +75,26 @@ type Observability struct {
 	Reason     string
 }
 
-const maxAttributedSubjects = 64
+// maxAttributedSubjects bounds one attributed-RTA slice: a package's
+// subjects are proven in slices of this width, each slice a walk over
+// the shared program whose proofs persist as it completes
+// (REQ-closure-observability-batch-equivalence,
+// REQ-closure-observability-memo). The width IS the attribution mask's
+// bit width — each subject of a slice owns one bit of every reachability
+// fact (attribution.go) — so it derives from the mask type and can be
+// no wider: a wider slice would shift a subject's bit off the word and
+// prove it observable without a walk. Measured over gofresh's own
+// closure package (237 subjects in one batch, cold memo, two runs per
+// width, wall / peak RSS): 16 subjects 81s / 1213MB, 32 76s / 1190MB,
+// 64 73s / 1244MB — wall falls with width because each slice re-walks
+// the shared program while peak memory stays flat within five percent,
+// so the widest legal width is the fastest; widening the mask past one
+// word is the next step that curve argues for. The cost a wide slice trades
+// is the kept-on-cancel granularity: a cancelled batch forfeits the
+// interrupted slice, so a rerun re-proves up to this many subjects.
+// The rooted-function inventories (ComputeRootedFunctions) slice on the
+// same width for the same reason.
+const maxAttributedSubjects = subjectMaskBits
 
 // packageBatch groups one package's requested subjects for shared analysis.
 type packageBatch struct {

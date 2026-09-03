@@ -5,6 +5,7 @@ import (
 	"go/types"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"github.com/greatliontech/gofresh/closure/internal/rta"
 	"golang.org/x/tools/go/packages"
@@ -99,6 +100,14 @@ var probePackageScope = func(ctx context.Context, prog *program, subjects []Subj
 	return result
 }
 
+// subjectMask attributes one reachability fact to the subjects of a
+// slice, one bit per subject; subjectMaskBits is therefore the widest
+// slice an attributed walk can serve, and maxAttributedSubjects derives
+// from it.
+type subjectMask = uint64
+
+const subjectMaskBits = int(unsafe.Sizeof(subjectMask(0))) * 8
+
 func shapeFailure(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "unsupported analysis shape")
 }
@@ -162,14 +171,14 @@ func splitAttributed(ctx context.Context, audited bool, prog *program, subjects 
 func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 	roots := make(map[*ssa.Function]uint64)
 	allMasks := ^uint64(0)
-	if len(subjects) < 64 {
+	if len(subjects) < subjectMaskBits {
 		allMasks = 1<<len(subjects) - 1
 	}
 	var testMasks uint64
 	var allFunctions map[*ssa.Function]bool
 	instantiated := map[uint64]map[*ssa.Function]bool{}
 	for i, subject := range subjects {
-		mask := uint64(1) << i
+		mask := subjectMask(1) << i
 		root := prog.Roots[subject.Symbol]
 		// A parameterized body is open over type parameters and cannot
 		// enter the runtime-type walk (REQ-closure-analysis): it is never
