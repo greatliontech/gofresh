@@ -2,15 +2,18 @@ package closure
 
 import "github.com/greatliontech/gofresh/closure/internal/cachefile"
 
-// SetMemoScope enables the persistent observability memo under scope -
-// the analysis identity outside the source closure: the caller supplies
-// the proof-strategy version and the code guards, and the memo key adds
-// the package test-binary closure hash, completing the pure function's
-// input identity (REQ-closure-observability-memo). An empty scope
-// disables memoization. The memo lives under the consumer-controlled
-// store root (the user cache by default; SetMemoRoot/DisableMemos);
-// a missing, unreadable, or corrupt entry recomputes silently - the key
-// IS the freshness, so no entry is ever trusted beyond it.
+// SetMemoScope arms every persistent closure memo that needs the
+// caller's guards — the observability proofs and the typed
+// testing-effect scan — under scope, the analysis identity outside the
+// source closure: the caller supplies the proof-strategy version and the
+// code guards, and each memo key adds the package test-binary closure
+// hash, completing the pure function's input identity
+// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo). An
+// empty scope leaves those memos inert — every pass recomputes. Those
+// memos live under the consumer-controlled store root (the user cache
+// by default; SetMemoRoot/DisableMemos); a missing, unreadable, or
+// corrupt entry recomputes silently - the key IS the freshness, so no
+// entry is ever trusted beyond it.
 func (h *Hasher) SetMemoScope(scope string) {
 	h.memoScope = scope
 }

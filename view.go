@@ -355,6 +355,12 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// guard-derived scope — so no two derivations of one pass can straddle
 	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
 	// observations stay independent witnesses.
+	// The memo scope is the analysis identity outside the source closure
+	// — the proof-strategy version and the code guards, exactly the
+	// bracket's — and it arms the typed testing-effect scan memo for this
+	// pass's closure folds (REQ-closure-testing-scan-memo); without it
+	// every fold would recompute the scan through a private typed load.
+	hasher.SetMemoScope(ObservationRTA + "|" + guards.Toolchain + "|" + guards.BuildConfig)
 	factScope := DynamicStateStrategy + "|" + guards.Toolchain + "|" + guards.BuildConfig
 	if e.singleSubjectExecution {
 		// The single-subject attestation changes what the derived facts

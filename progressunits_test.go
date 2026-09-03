@@ -55,6 +55,12 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 		case "list":
 			lists[e.Package] = true
 		case "typecheck":
+			// The shared view load carries no package and counts its
+			// patterns; a package's own testing-scan load (a cold memo
+			// under a served scan) names its package with one pattern.
+			if e.Package != "" {
+				continue
+			}
 			loads++
 			if e.Total < 2 {
 				t.Fatalf("typed load reports %d patterns, want the two view packages at least", e.Total)

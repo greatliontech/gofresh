@@ -2,8 +2,10 @@ package closure
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -104,12 +106,23 @@ func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
 	var privateLoads []string
 	analysisTestHooks.testingTypeOwnLoad = func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) }
 	defer func() { analysisTestHooks.testingTypeOwnLoad = nil }()
+	// The private load is a typed load like any other: it reports a
+	// typecheck unit naming the package, so an operator sees the cost.
+	var units []string
+	h.OnUnit(func(phase, pkgPath string, index, total int) {
+		if phase == "typecheck" {
+			units = append(units, fmt.Sprintf("%s:%d/%d", pkgPath, index, total))
+		}
+	})
 	got, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(privateLoads) != 1 || privateLoads[0] != pkg {
 		t.Fatalf("expected exactly one private fallback load of %s, got %v", pkg, privateLoads)
+	}
+	if want := []string{pkg + ":0/1"}; !slices.Equal(units, want) {
+		t.Fatalf("typecheck units = %v, want %v", units, want)
 	}
 	if !got[subjects[0]].Unverifiable {
 		t.Fatal("fallback path lost the testing-runtime effect")

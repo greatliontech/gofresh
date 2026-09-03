@@ -176,7 +176,8 @@ func (h *Hasher) emitProgress(phase, pkgPath string) {
 
 // OnUnit supplies a callback for per-unit steps that know their position
 // in the pass — a package's listing or closure fold among the pass's
-// packages, the view's typed load with its pattern count. Same
+// packages, the view's typed load with its pattern count, a package's
+// own testing-scan load when no shared load covers it. Same
 // discipline as OnProgress: fast, synchronous, never calling back in.
 func (h *Hasher) OnUnit(f func(phase, pkgPath string, index, total int)) {
 	h.unit = f

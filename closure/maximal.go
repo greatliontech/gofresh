@@ -272,6 +272,7 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 		if analysisTestHooks.testingTypeOwnLoad != nil {
 			analysisTestHooks.testingTypeOwnLoad(pkgPath)
 		}
+		h.emitUnit("typecheck", pkgPath, 0, 1)
 		var err error
 		loaded, err = packages.Load(&packages.Config{
 			Context:    h.ctx,

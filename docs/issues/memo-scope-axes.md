@@ -22,6 +22,17 @@ the same bytes in one pass; a shared path→digest cache holding the full
 digest (the fold's) alongside the truncated one would halve the warm
 read cost.
 
+Two axis mismatches the one-scope-channel design produces today: the
+typed testing-effect scan's scope inherits the observability
+proof-strategy version, an axis the scan does not depend on, so every
+bump of that version discards every persisted testing scan; and the
+view scan memo's scope omits the testing-scan strategy while both memos
+are consulted on the same warm path, so a testing-strategy bump alone
+leaves the scan memo serving and every view package paying a private
+typed load for its testing scan. Neither serves a stale output (the
+scan entry persists nothing the testing scan derives); both are cost
+the typed axes would make explicit.
+
 Adjacent, same altitude: the dynamic-state derivation's result type
 serves two roles — the per-pass state (per-view-package cones,
 downgrades, discharge records, culprit inventories) and the per-cone

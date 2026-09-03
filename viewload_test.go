@@ -9,10 +9,14 @@ import (
 	"testing"
 )
 
-// One observation pass performs exactly one typed package load — the subject
-// scan and the closure tier's testing-type effect scan share it — so view
-// construction's paired observations perform exactly two
-// (REQ-fresh-coherent-view: no same-pass mixture, passes stay independent).
+// One observation pass performs at most one typed package load — the subject
+// scan and the closure tier's testing-type effect scan share it — and a
+// pass whose package scan the store already holds under the pass's own
+// recomputed key performs none (REQ-closure-scan-memo): over a cold store
+// view construction's paired observations load exactly once, the second
+// pass serving the first's scan, and a warm store serves both
+// (REQ-fresh-coherent-view: no same-pass mixture; the key re-derived from
+// the bytes each pass keeps the passes independent witnesses).
 // The count is taken at the go-command boundary: every typed load drives
 // exactly one `go list … -json=<fields> …` invocation. That one-call-per-Load
 // shape is golang.org/x/tools/go/packages driver behavior, not a gofresh
@@ -34,6 +38,7 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	dir := t.TempDir()
 	for name, content := range map[string]string{
@@ -58,8 +63,17 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no typed loads logged at all: %v", err)
 	}
-	if got := strings.Count(string(logged), "typed-load"); got != 2 {
-		t.Fatalf("view construction drove %d typed package loads, want exactly 2 (one per paired observation pass)", got)
+	if got := strings.Count(string(logged), "typed-load"); got != 1 {
+		t.Fatalf("cold view construction drove %d typed package loads, want exactly 1 (the first pass; the second serves its scan)", got)
+	}
+	if err := os.Remove(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.NewViewFor(context.Background(), []Subject{{Package: "example.com/oneload", Symbol: "F"}}, dir, CodeResult); err != nil {
+		t.Fatal(err)
+	}
+	if logged, err := os.ReadFile(logPath); !os.IsNotExist(err) {
+		t.Fatalf("warm view construction drove %d typed package loads (read error %v), want none", strings.Count(string(logged), "typed-load"), err)
 	}
 }
 

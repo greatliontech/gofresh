@@ -516,9 +516,10 @@ func WithBuildInputs(inputs ...string) Option {
 // operation: Phase is "observe" for a view observation pass, "runtime"
 // for each runtime-input observation pass (a check's window performs
 // two), "list" for a package's dependency listing, "typecheck" for a
-// typed load (the view's shared load or a dynamic-state miss load; Total
-// is its pattern count), "load" for a package program load, "hash" for a
-// package's closure fold, "prove" for a package's observability batch
+// typed load (the view's shared load or a dynamic-state miss load, Total
+// its pattern count; or a package's own testing-effect scan load when
+// that memo is cold and no shared load covers the package), "load" for
+// a package program load, "hash" for a package's closure fold, "prove" for a package's observability batch
 // (one event per attribution slice, Index/Total the slice position),
 // "served" once per operation per memo class that stood in for a step —
 // Served names the class (an observability proof, an effect scan, a

@@ -97,14 +97,24 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 	if loads != 0 {
 		t.Fatalf("the warm view paid %d typed loads", loads)
 	}
-	served := 0
+	served, testingServed, typechecks := 0, 0, 0
 	for _, e := range events {
-		if e.Phase == "served" && e.Served == "scan" && e.Index == 1 {
+		switch {
+		case e.Phase == "served" && e.Served == "scan" && e.Index == 1:
 			served++
+		case e.Phase == "served" && e.Served == "testing scan" && e.Index == 1:
+			testingServed++
+		case e.Phase == "typecheck":
+			typechecks++
 		}
 	}
 	if served != 1 {
 		t.Fatalf("scan served summaries = %d, want one for the view package: %+v", served, events)
+	}
+	// The pass's memo scope arms the testing-effect scan memo too: the
+	// warm fold serves it and performs no typed load of its own.
+	if testingServed != 1 || typechecks != 0 {
+		t.Fatalf("testing-scan served summaries = %d, typecheck events = %d; want 1 and 0: %+v", testingServed, typechecks, events)
 	}
 	if got := scanOutputs(t, warm, scanMemoSubjects); !reflect.DeepEqual(got, want) {
 		t.Fatalf("served scan differs from the cold one:\n got %v\nwant %v", got, want)
