@@ -255,7 +255,7 @@ verdict, and records the measured wall against the audit's baseline.
       invariants. Release; 155–157 bump. Measurement: the pipeline-
       audit baseline (two observations per view; 3m42s proof) re-
       measured at close.
-- [ ] 155. stipulator: the prepared policy capture, the CLI reporter,
+- [x] 155. stipulator: the prepared policy capture, the CLI reporter,
       and unit persistence (pipeline-audit stipulator.md §8's seam).
       One `capturePolicy` at the top of every witness-consuming
       operation carrying the validated policy (the four static checks
@@ -429,7 +429,7 @@ verdict, and records the measured wall against the audit's baseline.
       gap-covered-unknown-id-at-declare); the bldc batch's nine
       surviving docs retargeted onto 141-145 (stipulator 62fc1a7);
       dispositions in the commit records.
-- [ ] 141. (converged 2026-09-02 — three review rounds, fourteen
+- [x] 141. (converged 2026-09-02 — three review rounds, fourteen
       probes killed, package suites green; committed with its
       self-host verdict DEFERRED to chunk 155's close under the
       replan's standing rule; the checkbox closes there)
