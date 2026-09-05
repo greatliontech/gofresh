@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/greatliontech/gofresh/guard"
 )
 
 // Bracket is an observation bracket (REQ-inputs-value-binding): a fingerprint
@@ -43,7 +45,7 @@ type Bracket struct {
 // walk — every digested entry's slash-form offset — retained so observation
 // ingest can decide whether an observed identity existed before the run
 // (the run-ephemera classification); nil for a root whose capture ran no
-// walk (a file, an absent object, an absolute root).
+// walk (a file, an absent object).
 type bracketRoot struct {
 	id      pathID
 	digest  string
@@ -92,13 +94,14 @@ func WithBracketExcludedPaths(patterns ...string) BracketOption {
 // Each root is a module-relative or clean absolute path whose object is a
 // regular file, a directory tree, or absent; it is fingerprinted with the
 // hashing semantics its materialized object would receive as an observed
-// identity of its kind, and an absent root fingerprints as absent, so an input
+// identity of its kind — a directory root, absolute or module-relative,
+// walks its tree — and an absent root fingerprints as absent, so an input
 // created, deleted, rewritten, or retyped under a root during the span moves
 // the bracket (REQ-inputs-bracket-coverage). A root those semantics refuse to
-// hash — an external directory, an unreadable object — makes the bracket
-// unverifiable, carrying the refusing reason, rather than silently narrowing
-// coverage. Declaring a root is the caller's assertion that the surface it
-// names was mutation-free for the span, with the same soundness responsibility
+// hash — an unreadable object — makes the bracket unverifiable, carrying the
+// refusing reason, rather than silently narrowing coverage. Declaring a root
+// is the caller's assertion that the surface it names was mutation-free for
+// the span, with the same soundness responsibility
 // as an exclusion.
 func CaptureBracket(moduleDir string, roots []string, opts ...BracketOption) (Bracket, error) {
 	return CaptureBracketContext(context.Background(), moduleDir, roots, opts...)
@@ -330,6 +333,12 @@ func bracketRootID(root string) (pathID, error) {
 		if volatileOSPath(filepath.Clean(root)) {
 			return pathID{}, fmt.Errorf("runtimeinputs: bracket root %q lies under a volatile OS root; nothing over it revalidates", root)
 		}
+		// The dual: a directory root ABOVE a volatile OS root would walk
+		// it, and the walk can never hold still; the filesystem root
+		// contains every such root and everything else besides.
+		if reason := containsVolatileOSRoot(filepath.Clean(root)); reason != "" {
+			return pathID{}, fmt.Errorf("runtimeinputs: bracket root %q %s; nothing over it revalidates", root, reason)
+		}
 		return pathID{Kind: pathAbs, Path: filepath.Clean(root)}, nil
 	}
 	clean := path.Clean(filepath.ToSlash(root))
@@ -337,6 +346,20 @@ func bracketRootID(root string) (pathID, error) {
 		return pathID{}, fmt.Errorf("runtimeinputs: bracket root escapes module: %q", root)
 	}
 	return pathID{Kind: pathRel, Path: clean}, nil
+}
+
+// containsVolatileOSRoot names the volatile OS root a directory path
+// contains (or the filesystem root itself); empty when it contains none.
+func containsVolatileOSRoot(clean string) string {
+	if clean == string(filepath.Separator) {
+		return "is the filesystem root"
+	}
+	for _, volatile := range guard.VolatileOSRoots {
+		if underPath(volatile, clean) {
+			return "contains the volatile OS root " + volatile
+		}
+	}
+	return ""
 }
 
 type bracketCapture struct {
@@ -406,15 +429,16 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, ex
 }
 
 // bracketSkip filters a root's directory walk by exclusion identity: an entry
-// at slash-form rel within the walk carries the identity extending the root's,
-// matched with REQ-inputs-exclusions semantics. Only module-relative roots
-// walk directories, so absolute roots need no filter.
+// at slash-form rel within the walk carries the identity extending the root's
+// (walkIdentity, the same identity coverage judges), matched with
+// REQ-inputs-exclusions semantics — so an excluded subtree leaves the
+// fingerprint and the coverage alike under a root of either kind.
 func bracketSkip(root pathID, exclusions []pathID) func(rel string) bool {
-	if root.Kind != pathRel || len(exclusions) == 0 {
+	if len(exclusions) == 0 {
 		return nil
 	}
 	return func(rel string) bool {
-		return excludesIdentity(exclusions, pathID{Kind: pathRel, Path: path.Join(root.Path, rel)})
+		return excludesIdentity(exclusions, walkIdentity(root, rel))
 	}
 }
 
@@ -695,9 +719,10 @@ type ephemeraRoot struct {
 // ephemera builds the scratch-namespace admission view. A nil or
 // capture-unverifiable bracket admits nothing, exactly as it declares no
 // stat roots, and no declared namespace admits nothing; absolute roots
-// are outside the admission — an absolute directory root already makes
-// the bracket unverifiable, and the rare file-shaped declarations stay
-// observed, the safe direction.
+// are outside the admission — a scratch namespace is declared
+// module-relative (REQ-inputs-scratch-namespace), so nothing under an
+// absolute root can match one, and its reads stay observed, the safe
+// direction.
 func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
 	e := bracketEphemera{}
 	if b == nil || b.reason != "" || len(namespaces) == 0 {

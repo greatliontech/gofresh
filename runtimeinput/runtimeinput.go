@@ -1908,8 +1908,11 @@ var currentMachineFacts = guard.CurrentMachineFacts
 // manifest entries bind an external directory's existence
 // (REQ-inputs-external-dir-existence), while a value-binding bracket
 // root must fingerprint content — an existence-bound root would hold
-// still while everything beneath it churns — so bracket hashing keeps
-// the refusal.
+// still while everything beneath it churns — so a bracket's absolute
+// directory root walks its tree exactly as a module-relative one does
+// (REQ-inputs-bracket-coverage): declaring it is the caller's
+// mutation-free assertion over the whole tree, an external replace
+// module as one surface.
 func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
@@ -1948,6 +1951,26 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
 			return true, "external runtime input target: " + p, nil
 		}
+	} else if info.IsDir() && !existenceBindsExternalDirs {
+		// An absolute directory bracket root walks its resolved
+		// position: the walk lstats its root, so an unresolved link
+		// would hash the link itself while coverage reads the tree
+		// beneath its target (REQ-inputs-value-binding's full-chain
+		// rule for absolute roots). The volatile-OS refusal the
+		// declaration passed lexically is re-judged over the target — a
+		// link into a volatile tree walks nothing.
+		if target, err = filepath.EvalSymlinks(p); err != nil {
+			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			return true, "unhashable runtime input: " + p, nil
+		}
+		if volatileOSPath(target) {
+			fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			return true, "bracket root resolves into a volatile OS root: " + p, nil
+		}
+		if reason := containsVolatileOSRoot(target); reason != "" {
+			fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			return true, "bracket root resolves to a tree that " + reason + ": " + p, nil
+		}
 	}
 	mode := info.Mode()
 	switch {
@@ -1960,7 +1983,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		}
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
-	case info.IsDir() && id.Kind == pathRel:
+	case info.IsDir() && (id.Kind == pathRel || !existenceBindsExternalDirs):
 		sum, unv, reason, err := dirHashFiltered(ctx, target, skip, visit, metadata)
 		if err != nil {
 			return false, "", err
@@ -1968,20 +1991,16 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		fprintf(h, "path %s %s dir %x\n", id.Kind, id.Path, sum)
 		return unv, reason, nil
 	case info.IsDir():
-		// An absolute external directory binds existence alone:
-		// ancestor stats from path-creation machinery consume only
-		// "exists as a directory"; listing and metadata dependence
-		// beyond that are outside the admitted observation set.
-		// Existing external dirs never mint identities — classifyPath
-		// refuses them at parse time — so entries reaching this arm are
-		// stat-admitted or since-materialized within the ingest's own
-		// classify-to-digest window, the clause's accepted residual
-		// (REQ-inputs-external-dir-existence). Bracket roots never
-		// existence-bind — see the parameter.
-		if !existenceBindsExternalDirs {
-			fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-			return true, "external directory input: " + p, nil
-		}
+		// An absolute external directory binds existence alone as a
+		// manifest entry: ancestor stats from path-creation machinery
+		// consume only "exists as a directory"; listing and metadata
+		// dependence beyond that are outside the admitted observation
+		// set. Existing external dirs never mint identities —
+		// classifyPath refuses them at parse time — so entries reaching
+		// this arm are stat-admitted or since-materialized within the
+		// ingest's own classify-to-digest window, the clause's accepted
+		// residual (REQ-inputs-external-dir-existence). A bracket root
+		// took the walk above.
 		fprintf(h, "path %s %s direxists\n", id.Kind, id.Path)
 		return false, "", nil
 	default:

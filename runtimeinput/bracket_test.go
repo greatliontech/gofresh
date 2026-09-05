@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/greatliontech/gofresh/guard"
 )
 
 // bracketTree builds a module tree with file, directory, symlink, and absent
@@ -292,37 +294,182 @@ func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) 
 
 // TestBracketRootRefusedByHashingSemanticsIsUnverifiable pins the
 // REQ-inputs-bracket-coverage refusal clause: a root the manifest hashing
-// semantics refuse — an external directory, or a module-relative root
-// resolving outside the module — makes the bracket unverifiable with the
-// refusing reason rather than silently narrowing coverage, and revalidation
-// reports that reason, never unchanged.
+// semantics refuse — a module-relative root resolving outside the module —
+// makes the bracket unverifiable with the refusing reason rather than
+// silently narrowing coverage, and revalidation reports that reason, never
+// unchanged.
 func TestBracketRootRefusedByHashingSemanticsIsUnverifiable(t *testing.T) {
 	moduleDir := bracketTree(t)
 	externalDir := t.TempDir()
-	bracket, err := CaptureBracket(moduleDir, []string{"data", externalDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bracket.reason == "" || !strings.Contains(bracket.reason, "external directory input") {
-		t.Fatalf("external directory root reason = %q", bracket.reason)
-	}
-	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if unchanged || reason != bracket.reason {
-		t.Fatalf("unverifiable bracket revalidate = %t %q", unchanged, reason)
-	}
-
 	if err := os.Symlink(externalDir, filepath.Join(moduleDir, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	escaped, err := CaptureBracket(moduleDir, []string{"escape"})
+	escaped, err := CaptureBracket(moduleDir, []string{"data", "escape"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if escaped.reason == "" || !strings.Contains(escaped.reason, "external directory input") {
 		t.Fatalf("escaping symlink root reason = %q", escaped.reason)
+	}
+	unchanged, reason, err := escaped.revalidate(context.Background(), moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged || reason != escaped.reason {
+		t.Fatalf("unverifiable bracket revalidate = %t %q", unchanged, reason)
+	}
+}
+
+// TestAbsoluteDirectoryRootBindsItsTree pins REQ-inputs-bracket-coverage's
+// directory clause for an absolute root: an external directory declared as
+// a root — a replace module outside the repository, one surface — walks its
+// tree, so a file rewritten, created, or deleted under it during the span
+// moves the bracket naming that root, an unchanged tree revalidates
+// unchanged, and its walk's membership serves the run-ephemera
+// classification exactly as a module-relative root's does.
+func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
+	moduleDir := bracketTree(t)
+	externalDir := filepath.Join(t.TempDir(), "replace")
+	if err := os.MkdirAll(filepath.Join(externalDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixed := filepath.Join(externalDir, "sub", "fixed.go")
+	if err := os.WriteFile(fixed, []byte("package sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bracket, err := CaptureBracket(moduleDir, []string{"data", externalDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bracket.reason != "" {
+		t.Fatalf("absolute directory root refused: %q", bracket.reason)
+	}
+	if unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+		t.Fatalf("unchanged external tree revalidated as moved: %t %q %v", unchanged, reason, err)
+	}
+	var external *bracketRoot
+	for i := range bracket.roots {
+		if bracket.roots[i].id.Kind == pathAbs {
+			external = &bracket.roots[i]
+		}
+	}
+	if external == nil || !external.members["sub/fixed.go"] {
+		t.Fatalf("absolute root walk recorded no membership: %+v", external)
+	}
+	if err := os.WriteFile(fixed, []byte("package sub // edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged || !strings.Contains(reason, externalDir) {
+		t.Fatalf("rewrite under the absolute root: unchanged=%t reason=%q, want moved naming the root", unchanged, reason)
+	}
+	recaptured, err := CaptureBracket(moduleDir, []string{"data", externalDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(externalDir, "new.go"), []byte("package replace\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, _, err := recaptured.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+		t.Fatalf("a file created under the absolute root did not move the bracket: %t %v", unchanged, err)
+	}
+}
+
+// TestAbsoluteDirectoryRootWalksItsResolvedTree pins REQ-inputs-value-binding's
+// full-chain rule for an absolute directory root: a root whose final
+// component is a symlink fingerprints the tree beneath its target, never
+// the link, so a mid-span rewrite of a file the producer read through the
+// link moves the bracket; and REQ-inputs-exclusions holds inside the walk —
+// an excluded subtree under an absolute root leaves the fingerprint as it
+// leaves coverage.
+func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
+	moduleDir := bracketTree(t)
+	real := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixed := filepath.Join(real, "sub", "f.go")
+	if err := os.WriteFile(fixed, []byte("package sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	bracket, err := CaptureBracket(moduleDir, []string{"data", link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bracket.reason != "" {
+		t.Fatalf("symlinked absolute root refused: %q", bracket.reason)
+	}
+	if err := os.WriteFile(fixed, []byte("package sub // edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+		t.Fatalf("a rewrite beneath the link's target did not move the bracket: %t %q %v", unchanged, reason, err)
+	}
+
+	volatile := filepath.Join(real, "vol")
+	if err := os.MkdirAll(volatile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := CaptureBracket(moduleDir, []string{"data", real}, WithBracketExcludedPaths(filepath.Join(real, "vol")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(volatile, "churn"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+		t.Fatalf("churn under an excluded subtree of an absolute root moved the bracket: %t %q %v", unchanged, reason, err)
+	}
+	// The exclusion removes its subtree alone: the rest of the absolute
+	// tree stays fingerprinted.
+	if err := os.WriteFile(fixed, []byte("package sub // edited again\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+		t.Fatalf("a rewrite outside the excluded subtree did not move the bracket: %t %q %v", unchanged, reason, err)
+	}
+}
+
+// An absolute directory root that contains a volatile OS root would walk a
+// tree that never holds still: refused at declaration, the dual of a root
+// lying under one (REQ-inputs-volatile-os-roots).
+func TestAbsoluteRootContainingVolatileOSRootIsRefused(t *testing.T) {
+	if len(guard.VolatileOSRoots) == 0 {
+		t.Skip("no volatile OS roots on this platform")
+	}
+	moduleDir := bracketTree(t)
+	if _, err := CaptureBracket(moduleDir, []string{"data", filepath.Dir(guard.VolatileOSRoots[0])}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
+		t.Fatalf("root above a volatile OS root: %v; want the refusal", err)
+	}
+	// A link that resolves into a volatile tree passes the lexical
+	// refusal and is refused at capture over its target: the bracket
+	// is unverifiable, nothing is walked.
+	link := filepath.Join(t.TempDir(), "into-volatile")
+	if err := os.Symlink(guard.VolatileOSRoots[0], link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	bracket, err := CaptureBracket(moduleDir, []string{"data", link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bracket.reason, "resolves into a volatile OS root") {
+		t.Fatalf("link into a volatile tree: reason %q, want the resolved refusal", bracket.reason)
+	}
+}
+
+// The filesystem root is refused on every platform, volatile roots or not:
+// nothing walks the whole filesystem.
+func TestFilesystemRootIsRefusedAsBracketRoot(t *testing.T) {
+	moduleDir := bracketTree(t)
+	if _, err := CaptureBracket(moduleDir, []string{"data", string(filepath.Separator)}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
+		t.Fatalf("filesystem root: %v; want the refusal", err)
 	}
 }
 

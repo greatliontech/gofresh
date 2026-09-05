@@ -460,8 +460,12 @@ type Engine struct {
 	// runtime-input revalidation computes environment values from it
 	// instead of env, so checks stay coherent with recorded evidence when
 	// the two environments diverge (WithProducerEnv).
-	producerEnv        []string
-	producerEnvSet     bool
+	producerEnv    []string
+	producerEnvSet bool
+	// evidenceRoot is the root a subject's runtime-input evidence is
+	// anchored at: relative identities are re-hashed under it. Empty
+	// means the module directory (WithEvidenceRoot).
+	evidenceRoot       string
 	analysisBudget     time.Duration
 	progress           func(Progress)
 	deferredCheckClose bool
@@ -492,6 +496,10 @@ var viewTestHooks struct {
 	// dynamicStateMissLoad observes the batched typed load of
 	// version-pinned packages whose dynamic-state facts missed the memo.
 	dynamicStateMissLoad func(patterns []string)
+	// guardDir observes the directory each guard observation captures
+	// in — tests pin that an evidence root moves no guard or load off
+	// the module directory (REQ-inputs-evidence-root).
+	guardDir func(dir string)
 	// typedLoad observes every typed package load an observation pass
 	// performs; runtimeWindow every runtime-input window a check opens;
 	// maximalBatch every maximal-closure fold — tests pin that a
@@ -713,6 +721,29 @@ func WithDir(dir string) Option {
 	return func(e *Engine) { e.dir = dir }
 }
 
+// WithEvidenceRoot anchors runtime-input evidence at dir: a subject's
+// recorded relative identities are re-hashed under dir instead of the
+// module directory, matching a producer that frames its observations at a
+// tree root above the module (a workspace member whose oracles read
+// root-module files declared as one surface for every member). dir must
+// contain the module directory — New refuses otherwise, since a relative
+// identity recorded under a root that does not contain the module could
+// not name the module's own inputs. Unset, the module directory is the
+// root (REQ-inputs-evidence-root). Package loads, Go commands, closure
+// analysis, and guards stay at the module directory.
+func WithEvidenceRoot(dir string) Option {
+	return func(e *Engine) { e.evidenceRoot = dir }
+}
+
+// evidenceRootFor is the root a view re-hashes runtime-input identities
+// under: the declared evidence root, else the view's module directory.
+func (e *Engine) evidenceRootFor(moduleDir string) string {
+	if e.evidenceRoot != "" {
+		return e.evidenceRoot
+	}
+	return moduleDir
+}
+
 // WithEnv supplies the complete process environment used by every package load,
 // Go command, source analysis, and guard observation. It has exec.Cmd.Env
 // semantics rather than patch semantics. New rejects malformed or duplicate
@@ -840,6 +871,16 @@ func New(opts ...Option) (*Engine, error) {
 		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
 	}
 	e.dir = root
+	if e.evidenceRoot != "" {
+		evidenceRoot, err := canonicalDir(e.evidenceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
+		}
+		if rel, err := filepath.Rel(evidenceRoot, e.dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("gofresh: evidence root %s does not contain the module directory %s; relative identities recorded under it could not name the module's inputs", evidenceRoot, e.dir)
+		}
+		e.evidenceRoot = evidenceRoot
+	}
 	for _, input := range e.buildInputs {
 		if strings.HasPrefix(strings.TrimSpace(input), "-") {
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)

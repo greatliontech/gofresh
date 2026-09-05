@@ -354,8 +354,10 @@ func TestExcludedIdentityObservedIsUncovered(t *testing.T) {
 // capture-refusal reason, while the observation still constructs.
 func TestBracketCaptureRefusalSealsObservationUnverifiable(t *testing.T) {
 	moduleDir := bindingModule(t)
-	externalDir := t.TempDir()
-	bracket := testBracket(t, moduleDir, "data", externalDir)
+	if err := os.Symlink(t.TempDir(), filepath.Join(moduleDir, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	bracket := testBracket(t, moduleDir, "data", "escape")
 	observation, err := FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)

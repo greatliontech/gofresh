@@ -200,6 +200,22 @@ persisted evidence is keyed by what was measured, never by the checkout root
 that measured it. The two conversions are inverses on states: converting to
 relative and back under the same module reproduces the absolute state.
 
+**REQ-inputs-evidence-root** (behavior): An engine MUST re-hash a subject's recorded
+relative runtime-input identities under the root its producer anchored the
+observation at — an evidence root the caller declares, which contains the module
+directory and defaults to it — so a producer that frames a workspace member's
+observations at the repository root above the member records a root-module input
+the member's process read as one tree-relative identity and reads it back under the
+same base, never under the member module; an engine declared an evidence root that
+does not contain its module directory is refused at construction, since a relative
+identity recorded under such a root could not name the module's own inputs. Declaring
+the root is the caller's assertion that it is the root the evidence was framed at —
+the manifest carries no frame identity (REQ-inputs-relative-identities keeps it
+checkout-free), so a wrong containing root is the caller's soundness responsibility
+exactly as an exclusion is: it normally stales, and binds falsely only where a
+same-named file of identical content sits under it. Package loading, Go commands,
+closure analysis, and guard observation stay at the module directory.
+
 **REQ-inputs-adoption** (behavior): A caller holding a persisted encoded manifest
 MUST be able to re-admit it as a completed observation under an attributable
 process identity of the caller's choosing. Adoption validates the manifest
@@ -331,8 +347,11 @@ construction.
 
 **REQ-inputs-bracket-coverage** (invariant): A declared root MUST be fingerprinted
 with the hashing semantics its materialized object would receive as an observed
-identity of its kind; a root those semantics refuse to hash makes the bracket unverifiable
-rather than silently narrowing coverage. A declared root that is absent
+identity of its kind — a directory root walks its tree whether declared
+module-relative or absolute, an external replace module being one declared surface
+the caller asserts mutation-free rather than an enumeration of its files; a root
+those semantics refuse to hash makes the bracket unverifiable rather than silently
+narrowing coverage. A declared root that is absent
 fingerprints as absent, so an input created, deleted, rewritten, or retyped under a
 root during the span moves the bracket. Coverage is per declared root, never
 inferred: an observed identity resolving under no root is uncovered however near a

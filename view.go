@@ -344,7 +344,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// reads those keys before execution, so a moved delivered width
 	// stales the evidence instead of hiding behind an analysis-env
 	// stand-in.
-	guards, err := guard.CaptureForContextEnvSnapshotRuntime(ctx, moduleDir, e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
+	guards, err := guard.CaptureForContextEnvSnapshotRuntime(ctx, observedGuardDir(moduleDir), e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -947,15 +947,15 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 		if current == nil {
 			current = runtimeinput.CurrentContext
 			if v.engine != nil {
-				current = func(ctx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
-					return runtimeinput.CurrentEnvContext(ctx, encoded, moduleDir, v.engine.evidenceEnv())
+				current = func(ctx context.Context, encoded, root string) (runtimeinput.State, error) {
+					return runtimeinput.CurrentEnvContext(ctx, encoded, root, v.engine.evidenceEnv())
 				}
 			}
 		}
 		if cached, ok := shared[recorded.RuntimeInputs]; ok {
 			return cached, nil
 		}
-		if rt, err = current(ctx, recorded.RuntimeInputs, v.moduleDir); err != nil {
+		if rt, err = current(ctx, recorded.RuntimeInputs, v.evidenceRoot()); err != nil {
 			if contextErr := ctx.Err(); contextErr != nil {
 				return runtimeinput.State{}, contextErr
 			}
@@ -1370,7 +1370,26 @@ func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string,
 	if v.engine == nil {
 		return nil, nil
 	}
-	return runtimeinput.MovedInputsContext(ctx, encoded, v.moduleDir, v.engine.evidenceEnv())
+	return runtimeinput.MovedInputsContext(ctx, encoded, v.evidenceRoot(), v.engine.evidenceEnv())
+}
+
+// observedGuardDir is the directory a guard observation captures in,
+// passed through the test hook that pins it to the module directory.
+func observedGuardDir(dir string) string {
+	if viewTestHooks.guardDir != nil {
+		viewTestHooks.guardDir(dir)
+	}
+	return dir
+}
+
+// evidenceRoot is the root this view re-hashes runtime-input identities
+// under: the engine's declared evidence root, else the view's module
+// directory (an engine-less view has only the latter).
+func (v *View) evidenceRoot() string {
+	if v.engine == nil {
+		return v.moduleDir
+	}
+	return v.engine.evidenceRootFor(v.moduleDir)
 }
 
 // withMovedInputs names the movers behind a stale runtime-inputs verdict
@@ -1419,9 +1438,9 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 		if !evaluated {
 			var err error
 			if v.runtimeCurrent != nil {
-				observed, err = v.runtimeCurrent(ctx, state.Manifest, v.moduleDir)
+				observed, err = v.runtimeCurrent(ctx, state.Manifest, v.evidenceRoot())
 			} else {
-				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.moduleDir, v.engine.evidenceEnv())
+				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.evidenceRoot(), v.engine.evidenceEnv())
 			}
 			if err != nil {
 				return err

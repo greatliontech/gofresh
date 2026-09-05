@@ -1814,6 +1814,116 @@ func TestBatchMarksRuntimeInputDriftStale(t *testing.T) {
 	}
 }
 
+// Runtime-input revalidation re-hashes relative identities under the
+// root the producer anchored the observation at when the caller declared
+// one (WithEvidenceRoot): a workspace member's engine reads a manifest
+// framed at the workspace root — a root-module fixture the member's
+// oracle read, recorded as one tree-relative identity — valid while the
+// fixture holds and stale when it moves, while an engine without the
+// declaration resolves the same identity under the member and reads it
+// stale; a root that does not contain the module directory is refused
+// at construction (REQ-inputs-evidence-root).
+func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a workspace fixture and runs the engine over it")
+	}
+	root := t.TempDir()
+	member := filepath.Join(root, "member")
+	if err := os.MkdirAll(member, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.work":          "go 1.26\n\nuse ./member\n",
+		"member/go.mod":    "module example.com/member\n\ngo 1.26\n",
+		"member/member.go": "package member\n\nfunc F() {}\n",
+		"shared/fixture":   "before",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The producer frames at the workspace root: the member's process
+	// reads the root fixture cwd-relatively, recorded tree-relative.
+	state, err := runtimeinput.FromTestLog([]byte("open ../shared/fixture\n"), root, member, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, root, "member", "shared/fixture")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := runtimeinput.Paths(state.Manifest, root)
+	if err != nil || len(paths) != 1 || paths[0] != filepath.Join(root, "shared", "fixture") {
+		t.Fatalf("recorded identities = %v, %v; want the fixture tree-relative under the root", paths, err)
+	}
+	current := func(opts ...Option) runtimeinput.State {
+		t.Helper()
+		e, err := New(append([]Option{WithDir(member), WithEnv(os.Environ()...)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := &View{moduleDir: member, engine: e}
+		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if got := current(WithEvidenceRoot(root)); !got.OK || got.Digest != state.Digest {
+		t.Fatalf("evidence-root recompute = %+v, want the recorded digest %s", got, state.Digest)
+	}
+	if got := current(); got.Digest == state.Digest {
+		t.Fatalf("member-rooted recompute reproduced the digest %s; the identity should have resolved under the member and missed", got.Digest)
+	}
+	if err := os.WriteFile(filepath.Join(root, "shared", "fixture"), []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := current(WithEvidenceRoot(root)); got.Digest == state.Digest {
+		t.Fatalf("a moved root fixture kept the recorded digest under the evidence root")
+	}
+	if _, err := New(WithDir(member), WithEnv(os.Environ()...), WithEvidenceRoot(t.TempDir())); err == nil || !strings.Contains(err.Error(), "does not contain the module directory") {
+		t.Fatalf("an evidence root outside the module = %v; want the containment refusal", err)
+	}
+	// Loads, closure analysis, and guard observation stay at the module
+	// directory: every guard observation an evidence-rooted engine
+	// performs captures in the member, and its fingerprint is the
+	// module-rooted engine's, field for field.
+	subject := Subject{Package: "example.com/member", Symbol: "F"}
+	var guardDirs []string
+	viewTestHooks.guardDir = func(dir string) { guardDirs = append(guardDirs, dir) }
+	defer func() { viewTestHooks.guardDir = nil }()
+	capture := func(opts ...Option) Fingerprint {
+		t.Helper()
+		e, err := New(append([]Option{WithDir(member), WithEnv(os.Environ()...)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, err := e.CaptureFor(context.Background(), subject, member, CodeResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fp
+	}
+	plain := capture()
+	guardDirs = nil
+	rooted := capture(WithEvidenceRoot(root))
+	if plain != rooted {
+		t.Fatalf("the evidence root moved the captured fingerprint:\n plain  %+v\n rooted %+v", plain, rooted)
+	}
+	resolvedMember, err := filepath.EvalSymlinks(member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(guardDirs) == 0 {
+		t.Fatal("no guard observation recorded under the evidence root")
+	}
+	for _, dir := range guardDirs {
+		if dir != resolvedMember {
+			t.Fatalf("a guard observation under the evidence root captured in %s, want the module directory %s", dir, resolvedMember)
+		}
+	}
+}
+
 // Runtime-input revalidation computes environment values from the
 // producer processes' environment when the caller declared one
 // (WithProducerEnv): a record digested under the env the producing
