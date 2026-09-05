@@ -289,7 +289,7 @@ verdict, and records the measured wall against the audit's baseline.
       warm baselines re-measured.
       At the bump to v0.94.0: the fast-tier gate pin collapses to
       gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
-- [ ] 156. gomutant: the per-verb prepare stage and the reporter for
+- [x] 156. gomutant: the per-verb prepare stage and the reporter for
       every verb (pipeline-audit gomutant.md §8's seam: `--plan`
       made whole). Prepare: the campaign lock at flag parse, `budget`
       and `runs` and the attestation reason and the retarget pair and
