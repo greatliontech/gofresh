@@ -459,8 +459,11 @@ func TestAbsoluteRootContainingVolatileOSRootIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(bracket.reason, "resolves into a volatile OS root") {
-		t.Fatalf("link into a volatile tree: reason %q, want the resolved refusal", bracket.reason)
+	if !strings.Contains(bracket.Reason(), "resolves into a volatile OS root") {
+		t.Fatalf("link into a volatile tree: reason %q, want the resolved refusal", bracket.Reason())
+	}
+	if clean, err := CaptureBracket(moduleDir, []string{"data"}); err != nil || clean.Reason() != "" {
+		t.Fatalf("a fingerprinted bracket reports a reason: %q, %v", clean.Reason(), err)
 	}
 }
 

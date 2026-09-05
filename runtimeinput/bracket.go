@@ -152,6 +152,13 @@ func CaptureBracketContext(ctx context.Context, moduleDir string, roots []string
 	return b, nil
 }
 
+// Reason reports why the bracket is unverifiable — the first declared
+// root its hashing semantics refused — empty exactly when every root
+// fingerprinted. A producer preflighting its declared roots before a
+// campaign reads it to refuse at declaration what every spawn's
+// observation would otherwise seal on (REQ-inputs-bracket-coverage).
+func (b Bracket) Reason() string { return b.reason }
+
 // checkSealed refuses a bracket that capture did not produce: a zero value or
 // a copied-and-altered one fails its seal rather than reading as unchanged
 // (REQ-inputs-value-binding).
