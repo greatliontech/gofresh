@@ -586,7 +586,11 @@ verdict, and records the measured wall against the audit's baseline.
       work on the v11 document — splitting it from the cheaper filter
       is a triage-gate call at 139.1. Measurement surface: no new pew
       arms; whole-store pew status at close re-judges the findings
-      reader arms if the records shape moves.
+      reader arms if the records shape moves. FOLDS:
+      gomutant docs/issues/legacy-overlay-read-deletes-attestations.md
+      — preserve unsupported older overlays and their authored
+      equivalence reasoning while refusing to serve them; doc deletes
+      at close.
 - [ ] 131. stipulator: one identity walk, two windows (stipulator
       docs/issues/identity-walk-two-trackers.md) — attachment and
       extent answer "whose block is this" via two independent reset
@@ -626,7 +630,10 @@ strategy bump.
       computation. FOLDS at this chunk: gofresh
       docs/issues/audit-key-mechanism-consolidation.md (four parallel
       spellings of the audit lookup/refuse mechanism — this is the
-      band's first audited-set change); doc deletes at close.
+      band's first audited-set change) and
+      docs/issues/nodwarf5-toolchain-audit-key-mismatch.md (release,
+      selection, and baked-experiment matching must use the actual
+      audited toolchain identity); docs delete at close.
 - [ ] 120. gofresh: math/big joins the audited-pure set (was SEP 2;
       ~505) — own audit.
 - [ ] 121. gofresh: fixed-argument time construction audited (was SEP

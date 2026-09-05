@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [nodwarf5-toolchain-audit-key-mismatch](nodwarf5-toolchain-audit-key-mismatch.md) | audited release and selection keys use a space where the system nodwarf5 toolchain reports a hyphen; witness admissions refuse | cross-tool train chunk 119 |
 | [compartment-ledger-derivation](compartment-ledger-derivation.md) | the spec does not state that equal compartment hashes entail equal declaration ledgers, which stipulator's content-addressed ledger store now relies on (fail-closed if false) | user decision |
 | [walk-dst-selection-for-audit-key](walk-dst-selection-for-audit-key.md) | the two-axis key landed (chunk 126): dst-tagged analyses refuse admissions loudly; the dst-selection WALK remains — walking it lists dst in the selections axis | with the first judged run over a dst-tagged build selection (tugboat DST-leg campaigns, paused with the tool phase) |
 | [audit-key-mechanism-consolidation](audit-key-mechanism-consolidation.md) | four parallel spellings of the audit lookup/refuse mechanism | folds at train chunk 119 (the band's first audited-set change) |
