@@ -287,8 +287,9 @@ verdict, and records the measured wall against the audit's baseline.
       a purpose or deleted. Close: the deferred chunk-141 self-host
       verdict runs here, once, warm. Measurement: the cold 30m43s /
       warm baselines re-measured.
-      At the bump to v0.94.0: the fast-tier gate pin collapses to
-      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (landed in every consumer; the shared package is
+      github.com/greatliontech/gofresh/shortgates).
 - [x] 156. gomutant: the per-verb prepare stage and the reporter for
       every verb (pipeline-audit gomutant.md §8's seam: `--plan`
       made whole). Prepare: the campaign lock at flag parse, `budget`
@@ -326,9 +327,10 @@ verdict, and records the measured wall against the audit's baseline.
       purpose or deleted. Measurement: `--plan` over
       `testdata/self-host-targets.json` timed before and after; the
       ephemeral probe path's silent stretches re-measured.
-      At the bump to v0.94.0: the fast-tier gate pin collapses to
-      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
-- [ ] 157. pew: the package preparation record, the reporter, and
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (landed in every consumer; the shared package is
+      github.com/greatliontech/gofresh/shortgates).
+- [x] 157. pew: the package preparation record, the reporter, and
       per-arm persistence (pipeline-audit pew.md §8's seam). Prepare:
       one record per package after `go list` carrying the benchmark
       declarations, the validated store destinations (label, path,
@@ -359,8 +361,9 @@ verdict, and records the measured wall against the audit's baseline.
       (a genuine fork: file for the user if so). Measurement:
       whole-store `pew status` wall before and after; no bench arms
       move.
-      At the bump to v0.94.0: the fast-tier gate pin collapses to
-      gofresh's shortgates.Pin (docs/issues/shortgates-pin-shared-home.md).
+      At the bump: the fast-tier gate pin collapses to gofresh's
+      shortgates.Pin (landed in every consumer; the shared package is
+      github.com/greatliontech/gofresh/shortgates).
 ## Band A — verdict integrity (correctness)
 
 
@@ -613,6 +616,10 @@ strategy bump.
       testing.Loop blocks every subject in a benchmark-bearing
       package; decide the class (admit as harness pacing like m.Run,
       or keep with the refusal naming the benchmark) — own audit.
+      Until it lands, pew's serve-proven default serves only
+      empty-bodied benchmarks (every b.N/b.Loop reader is
+      unverifiable): pew docs/issues/serve-proven-blocked-by-
+      benchmark-loop.md lands here.
 - [ ] 119. gofresh: writer-sensitive fmt.Fprint startup
       classification (was SEP 1; ~1,096 in the charter histogram) —
       an init formatting into a provably-local pure sink is value
