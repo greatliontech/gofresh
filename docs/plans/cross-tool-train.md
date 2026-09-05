@@ -468,6 +468,21 @@ verdict, and records the measured wall against the audit's baseline.
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
+- [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
+      reports 2026-09-03; gomutant docs/issues:
+      ephemeral-deletion-probes-strand-imports — an imports fix runs
+      over the mutant before compiling (a probe declares no import
+      intent), the result saying which happened;
+      ephemeral-blind-spots-stated-and-refused — a target file no
+      measured test compiled is a REFUSAL, never a survivor, and the
+      three blind spots enter the ephemeral guidance with the
+      mutate-the-guard's-input workaround beside them;
+      ephemeral-compiler-crash-retry — a compiler signal death retries
+      once or marks "compiler crashed — re-run to confirm";
+      ephemeral-batch-wrapper-undiscoverable — the {"edits": [...]}
+      wrapper named in guidance and refusal, or the bare array
+      accepted). Four docs delete at close. Measurement surface:
+      probe-path diagnostics only — no pew arms, no DST legs.
 - [ ] 146. FOLDED into chunk 156 (Band P, 2026-09-02): the staged
       snapshot's external-input refusal is one instance of the
       prepare-stage invariant 156 lands; the field report's doc rides
