@@ -450,7 +450,7 @@ verdict, and records the measured wall against the audit's baseline.
       move stance stays for example witnesses). Both docs delete at
       close. Measurement surface: verdict/diagnostics only — no pew
       arms, no DST legs.
-- [ ] 138. gomutant: workspace-relative path resolution
+- [x] 138. gomutant: workspace-relative path resolution
       (field-response, consumer reports 2026-09-03; gomutant
       docs/issues/bracket-path-module-relative-in-workspace.md) — a
       relative --bracket-path resolves against the invocation's --dir
