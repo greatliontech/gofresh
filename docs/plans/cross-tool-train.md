@@ -487,7 +487,7 @@ verdict, and records the measured wall against the audit's baseline.
       snapshot's external-input refusal is one instance of the
       prepare-stage invariant 156 lands; the field report's doc rides
       156's close.
-- [ ] 115. pew: verdict-surface batch (pew docs/issues:
+- [x] 115. pew: verdict-surface batch (pew docs/issues:
       gitblob-linked-worktree-object-lookup — pew run fails in linked
       worktrees; ab-worktree-placement-escape — operator escape +
       startup sweep; verdict-ladder-shared-admissibility — the
@@ -496,7 +496,12 @@ verdict, and records the measured wall against the audit's baseline.
       delete at close. RIDES: pew
       docs/issues/repo-level-vouch-source.md — a reviewed vouch file
       beside the store replaces hand-mirrored flag lists; doc deletes
-      at close.
+      at close. Deviations: the gitblob doc (user decision) folded —
+      one option on the open call, no judgment; `--vouch` flags
+      extend the file and never remove (no `--no-vouch`); the
+      residue sweep is ownership-scoped (this repository's, or an
+      empty mint) after review; the vouch-globals and row-decode
+      collapse filed as pew docs/issues/verdict-path-consolidation.md.
 - [ ] 142. stipulator: clause-granular binding claims (bldc report
       2026-09-03; stipulator
       docs/issues/clause-granular-binding-claims.md) — a binding
