@@ -519,7 +519,7 @@ verdict, and records the measured wall against the audit's baseline.
       the witness-selection guard fold
       (witness-selection-guard-masked-by-ineligible-red) landed as
       its own change set.
-- [ ] 143. stipulator: consent provenance (bldc report 2026-09-03;
+- [x] 143. stipulator: consent provenance (bldc report 2026-09-03;
       stipulator docs/issues/content-hash-function-versioning.md) — a
       hash-function move is its own recorded state ("rehash",
       bulk-re-pinnable without editorial consent) or the pin records
@@ -527,7 +527,14 @@ verdict, and records the measured wall against the audit's baseline.
       a re-consent over unchanged text is self-evidently that. RIDES
       docs/issues/pin-req-unchanged-text-wording.md ("text unchanged;
       nothing to re-consent" over "pins current"). Both docs delete
-      at close. Measurement surface: none.
+      at close. Measurement surface: none. Deviations: the second
+      option landed, but VCS-free — a consent-source digest over the
+      consent surface's raw blocks plus the document's link reference
+      labels (the one document-scoped parse input), not a blob hash;
+      rehash is derived from the two pins, never stored; the blanket
+      pin now also judges attestations and refreshes a current
+      record's source pin; the named form's no-op names its reason
+      (text unchanged / no records / attestation stale).
 - [ ] 144. stipulator: CLI query parity (bldc report 2026-09-03;
       stipulator docs/issues/cli-verify-view-path-and-explain.md) —
       CLI verify gains --view/--path and the explain verb lands on
