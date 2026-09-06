@@ -468,7 +468,7 @@ verdict, and records the measured wall against the audit's baseline.
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
-- [ ] 140. gomutant: ephemeral probe integrity (field-response, bldc
+- [x] 140. gomutant: ephemeral probe integrity (field-response, bldc
       reports 2026-09-03; gomutant docs/issues:
       ephemeral-deletion-probes-strand-imports — an imports fix runs
       over the mutant before compiling (a probe declares no import
