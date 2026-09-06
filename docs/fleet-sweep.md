@@ -55,11 +55,13 @@ healthy verdict into a timeout.
   the CI budgets exclude (CI runs build/vet/tests; the sweep runs the
   verdict weekly where the warm witness store lives).
 - **pew store freshness** — whole-store `pew status` per store under
-  the store's standing vouch set (tugboat's audited set lives in its
-  CLAUDE.md and is mirrored in the gatherer — the two point at each
-  other until a repo-level vouch source lands, pew
-  docs/issues/repo-level-vouch-source.md; protodb's store has no
-  assessed set yet and its unverifiable rows are expected).
+  the store's standing vouch set (pew reads it from the `vouches`
+  file at the store's root, one `IMPORT-PATH:VARIABLE` per line;
+  `--vouch` flags only extend that set, so a store whose file is
+  reviewed needs no mirrored flag list — tugboat's set moves into
+  its store's file when that session resumes, and the gatherer's
+  flags stay until it does; protodb's store has no assessed set yet
+  and its unverifiable rows are expected).
   `unverifiable` is a defect class exactly like stale/unrecorded.
   Long row lists are capped in the report and the report SAYS so
   ("showing N of M") — a cap is a visible fact, never a silent one.
