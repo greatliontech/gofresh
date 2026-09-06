@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/render"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -1320,11 +1321,7 @@ func movedIdentitySuffix(captured, current []string, capturedDigests, currentDig
 		return ""
 	}
 	sort.Strings(moved)
-	const show = 3
-	if len(moved) > show {
-		return fmt.Sprintf(" (moved: %s, and %d more)", strings.Join(moved[:show], ", "), len(moved)-show)
-	}
-	return fmt.Sprintf(" (moved: %s)", strings.Join(moved, ", "))
+	return " (moved: " + render.CappedList(moved) + ")"
 }
 
 func differingGuard(a, b guard.Guards) string {
@@ -1352,16 +1349,6 @@ func describeObservability(o closure.Observability) string {
 		return "not observable"
 	}
 	return "not observable: " + o.Reason
-}
-
-// movedSummary renders a bounded mover list for refusal texts: enough to act
-// on, never a wall of paths.
-func movedSummary(movers []string) string {
-	const limit = 3
-	if len(movers) <= limit {
-		return strings.Join(movers, ", ")
-	}
-	return strings.Join(movers[:limit], ", ") + fmt.Sprintf(", and %d more", len(movers)-limit)
 }
 
 // movedInputsForView attributes against the view's own environment, degrading
@@ -1404,7 +1391,7 @@ func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fi
 	if err != nil || len(movers) == 0 {
 		return verdict
 	}
-	verdict.Reason = "runtimeinputs (moved: " + movedSummary(movers) + ")"
+	verdict.Reason = "runtimeinputs (moved: " + render.CappedList(movers) + ")"
 	return verdict
 }
 
@@ -1450,7 +1437,7 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 		if observed != state {
 			detail := ""
 			if movers, moveErr := movedInputsForView(ctx, v, state.Manifest); moveErr == nil && len(movers) > 0 {
-				detail = " (moved: " + movedSummary(movers) + ")"
+				detail = " (moved: " + render.CappedList(movers) + ")"
 			}
 			return fmt.Errorf("%w: runtime inputs for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, detail)
 		}

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/render"
 )
 
 // bracketTree builds a module tree with file, directory, symlink, and absent
@@ -716,6 +717,24 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 	if !strings.Contains(reason, "recently touched: b.go") {
 		t.Fatalf("content-edit refusal = %q, want the edited member ranked first", reason)
 	}
+	// The recency list is bounded like every list a refusal carries:
+	// past the cap it names how many more members moved instead of
+	// silently dropping them.
+	moduleDir, root = build(t)
+	for _, name := range []string{"c.go", "d.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package lib\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b = capture(t, moduleDir)
+	for i, name := range []string{"a.go", "b.go", "c.go", "d.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package lib\n\nvar V"+name[:1]+" = "+string(rune('1'+i))+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reason := revalidateReason(t, b, moduleDir); !strings.Contains(reason, ", and 1 more") || strings.Count(reason, ".go (") != render.ListCap {
+		t.Fatalf("four-member content edit = %q, want %d named members and the remainder counted", reason, render.ListCap)
+	}
 
 	moduleDir, root = build(t)
 	b = capture(t, moduleDir)
@@ -747,7 +766,7 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 		}
 	}
 	reason = revalidateReason(t, b, moduleDir)
-	if !strings.Contains(reason, "+2 more") {
+	if !strings.Contains(reason, "and 2 more") {
 		t.Fatalf("capped added list = %q, want the remainder counted", reason)
 	}
 	if !utf8.ValidString(reason) || strings.ContainsAny(reason, "\x00\r\n") {

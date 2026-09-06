@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/render"
 )
 
 // Bracket is an observation bracket (REQ-inputs-value-binding): a fingerprint
@@ -234,7 +235,6 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 // starts from. Attribution is advisory text on an already-decided
 // refusal: stat errors just drop the entry.
 func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string {
-	const limit = 3
 	var added, removed []string
 	for rel := range now.members {
 		if !captured.members[rel] {
@@ -250,10 +250,10 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 	sort.Strings(removed)
 	var parts []string
 	if len(added) > 0 {
-		parts = append(parts, "added: "+cappedList(representableReasonNames(added), limit))
+		parts = append(parts, "added: "+render.CappedList(representableReasonNames(added)))
 	}
 	if len(removed) > 0 {
-		parts = append(parts, "removed: "+cappedList(representableReasonNames(removed), limit))
+		parts = append(parts, "removed: "+render.CappedList(representableReasonNames(removed)))
 	}
 	if len(parts) == 0 {
 		p, err := materializePath(moduleDir, captured.id)
@@ -277,15 +277,12 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 				}
 				return recent[i].rel < recent[j].rel
 			})
-			if len(recent) > limit {
-				recent = recent[:limit]
-			}
 			var names []string
 			for _, t := range recent {
 				names = append(names, representableReasonName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
 			}
 			if len(names) > 0 {
-				parts = append(parts, "recently touched: "+strings.Join(names, ", "))
+				parts = append(parts, "recently touched: "+render.CappedList(names))
 			}
 		}
 	}
@@ -314,13 +311,6 @@ func representableReasonNames(names []string) []string {
 		out[i] = representableReasonName(name)
 	}
 	return out
-}
-
-func cappedList(names []string, limit int) string {
-	if len(names) <= limit {
-		return strings.Join(names, ", ")
-	}
-	return strings.Join(names[:limit], ", ") + fmt.Sprintf(", +%d more", len(names)-limit)
 }
 
 // bracketRootID normalizes one declared root to identity form: a

@@ -95,7 +95,4 @@ func TestDriftRefusalComponents(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "captured observable, now not observable: reaches os.Open") {
 		t.Fatalf("proof drift = %v, want both dispositions named", err)
 	}
-	if got := movedSummary([]string{"a", "b", "c", "d", "e"}); got != "a, b, c, and 2 more" {
-		t.Fatalf("movedSummary = %q", got)
-	}
 }
