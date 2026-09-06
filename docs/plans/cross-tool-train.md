@@ -555,7 +555,7 @@ verdict, and records the measured wall against the audit's baseline.
       the diagnostic and guidance — no new timing hook; a scope now
       narrows the verification summary on both surfaces.
 
-- [ ] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
+- [x] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
       stipulator docs/issues/refines-multiple-targets.md — refines
       admits a target list, canonical form ordering it, impact and
       coverage reading every edge — +
@@ -563,6 +563,19 @@ verdict, and records the measured wall against the audit's baseline.
       removed-source supersede is one step: a dispose mode or compile
       admitting a supersedes edge into the tombstones-or-pending
       set). Both docs delete at close. Measurement surface: none.
+      Deviations: both asks already held in the code (the list form
+      compiled; the one-step supersede ran on the mid-disposition
+      corpus) — the gap was discoverability, and under review the
+      disposition's unit proved wrong for chains: it now follows the
+      declared edges (BREAKING precondition relaxation, retarget per
+      declaring successor), and the compile refusal names the one
+      step once per component as a `remedy` diagnostic class rendered
+      by every refusing surface except the counterfactual ones (the
+      tombstone overlay, the historical HEAD corpus); coverage reads
+      no edges and no spec clause asks it to (plan-only wording);
+      "tombstones-or-pending set" names no mechanism — the overlay is
+      it. Filed: stipulator docs/issues/remedy-spellings-one-source.md
+      (user decision).
 - [ ] 136. cross-tool: retroactive automation-and-consolidation audit
       (user directive 2026-08-29; the automation-over-configuration
       standing directive, tugboat fb4a45b, applied to the existing
