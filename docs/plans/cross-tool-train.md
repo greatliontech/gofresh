@@ -535,7 +535,7 @@ verdict, and records the measured wall against the audit's baseline.
       pin now also judges attestations and refreshes a current
       record's source pin; the named form's no-op names its reason
       (text unchanged / no records / attestation stale).
-- [ ] 144. stipulator: CLI query parity (bldc report 2026-09-03;
+- [x] 144. stipulator: CLI query parity (bldc report 2026-09-03;
       stipulator docs/issues/cli-verify-view-path-and-explain.md) —
       CLI verify gains --view/--path and the explain verb lands on
       the CLI, so "what claims this symbol" is a query, never a grep
@@ -548,7 +548,12 @@ verdict, and records the measured wall against the audit's baseline.
       attestation-cell refusal and explain-on-uncovered name the
       reclassification remedy (stipulator
       docs/issues/attestation-refusal-names-no-reclassification.md;
-      doc deletes at close).
+      doc deletes at close). Deviations: the rider landed as a kind
+      hint stating the IR's kind definitions, never a reclassification
+      instruction (the tool computes remediations, never prescribes
+      fixes); the keyword lint's entry point is `compile`, named in
+      the diagnostic and guidance — no new timing hook; a scope now
+      narrows the verification summary on both surfaces.
 
 - [ ] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
       stipulator docs/issues/refines-multiple-targets.md — refines
