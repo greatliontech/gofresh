@@ -502,7 +502,7 @@ verdict, and records the measured wall against the audit's baseline.
       residue sweep is ownership-scoped (this repository's, or an
       empty mint) after review; the vouch-globals and row-decode
       collapse filed as pew docs/issues/verdict-path-consolidation.md.
-- [ ] 142. stipulator: clause-granular binding claims (bldc report
+- [x] 142. stipulator: clause-granular binding claims (bldc report
       2026-09-03; stipulator
       docs/issues/clause-granular-binding-claims.md) — a binding
       names the clause it witnesses (ordinal or spec-admitted label),
@@ -510,7 +510,15 @@ verdict, and records the measured wall against the audit's baseline.
       requirement as a distinct "bound, clauses unclaimed" bucket —
       the consumer's own H-graded false-green channel retired
       upstream; doc deletes at close. Spec-format + coverage + both
-      surfaces. Measurement surface: none.
+      surfaces. Measurement surface: none. Deviations: the bucket is
+      named `partial` and is the `uncovered` excuse class in part (no
+      new gap excuse, no record migration); clauses are the payload's
+      list items only — no clause inference from prose; whole claims
+      on clause-structured requirements stay admitted (stipulator
+      docs/issues/clause-structured-whole-claims.md, user decision);
+      the witness-selection guard fold
+      (witness-selection-guard-masked-by-ineligible-red) landed as
+      its own change set.
 - [ ] 143. stipulator: consent provenance (bldc report 2026-09-03;
       stipulator docs/issues/content-hash-function-versioning.md) — a
       hash-function move is its own recorded state ("rehash",
