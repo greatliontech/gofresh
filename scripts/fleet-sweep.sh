@@ -36,11 +36,13 @@ STIPULATOR_REPOS=(stipulator gofresh gomutant tugboat ocifs pando pb)
 PEW_REPOS=(tugboat protodb)
 
 # Per-repo standing pew arguments: the reviewed vouch set AND the
-# store's variant label. tugboat's vouches are the audited list from
-# its CLAUDE.md "Standing vouch" section (per-entry provenance there;
-# that section points back here — keep both in step until a repo-level
-# vouch source lands: pew docs/issues/repo-level-vouch-source.md) and
-# its store is unlabeled. protodb's store records under the
+# store's variant label. pew reads a store's standing vouch set from
+# the `vouches` file at the store root (one IMPORT-PATH:VARIABLE per
+# line; the flags here only extend it), so a repo whose store carries
+# the file needs no --vouch list here. tugboat's list below is the
+# audited set from its CLAUDE.md "Standing vouch" section and stays
+# until tugboat's store carries benchmarks/vouches, at which point it
+# is deleted from both. Its store is unlabeled. protodb's store records under the
 # pebble-dragonboat label — statusing without it reads every recorded
 # arm as unrecorded, a false red the second production run's judge
 # caught — and has no assessed vouch set yet (unverifiable rows are
