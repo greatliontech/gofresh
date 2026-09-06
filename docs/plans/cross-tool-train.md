@@ -483,7 +483,7 @@ verdict, and records the measured wall against the audit's baseline.
       wrapper named in guidance and refusal, or the bare array
       accepted). Four docs delete at close. Measurement surface:
       probe-path diagnostics only — no pew arms, no DST legs.
-- [ ] 146. FOLDED into chunk 156 (Band P, 2026-09-02): the staged
+- [x] 146. FOLDED into chunk 156 (Band P, 2026-09-02): the staged
       snapshot's external-input refusal is one instance of the
       prepare-stage invariant 156 lands; the field report's doc rides
       156's close.
@@ -576,7 +576,7 @@ verdict, and records the measured wall against the audit's baseline.
       "tombstones-or-pending set" names no mechanism — the overlay is
       it. Filed: stipulator docs/issues/remedy-spellings-one-source.md
       (user decision).
-- [ ] 136. cross-tool: retroactive automation-and-consolidation audit
+- [x] 136. cross-tool: retroactive automation-and-consolidation audit
       (user directive 2026-08-29; the automation-over-configuration
       standing directive, tugboat fb4a45b, applied to the existing
       estate). Per tool, walk every knob, flag, env override, and
