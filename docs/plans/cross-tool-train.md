@@ -607,7 +607,7 @@ verdict, and records the measured wall against the audit's baseline.
       gofresh's deferred-close contract is the closing-cost lever; a
       design pass, then the adoption; history: `git log --all --
       docs/issues/post-completion-cpu-tail.md` (gomutant).
-- [ ] 92. gomutant: fold the decision batch (maximal captures) and the
+- [x] 92. gomutant: fold the decision batch (maximal captures) and the
       observed proof union — two back-to-back full observation passes
       over the identical symbol set with the same engines; one
       observed union view set serving both roles halves the warm
