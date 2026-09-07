@@ -5,6 +5,8 @@ import (
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
+
+	"github.com/greatliontech/gofresh/internal/auditset"
 )
 
 // The property-testing harness is audited surface exactly as the
@@ -40,7 +42,7 @@ import (
 // propertyHarnessPath reports whether pkgPath is the property-testing
 // harness package. Exactly pgregory.net/rapid.
 func propertyHarnessPath(pkgPath string) bool {
-	return pkgPath == "pgregory.net/rapid"
+	return pkgPath == propertyHarnessModulePath
 }
 
 // auditedPropertyHarnessVersion reports whether a registry release of
@@ -49,8 +51,16 @@ func propertyHarnessPath(pkgPath string) bool {
 // local source is judged separately (main module or replace - a
 // deliberate local choice, not a silent registry upgrade).
 func auditedPropertyHarnessVersion(version string) bool {
-	return version == "v1.3.0"
+	return auditedPropertyHarnessListing.Listed(propertyHarnessModulePath, version)
 }
+
+// auditedPropertyHarnessListing is the property-harness source audit's
+// record, one listing shape with the toolchain and module-variable
+// audits (internal/auditset).
+var auditedPropertyHarnessListing = auditset.VersionListing{propertyHarnessModulePath: {"v1.3.0"}}
+
+// propertyHarnessModulePath is the audited property-testing harness.
+const propertyHarnessModulePath = "pgregory.net/rapid"
 
 // auditedPropertyHarnessModule is the one module-level audit judgment
 // every arm shares: an audited release, or deliberate local source.

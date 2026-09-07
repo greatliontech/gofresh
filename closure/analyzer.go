@@ -1305,7 +1305,12 @@ func effectCauseRank(effect externalEffect) int {
 
 func isStandardFallbackExempt(audited bool, pkgPath string) bool {
 	// The testing harness itself is selected infrastructure. Its externally
-	// observable helpers are classified before this fallback.
+	// observable helpers are classified before this fallback. The
+	// hand-folded "testing" stays beside the source-only set on purpose,
+	// outside the audited-set tables (internal/auditset): exempting the
+	// harness from the unaudited-standard fallback is not an admission
+	// of its symbols, so it must never read as one — this is the
+	// family's deliberate third spelling, not a consolidation miss.
 	return pkgPath == "testing" || isSourceOnlyStandardPackage(audited, pkgPath)
 }
 

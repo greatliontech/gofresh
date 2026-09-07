@@ -11,8 +11,11 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
-// auditedToolchainReleases is the exact-version key of every
-// toolchain-source audit in this package: the standard-library
+// auditedToolchainSelections is the one toolchain-source listing of
+// this package: every audited release keyed to its audited build
+// selections, a release listed exactly when it has a row. The
+// release axis is the exact-version key of every toolchain-source
+// audit here — the standard-library
 // admissions (the audited-pure package set, the class-B pure
 // operations, the audited sync/pool/reflect symbols, the atomic
 // transparency, the harness logging and subtest-driver channels, the
@@ -46,90 +49,8 @@ import (
 // audited package selects among walked files and needs no key axis;
 // the memo scopes carry the platform through the build
 // configuration.
-var auditedToolchainReleases = map[string]bool{
-	// Stock go1.27.0 (the CI matrix's toolchain), audited by the
-	// go1.26.0→go1.27.0 delta walk.
-	"go1.27.0": true,
-	// Stock go1.27.1 (the CI matrix's toolchain since 2026-09-03),
-	// audited by the go1.27.0→go1.27.1 delta walk over the two stock
-	// source trees, both from the dl tool: the point release's non-test delta is seventeen entries —
-	// fourteen Go files and cmd's module metadata — of which three lie
-	// on the audited surface. net/http/transfer.go: a body read treats
-	// reaching EOF as success rather than an error; the class-B
-	// admission classifies net/http's operations as external effects
-	// whatever their bodies return, so the bar is untouched.
-	// encoding/json/v2_stream.go: selected — jsonv2 is baseline-on in
-	// go1.27, so encoding/json (audited pure) compiles its v2-backed
-	// files and delegates into encoding/json/v2 and jsontext, which the
-	// walk therefore covers as the package's implementation — the
-	// delta returns an io.ErrUnexpectedEOF from the reader as-is instead
-	// of re-shaping it: error plumbing over operands, no ambient
-	// acquisition. encoding/json/v2/arshal_default.go: the stringified
-	// "null" check moves ahead of the unquote in the legacy-semantics
-	// decode path: value computation over operands, no new channel.
-	// encoding/json/v2/doc.go's delta is prose. Every other changed
-	// file is outside the audited surface (cmd/compile, one vendored
-	// analysis pass, database/sql, debug/elf, internal/buildcfg, simd);
-	// every audited package's remaining non-test source is
-	// byte-identical between the releases; the race selection walk
-	// re-verified over the go1.27.1 tree — no audited package carries a
-	// non-test file constrained on a tag the -race selection sets.
-	"go1.27.1": true,
-	// The nodwarf5-experiment build of the same source: verified over
-	// source alone — no standard-library file outside
-	// internal/goexperiment gates on the experiment in the 1.27.1 tree,
-	// exactly the ground the 1.27.0 flavour's entry rests on.
-	"go1.27.1 X:nodwarf5": true,
-	// The nodwarf5-experiment build of the same source (the system
-	// toolchain): DWARF-only experiment, no build-tagged source
-	// selection in the audited surface.
-	"go1.27.0 X:nodwarf5": true,
-	// godst releases on the go1.27.0 base: the fork's delta intersects
-	// the audited surface at sync, time, AND testing (the chatty
-	// printer's host-stream slot and bubble output legs, the wrapped
-	// testlog writer), and every hook is dead code in the DEFAULT
-	// build selection behind compile-time constants and identity stubs
-	// (dstHookEnabled, dstMutexVirtualStarvation, dstTZBuild,
-	// dstFrameworkStreamEnabled, the untagged dstWrapTestlogWriter
-	// returning its argument). These audits cover the default
-	// selection ONLY: a `-tags dst` analysis selects the live hook
-	// bodies, whose audit is an open filing
-	// (docs/issues/walk-dst-selection-for-audit-key.md).
-	"go1.27.0-dst.10": true,
-	"go1.27.0-dst.11": true,
-	// dst.12's delta over dst.11 is one change: os.(*File).Stat gains
-	// a testlog.Stat record on every platform (godst 48c7e688), plus
-	// its test. Beyond strengthening the file-I/O class's
-	// testlog-visibility premise (a previously invisible fd-based
-	// metadata read becomes logged), the new record also CHANGES
-	// ingest classification: entries fd-stat'd by stdlib internals
-	// (ReadFile's buffer-sizing stat) classify metadata-bound, and an
-	// fd-stat outside a declared bracket stat root newly adds the
-	// "stat metadata input" unverifiable reason — both over-report
-	// (over-pin/refuse, never falsely serve), and dst.13 removes the
-	// non-escaping internal stat from the log. No audited symbol's
-	// body otherwise changed; the dead-code hook posture is dst.11's.
-	"go1.27.0-dst.12": true,
-	// dst.13's delta over dst.12: the fd-stat log line moves to the
-	// public method alone — stdlib-internal stats whose FileInfo never
-	// escapes (ReadFile's buffer-sizing stat via the new fstatNolog)
-	// no longer log, so the record matches what the subject could
-	// read: an explicit f.Stat() logs, os.ReadFile logs its open only.
-	// Same audited-surface intersection as dst.12 (the testlog
-	// premise, now drawn at the observable boundary); no audited
-	// symbol's body otherwise changed. dst.13 applied the rule at one
-	// of five internal call sites; dst.14 completes it.
-	"go1.27.0-dst.13": true,
-	// dst.14's delta over dst.13: the four remaining non-escaping
-	// internal fd-stats route through the nolog core (Getwd fallback
-	// hop, plan9 openDirNolog, illumos zero-copy check, windows
-	// readdir error-shaping); CopyFS's source stat stays logged - its
-	// mode escapes into the destination. Same audited-surface
-	// intersection as dst.13; no audited symbol's body otherwise
-	// changed.
-	"go1.27.0-dst.14": true,
-}
-
+//
+// The selection axis:
 // auditedToolchainSelections is the second axis of the key: per listed
 // release, the audited BUILD SELECTIONS — canonical sorted tag-set
 // keys, "" the default selection. The audits above cover the default
@@ -161,15 +82,87 @@ var auditedToolchainReleases = map[string]bool{
 // admissions loudly rather than inheriting the default audit
 // (docs/issues/walk-dst-selection-for-audit-key.md).
 var auditedToolchainSelections = map[string]map[string]bool{
-	"go1.27.0":            {"": true, "race": true},
-	"go1.27.1":            {"": true, "race": true},
+	// Stock go1.27.0 (the CI matrix's toolchain), audited by the
+	// go1.26.0→go1.27.0 delta walk.
+	"go1.27.0": {"": true, "race": true},
+	// Stock go1.27.1 (the CI matrix's toolchain since 2026-09-03),
+	// audited by the go1.27.0→go1.27.1 delta walk over the two stock
+	// source trees, both from the dl tool: the point release's non-test delta is seventeen entries —
+	// fourteen Go files and cmd's module metadata — of which three lie
+	// on the audited surface. net/http/transfer.go: a body read treats
+	// reaching EOF as success rather than an error; the class-B
+	// admission classifies net/http's operations as external effects
+	// whatever their bodies return, so the bar is untouched.
+	// encoding/json/v2_stream.go: selected — jsonv2 is baseline-on in
+	// go1.27, so encoding/json (audited pure) compiles its v2-backed
+	// files and delegates into encoding/json/v2 and jsontext, which the
+	// walk therefore covers as the package's implementation — the
+	// delta returns an io.ErrUnexpectedEOF from the reader as-is instead
+	// of re-shaping it: error plumbing over operands, no ambient
+	// acquisition. encoding/json/v2/arshal_default.go: the stringified
+	// "null" check moves ahead of the unquote in the legacy-semantics
+	// decode path: value computation over operands, no new channel.
+	// encoding/json/v2/doc.go's delta is prose. Every other changed
+	// file is outside the audited surface (cmd/compile, one vendored
+	// analysis pass, database/sql, debug/elf, internal/buildcfg, simd);
+	// every audited package's remaining non-test source is
+	// byte-identical between the releases; the race selection walk
+	// re-verified over the go1.27.1 tree — no audited package carries a
+	// non-test file constrained on a tag the -race selection sets.
+	"go1.27.1": {"": true, "race": true},
+	// The nodwarf5-experiment build of the same source: verified over
+	// source alone — no standard-library file outside
+	// internal/goexperiment gates on the experiment in the 1.27.1 tree,
+	// exactly the ground the 1.27.0 flavour's entry rests on.
 	"go1.27.1 X:nodwarf5": {"": true, "race": true},
+	// The nodwarf5-experiment build of the same source (the system
+	// toolchain): DWARF-only experiment, no build-tagged source
+	// selection in the audited surface.
 	"go1.27.0 X:nodwarf5": {"": true, "race": true},
-	"go1.27.0-dst.10":     {"": true, "race": true},
-	"go1.27.0-dst.11":     {"": true, "race": true},
-	"go1.27.0-dst.12":     {"": true, "race": true},
-	"go1.27.0-dst.13":     {"": true, "race": true},
-	"go1.27.0-dst.14":     {"": true, "race": true},
+	// godst releases on the go1.27.0 base: the fork's delta intersects
+	// the audited surface at sync, time, AND testing (the chatty
+	// printer's host-stream slot and bubble output legs, the wrapped
+	// testlog writer), and every hook is dead code in the DEFAULT
+	// build selection behind compile-time constants and identity stubs
+	// (dstHookEnabled, dstMutexVirtualStarvation, dstTZBuild,
+	// dstFrameworkStreamEnabled, the untagged dstWrapTestlogWriter
+	// returning its argument). These audits cover the default
+	// selection ONLY: a `-tags dst` analysis selects the live hook
+	// bodies, whose audit is an open filing
+	// (docs/issues/walk-dst-selection-for-audit-key.md).
+	"go1.27.0-dst.10": {"": true, "race": true},
+	"go1.27.0-dst.11": {"": true, "race": true},
+	// dst.12's delta over dst.11 is one change: os.(*File).Stat gains
+	// a testlog.Stat record on every platform (godst 48c7e688), plus
+	// its test. Beyond strengthening the file-I/O class's
+	// testlog-visibility premise (a previously invisible fd-based
+	// metadata read becomes logged), the new record also CHANGES
+	// ingest classification: entries fd-stat'd by stdlib internals
+	// (ReadFile's buffer-sizing stat) classify metadata-bound, and an
+	// fd-stat outside a declared bracket stat root newly adds the
+	// "stat metadata input" unverifiable reason — both over-report
+	// (over-pin/refuse, never falsely serve), and dst.13 removes the
+	// non-escaping internal stat from the log. No audited symbol's
+	// body otherwise changed; the dead-code hook posture is dst.11's.
+	"go1.27.0-dst.12": {"": true, "race": true},
+	// dst.13's delta over dst.12: the fd-stat log line moves to the
+	// public method alone — stdlib-internal stats whose FileInfo never
+	// escapes (ReadFile's buffer-sizing stat via the new fstatNolog)
+	// no longer log, so the record matches what the subject could
+	// read: an explicit f.Stat() logs, os.ReadFile logs its open only.
+	// Same audited-surface intersection as dst.12 (the testlog
+	// premise, now drawn at the observable boundary); no audited
+	// symbol's body otherwise changed. dst.13 applied the rule at one
+	// of five internal call sites; dst.14 completes it.
+	"go1.27.0-dst.13": {"": true, "race": true},
+	// dst.14's delta over dst.13: the four remaining non-escaping
+	// internal fd-stats route through the nolog core (Getwd fallback
+	// hop, plan9 openDirNolog, illumos zero-copy check, windows
+	// readdir error-shaping); CopyFS's source stat stays logged - its
+	// mode escapes into the destination. Same audited-surface
+	// intersection as dst.13; no audited symbol's body otherwise
+	// changed.
+	"go1.27.0-dst.14": {"": true, "race": true},
 }
 
 // auditedToolchainSource reports whether the running toolchain's
@@ -185,7 +178,7 @@ func auditedToolchainSource() bool { return auditedToolchainSourceFor(runtime.Ve
 // self-report — the one keyed entry the exported verdicts share, so a
 // test can drive a spelling this host does not report.
 func auditedToolchainSourceFor(version string) bool {
-	return auditedToolchainReleases[toolchainKey(version)]
+	return auditedToolchainSelections[toolchainKey(version)] != nil
 }
 
 // selectionAuditKey canonicalizes a producing build's EFFECTIVE flag
@@ -294,12 +287,6 @@ func experimentList(s string) bool {
 	return true
 }
 
-// binaryExperiment is the GOEXPERIMENT this binary's toolchain was
-// built with, as the version string carries it ("go1.27.0 X:nodwarf5"
-// or "go1.27.0-X:nodwarf5" → "nodwarf5"; "" for the default
-// experiment set).
-func binaryExperiment() string { return experimentOf(runtime.Version()) }
-
 // experimentOf reads the experiment set a version string carries, under
 // either spelling; "" for the default set.
 func experimentOf(version string) string {
@@ -358,7 +345,8 @@ func ToolchainSelectionNotice(buildFlags []string, goflags, goexperiment string)
 // admitted under the other through the same path the exported entry
 // takes.
 func toolchainSelectionNoticeFor(version string, buildFlags []string, goflags, goexperiment string) string {
-	return toolchainSelectionNotice(auditedToolchainSourceFor(version), version, experimentOf(version), auditedToolchainSelections[toolchainKey(version)], buildFlags, goflags, goexperiment)
+	row := auditedToolchainSelections[toolchainKey(version)]
+	return toolchainSelectionNotice(row != nil, version, experimentOf(version), row, buildFlags, goflags, goexperiment)
 }
 
 // toolchainSelectionNotice is the rendering over explicit axis inputs,

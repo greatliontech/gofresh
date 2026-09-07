@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -891,15 +892,7 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 // reachability everywhere else. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
 func auditedRuntimeTypeSymbol(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "reflect" {
-		return false
-	}
-	switch name {
-	case "Type", "TypeOf", "DeepEqual":
-		return true
-	default:
-		return false
-	}
+	return audited && pkgPath == "reflect" && auditset.ReflectSymbol(name)
 }
 
 // auditedLinknameTargets is the audited linkname-target set: standard
@@ -956,10 +949,17 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 		} else {
 			rest = ""
 		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 || fields[0] != "//go:linkname" && fields[0] != "//go:linknamestd" {
+		// The directive name is a whole token — the same bound the
+		// generated-header match keeps (internal/auditset): a space or
+		// tab, the byte grammar of a gofmt'd directive, deliberately
+		// narrower than a Unicode field split — a directive followed by
+		// any other whitespace refuses.
+		_, plain := auditset.BoundedToken(line, "//go:linkname", " \t")
+		_, std := auditset.BoundedToken(line, "//go:linknamestd", " \t")
+		if !plain && !std {
 			return false
 		}
+		fields := strings.Fields(line)
 		if len(fields) != 3 || !auditedLinknameTargets[fields[2]] {
 			return false
 		}
@@ -973,15 +973,7 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 // names, so the method names are unambiguous. Grows only by source
 // audit (REQ-closure-shared-dynamic-state).
 func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "sync" {
-		return false
-	}
-	switch name {
-	case "Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock":
-		return true
-	default:
-		return false
-	}
+	return audited && pkgPath == "sync" && auditset.SyncName(name)
 }
 
 // auditedPoolSymbol reports whether a sync-package symbol is in the
@@ -998,15 +990,7 @@ func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
 // functions by these names, so the method names are unambiguous. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
 func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "sync" {
-		return false
-	}
-	switch name {
-	case "Pool", "Get", "Put":
-		return true
-	default:
-		return false
-	}
+	return audited && pkgPath == "sync" && auditset.PoolName(name)
 }
 
 func packageHasClassifiedExternalAPI(pkgPath string) bool {

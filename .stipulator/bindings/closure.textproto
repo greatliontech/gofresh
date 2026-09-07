@@ -970,3 +970,43 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "5ecf849bbc31cc3406a3f8007fbf54d8275901c0d7e777a06d67b2b23c399131"
 }
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
+  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestAuditedSymbolPredicatesReadTheSharedTables"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "392434a62c8b606eeb70b2f0da5bcec242b805134f65e7cbf92b261fdf425681"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
+  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/auditset.TestMethodSetsReadBothWays"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "43d35c59e6008fddda410a41363caf89090a8d3cf64e5cc0be825704c225fb73"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
+  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/auditset.TestBoundedTokenNeverShadowsALongerName"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "323f26f4c125fbc4f054d730802dde1969f81d56c3f5ec56790ee4f1e92ce656"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-analysis"
+  content_hash: "ce75811dba0eabb386e2c0066f6b079bf8c3a390c9ef4cbe9a26002a95b51492"
+  source_hash: "a68ee7152b72f331829c787473438f5925a678b809ab83b0ac213b8b927efd32"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/auditset.TestVersionListingAdmitsOnlyListedVersions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c339efa3ec995fc47159ef1cb5f7d96a5fee33d6baaa65630b48f79ff200ab53"
+}

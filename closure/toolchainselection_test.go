@@ -68,18 +68,14 @@ func TestAuditedToolchainSelectionAxes(t *testing.T) {
 	}
 }
 
-// Every release in the version listing carries a selections entry and
-// vice versa — the two axes never drift apart.
+// Every listed release carries its default-selection audit — the one
+// listing keys releases to selections, so a release without a row is
+// unlisted by construction, and a row without the default selection is
+// a listing error.
 func TestAuditedSelectionsCoverEveryListedRelease(t *testing.T) {
-	for release := range auditedToolchainReleases {
-		sels, ok := auditedToolchainSelections[release]
-		if !ok || !sels[""] {
+	for release, sels := range auditedToolchainSelections {
+		if !sels[""] {
 			t.Errorf("release %s listed without a default-selection audit entry", release)
-		}
-	}
-	for release := range auditedToolchainSelections {
-		if !auditedToolchainReleases[release] {
-			t.Errorf("selections list release %s absent from the version listing", release)
 		}
 	}
 }
@@ -123,7 +119,7 @@ func TestAuditedToolchainSelectionEnvAxes(t *testing.T) {
 	if AuditedToolchainSelection(nil, "", "somefutureexp") {
 		t.Error("an environment GOEXPERIMENT differing from the binary's admitted")
 	}
-	if !AuditedToolchainSelection(nil, "", binaryExperiment()) {
+	if !AuditedToolchainSelection(nil, "", experimentOf(runtime.Version())) {
 		t.Error("the binary's own experiment refused")
 	}
 	// GOOS/GOARCH need no axis: the delta walks read the audited
