@@ -684,7 +684,7 @@ strategy bump.
       empty-bodied benchmarks (every b.N/b.Loop reader is
       unverifiable): pew docs/issues/serve-proven-blocked-by-
       benchmark-loop.md lands here.
-- [ ] 119. gofresh: writer-sensitive fmt.Fprint startup
+- [x] 119. gofresh: writer-sensitive fmt.Fprint startup
       classification (was SEP 1; ~1,096 in the charter histogram) —
       an init formatting into a provably-local pure sink is value
       computation. FOLDS at this chunk: gofresh
