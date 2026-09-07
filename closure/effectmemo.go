@@ -25,8 +25,15 @@ import (
 // the floor changes ride this surface alone (the same
 // no-prior-proof argument as @10: a file the floor blocked had no
 // servable proof), while ObservationRTA@27 carries base32 and the
-// keying for the walk tiers.
-const effectScanStrategy = "gofresh/effect-scan@11"
+// keying for the walk tiers. @12 admits math/big whole into the
+// audited-pure package set: the per-file scan's unaudited-dependence
+// marker and selector classification both consult the set, so a scan
+// persisted under the narrower set must refuse rather than serve
+// (ObservationRTA@28 carries the same widening for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@12"
+
+// EffectScanStrategy is the persisted effect scan's strategy version.
+func EffectScanStrategy() string { return effectScanStrategy }
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // toolchain identity, and — when the analysis' build selection is not

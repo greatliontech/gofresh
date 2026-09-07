@@ -150,7 +150,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "calendar", "stamp", "clock", "mirror"} {
+	for _, sub := range []string{"values", "entropy", "calendar", "stamp", "clock", "mirror"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -181,6 +181,17 @@ func Indirect() bool {
 	f, _ := big.NewFloat(2.5).Int(nil)
 	return reflect.DeepEqual(mk(2), f)
 }
+
+// Arithmetic exercises the package beyond its constructors: the
+// whole-package admission covers every operation.
+func Arithmetic() string {
+	n, _ := new(big.Int).SetString("123456789012345678901234567890", 10)
+	n.Exp(n, big.NewInt(3), nil).Mul(n, big.NewInt(7))
+	f := new(big.Float).SetPrec(200).SetInt(n)
+	f.Sqrt(f)
+	r := big.NewRat(22, 7)
+	return n.String() + f.Text('g', 30) + r.FloatString(12)
+}
 `)
 	writeFile(t, dir, "values/values_test.go", `package values
 
@@ -191,6 +202,42 @@ func TestValues(t *testing.T) {
 		t.Fatal("value comparison")
 	}
 	_ = Ratio()
+}
+`)
+	// The entropy legs live in their own package: the package scan is
+	// package-wide, and a math/rand construction anywhere in a package
+	// refuses every subject of it — exactly the caller-side refusal
+	// the admission relies on.
+	writeFile(t, dir, "entropy/entropy.go", `package entropy
+
+import (
+	"math/big"
+	"math/rand"
+)
+
+// RandLocal draws entropy through math/rand's own constructor: the
+// ambient entry is the caller's, refused at the caller, never inside
+// the admitted package.
+func RandLocal() string {
+	return new(big.Int).Rand(rand.New(rand.NewSource(7)), big.NewInt(100)).String()
+}
+
+// RandParam draws through a caller-supplied source: the subject's own
+// body reaches no ambient constructor; whoever constructs the source
+// carries the refusal.
+func RandParam(r *rand.Rand) string {
+	return new(big.Int).Rand(r, big.NewInt(100)).String()
+}
+`)
+	writeFile(t, dir, "entropy/entropy_test.go", `package entropy
+
+import (
+	"math/rand"
+	"testing"
+)
+
+func TestRandParam(t *testing.T) {
+	_ = RandParam(rand.New(rand.NewSource(7)))
 }
 `)
 	writeFile(t, dir, "calendar/calendar.go", `package calendar
@@ -275,6 +322,9 @@ func TestMirror(t *testing.T) {
 		{Package: "example.com/audited/values", Symbol: "Equal"},
 		{Package: "example.com/audited/values", Symbol: "Ratio"},
 		{Package: "example.com/audited/values", Symbol: "Indirect"},
+		{Package: "example.com/audited/values", Symbol: "Arithmetic"},
+		{Package: "example.com/audited/entropy", Symbol: "RandLocal"},
+		{Package: "example.com/audited/entropy", Symbol: "TestRandParam"},
 		{Package: "example.com/audited/calendar", Symbol: "Year"},
 		{Package: "example.com/audited/stamp", Symbol: "Stamp"},
 		{Package: "example.com/audited/clock", Symbol: "Now"},
@@ -290,6 +340,19 @@ func TestMirror(t *testing.T) {
 	ratio := proofs[Subject{Package: "example.com/audited/values", Symbol: "Ratio"}]
 	if !ratio.Observable {
 		t.Fatalf("Ratio = %+v, want the constructed-type reference observable", ratio)
+	}
+	arithmetic := proofs[Subject{Package: "example.com/audited/values", Symbol: "Arithmetic"}]
+	if !arithmetic.Observable {
+		t.Fatalf("math/big arithmetic subject unobservable: %+v", arithmetic)
+	}
+	// Entropy enters through math/rand's constructor at the caller,
+	// never through the admitted package: the local construction and
+	// the parameter-fed one refuse where the source is built.
+	for _, symbol := range []string{"RandLocal", "TestRandParam"} {
+		proof := proofs[Subject{Package: "example.com/audited/entropy", Symbol: symbol}]
+		if proof.Observable || !strings.Contains(proof.Reason, "math/rand") {
+			t.Fatalf("%s = %+v, want refused at the math/rand construction", symbol, proof)
+		}
 	}
 	indirect := proofs[Subject{Package: "example.com/audited/values", Symbol: "Indirect"}]
 	if !indirect.Observable {
@@ -317,9 +380,12 @@ func TestMirror(t *testing.T) {
 // execution-free references in, every ambient or reflective neighbor
 // out (REQ-closure-observability-analysis's audited-set boundary).
 func TestAuditedPureStandardBounds(t *testing.T) {
+	// math/big is a member of the audited-pure package set, admitted
+	// whole there and not operation by operation here.
+	if !isSourceOnlyStandardPackage(true, "math/big") || isSourceOnlyStandardPackage(false, "math/big") {
+		t.Error("math/big membership: want admitted on an audited toolchain only")
+	}
 	for _, tc := range []struct{ pkg, name string }{
-		{"math/big", "NewInt"}, {"math/big", "NewFloat"}, {"math/big", "NewRat"},
-		{"math/big", "Int"}, {"math/big", "Float"}, {"math/big", "Rat"},
 		{"time", "Date"}, {"time", "Time"}, {"time", "Month"},
 		{"time", "January"}, {"time", "February"}, {"time", "March"},
 		{"time", "April"}, {"time", "May"}, {"time", "June"},
@@ -334,7 +400,7 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 	for _, tc := range []struct{ pkg, name string }{
 		{"time", "Now"}, {"time", "UTC"}, {"time", "Local"},
 		{"time", "LoadLocation"}, {"time", "FixedZone"}, {"time", "Since"},
-		{"math/big", "Rand"}, {"math/big", "ParseFloat"},
+		{"math/big", "NewInt"}, {"math/big", "Int"},
 		{"fmt", "State"}, {"fmt", "Print"}, {"fmt", "Formatter"},
 	} {
 		if classBPureStandard(true, tc.pkg, tc.name) {
@@ -619,8 +685,8 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if classBPureStandard(false, "fmt", "Sprint") {
 		t.Error("classBPureStandard admits fmt.Sprint on an unaudited toolchain")
 	}
-	if isSourceOnlyStandardPackage(false, "strings") {
-		t.Error("isSourceOnlyStandardPackage admits strings on an unaudited toolchain")
+	if isSourceOnlyStandardPackage(false, "strings") || isSourceOnlyStandardPackage(false, "math/big") {
+		t.Error("isSourceOnlyStandardPackage admits strings or math/big on an unaudited toolchain")
 	}
 	if auditedSyncSymbol(false, "sync", "Lock") {
 		t.Error("auditedSyncSymbol admits sync.Lock on an unaudited toolchain")

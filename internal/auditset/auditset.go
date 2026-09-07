@@ -57,6 +57,31 @@ var (
 	poolNames = names(poolMethods)
 )
 
+// purePackages is the audited-pure standard package set: packages that
+// are bit-deterministic pure computation for every consumer of the
+// audit — every ambient effect enters via a flagged constructor or
+// global of an effect-bearing package, no testlog-invisible input
+// channel, no machine-variant results. The exclusion rationale per
+// family lives with the closure tier's consumer (isSourceOnlyStandardPackage).
+// Grows only by source audit, each admission with its own record in
+// the commit that lists it (REQ-closure-observability-analysis).
+var purePackages = map[string]bool{
+	"bufio": true, "bytes": true, "cmp": true,
+	"container/heap": true, "container/list": true, "container/ring": true,
+	"crypto/hmac": true, "crypto/md5": true, "crypto/sha1": true, "crypto/sha256": true, "crypto/sha512": true, "crypto/subtle": true,
+	"encoding": true, "encoding/asn1": true, "encoding/base32": true, "encoding/base64": true, "encoding/binary": true, "encoding/csv": true,
+	"encoding/hex": true, "encoding/json": true, "encoding/pem": true, "encoding/xml": true,
+	"errors": true, "hash": true, "hash/adler32": true, "hash/crc32": true, "hash/crc64": true, "hash/fnv": true,
+	"io": true, "io/fs": true, "iter": true, "maps": true, "math/big": true, "math/bits": true,
+	"path": true, "regexp": true, "regexp/syntax": true,
+	"slices": true, "sort": true, "strconv": true, "strings": true, "text/scanner": true,
+	"unicode": true, "unicode/utf16": true, "unicode/utf8": true,
+}
+
+// PurePackage reports whether a standard package is in the audited-pure
+// set.
+func PurePackage(pkgPath string) bool { return purePackages[pkgPath] }
+
 // SyncMethod reports whether a sync receiver's method is in the
 // audited synchronization set.
 func SyncMethod(receiver, method string) bool { return slices.Contains(syncMethods[receiver], method) }

@@ -185,22 +185,23 @@ func harnessSubtestDriverEffect() externalEffect {
 // results. fmt's Sprint family qualifies (arguments' methods stay
 // visible to reachability); its Print family is classified output and
 // its Scan family classified input, so only the pure remainder lands
-// here. math/big's value constructors are software arithmetic over
-// their operands, no CPU dispatch. time.Date is calendar arithmetic
+// here. time.Date is calendar arithmetic
 // over its operands - the ambient timezone channel enters only through
 // the Location globals and constructors, which stay flagged (time.UTC
 // is an exported mutable var, refused like io.EOF); the bare-name
 // match also admits the equally pure decomposition (time.Time).Date at
 // the SSA tiers. The remaining names are execution-free references:
 // each is an audited type or constant name (fmt.Stringer, time.Time,
-// time.Month and its twelve constants, math/big's Int, Float, and Rat)
-// with no package-level callable of the same name - the reference
-// declares or denotes and executes nothing, and every dispatch through
-// a value of such a type classifies at its own site. The bare-name
-// match at the SSA tiers additionally admits the value methods sharing
-// these names - (time.Time).Month, (*big.Float).Int, (*big.Float).Rat
-// - each equally pure decomposition or conversion over its operands.
-// Grows only by source audit (REQ-closure-observability-analysis).
+// time.Month and its twelve constants) with no package-level callable
+// of the same name - the reference declares or denotes and executes
+// nothing, and every dispatch through a value of such a type
+// classifies at its own site. The bare-name match at the SSA tiers
+// additionally admits the value methods sharing these names -
+// (time.Time).Month - each equally pure decomposition over its
+// operands. math/big is admitted whole as a member of the audited-pure
+// package set (isSourceOnlyStandardPackage), not operation by
+// operation here. Grows only by source audit
+// (REQ-closure-observability-analysis).
 func classBPureStandard(audited bool, pkgPath, name string) bool {
 	if !audited {
 		return false
@@ -209,11 +210,6 @@ func classBPureStandard(audited bool, pkgPath, name string) bool {
 	case "fmt":
 		switch name {
 		case "Sprint", "Sprintf", "Sprintln", "Errorf", "Append", "Appendf", "Appendln", "FormatString", "Stringer":
-			return true
-		}
-	case "math/big":
-		switch name {
-		case "NewInt", "NewFloat", "NewRat", "Int", "Float", "Rat":
 			return true
 		}
 	case "time":

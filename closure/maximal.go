@@ -854,26 +854,17 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	// same registration-shaped covert channel: a subject's decode
 	// outcome can depend on a sibling's prior Register call);
 	// math and math/cmplx (CPU-dispatched implementations vary results
-	// across machines); sync
+	// across machines — math/big is a member on its own audit: software
+	// arbitrary-precision arithmetic whose CPU-selected kernels compute
+	// bit-identical integer results, whose only state is invisible
+	// memoization and scratch pooling, and whose only entropy is the
+	// caller's *rand.Rand or a value-seeded source); sync
 	// and sync/atomic (sync.Pool is runtime-backed and GC-coupled);
 	// time, math/rand, hash/maphash (ambient clock and entropy); and
 	// every I/O-acquiring package
-	// (REQ-closure-observability-analysis).
-	switch pkgPath {
-	case "bufio", "bytes", "cmp",
-		"container/heap", "container/list", "container/ring",
-		"crypto/hmac", "crypto/md5", "crypto/sha1", "crypto/sha256", "crypto/sha512", "crypto/subtle",
-		"encoding", "encoding/asn1", "encoding/base32", "encoding/base64", "encoding/binary", "encoding/csv",
-		"encoding/hex", "encoding/json", "encoding/pem", "encoding/xml",
-		"errors", "hash", "hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
-		"io", "io/fs", "iter", "maps", "math/bits",
-		"path", "regexp", "regexp/syntax",
-		"slices", "sort", "strconv", "strings", "text/scanner",
-		"unicode", "unicode/utf16", "unicode/utf8":
-		return true
-	default:
-		return false
-	}
+	// (REQ-closure-observability-analysis). The set itself is one table
+	// in internal/auditset beside the other audited sets.
+	return auditset.PurePackage(pkgPath)
 }
 
 // auditedRuntimeTypeSymbol reports whether a reflect-package symbol is

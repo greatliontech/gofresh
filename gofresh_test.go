@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@27" {
-		t.Fatalf("ObservationRTA = %q, want the value-provenance narrowing with the exact-version toolchain keying", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@28" {
+		t.Fatalf("ObservationRTA = %q, want the math/big whole-package admission over the value-provenance narrowing", ObservationRTA)
 	}
 }
 
@@ -800,5 +800,15 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/embed", Symbol: "W.Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("promoted conflicted method capture = %v, want the contradiction refusal", err)
+	}
+}
+
+// The per-file effect scan's strategy moves with every audited-set
+// widening, so a scan persisted under a narrower set refuses instead
+// of serving (REQ-closure-effect-scan-memo); @12 is the math/big
+// admission beside ObservationRTA@28.
+func TestEffectScanStrategyVersion(t *testing.T) {
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@12" {
+		t.Fatalf("effect-scan strategy = %q, want @12", closure.EffectScanStrategy())
 	}
 }

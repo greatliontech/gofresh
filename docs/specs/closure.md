@@ -1200,14 +1200,20 @@ operations through which every ambient effect must enter via a flagged
 constructor or global of an effect-bearing package, adding no
 testlog-invisible input channel of their own and no machine-variant
 results (fmt's Sprint family included: argument methods stay visible to
-reachability; math/big's value constructors NewInt, NewFloat, and NewRat
-included: software arithmetic over their operands, no CPU dispatch;
+reachability; math/big included whole — software arbitrary-precision
+arithmetic over its operands, the CPU-selected kernels computing
+bit-identical integer results, its only state invisible memoization and
+scratch pooling, its only entropy the caller's *rand.Rand or a
+value-seeded source, and its two reaches into math — a Log2 that only sizes
+a conversion buffer whose content is invariant, and a correctly-rounded Sqrt
+seeding a Newton iteration — leave every result invariant, so the
+math-family exclusion's CPU-dispatch rationale does not reach it;
 time.Date included: calendar arithmetic over its operands, the ambient
 timezone channel entering only through the Location globals and
 constructors, which stay flagged — time.UTC is an exported mutable
 variable and refuses like any other; execution-free references
 included: an audited type or constant name — fmt.Stringer, time.Time,
-time.Month and its twelve constants, math/big's Int, Float, and Rat —
+time.Month and its twelve constants —
 declares or denotes and executes nothing, every dispatch through a
 value of such a type classified at its own site, and the pure value
 methods sharing an audited name admitted with it) —

@@ -651,7 +651,7 @@ verdict, and records the measured wall against the audit's baseline.
       — preserve unsupported older overlays and their authored
       equivalence reasoning while refusing to serve them; doc deletes
       at close.
-- [ ] 131. stipulator: one identity walk, two windows (stipulator
+- [x] 131. stipulator: one identity walk, two windows (stipulator
       docs/issues/identity-walk-two-trackers.md) — attachment and
       extent answer "whose block is this" via two independent reset
       tables in two packages; collapse to one walk producing both

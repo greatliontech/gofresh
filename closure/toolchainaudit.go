@@ -81,6 +81,17 @@ import (
 // observation producer model) — a dst-tagged analysis refuses
 // admissions loudly rather than inheriting the default audit
 // (docs/issues/walk-dst-selection-for-audit-key.md).
+//
+// A widening of the audited-pure package set claims every listed
+// release at once, so it is grounded across them: the math/big
+// admission (observation-rta@28) checked that math/big's non-test
+// source (every .go and .s file, sorted and concatenated) is
+// byte-identical across every listed tree on the host that listed it
+// — the dst.10–dst.14 flavors and stock go1.27.0 and go1.27.1, SHA-256
+// prefix bbe42f2fef9bd0ab — and the nodwarf5 experiment builds are
+// those same sources; math/big carries no race build constraint in any
+// non-test file, so the race-selection record above is unchanged by
+// its admission.
 var auditedToolchainSelections = map[string]map[string]bool{
 	// Stock go1.27.0 (the CI matrix's toolchain), audited by the
 	// go1.26.0→go1.27.0 delta walk.
