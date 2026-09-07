@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
@@ -518,6 +519,20 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		t.Error("math/big membership: want admitted on an audited toolchain only")
 	}
 	for _, tc := range []struct{ pkg, name string }{
+		{"net/url", "QueryEscape"}, {"net/url", "QueryUnescape"}, {"net/url", "PathEscape"}, {"net/url", "PathUnescape"},
+		{"net/url", "User"}, {"net/url", "UserPassword"}, {"net/url", "URL"}, {"net/url", "Values"}, {"net/url", "Userinfo"},
+		{"net/url", "String"}, {"net/url", "EscapedPath"}, {"net/url", "ResolveReference"}, {"net/url", "Hostname"},
+		{"net/url", "Port"}, {"net/url", "Encode"}, {"net/url", "Get"}, {"net/url", "Set"}, {"net/url", "MarshalBinary"},
+		{"net/url", "Username"}, {"net/url", "Password"}, {"net/url", "EscapedFragment"}, {"net/url", "Redacted"},
+		{"net/url", "IsAbs"}, {"net/url", "RequestURI"}, {"net/url", "AppendBinary"}, {"net/url", "Clone"},
+		{"net/url", "Add"}, {"net/url", "Del"}, {"net/url", "Has"}, {"net/url", "Unwrap"}, {"net/url", "Timeout"},
+		{"net/url", "Temporary"}, {"net/url", "Error"}, {"net/url", "EscapeError"}, {"net/url", "InvalidHostError"},
+		{"path/filepath", "Clean"}, {"path/filepath", "IsLocal"}, {"path/filepath", "Localize"},
+		{"path/filepath", "ToSlash"}, {"path/filepath", "FromSlash"}, {"path/filepath", "SplitList"},
+		{"path/filepath", "Split"}, {"path/filepath", "Join"}, {"path/filepath", "Ext"},
+		{"path/filepath", "IsAbs"}, {"path/filepath", "Rel"}, {"path/filepath", "Base"},
+		{"path/filepath", "Dir"}, {"path/filepath", "VolumeName"}, {"path/filepath", "Match"}, {"path/filepath", "HasPrefix"},
+		{"path/filepath", "Separator"}, {"path/filepath", "ListSeparator"}, {"path/filepath", "WalkFunc"},
 		{"time", "Date"}, {"time", "Time"}, {"time", "Month"},
 		{"time", "January"}, {"time", "February"}, {"time", "March"},
 		{"time", "April"}, {"time", "May"}, {"time", "June"},
@@ -538,6 +553,11 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ pkg, name string }{
+		{"net/url", "Parse"}, {"net/url", "ParseRequestURI"}, {"net/url", "ParseQuery"}, {"net/url", "Query"},
+		{"net/url", "JoinPath"}, {"net/url", "UnmarshalBinary"},
+		{"path/filepath", "Abs"}, {"path/filepath", "EvalSymlinks"}, {"path/filepath", "Glob"},
+		{"path/filepath", "Walk"}, {"path/filepath", "WalkDir"}, {"path/filepath", "ErrBadPattern"},
+		{"path/filepath", "SkipDir"}, {"path/filepath", "SkipAll"},
 		{"time", "Now"}, {"time", "UTC"}, {"time", "Local"},
 		{"time", "LoadLocation"}, {"time", "LoadLocationFromTZData"}, {"time", "Since"}, {"time", "Until"},
 		// A name shared by a pure declaration and an ambient one is
@@ -923,4 +943,180 @@ func (t *T) Run(name string, f func(*T)) bool { return true }
 		t.Fatal("no SSA function for (*T).Run")
 	}
 	return fn
+}
+
+// net/url's escaping and composition are admitted by symbol — outside
+// the always-external net tree, never as a whole package — while every
+// operation reaching its GODEBUG settings refuses naming itself;
+// path/filepath's lexical operations are admitted by symbol while its
+// filesystem reaches and its error variables refuse naming themselves
+// (REQ-closure-observability-analysis's audited-set boundary).
+func TestNetURLAndFilepathAdmissions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	if isSourceOnlyStandardPackage(true, "net/url") || isAlwaysExternalPackage("net/url") || !isAlwaysExternalPackage("net/http") || !isAlwaysExternalPackage("net") {
+		t.Fatal("net/url membership: want by symbol only, outside the always-external net tree, the tree itself unchanged")
+	}
+	// A package admitted by symbol is never always-external: the
+	// admission at the selector ladder would otherwise override the
+	// tree's classification with no test failing.
+	for _, pkgPath := range auditset.SymbolPackages() {
+		if isAlwaysExternalPackage(pkgPath) || isSourceOnlyStandardPackage(true, pkgPath) {
+			t.Fatalf("%s is admitted by symbol and classified whole", pkgPath)
+		}
+	}
+	dir := t.TempDir()
+	for _, sub := range []string{"urlhost", "urlvalues", "lexical", "absolute", "walking", "linking", "globbing", "walkfn", "badpattern", "viaglobal"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, dir, "go.mod", "module example.com/pathaudit\n\ngo 1.26\n")
+	writeFile(t, dir, "urlhost/urlhost.go", `package urlhost
+
+import "net/url"
+
+func Host(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("k", url.QueryEscape("v w"))
+	return u.Host + "?" + q.Encode()
+}
+`)
+	writeFile(t, dir, "urlvalues/urlvalues.go", `package urlvalues
+
+import "net/url"
+
+func Compose(host, k, v string) string {
+	q := url.Values{}
+	q.Set(k, url.QueryEscape(v))
+	u := url.URL{Scheme: "https", Host: host, Path: url.PathEscape("a b"), RawQuery: q.Encode(), User: url.UserPassword("u", "p")}
+	return u.Redacted() + " " + u.Hostname() + ":" + u.Port()
+}
+`)
+	writeFile(t, dir, "linking/linking.go", `package linking
+
+import "path/filepath"
+
+func Real(p string) string {
+	r, _ := filepath.EvalSymlinks(p)
+	return r
+}
+`)
+	writeFile(t, dir, "globbing/globbing.go", `package globbing
+
+import "path/filepath"
+
+func Count(pattern string) int {
+	m, _ := filepath.Glob(pattern)
+	return len(m)
+}
+`)
+	writeFile(t, dir, "walkfn/walkfn.go", `package walkfn
+
+import (
+	"io/fs"
+	"path/filepath"
+)
+
+func Count(root string) int {
+	n := 0
+	var visit filepath.WalkFunc = func(string, fs.FileInfo, error) error { n++; return nil }
+	_ = filepath.Walk(root, visit)
+	return n
+}
+`)
+	// The file fold admits a selector of a package admitted whole, so
+	// the walk's standard-global arm is the sole guard of such a
+	// package's exported variables — io.EOF's shape.
+	writeFile(t, dir, "viaglobal/viaglobal.go", `package viaglobal
+
+import "io"
+
+func Ended() bool { return io.EOF != nil }
+`)
+	writeFile(t, dir, "badpattern/badpattern.go", `package badpattern
+
+import "path/filepath"
+
+func Bad(pattern string) bool {
+	_, err := filepath.Match(pattern, "x")
+	return err == filepath.ErrBadPattern
+}
+`)
+	writeFile(t, dir, "lexical/lexical.go", `package lexical
+
+import "path/filepath"
+
+func Stem(p string) string {
+	base := filepath.Base(filepath.Clean(p))
+	ok, _ := filepath.Match("*.go", base)
+	if !ok {
+		return filepath.Join(filepath.Dir(p), base)
+	}
+	return base[:len(base)-len(filepath.Ext(base))] + string(filepath.Separator)
+}
+`)
+	writeFile(t, dir, "absolute/absolute.go", `package absolute
+
+import "path/filepath"
+
+func Abs(p string) string {
+	a, _ := filepath.Abs(p)
+	return a
+}
+`)
+	writeFile(t, dir, "walking/walking.go", `package walking
+
+import (
+	"io/fs"
+	"path/filepath"
+)
+
+func Count(root string) int {
+	n := 0
+	_ = filepath.WalkDir(root, func(string, fs.DirEntry, error) error { n++; return nil })
+	return n
+}
+`)
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A refusal names its tier: the file fold's carries the "package
+	// scan: " prefix, the walk's does not — so each tier's arm is
+	// pinned on its own (REQ-closure-observability-analysis).
+	cases := []struct{ pkg, symbol, refusal string }{
+		{"urlhost", "Host", "package scan: reaches unaudited standard operation net/url.Parse"},
+		{"urlvalues", "Compose", ""},
+		{"lexical", "Stem", ""},
+		{"absolute", "Abs", "package scan: reaches unaudited standard operation path/filepath.Abs"},
+		{"walking", "Count", "package scan: reaches unaudited standard operation path/filepath.WalkDir"},
+		{"linking", "Real", "package scan: reaches unaudited standard operation path/filepath.EvalSymlinks"},
+		{"globbing", "Count", "package scan: reaches unaudited standard operation path/filepath.Glob"},
+		{"walkfn", "Count", "package scan: reaches unaudited standard operation path/filepath.Walk"},
+		{"badpattern", "Bad", "package scan: reaches unaudited standard operation path/filepath.ErrBadPattern"},
+		{"viaglobal", "Ended", "reaches standard global io.EOF"},
+	}
+	subjects := make([]Subject, 0, len(cases))
+	for _, tc := range cases {
+		subjects = append(subjects, Subject{Package: "example.com/pathaudit/" + tc.pkg, Symbol: tc.symbol})
+	}
+	proofs, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		proof := proofs[Subject{Package: "example.com/pathaudit/" + tc.pkg, Symbol: tc.symbol}]
+		if tc.refusal == "" && !proof.Observable {
+			t.Errorf("%s.%s = %+v, want observable", tc.pkg, tc.symbol, proof)
+		}
+		if tc.refusal != "" && (proof.Observable || proof.Reason != tc.refusal) {
+			t.Errorf("%s.%s = %+v, want exactly %q", tc.pkg, tc.symbol, proof, tc.refusal)
+		}
+	}
 }

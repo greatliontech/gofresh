@@ -834,8 +834,15 @@ func isTestingHandleType(expression ast.Expr, aliases map[string]string, handles
 
 func isAlwaysExternalPackage(pkgPath string) bool {
 	return pkgPath == "plugin" || pkgPath == "syscall" ||
-		strings.HasPrefix(pkgPath, "golang.org/x/sys/") ||
-		pkgPath == "net" || strings.HasPrefix(pkgPath, "net/")
+		strings.HasPrefix(pkgPath, "golang.org/x/sys/") || networkPackage(pkgPath)
+}
+
+// networkPackage is the one spelling of the net tree's network-I/O
+// classification: net and every package beneath it except net/url —
+// value computation with no socket, admitted by symbol
+// (REQ-closure-observability-analysis).
+func networkPackage(pkgPath string) bool {
+	return pkgPath == "net" || (strings.HasPrefix(pkgPath, "net/") && pkgPath != "net/url")
 }
 
 // isSourceOnlyStandardPackage is the deliberately small set whose public
@@ -1006,11 +1013,14 @@ func trueReason(pkgPath string) string {
 	return trueExternalEffect(pkgPath).reason
 }
 
+// trueExternalEffect names an always-external package's effect; it is
+// meaningful for isAlwaysExternalPackage members alone, which both
+// call sites gate on.
 func trueExternalEffect(pkgPath string) externalEffect {
 	switch {
 	case pkgPath == "plugin":
 		return symbolExternalEffect(externalEffectPlugin, pkgPath, "", "reaches plugin")
-	case pkgPath == "net" || strings.HasPrefix(pkgPath, "net/"):
+	case networkPackage(pkgPath):
 		return symbolExternalEffect(externalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
 	default:
 		return symbolExternalEffect(externalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")

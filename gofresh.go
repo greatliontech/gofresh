@@ -351,7 +351,11 @@ const ClosureStrategy = closure.IdentityStrategy
 // (network, plugin, native reach) — the persisted reason text moves,
 // so a proof served under @29 would name a dead end the fresh
 // derivation no longer does.
-const ObservationRTA = "gofresh/observation-rta@30"
+// @31 admits net/url's escaping and composition by symbol — the parsing
+// half, which reads GODEBUG settings no code-result guard pins, stays
+// refused — and path/filepath's lexical operations by symbol, the
+// filesystem reaches (Abs, EvalSymlinks, Glob, Walk, WalkDir) refused.
+const ObservationRTA = "gofresh/observation-rta@31"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

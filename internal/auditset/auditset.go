@@ -12,6 +12,7 @@ package auditset
 
 import (
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -119,9 +120,80 @@ var timeSymbols = map[string]bool{
 	"Hours": true, "Minutes": true, "Seconds": true, "Milliseconds": true, "Microseconds": true, "Nanoseconds": true, "Abs": true,
 }
 
-// TimeSymbol reports whether a time-package symbol name is in the
-// audited surface.
-func TimeSymbol(name string) bool { return timeSymbols[name] }
+// urlSymbols is the audited surface of package net/url, matched by
+// bare name at every tier: escaping and unescaping, the Userinfo
+// constructors, and the value methods of URL, Values, Userinfo, and
+// the error types — string computation over their operands. Every
+// operation that reaches the package's two GODEBUG settings
+// (urlstrictcolons through parseHost, urlmaxqueryparams through
+// parseQuery) never enters: Parse, ParseRequestURI, ParseQuery,
+// JoinPath, (URL).Parse, (URL).Query, (URL).UnmarshalBinary — a
+// setting is read through the runtime's debug registry, which no
+// code-result guard pins and which one Setenv moves in-process — and
+// a name shared with one of them (Parse, JoinPath) is excluded whole.
+// The package's other reaches are net/netip's value parsing (its
+// unique-interning registry is value-deterministic; its math use is
+// a constant) and a push linkname of setPath (pure over its
+// receiver). No exported variables. Audited on go1.27.0-dst.14;
+// grows only by source audit (REQ-closure-observability-analysis).
+var urlSymbols = map[string]bool{
+	"QueryEscape": true, "QueryUnescape": true, "PathEscape": true, "PathUnescape": true,
+	"User": true, "UserPassword": true, "Username": true, "Password": true,
+	"URL": true, "Values": true, "Userinfo": true, "Error": true, "EscapeError": true, "InvalidHostError": true,
+	"String": true, "EscapedPath": true, "EscapedFragment": true, "Redacted": true, "IsAbs": true,
+	"ResolveReference": true, "RequestURI": true, "Hostname": true, "Port": true,
+	"MarshalBinary": true, "AppendBinary": true, "Clone": true,
+	"Get": true, "Set": true, "Add": true, "Del": true, "Has": true, "Encode": true,
+	"Unwrap": true, "Timeout": true, "Temporary": true,
+}
+
+// symbolTables is the one table of per-package audited surfaces the
+// class-B ladder consults; a widening is a row here, never a new
+// consulting site. The audited set has two shapes — a package
+// admitted whole (purePackages) or by symbol (here) — and a package
+// is in exactly one, so the two consulting predicates can never
+// answer differently for one package (pinned by the package's test).
+var symbolTables = map[string]map[string]bool{
+	"time":          timeSymbols,
+	"path/filepath": filepathSymbols,
+	"net/url":       urlSymbols,
+}
+
+// Symbol reports whether a standard package's symbol name is in its
+// audited surface; a package without a table admits nothing here.
+func Symbol(pkgPath, name string) bool { return symbolTables[pkgPath][name] }
+
+// SymbolPackages lists the packages admitted by symbol, sorted, so a
+// consumer's own package classifications can be pinned disjoint from
+// them.
+func SymbolPackages() []string {
+	out := make([]string, 0, len(symbolTables))
+	for pkgPath := range symbolTables {
+		out = append(out, pkgPath)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// filepathSymbols is the audited surface of package path/filepath,
+// matched by bare name at every tier: the lexical operations —
+// each a string computation over its operands and the build-selected
+// GOOS's separators, delegated to internal/filepathlite, which
+// reaches no ambient channel — the two separator constants, and the
+// callback type name, and HasPrefix (deprecated, a bare
+// strings.HasPrefix over its operands). The filesystem-reaching
+// operations never enter: Abs (the working directory), EvalSymlinks,
+// Glob, Walk, WalkDir. The
+// exported error variables (ErrBadPattern, SkipDir, SkipAll) refuse as
+// standard globals whatever this table says. No admitted name is
+// shared with an ambient declaration. Audited on go1.27.0-dst.14;
+// grows only by source audit (REQ-closure-observability-analysis).
+var filepathSymbols = map[string]bool{
+	"Clean": true, "IsLocal": true, "Localize": true, "ToSlash": true, "FromSlash": true,
+	"SplitList": true, "Split": true, "Join": true, "Ext": true, "IsAbs": true, "Rel": true,
+	"Base": true, "Dir": true, "VolumeName": true, "Match": true, "HasPrefix": true,
+	"Separator": true, "ListSeparator": true, "WalkFunc": true,
+}
 
 // SyncMethod reports whether a sync receiver's method is in the
 // audited synchronization set.

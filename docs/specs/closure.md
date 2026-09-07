@@ -1250,7 +1250,29 @@ mutable variable that refuses like any other; the admission is by bare
 name at every tier, so a name shared by a pure declaration and an ambient
 one — After, Local, UTC, Unix, UnixMilli, UnixMicro, Location, AddDate — is
 excluded whole, at the stated cost that a subject calling the pure method
-of a shared name ((Time).After, (Time).Unix, (Time).AddDate) refuses; execution-free references
+of a shared name ((Time).After, (Time).Unix, (Time).AddDate) refuses; net/url's
+escaping and composition included by symbol — QueryEscape, QueryUnescape,
+PathEscape, PathUnescape, User, UserPassword, the URL, Values, Userinfo, Error,
+EscapeError, and InvalidHostError type names, and the value methods of URL,
+Values, Userinfo, and the error types — string computation over their operands,
+so the always-external rule over the net tree exempts net/url alone, while every
+operation reaching the package's two GODEBUG settings stays refused — Parse,
+ParseRequestURI, ParseQuery, JoinPath, (URL).Parse, (URL).Query,
+(URL).UnmarshalBinary — because a setting is read through the runtime's debug
+registry, an input no code-result guard pins (REQ-guard-runtimeconfig in
+[guards.md](guards.md) bears on timing results alone) and one that a
+sibling's Setenv moves in-process, exactly the channel that excludes
+encoding/gob; path/filepath's lexical operations included by symbol — Clean,
+IsLocal, Localize, ToSlash, FromSlash, SplitList, Split, Join, Ext, IsAbs, Rel,
+Base, Dir, VolumeName, Match, the deprecated HasPrefix, the Separator and
+ListSeparator constants, and the WalkFunc type name — each a string computation
+over its operands and the build-selected GOOS, while Abs (the working
+directory), EvalSymlinks, Glob, Walk, and WalkDir (the filesystem) stay refused
+and the package's exported error variables refuse as unaudited selectors at the
+file fold, which composes every reached package's scan — the walk's
+standard-global arm covers every standard package's exported variable and is
+the sole guard for the packages admitted whole, whose selectors the fold admits
+(io.EOF's shape); execution-free references
 included: an audited type or constant name — fmt.Stringer, time.Time,
 time.Month, time.Duration, time.Weekday and their constants, time's
 layout constants — declares or denotes and executes nothing, every dispatch through a

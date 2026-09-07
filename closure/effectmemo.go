@@ -35,7 +35,10 @@ import (
 // @14 composes the discharge channel into the ambient-effect reasons
 // the fold persists (ObservationRTA@30 carries the same text for the
 // walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@14"
+// @15 admits net/url's escaping and composition and path/filepath's
+// lexical operations, both by symbol (ObservationRTA@31 carries the
+// same widening for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@15"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

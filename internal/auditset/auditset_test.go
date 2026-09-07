@@ -65,3 +65,20 @@ func TestBoundedTokenNeverShadowsALongerName(t *testing.T) {
 		}
 	}
 }
+
+// A standard package is admitted whole or by symbol, never both: the
+// two consulting predicates would otherwise answer differently for one
+// package (REQ-closure-observability-analysis).
+func TestAuditedShapesAreDisjoint(t *testing.T) {
+	for pkgPath := range symbolTables {
+		if purePackages[pkgPath] {
+			t.Errorf("%s is admitted whole and by symbol", pkgPath)
+		}
+		if len(symbolTables[pkgPath]) == 0 {
+			t.Errorf("%s has an empty symbol table", pkgPath)
+		}
+	}
+	if Symbol("net/url", "Parse") || !Symbol("net/url", "QueryEscape") || Symbol("strings", "ToUpper") {
+		t.Fatal("Symbol answers outside its tables")
+	}
+}

@@ -249,10 +249,9 @@ func classBPureStandard(audited bool, pkgPath, name string) bool {
 		case "Sprint", "Sprintf", "Sprintln", "Errorf", "Append", "Appendf", "Appendln", "FormatString", "Stringer":
 			return true
 		}
-	case "time":
-		return auditset.TimeSymbol(name)
 	}
-	return false
+	// Every per-package audited surface is one table in internal/auditset.
+	return auditset.Symbol(pkgPath, name)
 }
 
 // auditedStandardSymbol is the one ladder every tier consults for a
