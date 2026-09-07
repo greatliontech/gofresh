@@ -697,7 +697,7 @@ strategy bump.
       audited toolchain identity); docs delete at close.
 - [x] 120. gofresh: math/big joins the audited-pure set (was SEP 2;
       ~505) — own audit.
-- [ ] 121. gofresh: fixed-argument time construction audited (was SEP
+- [x] 121. gofresh: fixed-argument time construction audited (was SEP
       3; ~186) — Date/AddDate/Format read no clock; own audit.
 - [ ] 122. gofresh: std init-closure exemption (was SEP 4; ~58) —
       synthetic init$N closures ride the toolchain guard as named
