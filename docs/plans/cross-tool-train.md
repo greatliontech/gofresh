@@ -620,7 +620,7 @@ verdict, and records the measured wall against the audit's baseline.
       consumed only under a later successful validation of the same
       view) — adopt WithDeferredCheckClose in the same change set and
       re-measure the closing observation (60 ms per view warm at 91).
-- [ ] 96. gomutant: concurrent ephemeral probe overrides — two
+- [x] 96. gomutant: concurrent ephemeral probe overrides — two
       concurrent probes' width/ceiling snapshot-restores can
       interleave (bounded, self-healing); either the probe claim goes
       exclusive or the interleaving is recorded as accepted.
