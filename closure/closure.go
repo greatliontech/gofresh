@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -80,18 +81,14 @@ type Hasher struct {
 	// admission by omission — the audit's fail-closed ladder survives
 	// the zero value.
 	selectionResolved bool
-	// selectionNotice is the two-axis toolchain-audit rendering for this
-	// analysis' build selection, computed once at construction — ""
-	// exactly when the selection is audited, so verdict and text are
-	// one derivation: every audited-set consultation under this Hasher
-	// answers through SelectionAudited, and a tag-swapped selection
-	// degrades the stdlib admissions to the ordinary fail-closed
-	// classification instead of inheriting the default selection's
-	// audit (ToolchainSelectionNotice).
-	selectionNotice string
-	progs           map[string]*program  // by package import path
-	progErrs        map[string]error     // memoized load failures, by package import path
-	lists           map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	// selection is the two-axis toolchain-audit verdict this Hasher was
+	// built under, stored once: the audited bool, the diagnostic
+	// notice, and every refusal's attribution are its readings
+	// (REQ-closure-refusal-channels).
+	selection selectionDegradation
+	progs     map[string]*program  // by package import path
+	progErrs  map[string]error     // memoized load failures, by package import path
+	lists     map[string][]listPkg // parsed `go list -deps -test`, by package import path
 	// snapshot is the pass's env snapshot when the caller supplied one —
 	// the listing memo's scope identity; nil leaves that memo inert.
 	snapshot       *gotool.EnvSnapshot
@@ -338,7 +335,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 	}
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
-		selectionResolved: true, selectionNotice: ToolchainSelectionNotice(buildFlags, goflags, goexperiment),
+		selectionResolved: true, selection: selectionDegradationFor(runtime.Version(), buildFlags, goflags, goexperiment),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),

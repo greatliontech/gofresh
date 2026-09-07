@@ -356,30 +356,65 @@ func ToolchainSelectionNotice(buildFlags []string, goflags, goexperiment string)
 // admitted under the other through the same path the exported entry
 // takes.
 func toolchainSelectionNoticeFor(version string, buildFlags []string, goflags, goexperiment string) string {
-	row := auditedToolchainSelections[toolchainKey(version)]
-	return toolchainSelectionNotice(row != nil, version, experimentOf(version), row, buildFlags, goflags, goexperiment)
+	return selectionDegradationFor(version, buildFlags, goflags, goexperiment).notice()
 }
 
-// toolchainSelectionNotice is the rendering over explicit axis inputs,
-// so a test can drive the worlds the exported entry cannot reach on a
-// listed toolchain (the unlisted-release branch foremost).
-func toolchainSelectionNotice(sourceListed bool, version, bakedExperiment string, listedSelections map[string]bool, buildFlags []string, goflags, goexperiment string) string {
+// selectionDegradation is the two-axis toolchain-audit verdict stored
+// once: the axis names what is degraded, the remedy what lifts it, both
+// empty exactly when the selection is audited. The audited bool, the
+// notice, and the attribution — the bare axis a refusal carries, a
+// statement of provenance and never a lift — are its three readings,
+// so no two can disagree (REQ-closure-refusal-channels).
+type selectionDegradation struct {
+	axis, remedy string
+}
+
+// unresolvedSelection is the verdict of a Hasher built without
+// construction: refused, with its own axis, read through the same
+// three readings as a resolved one.
+var unresolvedSelection = selectionDegradation{axis: "verdict unresolved: this Hasher was built without construction"}
+
+func (d selectionDegradation) audited() bool { return d.axis == "" }
+
+// notice is the diagnostic-channel rendering: the axis with the
+// consequence every degradation shares and the remedy that lifts it.
+func (d selectionDegradation) notice() string {
 	const consequence = " — standard-library observation admissions are disabled (observation proofs strip and serving degrades to execution)"
+	if d.axis == "" {
+		return ""
+	}
+	return "toolchain-selection audit: " + d.axis + consequence + d.remedy
+}
+
+// selectionDegradationFor resolves the verdict for a running or
+// self-reported release: every table lookup and the experiment read
+// key on the folded form of version (toolchainKey), so a toolchain
+// admitted under one spelling is admitted under the other.
+func selectionDegradationFor(version string, buildFlags []string, goflags, goexperiment string) selectionDegradation {
+	row := auditedToolchainSelections[toolchainKey(version)]
+	return toolchainSelectionDegradation(row != nil, version, experimentOf(version), row, buildFlags, goflags, goexperiment)
+}
+
+// toolchainSelectionDegradation is the one derivation of the verdict
+// over explicit axis inputs, so a test can drive the worlds the
+// exported entries cannot reach on a listed toolchain (the
+// unlisted-release branch foremost).
+func toolchainSelectionDegradation(sourceListed bool, version, bakedExperiment string, listedSelections map[string]bool, buildFlags []string, goflags, goexperiment string) selectionDegradation {
 	if !sourceListed {
-		return "toolchain-selection audit: release " + version + " is not listed (audit key " + strconv.Quote(toolchainKey(version)) + ")" + consequence + " until the release delta is walked and listed under that key"
+		return selectionDegradation{"release " + version + " is not listed (audit key " + strconv.Quote(toolchainKey(version)) + ")", " until the release delta is walked and listed under that key"}
 	}
 	if goexperiment != "" && goexperiment != bakedExperiment {
-		return "toolchain-selection audit: environment GOEXPERIMENT " + strconv.Quote(goexperiment) + " under " + version + " differs from the binary's baked experiment set" + consequence + "; experiment flavors are version-axis listings, never inherited"
+		return selectionDegradation{"environment GOEXPERIMENT " + strconv.Quote(goexperiment) + " under " + version + " differs from the binary's baked experiment set", "; experiment flavors are version-axis listings, never inherited"}
 	}
 	effective := append(append([]string(nil), buildFlags...), strings.Fields(goflags)...)
 	key, ok := selectionAuditKey(effective)
 	if !ok {
-		return fmt.Sprintf("toolchain-selection audit: effective build flags %q (explicit plus GOFLAGS) under %s defeat selection classification%s; an unclassifiable selection is never admitted", effective, version, consequence)
+		return selectionDegradation{fmt.Sprintf("effective build flags %q (explicit plus GOFLAGS) under %s defeat selection classification", effective, version), "; an unclassifiable selection is never admitted"}
 	}
 	if listedSelections[key] {
-		return ""
+		return selectionDegradation{}
 	}
-	return fmt.Sprintf("toolchain-selection audit: selection %q under %s is unwalked%s until the selection delta is walked and listed", key, version, consequence)
+	return selectionDegradation{fmt.Sprintf("selection %q under %s is unwalked", key, version), " until the selection delta is walked and listed"}
 }
 
 // ToolchainSelectionNoticeResolvedContext is the resolving entry of the
@@ -405,17 +440,45 @@ func ToolchainSelectionNoticeResolvedContext(ctx context.Context, dir string, en
 // consultations from the same verdict the closure tiers thread
 // internally. An unresolved (zero-value) Hasher refuses.
 func (h *Hasher) SelectionAudited() bool {
-	return h.selectionResolved && h.selectionNotice == ""
+	return h.verdict().audited()
+}
+
+// verdict is the one selection verdict every reading derives from: the
+// stored degradation once resolved, the unresolved refusal otherwise.
+func (h *Hasher) verdict() selectionDegradation {
+	if !h.selectionResolved {
+		return unresolvedSelection
+	}
+	return h.selection
 }
 
 // SelectionNotice is the Hasher's owned degradation rendering, ""
 // exactly when the selection is audited — the biconditional holds for
 // the unresolved zero value too, which refuses with its own notice.
 func (h *Hasher) SelectionNotice() string {
-	if !h.selectionResolved {
-		return "toolchain-selection audit: verdict unresolved — this Hasher was built without construction, so every standard-library admission refuses fail-closed"
+	return h.verdict().notice()
+}
+
+// SelectionAttribution is the Hasher's owned attribution for a refusal
+// composed under its selection — the degraded axis, "" exactly when
+// the selection is audited, the unresolved zero value's own axis
+// otherwise. Every tier attributes at its own composition through
+// AttributeSelection (REQ-closure-refusal-channels).
+func (h *Hasher) SelectionAttribution() string {
+	return h.verdict().axis
+}
+
+// AttributeSelection appends the selection attribution to a refusal
+// composed under an unaudited selection: a statement that the judgment
+// ran with the standard-library admissions disabled, never a promise
+// that walking the selection lifts it — whether it lifts is the walk's
+// answer. An audited selection (empty axis) leaves the reason as it is
+// (REQ-closure-refusal-channels).
+func AttributeSelection(reason, axis string) string {
+	if axis == "" || reason == "" {
+		return reason
 	}
-	return h.selectionNotice
+	return reason + " (judged under an unaudited toolchain selection: " + axis + ")"
 }
 
 // resolveSelectionEnv reads the two selection-bearing go-env values:

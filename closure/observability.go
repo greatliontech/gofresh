@@ -261,6 +261,17 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 	if err := h.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
+	// Every refusal attributes the selection it was judged under at
+	// the batch's return — past every memo read and write, so the
+	// memoized, hashed Reason stays byte-stable and a warm and a cold
+	// pass render the same attribution (REQ-closure-refusal-channels,
+	// REQ-closure-observability-memo).
+	if axis := h.SelectionAttribution(); axis != "" {
+		for subject, proof := range results {
+			proof.Reason = AttributeSelection(proof.Reason, axis)
+			results[subject] = proof
+		}
+	}
 	return results, nil
 }
 

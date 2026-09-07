@@ -127,10 +127,11 @@ func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("assembly-carrying serve = handled %v, err %v", handled, err)
 	}
-	if !hasEffectReason(withAsm.effects, "reaches non-standard assembly") {
+	assembly := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly").reason
+	if !hasEffectReason(withAsm.effects, assembly) {
 		t.Fatalf("assembly fact missing from the served composite: %+v", withAsm)
 	}
-	if hasEffectReason(served.effects, "reaches non-standard assembly") {
+	if hasEffectReason(served.effects, assembly) {
 		t.Fatalf("assembly fact leaked into the assembly-free composite: %+v", served)
 	}
 }

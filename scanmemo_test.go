@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -391,8 +392,8 @@ func TestScanMemoRefusesAnEntryOfAnotherShape(t *testing.T) {
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if string(payload["version"]) != "1" {
-			t.Fatalf("entry %s carries version %s, want 1", e, payload["version"])
+		if string(payload["version"]) != strconv.Itoa(scanEntryVersion) {
+			t.Fatalf("entry %s carries version %s, want %d", e, payload["version"], scanEntryVersion)
 		}
 		payload["version"] = json.RawMessage("0")
 		envelope.Payload, _ = json.Marshal(payload)
@@ -420,7 +421,7 @@ func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
 	s := func(sym string) Subject { return Subject{Package: pkg, Symbol: sym} }
 	scan := &subjectScan{
 		known: map[Subject]bool{s("A"): true, s("B"): true, s("C"): true}, pure: map[Subject]bool{s("A"): true},
-		openWorld: map[Subject]bool{s("B"): true}, external: map[Subject]bool{s("C"): true},
+		openWorld: map[Subject]string{s("B"): "parameter f func()"}, external: map[Subject]bool{s("C"): true},
 		downgradeReason: map[Subject]string{s("B"): "reason"}, vouchDischarges: map[Subject]string{s("A"): "v"},
 		attestationDischarges: map[Subject]string{s("B"): "att"}, packageProcessDischarges: map[Subject]string{s("C"): "pp"},
 		ambiguous: map[Subject]string{s("C"): "declared twice"},

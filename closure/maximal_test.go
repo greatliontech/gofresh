@@ -477,7 +477,7 @@ func F() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches net (network I/O)" {
+	if scan.preferred != trueExternalEffect("net").reason {
 		t.Fatalf("preferred diagnostic = %q, want the always-external import to outrank the body walk", scan.preferred)
 	}
 	for _, want := range [][2]string{{"os", "ReadFile"}, {"net", "Dial"}} {
@@ -582,7 +582,7 @@ func TestMaximalPackageSelectionRanksTheEffectUnion(t *testing.T) {
 	library := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
 	library.unrefinable = true
 	union = append(union, library)
-	if selected := preferredEffectReason(union); selected != "reaches cgo external library" {
+	if selected := preferredEffectReason(union); selected != library.reason {
 		t.Fatalf("the top-rank blocker was not selected: %q", selected)
 	}
 }
@@ -595,7 +595,7 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 		SysoFiles:  []string{"object.syso"},
 	}
 	scan := maximalPackageExternalEffects(pkg)
-	if scan.preferred != "reaches cgo external library" {
+	if scan.preferred != opaqueExternalEffect(externalEffectNative, "reaches cgo external library").reason {
 		t.Fatalf("preferred package diagnostic = %q, want the lexicographic least of the native facts", scan.preferred)
 	}
 	if len(scan.effects) != 4 {

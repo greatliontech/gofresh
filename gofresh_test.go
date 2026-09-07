@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@29" {
-		t.Fatalf("ObservationRTA = %q, want the fixed-argument time admission over the math/big admission", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@30" {
+		t.Fatalf("ObservationRTA = %q, want the ambient-effect discharge channels over the fixed-argument time admission", ObservationRTA)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @13 is the fixed-argument
-// time admission beside ObservationRTA@29.
+// of serving (REQ-closure-effect-scan-memo); @14 is the ambient-effect
+// discharge channel in the persisted reasons beside ObservationRTA@30.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@13" {
-		t.Fatalf("effect-scan strategy = %q, want @13", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@14" {
+		t.Fatalf("effect-scan strategy = %q, want @14", closure.EffectScanStrategy())
 	}
 }

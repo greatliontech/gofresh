@@ -1451,7 +1451,7 @@ func TestNonToolchainAssemblyReachedPackagesWiden(t *testing.T) {
 		}
 		found := false
 		for _, effect := range a.effects {
-			if effect.kind == externalEffectNative && effect.reason == "reaches non-standard assembly" {
+			if effect.kind == externalEffectNative && effect.reason == opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly").reason {
 				found = true
 			}
 		}
@@ -2345,7 +2345,7 @@ func TestNonToolchainAssemblyWidensAndBlocks(t *testing.T) {
 	}
 	found := false
 	for _, effect := range tr.effects {
-		if effect.kind == externalEffectNative && effect.reason == "reaches non-standard assembly" {
+		if effect.kind == externalEffectNative && effect.reason == opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly").reason {
 			found = true
 		}
 	}

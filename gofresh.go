@@ -347,7 +347,11 @@ const ClosureStrategy = closure.IdentityStrategy
 // local zone, or the time.UTC variable; the names that collide with an
 // ambient declaration (After, Local, UTC, the Unix constructors,
 // Location, AddDate) stay excluded whole.
-const ObservationRTA = "gofresh/observation-rta@29"
+// @30 composes the discharge channel into every ambient-effect refusal
+// (network, plugin, native reach) — the persisted reason text moves,
+// so a proof served under @29 would name a dead end the fresh
+// derivation no longer does.
+const ObservationRTA = "gofresh/observation-rta@30"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

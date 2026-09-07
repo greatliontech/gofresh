@@ -159,7 +159,7 @@ func TestSelectionAuditKeySanitizerValueForms(t *testing.T) {
 // pre-selection era's so existing memos keep serving.
 func TestEffectScanScopeDiscriminatesSelectionVerdict(t *testing.T) {
 	audited := (&Hasher{selectionResolved: true}).effectScanScope()
-	unaudited := (&Hasher{selectionResolved: true, selectionNotice: "unwalked"}).effectScanScope()
+	unaudited := (&Hasher{selectionResolved: true, selection: selectionDegradation{axis: "unwalked"}}).effectScanScope()
 	if audited == unaudited {
 		t.Fatal("effect-scan memo scope ignores the selection verdict — unaudited scans could serve audited consumers")
 	}
@@ -245,6 +245,16 @@ func TestToolchainSelectionNoticeMatchesVerdict(t *testing.T) {
 		if (notice == "") != audited {
 			t.Errorf("%s: notice %q disagrees with verdict %v", tc.name, notice, audited)
 		}
+		// The attribution is the same verdict's third reading: "" exactly
+		// when audited, the notice's axis with neither consequence nor
+		// remedy (REQ-closure-refusal-channels).
+		attribution := selectionDegradationFor(runtime.Version(), tc.flags, tc.goflags, tc.goexperiment).axis
+		if (attribution == "") != audited {
+			t.Errorf("%s: attribution %q disagrees with verdict %v", tc.name, attribution, audited)
+		}
+		if attribution != "" {
+			requireBareAxis(t, tc.name, notice, attribution)
+		}
 		if len(tc.wantFragments) == 0 && notice != "" {
 			t.Errorf("%s: unexpected notice %q", tc.name, notice)
 		}
@@ -300,13 +310,13 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 // under a listed toolchain, where every other test in this file runs —
 // stays pinned.
 func TestToolchainSelectionNoticeNamesUnlistedRelease(t *testing.T) {
-	notice := toolchainSelectionNotice(false, "go9.99", "", nil, nil, "", "")
+	notice := toolchainSelectionDegradation(false, "go9.99", "", nil, nil, "", "").notice()
 	for _, frag := range []string{"release go9.99 is not listed", "observation admissions are disabled", "walked and listed"} {
 		if !strings.Contains(notice, frag) {
 			t.Fatalf("unlisted-release notice %q missing %q", notice, frag)
 		}
 	}
-	if toolchainSelectionNotice(true, "go9.99", "", map[string]bool{"": true}, nil, "", "") != "" {
+	if toolchainSelectionDegradation(true, "go9.99", "", map[string]bool{"": true}, nil, "", "").notice() != "" {
 		t.Fatal("listed default selection rendered a notice through the core")
 	}
 }
@@ -321,6 +331,29 @@ func TestZeroHasherRefusesSelectionAudit(t *testing.T) {
 	}
 	if notice := h.SelectionNotice(); notice == "" || !strings.Contains(notice, "unresolved") {
 		t.Fatalf("unresolved verdict has no explaining notice: %q", notice)
+	}
+	// The third reading refuses with the same verdict: a refusal
+	// composed under the zero value names the unresolved axis, never
+	// an empty attribution beside a refused audit
+	// (REQ-closure-refusal-channels).
+	if attribution := h.SelectionAttribution(); attribution == "" || !strings.Contains(attribution, "unresolved") {
+		t.Fatalf("unresolved verdict's attribution %q does not name the unresolved axis", attribution)
+	}
+	requireBareAxis(t, "unresolved", h.SelectionNotice(), h.SelectionAttribution())
+}
+
+// requireBareAxis is the one spelling of the axis-only rule over both
+// worlds: the attribution is the notice's axis and carries neither the
+// consequence nor the remedy (REQ-closure-refusal-channels).
+func requireBareAxis(t *testing.T, name, notice, attribution string) {
+	t.Helper()
+	if !strings.HasPrefix(notice, "toolchain-selection audit: "+attribution+" — ") {
+		t.Errorf("%s: attribution %q is not the notice's axis (%q)", name, attribution, notice)
+	}
+	for _, forbidden := range []string{"admission", "walked and listed", "never inherited", "never admitted", "—"} {
+		if strings.Contains(attribution, forbidden) {
+			t.Errorf("%s: attribution %q carries %q — consequence or remedy text", name, attribution, forbidden)
+		}
 	}
 }
 
@@ -339,4 +372,35 @@ func environmentWith(settings ...string) []string {
 		}
 	}
 	return append(env, settings...)
+}
+
+// Every axis of the degradation names itself in the attribution and
+// its remedy in the notice, over explicit inputs so the unlisted-release
+// world a listed toolchain cannot reach is pinned too
+// (REQ-closure-refusal-channels).
+func TestSelectionDegradationNamesEveryAxis(t *testing.T) {
+	listed := map[string]bool{"": true, "race": true}
+	for _, tc := range []struct {
+		name         string
+		sourceListed bool
+		flags        []string
+		goexperiment string
+		axis, remedy string
+	}{
+		{"unlisted release", false, nil, "", "release go1.99.0 is not listed", "walked and listed under that key"},
+		{"experiment mismatch", true, nil, "somefutureexp", `GOEXPERIMENT "somefutureexp" under go1.99.0`, "never inherited"},
+		{"unclassifiable flags", true, []string{"-tags"}, "", "defeat selection classification", "never admitted"},
+		{"unwalked selection", true, []string{"-tags=dup"}, "", `selection "dup" under go1.99.0 is unwalked`, "walked and listed"},
+	} {
+		d := toolchainSelectionDegradation(tc.sourceListed, "go1.99.0", "", listed, tc.flags, "", tc.goexperiment)
+		if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
+			t.Errorf("%s: degradation %+v, want axis %q and remedy %q", tc.name, d, tc.axis, tc.remedy)
+		}
+		if notice := d.notice(); !strings.HasPrefix(notice, "toolchain-selection audit: "+d.axis+" — ") || !strings.HasSuffix(notice, d.remedy) {
+			t.Errorf("%s: notice %q is not axis+consequence+remedy", tc.name, notice)
+		}
+	}
+	if d := toolchainSelectionDegradation(true, "go1.99.0", "", listed, []string{"-race"}, "", ""); !d.audited() || d.notice() != "" || d.axis != "" {
+		t.Errorf("audited selection degraded: %+v", d)
+	}
 }

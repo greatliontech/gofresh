@@ -77,7 +77,16 @@ func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject
 				Hash:         maximalSubjectHash(hash, subject),
 				TestVariants: h.testVariants[pkgPath].Hash,
 				Unverifiable: unverifiable,
-				Reason:       reason,
+				// The closure tier's refusal attributes the selection it
+				// was judged under at its own composition; the effect
+				// fold beneath stays selection-keyed and unattributed
+				// (REQ-closure-refusal-channels). A verifiable closure
+				// carrying an import-candidate diagnostic needs no guard:
+				// under an unaudited selection every standard selector
+				// is an effect and the blank and dot spellings refuse,
+				// so that state exists only under an audited selection,
+				// whose attribution is empty.
+				Reason: AttributeSelection(reason, h.SelectionAttribution()),
 			}
 			sources[subject] = append([]string(nil), files...)
 		}
@@ -1000,11 +1009,11 @@ func trueReason(pkgPath string) string {
 func trueExternalEffect(pkgPath string) externalEffect {
 	switch {
 	case pkgPath == "plugin":
-		return externalEffect{kind: externalEffectPlugin, packagePath: pkgPath, reason: "reaches plugin"}
+		return symbolExternalEffect(externalEffectPlugin, pkgPath, "", "reaches plugin")
 	case pkgPath == "net" || strings.HasPrefix(pkgPath, "net/"):
-		return externalEffect{kind: externalEffectNetwork, packagePath: pkgPath, reason: "reaches " + pkgPath + " (network I/O)"}
+		return symbolExternalEffect(externalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
 	default:
-		return externalEffect{kind: externalEffectNative, packagePath: pkgPath, reason: "reaches " + pkgPath + " (external system call)"}
+		return symbolExternalEffect(externalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")
 	}
 }
 

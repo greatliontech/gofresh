@@ -437,13 +437,19 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	}
 	for _, subject := range subjects {
 		maximal := computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]
-		if openWorld[subject] {
+		// The two consumer-tier judgments — signature dynamism and
+		// shared dynamic state — ran under the selection the Hasher
+		// resolved, so each attributes it at its own composition, as
+		// the closure tiers do at theirs; the declaration-borne refusals
+		// below (ambiguous identity, the external directive) are no
+		// degraded judgment and carry none (REQ-closure-refusal-channels).
+		if term := openWorld[subject]; term != "" {
 			maximal.Unverifiable = true
-			maximal.Reason = "subject accepts caller-supplied dynamic behavior"
+			maximal.Reason = closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())
 		}
 		if reason := scan.downgradeReason[subject]; reason != "" {
 			maximal.Unverifiable = true
-			maximal.Reason = reason
+			maximal.Reason = closure.AttributeSelection(reason, hasher.SelectionAttribution())
 		}
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
@@ -1627,7 +1633,11 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 				if ctx.Err() != nil {
 					return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 				}
-				observableComputed[request] = closure.Observability{Reason: "observation analysis unavailable: " + isolatedErr.Error()}
+				// The isolated refusal composes here, outside the batch's
+				// attributed return, so it attributes the selection itself
+				// exactly as its in-batch twin does
+				// (REQ-closure-refusal-channels).
+				observableComputed[request] = closure.Observability{Reason: closure.AttributeSelection("observation analysis unavailable: "+isolatedErr.Error(), hasher.SelectionAttribution())}
 				continue
 			}
 			maps.Copy(observableComputed, isolated)

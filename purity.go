@@ -212,12 +212,17 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 
 // scanEntryVersion versions the persisted scan entry's shape; a shape
 // change recomputes rather than misreading an older entry.
-const scanEntryVersion = 1
+const scanEntryVersion = 2
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {
-	Pure                     bool   `json:"pure,omitempty"`
-	OpenWorld                bool   `json:"openWorld,omitempty"`
+	Pure bool `json:"pure,omitempty"`
+	// OpenWorld is the conferring term of an open-world subject — the
+	// type parameter, receiver, or parameter whose type carries
+	// dynamic reach — and empty for a closed one: one field, so an open
+	// subject without its term is unrepresentable
+	// (REQ-closure-refusal-channels).
+	OpenWorld                string `json:"openWorld,omitempty"`
 	External                 bool   `json:"external,omitempty"`
 	DowngradeReason          string `json:"downgradeReason,omitempty"`
 	VouchDischarges          string `json:"vouchDischarges,omitempty"`
@@ -259,8 +264,8 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 			if e.Pure {
 				scan.pure[subject] = true
 			}
-			if e.OpenWorld {
-				scan.openWorld[subject] = true
+			if e.OpenWorld != "" {
+				scan.openWorld[subject] = e.OpenWorld
 			}
 			if e.External {
 				scan.external[subject] = true
@@ -287,7 +292,7 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 // scanFromEntries builds a scan entirely from served entries.
 func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
 	scan := &subjectScan{
-		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]bool{}, external: map[Subject]bool{},
+		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]string{}, external: map[Subject]bool{},
 		downgradeReason: map[Subject]string{}, vouchDischarges: map[Subject]string{}, attestationDischarges: map[Subject]string{},
 		packageProcessDischarges: map[Subject]string{}, ambiguous: map[Subject]string{},
 	}
@@ -299,9 +304,13 @@ func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
 // directive purity, per-subject dynamic-signature marks, and the subjects
 // whose identity collapsed distinct declarations.
 type subjectScan struct {
-	pure      map[Subject]bool
-	known     map[Subject]bool
-	openWorld map[Subject]bool
+	pure  map[Subject]bool
+	known map[Subject]bool
+	// openWorld maps each open-world subject to the term conferring its
+	// openness (REQ-closure-analysis's openness rule), the refusal's
+	// named identity; a closed subject is absent
+	// (REQ-closure-refusal-channels).
+	openWorld map[Subject]string
 	external  map[Subject]bool
 	// downgradeReason maps each subject of a shared-dynamic-state
 	// downgraded package to the refusal reason naming the owning package
@@ -341,7 +350,7 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 	scan := &subjectScan{
 		pure:                     map[Subject]bool{},
 		known:                    map[Subject]bool{},
-		openWorld:                map[Subject]bool{},
+		openWorld:                map[Subject]string{},
 		external:                 map[Subject]bool{},
 		downgradeReason:          map[Subject]string{},
 		vouchDischarges:          map[Subject]string{},
@@ -454,8 +463,10 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 					if isExternal {
 						external[subject] = true
 					}
-					if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok && signatureMayReceiveUnknownDynamic(audited, fn.Type().(*types.Signature)) {
-						openWorld[subject] = true
+					if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok {
+						if term := openWorldTerm(audited, fn.Type().(*types.Signature)); term != "" {
+							openWorld[subject] = term
+						}
 					}
 				}
 			}
@@ -480,8 +491,10 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 					}
 					subject := Subject{Package: pkgPath, Symbol: name + "." + method.Name()}
 					record(subject, objectDeclarationKey(p, method))
-					if sig, ok := method.Type().(*types.Signature); ok && signatureMayReceiveUnknownDynamic(audited, sig) {
-						openWorld[subject] = true
+					if sig, ok := method.Type().(*types.Signature); ok {
+						if term := openWorldTerm(audited, sig); term != "" {
+							openWorld[subject] = term
+						}
 					}
 					pureKey, externalKey := state.methodDirectives(pkgPath, method)
 					if pureKey != "" && externalKey != "" && scanErr == nil {
@@ -531,12 +544,20 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 	return scan, nil
 }
 
-func signatureMayReceiveUnknownDynamic(audited bool, sig *types.Signature) bool {
+// openWorldTerm names the first term of a signature that confers
+// openness on its subject — a type parameter whose constraint does not
+// bound its type set away from dynamic carriers, a receiver or a
+// parameter whose type carries dynamic reach — and is empty for a
+// closed signature. The term is the refusal's identity: the operator
+// bounds exactly that type (REQ-closure-refusal-channels).
+func openWorldTerm(audited bool, sig *types.Signature) string {
 	if sig == nil {
-		return true
+		// Unreachable — a *types.Func's type is always a signature —
+		// kept fail-closed rather than trusted.
+		return "unresolved signature"
 	}
 	if isHarnessSignature(sig) {
-		return false
+		return ""
 	}
 	// The type-parameter lists are consulted directly: a zero-parameter
 	// generic reads closed through Params alone, and both tiers must
@@ -544,24 +565,33 @@ func signatureMayReceiveUnknownDynamic(audited bool, sig *types.Signature) bool 
 	// parameterized-subject arm).
 	for _, list := range []*types.TypeParamList{sig.TypeParams(), sig.RecvTypeParams()} {
 		for i := 0; list != nil && i < list.Len(); i++ {
-			if !closure.TypeParamBoundsAwayFromDynamic(audited, list.At(i)) {
-				return true
+			if param := list.At(i); !closure.TypeParamBoundsAwayFromDynamic(audited, param) {
+				return "type parameter " + param.Obj().Name() + " constrained by " + types.TypeString(param.Constraint(), packageNameQualifier)
 			}
 		}
 	}
 	// One fresh map per parameter, mirroring the closure tier: no
 	// cross-parameter mark leakage, cycle-safe within each evaluation.
 	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(audited, recv.Type(), make(map[types.Type]bool)) {
-		return true
+		return "receiver " + types.TypeString(recv.Type(), packageNameQualifier)
 	}
 	params := sig.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryUnknownDynamic(audited, params.At(i).Type(), make(map[types.Type]bool)) {
-			return true
+		param := params.At(i)
+		if typeMayCarryUnknownDynamic(audited, param.Type(), make(map[types.Type]bool)) {
+			name := param.Name()
+			if name == "" || name == "_" {
+				name = "#" + strconv.Itoa(i+1)
+			}
+			return "parameter " + name + " " + types.TypeString(param.Type(), packageNameQualifier)
 		}
 	}
-	return false
+	return ""
 }
+
+// packageNameQualifier renders a type's package by name, the spelling
+// the declaration itself uses.
+func packageNameQualifier(pkg *types.Package) string { return pkg.Name() }
 
 func isHarnessSignature(sig *types.Signature) bool {
 	if sig == nil || sig.Recv() != nil || sig.Params().Len() != 1 {

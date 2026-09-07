@@ -32,7 +32,10 @@ import (
 // (ObservationRTA@28 carries the same widening for the walk tiers).
 // @13 admits time's fixed-argument construction and value computation
 // (ObservationRTA@29 carries the same widening for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@13"
+// @14 composes the discharge channel into the ambient-effect reasons
+// the fold persists (ObservationRTA@30 carries the same text for the
+// walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@14"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

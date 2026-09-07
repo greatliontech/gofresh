@@ -1023,6 +1023,32 @@ restructure and the single-subject directive with its attestation caveat. The
 reason may illustrate a consumer CLI spelling, but the channel and identity are
 the contract — consumers differ in how vouches are supplied.
 
+**REQ-closure-refusal-channels** (behavior): The sibling refusal families MUST
+name their discharge channel exactly as the shared-dynamic-state family does, so
+no correct refusal is a dead end. An ambient-effect refusal — a network, plugin,
+or native reach, which no finer tier analyzes and no directive below the
+subject bounds — names the reached operation and the subject-level channel:
+restructuring the subject away from the reach, or the subject's purity
+responsibility — the `//gofresh:pure` directive on its declaration or the
+caller's purity assertion (REQ-purity-directive and REQ-purity-responsibility
+in [purity.md](purity.md)); the composition is the effect's, so every reason
+of the kind carries it at every tier. The signature-dynamism refusal names the
+conferring term — the first type parameter, receiver, or parameter whose type
+carries dynamic reach under REQ-closure-analysis's openness rule — and its
+channel: bounding that type away from dynamic carriers, or the purity
+responsibility; the term is the persisted open-world fact itself, so an open
+subject without its term is unrepresentable. Under an unaudited
+toolchain selection every tier refusal — the closure tier, the observability
+tier, signature dynamism, shared dynamic state — carries the selection's owned
+attribution, the degraded axis, appended at the tier's own composition: a
+statement that the judgment ran with the standard-library admissions disabled,
+never a promise that walking the selection lifts it (a network reach refuses
+under every selection; whether a refusal survives the walk is the walk's
+answer); an author's external declaration and an ambiguous identity carry none,
+being no degraded judgment. The reached operation, the conferring term, the
+channel, and the attributed axis are the contract; the spellings are
+illustrative.
+
 ## Analysis requirements
 
 **REQ-closure-analysis** (behavior): The observability proof's precise analysis MUST build

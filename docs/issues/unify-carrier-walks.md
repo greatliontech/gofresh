@@ -22,5 +22,12 @@ becomes a single code object. The TypeParam cycle-guard semantics
 behavior-bearing and must be preserved per call surface; that is the
 delicate part and why this is its own change set.
 
+The openness computations over signatures ride the same collapse:
+`purity.go openWorldTerm` (the consumer tier, naming the conferring
+term) and `closure/attribution.go rootMayReceiveUnknownDynamic` (the
+closure tier) walk the same type-parameter, receiver, and parameter
+positions under the same carrier rule and are required by comment to
+agree, enforced by nothing; one walk would name the term for both.
+
 Lands: with the next reachability-scoping change (the same window as
 unify-discharge-walks and binary-roots-single-mask-union).

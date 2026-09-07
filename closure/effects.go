@@ -57,12 +57,39 @@ func (s *maximalEffectScan) add(effect externalEffect) {
 }
 
 func opaqueExternalEffect(kind externalEffectKind, reason string) externalEffect {
-	return externalEffect{kind: kind, detail: reason, reason: reason}
+	return externalEffect{kind: kind, detail: reason, reason: reason + ambientDischargeChannel(kind)}
 }
 
 func symbolExternalEffect(kind externalEffectKind, pkgPath, name, reason string) externalEffect {
-	return externalEffect{kind: kind, packagePath: pkgPath, symbol: name, reason: reason}
+	return externalEffect{kind: kind, packagePath: pkgPath, symbol: name, reason: reason + ambientDischargeChannel(kind)}
 }
+
+// ambientDischargeChannel names the lift an ambient effect's boundary
+// affords, composed by the constructors so every reason of the kind
+// carries it (REQ-closure-refusal-channels). A network, plugin, or
+// native reach is analyzed by no finer tier, and the closure walk
+// honors no directive below the subject, so the channel is the
+// subject's own: restructuring it away from the reach, or the
+// subject-level purity responsibility — the //gofresh:pure directive on
+// its declaration or the caller's purity assertion
+// (REQ-purity-directive, REQ-purity-responsibility). Every other kind
+// carries its lift elsewhere: an observable effect proceeds to the
+// observation bracket, an unaudited standard reach names the toolchain
+// audit through the selection notice.
+func ambientDischargeChannel(kind externalEffectKind) string {
+	switch kind {
+	case externalEffectNetwork, externalEffectPlugin, externalEffectNative:
+		return " (dischargeable by restructuring the subject away from the reach, or by " + PurityResponsibility + ")"
+	default:
+		return ""
+	}
+}
+
+// PurityResponsibility is the one spelling of the subject-level purity
+// channel every refusal that affords it names: the author's durable
+// directive or the caller's recorded assertion (REQ-purity-directive,
+// REQ-purity-responsibility; REQ-closure-refusal-channels).
+const PurityResponsibility = "the //gofresh:pure directive on the subject's declaration or the caller's purity assertion"
 
 func appendExternalEffect(effects []externalEffect, effect externalEffect) []externalEffect {
 	if effect.reason == "" {

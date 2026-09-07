@@ -1030,3 +1030,53 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "83cdcf123fece402d84db42446ce81ca9e28fe96e4b061f771c2b06b312e364e"
 }
+
+bindings {
+  requirement_id: "REQ-closure-refusal-channels"
+  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
+  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestAmbientEffectReasonsNameTheirDischargeChannel"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "40cc3b170d63528d5c76580ca32ad2a320d2069d19b4a3c773718446a9d1fd88"
+}
+
+bindings {
+  requirement_id: "REQ-closure-refusal-channels"
+  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
+  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestOpenWorldRefusalNamesTheConferringTerm"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "306f3c88e907dd5ee3ce66a5c0a5a89f1ae44044c5121e32d255f2db235f58cf"
+}
+
+bindings {
+  requirement_id: "REQ-closure-refusal-channels"
+  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
+  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestUnauditedSelectionAttributesTierRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "eea68a84e9bc0ac196dcad34630cf2e0b8ca93f1aa8000973793edb4941fd382"
+}
+
+bindings {
+  requirement_id: "REQ-closure-refusal-channels"
+  content_hash: "fc879de165ab141beec4b323baf2fb065e88b6da76cc78f4ad98095aec0e5524"
+  source_hash: "b1c255c669e2b7e80e072bb82ff0e7d6835476809e1bf281df30d3456739d022"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityRefusalAttributesTheUnauditedSelection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6259bbc1516786e9e1a22815962b69079ca9918d9206c5c399ad678ece83aad8"
+}
+
+bindings {
+  requirement_id: "REQ-closure-refusal-channels"
+  content_hash: "d64d4b274cc1419882f3e22a71e63d56a3e5790ccad3f06b4a3ad36d234b7d7e"
+  source_hash: "a83eb2a45581b1f01bb012fb276e4839cfc56bf9749b30559357e2dd97715291"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSelectionDegradationNamesEveryAxis"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e5d8d443a190f1cdffd911246091dc275d2ca6a822c0c801f4c1b25dbf8784aa"
+}

@@ -49,10 +49,11 @@ func writePinnedDepModule(t *testing.T) string {
 }
 
 type scanResult struct {
-	known, openWorld, external map[Subject]bool
-	pure                       map[Subject]bool
-	downgradeReason            map[Subject]string
-	vouchDischarges            map[Subject]string
+	known, external map[Subject]bool
+	openWorld       map[Subject]string
+	pure            map[Subject]bool
+	downgradeReason map[Subject]string
+	vouchDischarges map[Subject]string
 }
 
 // testScope carries one test's opaque scope string as the fact-strategy
@@ -646,7 +647,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	// effects (their observability classification is untouched by the
 	// discharge), so the ONLY residual is that class — pinned by
 	// equality so a second downgrade can never hide behind it.
-	if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call)" {
+	if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call) (dischargeable by restructuring the subject away from the reach, or by the //gofresh:pure directive on the subject's declaration or the caller's purity assertion)" {
 		t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason likely means the parent go.mod pins an x/sys version outside the audited set: audit the new source and extend auditedMappingOut's switch", controlVerdict)
 	}
 	if controlFP.SingleSubjectDischarges != "" {
@@ -1123,13 +1124,13 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Data"}] {
-		t.Fatal("a data-only atomic.Pointer parameter opened the subject")
+	if term := scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Data"}]; term != "" {
+		t.Fatalf("a data-only atomic.Pointer parameter opened the subject through %q", term)
 	}
-	if scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Bounded"}] {
-		t.Fatal("a constraint term of the toolchain atomic type opened the subject - the term walk must see the same transparency the parameter walk does")
+	if term := scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Bounded"}]; term != "" {
+		t.Fatalf("a constraint term of the toolchain atomic type opened the subject through %q - the term walk must see the same transparency the parameter walk does", term)
 	}
-	if !scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Dyn"}] {
+	if term := scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Dyn"}]; term == "" {
 		t.Fatal("a dynamic-pointee atomic.Pointer parameter left the subject closed")
 	}
 }
