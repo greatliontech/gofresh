@@ -880,6 +880,7 @@ in their repos.
       exactly as gomutant's --scratch-namespaces are; the excluded-path
       interim retires where a namespace covers it; tugboat's .realseam-tmp
       is the first declaration (its session's work).
+
 ## Band E — design chunks (open with the user)
 
 - [ ] 15. pew: profile capture and attribution as recording
