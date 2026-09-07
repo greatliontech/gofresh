@@ -150,7 +150,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "entropy", "calendar", "stamp", "clock", "mirror"} {
+	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -204,11 +204,11 @@ func TestValues(t *testing.T) {
 	_ = Ratio()
 }
 `)
-	// The entropy legs live in their own package: the package scan is
-	// package-wide, and a math/rand construction anywhere in a package
-	// refuses every subject of it — exactly the caller-side refusal
-	// the admission relies on.
-	writeFile(t, dir, "entropy/entropy.go", `package entropy
+	// The entropy legs live in packages of their own: the package scan
+	// is package-wide, so a math/rand construction anywhere in a package
+	// refuses every subject of it — the caller-side refusal the
+	// admission relies on — and each leg's reason must be its own.
+	writeFile(t, dir, "entropylocal/entropylocal.go", `package entropylocal
 
 import (
 	"math/big"
@@ -221,6 +221,21 @@ import (
 func RandLocal() string {
 	return new(big.Int).Rand(rand.New(rand.NewSource(7)), big.NewInt(100)).String()
 }
+`)
+	writeFile(t, dir, "entropylocal/entropylocal_test.go", `package entropylocal
+
+import "testing"
+
+func TestRandLocal(t *testing.T) {
+	_ = RandLocal()
+}
+`)
+	writeFile(t, dir, "entropyparam/entropyparam.go", `package entropyparam
+
+import (
+	"math/big"
+	"math/rand"
+)
 
 // RandParam draws through a caller-supplied source: the subject's own
 // body reaches no ambient constructor; whoever constructs the source
@@ -229,7 +244,7 @@ func RandParam(r *rand.Rand) string {
 	return new(big.Int).Rand(r, big.NewInt(100)).String()
 }
 `)
-	writeFile(t, dir, "entropy/entropy_test.go", `package entropy
+	writeFile(t, dir, "entropyparam/entropyparam_test.go", `package entropyparam
 
 import (
 	"math/rand"
@@ -323,8 +338,9 @@ func TestMirror(t *testing.T) {
 		{Package: "example.com/audited/values", Symbol: "Ratio"},
 		{Package: "example.com/audited/values", Symbol: "Indirect"},
 		{Package: "example.com/audited/values", Symbol: "Arithmetic"},
-		{Package: "example.com/audited/entropy", Symbol: "RandLocal"},
-		{Package: "example.com/audited/entropy", Symbol: "TestRandParam"},
+		{Package: "example.com/audited/entropylocal", Symbol: "RandLocal"},
+		{Package: "example.com/audited/entropyparam", Symbol: "TestRandParam"},
+		{Package: "example.com/audited/entropyparam", Symbol: "RandParam"},
 		{Package: "example.com/audited/calendar", Symbol: "Year"},
 		{Package: "example.com/audited/stamp", Symbol: "Stamp"},
 		{Package: "example.com/audited/clock", Symbol: "Now"},
@@ -346,12 +362,21 @@ func TestMirror(t *testing.T) {
 		t.Fatalf("math/big arithmetic subject unobservable: %+v", arithmetic)
 	}
 	// Entropy enters through math/rand's constructor at the caller,
-	// never through the admitted package: the local construction and
-	// the parameter-fed one refuse where the source is built.
-	for _, symbol := range []string{"RandLocal", "TestRandParam"} {
-		proof := proofs[Subject{Package: "example.com/audited/entropy", Symbol: symbol}]
-		if proof.Observable || !strings.Contains(proof.Reason, "math/rand") {
-			t.Fatalf("%s = %+v, want refused at the math/rand construction", symbol, proof)
+	// never through the admitted package: the subject constructing its
+	// own source refuses on that construction, and so does the test
+	// constructing the source it feeds to the parameter-taking subject
+	// (its own package's source carries the construction). The bare
+	// parameter-taking subject, judged alone, refuses on its open
+	// world — a *rand.Rand it never constructs is a value it cannot
+	// close over — not on the entropy bar; both directions fail closed.
+	for _, tc := range []struct{ pkg, symbol, reason string }{
+		{"example.com/audited/entropylocal", "RandLocal", "math/rand"},
+		{"example.com/audited/entropyparam", "TestRandParam", "math/rand"},
+		{"example.com/audited/entropyparam", "RandParam", "reachability is not closed"},
+	} {
+		proof := proofs[Subject{Package: tc.pkg, Symbol: tc.symbol}]
+		if proof.Observable || !strings.Contains(proof.Reason, tc.reason) {
+			t.Fatalf("%s.%s = %+v, want refused naming %q", tc.pkg, tc.symbol, proof, tc.reason)
 		}
 	}
 	indirect := proofs[Subject{Package: "example.com/audited/values", Symbol: "Indirect"}]
