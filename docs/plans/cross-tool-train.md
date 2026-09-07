@@ -624,7 +624,7 @@ verdict, and records the measured wall against the audit's baseline.
       concurrent probes' width/ceiling snapshot-restores can
       interleave (bounded, self-healing); either the probe claim goes
       exclusive or the interleaving is recorded as accepted.
-- [ ] 129. gofresh: comment/format-insensitive closure identity — a
+- [x] 129. gofresh: comment/format-insensitive closure identity — a
       closure identity insensitive to comments and formatting
       (caching axis: comment-only edits stop invalidating consumer
       evidence); chartered as the prerequisite gomutant's carry gate
