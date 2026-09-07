@@ -727,18 +727,16 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if c.IsInvoke() && observableDirEntryCall(site) {
 		return
 	}
-	// For an enumeration-closed subject the operand walk crosses
-	// subject-attributed parameters through to the root's whole-view
-	// caller sites — that crossing is the enumeration design itself.
-	// Every other subject keeps the local walk for this short-circuit;
-	// the subject-determined dispatch admission below carries the
-	// subject-internal parameter crossing for enumerated-target sites.
-	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.localHarnessView())
-	if !operandClosed && a.fresh != nil && a.fresh.enumRoot != nil {
-		operandClosed = subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
-	}
+	// One value walk under the subject's fresh analysis: its callers
+	// are the subject's provenance frames alone (the reach is narrowed
+	// to subjectFunctions before this walk) while its dynamic-target
+	// set stays mask-wide, which is exactly what lets a callee's
+	// parameter cross to the subject's own call sites without an
+	// initializer's or a dynamic dispatch's argument leaking in
+	// (REQ-closure-observability-analysis's subject-determined operand).
+	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
 	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && operandClosed
-	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.subjectDeterminedInvokes[site] && subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)) {
+	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.subjectDeterminedInvokes[site] && operandClosed) {
 		a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
 	}
 	if !c.IsInvoke() && c.StaticCallee() == nil {

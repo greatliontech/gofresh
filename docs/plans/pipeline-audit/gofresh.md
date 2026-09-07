@@ -114,7 +114,6 @@ Expected: default `go test ./...` from 555s to the seconds class; the fixture ti
 
 ## 7. Known-failure register relevant to our own loop
 
-- **range-over-func-yield-closure** — a subject ranging a function iterator refuses observability; the corpus pins the refusal. *Lands: chunk 124.*
 - **walk-dst-selection-for-audit-key** — a `-tags dst` analysis refuses **every** stdlib admission loudly; the walk that would lift it is undone. *Lands: with the first judged run over a dst-tagged selection.*
 - **grpc-runtime-memo-and-registry-discharges** — 209 residual culprits keep a real consumer workload unverifiable. *Lands: with the get-or-compute discharge charter.*
 - **binary-roots-single-mask-union** — ⌈N/64⌉ attributed RTA analyses plus N provenance walks for a union needing none. *Lands: with the next reachability-scoping change.*

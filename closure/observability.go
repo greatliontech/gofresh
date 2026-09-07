@@ -280,6 +280,14 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 // closure of the subject world, then package-level blockers, then the
 // subject's own effect set (REQ-closure-observability-analysis).
 func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
+	// The subject walk's function set is the subject's provenance
+	// frames alone, while dynamicTargets stays the whole-mask
+	// projection: the parameter crossing's callers come from the former
+	// and its dynamically-targeted refusal from the latter, so a callee
+	// an initializer or a dynamic dispatch also reaches never closes on
+	// the subject's sites alone (REQ-closure-observability-analysis's
+	// subject-determined operand). Narrowing the targets too would
+	// silently admit that callee.
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
 	subjectResult, err := h.tier2Reachable(base, subjectReach)

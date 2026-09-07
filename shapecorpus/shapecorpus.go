@@ -174,13 +174,13 @@ func Subject() int {
 }
 `,
 			ShapeSymbol: "seq",
-			// The subject reads open-world today: ranging a function
-			// treats yield as a computed call on a parameter, which
-			// the enumeration cannot close. The pin keeps the
-			// DISPOSITION honest — a release flipping it in either
-			// direction is a red canary.
-			SubjectObservable: false,
-			SubjectReason:     "not closed",
+			// The iterator's yield is a computed call on a parameter the
+			// subject's own range statement binds: the parameter crossing
+			// closes it for every closed-world subject
+			// (REQ-closure-observability-analysis's subject-determined
+			// operand). The pin keeps the DISPOSITION honest — a release
+			// flipping it in either direction is a red canary.
+			SubjectObservable: true,
 		},
 		{
 			Name: "range over integer",

@@ -1533,7 +1533,12 @@ the subject's own flow — the operand derives from local construction or
 from a parameter whose function is not dynamically targeted, closes over
 nothing, is not variadic, and has at least one subject-attributed call
 site, every such site feeding a subject-closed value (zero enumerable
-callers is absence of provenance, refused, never a vacuous pass); a load
+callers is absence of provenance, refused, never a vacuous pass) — the
+crossing holding for every closed-world subject whatever its own enumeration
+state, an iterator's yield bound by the subject's range statement or call the
+canonical shape, and the subject-attributed sites being the subject's own
+provenance frames, an initializer's call to the same function startup flow the
+startup walk judges; a load
 from shared mutable state refuses, because analysis is
 subject-scoped while the process heap is shared, so a sibling subject's
 runtime flow can plant an implementation the subject's attributed

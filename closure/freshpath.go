@@ -1193,6 +1193,10 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 		sites = append(append([]ssa.CallInstruction(nil), sites...), fp.enumSites...)
 	}
 	if len(sites) == 0 {
+		// Absence of provenance refuses, never a vacuous pass. A
+		// subject-reachable, statically called function always has an
+		// attributed caller, so this arm is the clause's fail-closed
+		// backstop rather than a reachable state.
 		return nil, false
 	}
 	args := make([]ssa.Value, 0, len(sites))

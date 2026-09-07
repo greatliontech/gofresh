@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@32" {
-		t.Fatalf("ObservationRTA = %q, want the benchmark-pacing admission over the net/url and path/filepath admissions", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@33" {
+		t.Fatalf("ObservationRTA = %q, want the callee-parameter crossing over the benchmark-pacing admission", ObservationRTA)
 	}
 }
 
