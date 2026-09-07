@@ -11,5 +11,5 @@ greatliontech/.github repo, inputs test-timeout/job-timeout/
 packages) would single-source it; the org already centralizes
 greatliontech/semrel@main, so the convention exists.
 
-Lands: user decision (creating the org-level repo is an
-outward-facing act).
+Lands: user decision — deferred 2026-09-07 (creating the org-level repo is
+an outward-facing act; the four copies stay until the user schedules it).
