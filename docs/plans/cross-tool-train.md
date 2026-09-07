@@ -630,7 +630,7 @@ verdict, and records the measured wall against the audit's baseline.
       evidence); chartered as the prerequisite gomutant's carry gate
       names (semantic-closure-in-the-carry-gate); release, then 130
       rides.
-- [ ] 130. gomutant: semantic closure in the carry gate (gomutant
+- [x] 130. gomutant: semantic closure in the carry gate (gomutant
       docs/issues/semantic-closure-in-the-carry-gate.md) — adopt
       129's identity at both poles of the carry gate; doc deletes at
       close.
