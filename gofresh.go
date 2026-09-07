@@ -183,6 +183,16 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // capture-broken).
 const DynamicStateStrategy = "gofresh/dynamic-state@35"
 
+// ClosureStrategy identifies the closure identity derivation — the
+// maximal closure's and the test-variant compartment's — as the
+// composition of the fold derivations they read (closure.IdentityStrategy):
+// a bump to any fold moves it by construction, so a consumer keying a
+// judgment to either hash compares within one derivation. An empty
+// recorded value is not a derivation: records predating the field exist
+// under two folds (the byte fold and the first canonical form), so a
+// consumer treats an empty strategy as incomparable and bridges.
+const ClosureStrategy = closure.IdentityStrategy
+
 // ObservationRTA identifies the caller-selected declaration-RTA observability
 // proof. A standing coupling rides this surface: the audited mapping
 // set's shared-dynamic-state discharge (closure.md) is grounded in the
@@ -398,9 +408,17 @@ type Fingerprint struct {
 	// fails closed exactly as the compartment's does
 	// (REQ-closure-dynamic-state-memo's serving arm).
 	DynamicStateStrategy string
-	RuntimeInputs        string // encoded manifest; empty only when the caller supplies no observation manifest
-	RuntimeDigest        string // digest of the manifest at capture
-	ResultKind           Kind   // guard policy captured with this recording; zero is invalid
+	// ClosureStrategy records the closure identity derivation the
+	// MaximalClosure and TestVariantClosure were folded under — the
+	// identity's own version, so a consumer comparing two records'
+	// closure identities compares them within one derivation and
+	// bridges, rather than misreads, a derivation change: two hashes
+	// folded by different strategies say nothing about each other's
+	// source, and an empty recorded strategy is no derivation at all.
+	ClosureStrategy string
+	RuntimeInputs   string // encoded manifest; empty only when the caller supplies no observation manifest
+	RuntimeDigest   string // digest of the manifest at capture
+	ResultKind      Kind   // guard policy captured with this recording; zero is invalid
 }
 
 // Status is a verdict's outcome.

@@ -1722,6 +1722,24 @@ named, not new: a subject observing its own source position can change output
 under a layout-only edit, exactly as under a header-only edit the ledger rules
 inert.
 
+**REQ-closure-identity-strategy** (invariant): The closure identity's derivation
+— what the maximal closure and the test-variant compartment fold and how: each
+hash's membership rule and its byte-or-form discipline (the compartment's
+empty sentinel included), the canonical member form, and the compartment's
+ledger derivation — MUST be a fingerprint constituent exposed as data beside
+the two hashes, composed from every such derivation's own version so that a
+change to any of them moves it by construction, never restated where it
+could lag; the value is opaque, compared for equality only, never parsed for
+which derivation moved. Two hashes folded under different derivations say nothing
+about each other's source: a consumer keying a judgment to a closure hash —
+gofresh's own check serves by the hash alone, which is self-describing, but a
+consumer carrying a judgment across records compares identities — compares two
+records within one derivation and bridges a derivation change rather than
+reading it as source motion. An empty recorded derivation is not a
+recognized one: records predating the constituent exist under two folds (the
+byte fold and the first canonical form), so an empty value is incomparable
+and a consumer bridges it exactly as a differing one.
+
 **REQ-closure-pinned-dep** (behavior): A pinned dependency reached by the subject
 SHOULD be identified by its module path and version rather than hashed per
 declaration — content and version are equivalent for a version-locked module, so the

@@ -33,7 +33,8 @@ const (
 // derivation — the declaration partition, the positional folds, the
 // reference lists, the header identity. Any change that can move a
 // ledger entry bumps it, so persisted parses from the prior
-// interpretation refuse instead of serving.
+// interpretation refuse instead of serving — and IdentityStrategy
+// (closure.go) moves with it.
 const variantParseStrategy = "gofresh/variant-parse@1"
 
 // variantParseScope is the parse memo's scope: the strategy and the

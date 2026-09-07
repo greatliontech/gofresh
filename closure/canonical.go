@@ -25,9 +25,10 @@ import (
 // sound direction for text the scanner refuses.
 
 // canonicalStrategy versions the canonical form: the retained comment
-// classes, the printer configuration, and the parse mode. Any change
-// that can move a member's canonical digest bumps it, so persisted
-// digests from the prior form refuse instead of serving.
+// classes, the scanner mode, the attachment rule. Any change that can
+// move a member's canonical digest bumps it, so persisted digests from
+// the prior form refuse instead of serving — and IdentityStrategy
+// (closure.go) moves with it.
 const canonicalStrategy = "gofresh/canonical-member@1"
 
 // canonicalDirName is the canonical-digest memo's store directory.

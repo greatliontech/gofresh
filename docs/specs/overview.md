@@ -158,10 +158,12 @@ receiving the same verdict, so an unrelated commit never invalidates a result
 whose inputs are unchanged.
 
 **REQ-fresh-fingerprint-data** (structural): A fingerprint MUST be exposed as its
-constituent guard values, maximal closure hash, test-variant compartment hash, and
+constituent guard values, maximal closure hash, test-variant compartment hash, the
+closure identity's derivation (REQ-closure-identity-strategy in
+[closure.md](closure.md)), the shared-dynamic-state facts' derivation, and
 optional attributable observation-completeness assertion and observability proof
-evidence, attributable purity assertion, and result kind as data, carrying no
-persistence or wire format of its own — the caller owns how a
+evidence, attributable purity assertion, runtime-input evidence, and result kind
+as data, carrying no persistence or wire format of its own — the caller owns how a
 fingerprint is serialized and stored beside its result.
 
 > Compatibility posture of the test-variant partition: every recording captured

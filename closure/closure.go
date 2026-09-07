@@ -667,6 +667,28 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 	return contribution, paths, nil
 }
 
+// IdentityStrategy versions the closure identity as a whole — the
+// maximal closure and the test-variant compartment — as the composition
+// of the derivations the two hashes read: the fold discipline
+// (identityFoldStrategy: which members each hash folds and by bytes or
+// by form), the canonical member form (canonicalStrategy), and the
+// compartment's ledger derivation (variantParseStrategy, which also
+// scopes its memo). Composed, not restated, so a bump to any leg moves
+// the identity's version by construction. The value is opaque: a
+// consumer keying a judgment to either hash compares two records'
+// values for equality only — never parsed for which leg moved.
+const IdentityStrategy = identityFoldStrategy + " " + canonicalStrategy + " " + variantParseStrategy
+
+// identityFoldStrategy versions what the two hashes fold beyond the
+// per-member forms: the maximal fold's member kinds (compiled, embedded,
+// whole directory), its mutable-local and pinned-dependency rules and
+// the standard-library cut; and the compartment's membership rule (the
+// subject package's own test variants and the test-only members they
+// add), its per-member byte fold, and its empty sentinel. @1 folds
+// compiled unembedded Go members by canonical form in the core and
+// every other member — the compartment's included — by bytes.
+const identityFoldStrategy = "gofresh/closure@1"
+
 // memberKinds derives one listing node's member kinds — the compiled
 // Go members (GoFiles and CgoFiles) and the embedded data members — the
 // one derivation the core contribution and the test-variant compartment

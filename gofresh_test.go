@@ -162,7 +162,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectDischarges", "PackageProcessDischarges", "DynamicStateStrategy", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectDischarges", "PackageProcessDischarges", "DynamicStateStrategy", "ClosureStrategy", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
@@ -186,6 +186,56 @@ func TestObservationRTAVersion(t *testing.T) {
 func TestDynamicStateStrategyVersion(t *testing.T) {
 	if DynamicStateStrategy != "gofresh/dynamic-state@35" {
 		t.Fatalf("DynamicStateStrategy = %q, want the per-parameter argument-storage insertion facts", DynamicStateStrategy)
+	}
+}
+
+func TestClosureStrategyVersion(t *testing.T) {
+	if ClosureStrategy != "gofresh/closure@1 gofresh/canonical-member@1 gofresh/variant-parse@1" {
+		t.Fatalf("ClosureStrategy = %q, want the composition of the fold, canonical-member, and compartment derivations", ClosureStrategy)
+	}
+}
+
+// Every capture path stamps the closure identity's derivation beside
+// the hash, so a consumer keying a judgment to the identity can compare
+// two records within one derivation (REQ-closure-identity-strategy).
+func TestEveryCaptureStampsTheClosureStrategy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := scanMemoModule(t)
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), scanMemoSubjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := view.Capture(context.Background(), scanMemoSubjects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.ClosureStrategy != ClosureStrategy {
+		t.Fatalf("Capture stamped closure strategy %q, want %q", plain.ClosureStrategy, ClosureStrategy)
+	}
+	batch, err := view.CaptureBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := view.CaptureObservedBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, fps := range map[string]map[Subject]Fingerprint{"CaptureBatch": batch, "CaptureObservedBatch": observed} {
+		if len(fps) != len(scanMemoSubjects) {
+			t.Fatalf("%s returned %d fingerprints for %d subjects", name, len(fps), len(scanMemoSubjects))
+		}
+		for subject, fp := range fps {
+			if fp.ClosureStrategy != ClosureStrategy {
+				t.Fatalf("%s: %s stamped closure strategy %q, want %q", subject.Symbol, name, fp.ClosureStrategy, ClosureStrategy)
+			}
+		}
 	}
 }
 

@@ -513,7 +513,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ResultKind: v.kind}, nil
+	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy, ResultKind: v.kind}, nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -570,7 +570,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ResultKind: v.kind}
+		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy, ResultKind: v.kind}
 	}
 	return result, nil
 }
@@ -643,6 +643,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
 		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
 		DynamicStateStrategy:     DynamicStateStrategy,
+		ClosureStrategy:          ClosureStrategy,
 		ResultKind:               v.kind,
 	}
 }

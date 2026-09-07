@@ -890,3 +890,63 @@ bindings {
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "bb6014eb919ae405e223a70797cd9bfbf76969b1ac35617f966b9758d0680b3a"
 }
+
+bindings {
+  requirement_id: "REQ-closure-canonical-member"
+  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
+  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestEveryCaptureStampsTheClosureStrategy"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bf0dcdf0a2dfeea87c97a4aa2caaaed28f93438a2dfba87c90d5662217b6ddb2"
+}
+
+bindings {
+  requirement_id: "REQ-closure-canonical-member"
+  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
+  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.ClosureStrategy"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "64da97e280969a598d588e986384ae7edf579f29aa73867efe3a59a47b3a5824"
+}
+
+bindings {
+  requirement_id: "REQ-closure-identity-strategy"
+  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
+  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestClosureStrategyVersion"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ebc2a99cd22cb703c1ac637ca950a191c93bf276015c674924e24b3e57b6800e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-identity-strategy"
+  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
+  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestEveryCaptureStampsTheClosureStrategy"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bf0dcdf0a2dfeea87c97a4aa2caaaed28f93438a2dfba87c90d5662217b6ddb2"
+}
+
+bindings {
+  requirement_id: "REQ-closure-identity-strategy"
+  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
+  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.ClosureStrategy"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "64da97e280969a598d588e986384ae7edf579f29aa73867efe3a59a47b3a5824"
+}
+
+bindings {
+  requirement_id: "REQ-closure-identity-strategy"
+  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
+  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.IdentityStrategy"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "923b812d6d73bb8b21838ef5b07695c9cde152bdc69038a937eb66582a4b03a1"
+}
