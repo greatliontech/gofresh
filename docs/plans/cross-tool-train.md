@@ -707,7 +707,7 @@ strategy bump.
 - [x] 122. gofresh: std init-closure exemption (was SEP 4; ~58) —
       synthetic init$N closures ride the toolchain guard as named
       init does.
-- [ ] 123. gofresh: maximal-tier pure-shape selector audits (was SEP
+- [x] 123. gofresh: maximal-tier pure-shape selector audits (was SEP
       5; ~23) — net/url.Parse, time.Time, path/filepath.Ext.
 - [ ] 124. gofresh: enumeration targets tightened (was SEP 10;
       gofresh docs/issues/enumeration-targets-over-approximated.md,
