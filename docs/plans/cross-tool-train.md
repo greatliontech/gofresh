@@ -111,13 +111,18 @@ band as previously ordered: 138, 140, 115, then 142, 143, 144, 145,
 then 136 (rescoped: the consolidation scan and the refusal-site walk
 that Band P leaves), then the rest as recorded below.
 
-Standing rule from the ruling, binding on the loop: a long
-measurement (self-host check, campaign, full fixture suite) runs
-ONCE, over the settled tree, after the adversarial loop converges;
-the loop's own gates ride Band T's fast tier plus ephemeral probes.
-While Band P is open, no chunk's close waits on a tool-on-itself run
-of a tool Band P has not yet restaged — the verdict is deferred to
-that chunk's close and named in the commit record.
+Standing rule from the ruling (restated 2026-09-07, binding on every
+chunk): the tools' self-checks — `stipulator check` over a repo and
+gomutant campaigns — are NOT part of a chunk's fix workflow and do
+not run at a chunk's close. They run only at these named points: (1)
+before a release push of the repo being released; (2) at a band's
+close, over the settled tree; (3) where a chunk's charter names its
+own self-host verdict (141, 155 — and 175's close, where the closure
+identity becomes subject-scoped and a gofresh check turns warm). A
+chunk's close-out evidence is the full `go test` tier (never the
+-short tier alone) plus the ephemeral probes of its review rounds.
+Between named points the check is not run even when cheap; running
+it "because the tree settled" was the waste the ruling ends.
 
 Previous order (user-confirmed 2026-08-26, kept for the field band's
 relative sequence): 103, 107, 83, 108, 82, 94, 109, 110, 105,
@@ -746,7 +751,7 @@ strategy bump.
       docs/issues/fresh-mutation-in-module-scratch.md`; triage
       re-derives against the then-current measure. Release, then
       consumer bumps ride.
-- [ ] 101. gofresh: audited-construction discharge reaches carrier
+- [x] 101. gofresh: audited-construction discharge reaches carrier
       stores, and errors.New joins the audited set — storing an
       audited-construction carrier into a struct field marks the
       SOURCE variable mutated though the store copies the interface
