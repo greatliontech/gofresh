@@ -1302,7 +1302,15 @@ covered and never admits. GOOS/GOARCH selection needs no axis — the delta
 walks read each audited package's non-test source whole, platform-split
 files included, so a platform selection of an audited package selects
 among walked files, and the memo scopes carry the platform through the
-build configuration. An
+build configuration. The release axis keys on the toolchain's reported identity under
+the one spelling the listing carries: a toolchain that reports its
+experiment set hyphenated (`go1.27.0-X:nodwarf5`, the VERSION-file form)
+is the same toolchain as the space-separated runtime form, and the key
+folds exactly that separator when an experiment set (GOEXPERIMENT's
+comma-separated names) follows it — never a release, a flavor, or an
+experiment name — so one audited toolchain is admitted under both its
+spellings and an unlisted one under neither, and a refusal names the key
+the listing would carry. An
 admission answers true only when the running release AND the effective
 selection are both listed. Each listing names the selections its walks
 cover — the default, and the race selection, whose walk found that no

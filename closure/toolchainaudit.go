@@ -179,8 +179,13 @@ var auditedToolchainSelections = map[string]map[string]bool{
 // version by construction: judged runs refuse binary/ambient toolchain
 // skew before any analysis (the fleet's provenance guards), and this
 // package's own suite runs under the toolchain that loads its views.
-func auditedToolchainSource() bool {
-	return auditedToolchainReleases[runtime.Version()]
+func auditedToolchainSource() bool { return auditedToolchainSourceFor(runtime.Version()) }
+
+// auditedToolchainSourceFor is the release-axis lookup over an explicit
+// self-report — the one keyed entry the exported verdicts share, so a
+// test can drive a spelling this host does not report.
+func auditedToolchainSourceFor(version string) bool {
+	return auditedToolchainReleases[toolchainKey(version)]
 }
 
 // selectionAuditKey canonicalizes a producing build's EFFECTIVE flag
@@ -248,11 +253,57 @@ func selectionAuditKey(buildFlags []string) (key string, ok bool) {
 	return strings.Join(sorted, ","), true
 }
 
+// toolchainKey is the audit tables' spelling of a toolchain identity.
+// One experiment build reports itself two ways — runtime.Version()
+// spells the experiment set space-separated ("go1.27.0 X:nodwarf5")
+// while a toolchain whose VERSION file carries it reports the
+// hyphenated form ("go1.27.0-X:nodwarf5" through `go version` and
+// GOVERSION, and in binaries it builds) — and the tables list one. A
+// lookup keyed by the raw string admitted only the spelling the
+// listing author happened to see: the same audited toolchain was
+// refused under its other spelling, degrading every standard-library
+// admission for its consumers. The key folds the hyphenated experiment
+// separator to the listed form; nothing else is normalized, so an
+// unlisted release, experiment, or flavor still misses.
+func toolchainKey(version string) string {
+	if release, exp, ok := strings.Cut(version, "-X:"); ok && experimentList(exp) {
+		return release + " X:" + exp
+	}
+	return version
+}
+
+// experimentList reports the experiment-set grammar the fold requires
+// after the separator — a comma-separated list of lowercase
+// alphanumeric names (GOEXPERIMENT's own spelling, with a leading
+// "no" for a disabled experiment) — so a vendor flavor whose name
+// merely begins with "X:" is never mistaken for an experiment set.
+func experimentList(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, name := range strings.Split(s, ",") {
+		if name == "" {
+			return false
+		}
+		for _, r := range name {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // binaryExperiment is the GOEXPERIMENT this binary's toolchain was
 // built with, as the version string carries it ("go1.27.0 X:nodwarf5"
-// → "nodwarf5"; "" for the default experiment set).
-func binaryExperiment() string {
-	if _, exp, ok := strings.Cut(runtime.Version(), " X:"); ok {
+// or "go1.27.0-X:nodwarf5" → "nodwarf5"; "" for the default
+// experiment set).
+func binaryExperiment() string { return experimentOf(runtime.Version()) }
+
+// experimentOf reads the experiment set a version string carries, under
+// either spelling; "" for the default set.
+func experimentOf(version string) string {
+	if _, exp, ok := strings.Cut(toolchainKey(version), " X:"); ok {
 		return exp
 	}
 	return ""
@@ -298,7 +349,16 @@ func AuditedToolchainSelection(buildFlags []string, goflags, goexperiment string
 // classification, or the canonical selection key — with the walk that
 // would list it.
 func ToolchainSelectionNotice(buildFlags []string, goflags, goexperiment string) string {
-	return toolchainSelectionNotice(auditedToolchainSource(), runtime.Version(), binaryExperiment(), auditedToolchainSelections[runtime.Version()], buildFlags, goflags, goexperiment)
+	return toolchainSelectionNoticeFor(runtime.Version(), buildFlags, goflags, goexperiment)
+}
+
+// toolchainSelectionNoticeFor is the notice over an explicit self-report:
+// every table lookup and the experiment read key on the folded form of
+// version (toolchainKey), so a toolchain admitted under one spelling is
+// admitted under the other through the same path the exported entry
+// takes.
+func toolchainSelectionNoticeFor(version string, buildFlags []string, goflags, goexperiment string) string {
+	return toolchainSelectionNotice(auditedToolchainSourceFor(version), version, experimentOf(version), auditedToolchainSelections[toolchainKey(version)], buildFlags, goflags, goexperiment)
 }
 
 // toolchainSelectionNotice is the rendering over explicit axis inputs,
@@ -307,7 +367,7 @@ func ToolchainSelectionNotice(buildFlags []string, goflags, goexperiment string)
 func toolchainSelectionNotice(sourceListed bool, version, bakedExperiment string, listedSelections map[string]bool, buildFlags []string, goflags, goexperiment string) string {
 	const consequence = " — standard-library observation admissions are disabled (observation proofs strip and serving degrades to execution)"
 	if !sourceListed {
-		return "toolchain-selection audit: release " + version + " is not listed" + consequence + " until the release delta is walked and listed"
+		return "toolchain-selection audit: release " + version + " is not listed (audit key " + strconv.Quote(toolchainKey(version)) + ")" + consequence + " until the release delta is walked and listed under that key"
 	}
 	if goexperiment != "" && goexperiment != bakedExperiment {
 		return "toolchain-selection audit: environment GOEXPERIMENT " + strconv.Quote(goexperiment) + " under " + version + " differs from the binary's baked experiment set" + consequence + "; experiment flavors are version-axis listings, never inherited"

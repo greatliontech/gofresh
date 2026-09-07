@@ -606,7 +606,7 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 // this test is the release listing's enforcement pointer.
 func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
 	if !auditedToolchainSource() {
-		t.Fatalf("running toolchain %q is not in auditedToolchainReleases: walk its standard-library delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family) and list the release in closure/toolchainaudit.go", runtime.Version())
+		t.Fatalf("running toolchain %q (audit key %q) is not in auditedToolchainReleases: walk its standard-library delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family) and list the audit key in closure/toolchainaudit.go", runtime.Version(), toolchainKey(runtime.Version()))
 	}
 }
 
