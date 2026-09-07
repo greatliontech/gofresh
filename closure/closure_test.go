@@ -1968,11 +1968,11 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// A dependency's untraceable sink blocks this package's
 		// subjects too - the poison spans the test binary.
 		{fixture: "flagregdep", subject: "TestProd", reason: "untraceable sink in github.com/greatliontech/gofresh/closure/fixtures/flagregescape"},
-		// With the startup arm no longer covering test-main flow, the
-		// benchmark-bearing sibling surfaces the pre-existing
-		// package-scan blocker on testing.Loop - the b.Loop audit is
-		// its own roadmap line.
-		{fixture: "harnessroot", subject: "BenchmarkProd", reason: "package scan: reaches testing.Loop"},
+		// The benchmark-bearing sibling proves observable: b.Loop is
+		// benchmark pacing, an admitted harness fact the fold ignores
+		// (REQ-closure-observability-analysis's benchmark-pacing
+		// clause) — the deliberate flip of the former package-scan pin.
+		{fixture: "harnessroot", subject: "BenchmarkProd", observable: true},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	} {
 		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
@@ -1982,7 +1982,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := results[subject]
-			if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
+			if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) || tc.observable && got.Reason != "" {
 				t.Fatalf("observability = %+v, want observable=%v reason containing %q", got, tc.observable, tc.reason)
 			}
 			if tc.absent != "" && strings.Contains(got.Reason, tc.absent) {

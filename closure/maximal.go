@@ -524,7 +524,7 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-analysis).
-				} else if pkgPath != "testing" && !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(audited, pkgPath)) {
+				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
 					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 				}
 			}

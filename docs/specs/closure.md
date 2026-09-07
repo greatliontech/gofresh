@@ -1182,6 +1182,24 @@ reason. The canonical test-main epilogue `os.Exit` is harness protocol,
 not an effect: it runs post-bracket and adds no input channel to any
 subject's execution (an exit before the harness run means no measurement
 ever runs — an execution condition, not an observability leak). The
+benchmark harness's pacing is harness protocol likewise: the iteration count
+`b.N`, the `b.Loop` protocol, and the timer controls (ResetTimer, StartTimer,
+StopTimer) are the harness's own — the count derived from its flags and its
+previous iteration's timing, the controls moving only its clock and allocation
+bookkeeping — and never an input to the measured computation, whose
+per-iteration result the benchmark contract makes invariant in the count, the
+count's own inputs — the harness's pacing flags — being run conditions the
+caller sets deliberately, never a guard of this engine's
+(REQ-guard-machine-transient's principle in [guards.md](guards.md)) — an
+obligation on every consumer serving measurement results: its recording
+identity carries the pacing flags, or a benchmark whose outcome branches on the
+count is served across a flag change; they are admitted harness facts, the file fold
+recording nothing for them and the walk alone recording the fact — an audited
+harness call is no purity evidence — without descending into the harness body,
+while every other benchmark surface keeps its class: Elapsed and RunParallel
+their test-runtime classification, and the harness's remaining surface
+(ReportMetric, ReportAllocs, SetBytes) the fallback exemption every testing
+symbol has, recording nothing while its body is walked. The
 observed walk admits it throughout user test-main flow — helpers
 included, since an exit anywhere in that flow means the harness
 protocol ended or never ran a measurement — while the package-scan

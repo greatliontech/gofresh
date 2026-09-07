@@ -38,7 +38,10 @@ import (
 // @15 admits net/url's escaping and composition and path/filepath's
 // lexical operations, both by symbol (ObservationRTA@31 carries the
 // same widening for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@15"
+// @16 stops classifying b.N and b.Loop as package-wide configuration
+// reads: benchmark pacing is a harness fact the walk records
+// (ObservationRTA@32 carries the admission for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@16"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }
@@ -64,7 +67,9 @@ func (h *Hasher) effectScanScope() string {
 // can move the scan's effect set or preferred diagnostic bumps it, so
 // persisted scans from the prior interpretation refuse instead of serving
 // (REQ-closure-testing-scan-memo).
-const testingScanStrategy = "gofresh/testing-scan@3"
+// @4 stops classifying b.N and b.Loop: benchmark pacing records nothing
+// at the fold (ObservationRTA@32, effect-scan@16).
+const testingScanStrategy = "gofresh/testing-scan@4"
 
 // testingScanScope completes the typed scan's analysis identity outside
 // the source closure: its own strategy version plus the code guards —

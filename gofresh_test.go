@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@31" {
-		t.Fatalf("ObservationRTA = %q, want the net/url and path/filepath admissions over the discharge channels", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@32" {
+		t.Fatalf("ObservationRTA = %q, want the benchmark-pacing admission over the net/url and path/filepath admissions", ObservationRTA)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @15 is the net/url and
-// path/filepath admission beside ObservationRTA@31.
+// of serving (REQ-closure-effect-scan-memo); @16 stops classifying the
+// benchmark pacing reads beside ObservationRTA@32.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@15" {
-		t.Fatalf("effect-scan strategy = %q, want @15", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@16" {
+		t.Fatalf("effect-scan strategy = %q, want @16", closure.EffectScanStrategy())
 	}
 }

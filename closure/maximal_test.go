@@ -209,12 +209,6 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 			reason: "testing.Elapsed",
 		},
 		{
-			name:   "benchmark iteration count",
-			source: "package wrapper\n\nimport \"testing\"\n\nfunc BenchmarkN(b *testing.B) { _ = b.N }\n",
-			symbol: "BenchmarkN",
-			reason: "testing.N",
-		},
-		{
 			name:   "escaped testing receiver",
 			source: "package wrapper\n\nimport \"testing\"\n\ntype tempDir interface { TempDir() string }\nfunc use(value tempDir) { _ = value.TempDir() }\nfunc TestEscape(t *testing.T) { use(t) }\n",
 			symbol: "TestEscape",
@@ -222,12 +216,12 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 		},
 		{
 			// The receiver escape is the structural finding and ranks
-			// top, so the diagnostic names it over the testing.N
-			// classification the escape also records
+			// top, so the diagnostic names it over the down-ranked
+			// testing.Elapsed classification the escape also records
 			// (REQ-closure-observability-analysis's cause-preference
 			// order).
 			name:   "testing receiver in composite",
-			source: "package wrapper\n\nimport \"testing\"\n\nfunc BenchmarkComposite(b *testing.B) { handles := []*testing.B{b}; _ = handles[0].N }\n",
+			source: "package wrapper\n\nimport \"testing\"\n\nfunc BenchmarkComposite(b *testing.B) { handles := []*testing.B{b}; _ = handles[0].Elapsed() }\n",
 			symbol: "BenchmarkComposite",
 			reason: "escapes analyzable receiver",
 		},
@@ -296,7 +290,7 @@ func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "alias_test.go"), []byte("package wrapper\n\nimport \"testing\"\n\ntype Bench struct { *testing.B }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "benchmark_test.go"), []byte("package wrapper\n\nfunc F(b *Bench) { _ = b.N }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "benchmark_test.go"), []byte("package wrapper\n\nfunc F(b *Bench) { _ = b.Elapsed() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h, err := NewAt(dir)
@@ -308,8 +302,8 @@ func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := closures[subject]; !got.Unverifiable || !strings.Contains(got.Reason, "testing.N") {
-		t.Fatalf("cross-file testing alias = %+v, want testing.N unverifiable", got)
+	if got := closures[subject]; !got.Unverifiable || !strings.Contains(got.Reason, "testing.Elapsed") {
+		t.Fatalf("cross-file testing alias = %+v, want testing.Elapsed unverifiable", got)
 	}
 }
 
@@ -327,7 +321,7 @@ func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "dep", "dep.go"), []byte("package dep\n\nimport \"testing\"\n\ntype B = testing.B\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "wrapper.go"), []byte("package wrapper\n\nimport \"example.com/wrapper/dep\"\n\ntype B = dep.B\nfunc F(b *B) { _ = b.N }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "wrapper.go"), []byte("package wrapper\n\nimport \"example.com/wrapper/dep\"\n\ntype B = dep.B\nfunc F(b *B) { _ = b.Elapsed() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h, err := NewAt(dir)
@@ -339,8 +333,8 @@ func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := closures[subject]; !got.Unverifiable || !strings.Contains(got.Reason, "testing.N") {
-		t.Fatalf("imported testing alias = %+v, want testing.N unverifiable", got)
+	if got := closures[subject]; !got.Unverifiable || !strings.Contains(got.Reason, "testing.Elapsed") {
+		t.Fatalf("imported testing alias = %+v, want testing.Elapsed unverifiable", got)
 	}
 }
 

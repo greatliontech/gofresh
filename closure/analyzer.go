@@ -103,6 +103,13 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				a.recordExternalEffect(harnessLoggingEffect(functionSymbolName(target)))
 				continue
 			}
+			if !ok && harnessPacingFunction(h.SelectionAudited(), target) {
+				// A pacing method reached as a dynamic target — an
+				// interface holding the *B — classifies as the static
+				// call does (REQ-closure-observability-analysis).
+				a.recordExternalEffect(harnessPacingEffect(functionSymbolName(target)))
+				continue
+			}
 			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(h.SelectionAudited(), idx.path) {
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
@@ -688,20 +695,14 @@ func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, ins
 	}
 }
 
-func testingRuntimeFieldReason(t types.Type, index int) string {
-	effect, ok := testingRuntimeFieldEffect(t, index)
-	if !ok {
-		return ""
-	}
-	return effect.reason
-}
-
 func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
 		t = pointer.Elem()
 	}
 	named, ok := types.Unalias(t).(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
+	// The pacing field is B's alone: BenchmarkResult and the fuzz result
+	// declare an N too, and neither is the harness's count.
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" || named.Obj().Name() != "B" {
 		return externalEffect{}, false
 	}
 	structure, ok := named.Underlying().(*types.Struct)
@@ -709,7 +710,10 @@ func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 		return externalEffect{}, false
 	}
 	if name := structure.Field(index).Name(); name == "N" {
-		return symbolExternalEffect(externalEffectTestRuntime, "testing", "B.N", "reaches testing.B.N (test runtime configuration)"), true
+		// The harness's iteration count is benchmark pacing: an
+		// admitted harness fact, never an input
+		// (REQ-closure-observability-analysis's benchmark-pacing clause).
+		return harnessPacingEffect("B.N"), true
 	}
 	return externalEffect{}, false
 }
@@ -759,6 +763,15 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 	if auditedHarnessLogging(a.h.SelectionAudited(), pkgPath, name) {
 		a.recordExternalEffect(harnessLoggingEffect(name))
+		return
+	}
+	if auditedHarnessPacing(a.h.SelectionAudited(), pkgPath, name) {
+		// Benchmark pacing is the harness's own protocol: the fact is
+		// recorded — an audited harness call is not purity evidence, so
+		// the legacy projection stays unverifiable exactly as for the
+		// logging family — and the harness body is never descended into
+		// (REQ-closure-observability-analysis's benchmark-pacing clause).
+		a.recordExternalEffect(harnessPacingEffect(name))
 		return
 	}
 	if auditedHarnessSubtestDriver(a.h.SelectionAudited(), callee) {
@@ -862,8 +875,16 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 // (the one-site-classifier collapse).
 func stdBodyCut(audited bool, fn *ssa.Function, classified externalEffect, classifiedOK bool) bool {
 	return classifiedOK && classified.kind == externalEffectFileIO ||
-		atomicObservabilityOperation(fn) || harnessLoggingFunction(audited, fn) ||
+		atomicObservabilityOperation(fn) || harnessLoggingFunction(audited, fn) || harnessPacingFunction(audited, fn) ||
 		auditedHarnessSubtestDriver(audited, fn) || harnessFuzzDriver(fn)
+}
+
+// harnessPacingFunction gates the body-scan cut and the dynamic-target
+// admission on the same pacing set, so a pacing method reached through
+// an RTA-resolved dispatch classifies exactly as a static call to it
+// would (REQ-closure-observability-analysis's benchmark-pacing clause).
+func harnessPacingFunction(audited bool, fn *ssa.Function) bool {
+	return fn != nil && auditedHarnessPacing(audited, funcPkgPath(fn), functionSymbolName(fn))
 }
 
 func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {

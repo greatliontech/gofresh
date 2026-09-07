@@ -1607,7 +1607,10 @@ func TestFormattedReaderInputIsUnverifiable(t *testing.T) {
 	}
 }
 
-func TestBenchmarkIterationCountIsUnverifiable(t *testing.T) {
+// The benchmark's iteration count is harness pacing: a measurement-kind
+// view proves the b.N reader observable and its verdict valid
+// (REQ-closure-observability-analysis's benchmark-pacing clause).
+func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
@@ -1632,12 +1635,11 @@ func TestBenchmarkIterationCountIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "test runtime configuration") {
-		t.Fatalf("benchmark iteration verdict = %+v, want test-runtime unverifiable", verdict)
+	if verdict.Status != Valid {
+		t.Fatalf("benchmark iteration verdict = %+v, want valid — the count is harness pacing", verdict)
 	}
-	// The proof carries the same classification.
-	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "testing.N (test runtime configuration)") {
-		t.Fatalf("benchmark iteration proof = %+v, want test-runtime classification", fingerprint.ObservationProof)
+	if !fingerprint.ObservationProof.Observable || fingerprint.ObservationProof.Reason != "" {
+		t.Fatalf("benchmark iteration proof = %+v, want observable", fingerprint.ObservationProof)
 	}
 }
 

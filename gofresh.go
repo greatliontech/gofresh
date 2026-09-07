@@ -355,7 +355,9 @@ const ClosureStrategy = closure.IdentityStrategy
 // half, which reads GODEBUG settings no code-result guard pins, stays
 // refused — and path/filepath's lexical operations by symbol, the
 // filesystem reaches (Abs, EvalSymlinks, Glob, Walk, WalkDir) refused.
-const ObservationRTA = "gofresh/observation-rta@31"
+// @32 admits the benchmark harness's pacing — b.N, b.Loop, and the timer
+// controls — as harness facts: the walk records them, the fold nothing.
+const ObservationRTA = "gofresh/observation-rta@32"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

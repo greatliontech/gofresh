@@ -1120,3 +1120,274 @@ func Count(root string) int {
 		}
 	}
 }
+
+// The benchmark harness's pacing — b.N, b.Loop, the timer controls — is
+// harness protocol: benchmarks reading it and the tests beside them
+// prove observable, while every other benchmark surface keeps its
+// class (REQ-closure-observability-analysis's benchmark-pacing clause).
+func TestBenchmarkPacingIsHarnessProtocol(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	for _, name := range []string{"N", "Loop", "ResetTimer", "StartTimer", "StopTimer"} {
+		if !auditedHarnessPacing(true, "testing", name) || auditedHarnessPacing(false, "testing", name) {
+			t.Errorf("testing.%s: want pacing on an audited toolchain only", name)
+		}
+		if _, classified := classBEffect("testing", name); classified {
+			t.Errorf("testing.%s classifies at the file fold — a package-wide blocker", name)
+		}
+	}
+	for _, name := range []string{"Elapsed", "ReportMetric", "ReportAllocs", "SetBytes", "RunParallel", "Parallel", "Short"} {
+		if auditedHarnessPacing(true, "testing", name) {
+			t.Errorf("testing.%s admitted as pacing", name)
+		}
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/pacing\n\ngo 1.26\n")
+	writeFile(t, dir, "pacing.go", "package pacing\n\nfunc Sum(n int) int {\n\ts := 0\n\tfor i := 0; i < n; i++ {\n\t\ts += i\n\t}\n\treturn s\n}\n")
+	writeFile(t, dir, "pacing_test.go", `package pacing
+
+import "testing"
+
+func TestSum(t *testing.T) {
+	if Sum(3) != 3 {
+		t.Fatal(Sum(3))
+	}
+}
+
+func BenchmarkCount(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		Sum(i)
+	}
+}
+
+func BenchmarkLoop(b *testing.B) {
+	for b.Loop() {
+		Sum(8)
+	}
+}
+
+func BenchmarkTimers(b *testing.B) {
+	b.StopTimer()
+	x := Sum(4)
+	b.StartTimer()
+	b.ResetTimer()
+	for b.Loop() {
+		Sum(x)
+	}
+}
+
+func BenchmarkMethodValue(b *testing.B) {
+	loop := b.Loop
+	for loop() {
+		Sum(5)
+	}
+}
+
+func BenchmarkInterface(b *testing.B) {
+	var pacer interface{ Loop() bool } = b
+	for pacer.Loop() {
+		Sum(6)
+	}
+}
+
+func BenchmarkResultField(b *testing.B) {
+	r := testing.BenchmarkResult{N: 3}
+	for b.Loop() {
+		Sum(r.N)
+	}
+}
+`)
+	// Every other benchmark surface keeps its class — and the file fold
+	// is package-wide, so the refused reader lives in its own package.
+	if err := os.MkdirAll(filepath.Join(dir, "elapsed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "elapsed/elapsed_test.go", "package elapsed\n\nimport \"testing\"\n\nfunc BenchmarkElapsed(b *testing.B) {\n\tfor b.Loop() {\n\t}\n\t_ = b.Elapsed()\n}\n")
+	h, err := NewAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ pkg, symbol, refusal string }{
+		{"pacing", "TestSum", ""}, {"pacing", "BenchmarkCount", ""}, {"pacing", "BenchmarkLoop", ""}, {"pacing", "BenchmarkTimers", ""},
+		{"pacing", "BenchmarkMethodValue", ""}, {"pacing", "BenchmarkInterface", ""}, {"pacing", "BenchmarkResultField", ""},
+		{"pacing/elapsed", "BenchmarkElapsed", "package scan: reaches testing.Elapsed (test runtime execution)"},
+	}
+	subjects := make([]Subject, 0, len(cases))
+	for _, tc := range cases {
+		subjects = append(subjects, Subject{Package: "example.com/" + tc.pkg, Symbol: tc.symbol})
+	}
+	proofs, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The maximal tier records nothing for pacing, so the benchmark
+	// package is verifiable there too — the conservative tier no more
+	// restrictive than the precise one on the harness's own protocol.
+	var pacingSubjects []Subject
+	for _, tc := range cases {
+		if tc.pkg == "pacing" {
+			pacingSubjects = append(pacingSubjects, Subject{Package: "example.com/pacing", Symbol: tc.symbol})
+		}
+	}
+	closures, err := h.ComputeMaximalBatch(pacingSubjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(closures) != len(pacingSubjects) {
+		t.Fatalf("maximal closures = %d, want %d", len(closures), len(pacingSubjects))
+	}
+	for subject, cl := range closures {
+		if cl.Unverifiable {
+			t.Errorf("maximal %s = %+v, want verifiable", subject.Symbol, cl)
+		}
+	}
+	for _, tc := range cases {
+		proof := proofs[Subject{Package: "example.com/" + tc.pkg, Symbol: tc.symbol}]
+		if tc.refusal == "" && (!proof.Observable || proof.Reason != "") {
+			t.Errorf("%s = %+v, want observable", tc.symbol, proof)
+		}
+		if tc.refusal != "" && (proof.Observable || proof.Reason != tc.refusal) {
+			t.Errorf("%s = %+v, want exactly %q", tc.symbol, proof, tc.refusal)
+		}
+	}
+}
+
+// A pacing call is an audited harness fact, not purity evidence: the
+// legacy projection stays unverifiable with the pacing reason and the
+// recorded fact observable, and a subject mixing pacing with a causal
+// effect keeps the causal reason
+// (REQ-closure-observability-analysis's benchmark-pacing clause).
+func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
+	h, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/benchpacing"
+	result, err := computeTier2Result(h, pkg, "BenchmarkLoopOnly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.unverifiable || !strings.Contains(result.reason, "benchmark pacing") {
+		t.Fatalf("pacing-only subject = unverifiable %v reason %q, want the recorded harness fact", result.unverifiable, result.reason)
+	}
+	found := false
+	for _, effect := range result.effects {
+		if effect.packagePath == "testing" && effect.symbol == "Loop" {
+			found = true
+			if !effect.observable {
+				t.Fatal("pacing harness fact recorded as blocking")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("effects = %+v, want the recorded testing.Loop harness fact", result.effects)
+	}
+	mixed, err := computeTier2Result(h, pkg, "BenchmarkLoopReadsFile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mixed.unverifiable || !strings.Contains(mixed.reason, "file I/O") || strings.Contains(mixed.reason, "benchmark pacing") {
+		t.Fatalf("mixed subject reason = %q, want the causal file read over the harness fact", mixed.reason)
+	}
+	// The pacing field is B's alone: a BenchmarkResult's N records no
+	// harness fact — the walk sees a plain struct field — while the
+	// Loop beside it is still recorded.
+	other, err := computeTier2Result(h, pkg, "BenchmarkResultField")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !other.unverifiable || !strings.Contains(other.reason, "benchmark pacing") {
+		t.Fatalf("BenchmarkResultField = unverifiable %v reason %q, want the Loop fact recorded", other.unverifiable, other.reason)
+	}
+	for _, effect := range other.effects {
+		if effect.packagePath == "testing" && effect.symbol == "B.N" {
+			t.Fatalf("BenchmarkResult.N recorded as the harness's count: %+v", other.effects)
+		}
+	}
+	// The harness's remaining reporting surface records nothing at all:
+	// the fallback exemption every testing symbol has, its body walked.
+	reporting, err := computeTier2Result(h, pkg, "BenchmarkReporting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reporting.unverifiable || len(reporting.effects) != 0 {
+		t.Fatalf("reporting-only subject = unverifiable %v effects %+v, want nothing recorded", reporting.unverifiable, reporting.effects)
+	}
+}
+
+// The typed testing scan's memo serves the classification table, so
+// the strategy moves with it (REQ-closure-testing-scan-memo).
+func TestTestingScanStrategyVersion(t *testing.T) {
+	if testingScanStrategy != "gofresh/testing-scan@4" {
+		t.Fatalf("testing-scan strategy = %q, want @4 — the benchmark-pacing reads left the table", testingScanStrategy)
+	}
+}
+
+// The pacing admission is sound only while the pacing names are declared
+// exactly where the audit looked: Loop and the timer controls as methods
+// of B alone, N as a field of B — BenchmarkResult and the fuzz result
+// declare an N too, which the field arm's receiver check excludes — and
+// none as a package-level function. A drifting toolchain fails here
+// instead of silently widening (REQ-closure-observability-analysis).
+func TestBenchmarkPacingDeclarationInventory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo
+	pkgs, err := packages.Load(&packages.Config{Mode: mode}, "testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 || pkgs[0].Types == nil || len(pkgs[0].Syntax) == 0 {
+		t.Fatalf("loaded %d packages for testing, want one with types and syntax", len(pkgs))
+	}
+	pacing := map[string]bool{"Loop": true, "ResetTimer": true, "StartTimer": true, "StopTimer": true}
+	scope := pkgs[0].Types.Scope()
+	fieldN := map[string]bool{}
+	declaredOnB := map[string]bool{}
+	for _, typeName := range scope.Names() {
+		object := scope.Lookup(typeName)
+		if _, isFunc := object.(*types.Func); isFunc && (pacing[object.Name()] || object.Name() == "N") {
+			t.Errorf("testing declares pacing name %s as a package-level function — re-audit the benchmark-pacing channel before trusting this toolchain", object.Name())
+			continue
+		}
+		named, ok := object.Type().(*types.Named)
+		if !ok {
+			continue
+		}
+		for i := 0; i < named.NumMethods(); i++ {
+			method := named.Method(i)
+			if pacing[method.Name()] && typeName != "B" {
+				t.Errorf("testing.%s declares pacing name %s outside B — re-audit the benchmark-pacing channel before trusting this toolchain", typeName, method.Name())
+			}
+			if typeName == "B" && pacing[method.Name()] {
+				declaredOnB[method.Name()] = true
+			}
+		}
+		if structure, ok := named.Underlying().(*types.Struct); ok {
+			for i := 0; i < structure.NumFields(); i++ {
+				if structure.Field(i).Name() == "N" {
+					fieldN[typeName] = true
+				}
+			}
+		}
+	}
+	for name := range pacing {
+		if !declaredOnB[name] {
+			t.Errorf("testing.B no longer declares %s — the admission names a method that does not exist", name)
+		}
+	}
+	for _, known := range []string{"B", "BenchmarkResult", "fuzzResult"} {
+		if !fieldN[known] {
+			t.Errorf("testing.%s no longer declares field N — re-audit the field arm's receiver check", known)
+		}
+		delete(fieldN, known)
+	}
+	if len(fieldN) != 0 {
+		t.Errorf("testing declares field N on %v beyond the audited three — re-audit the field arm's receiver check", fieldN)
+	}
+}

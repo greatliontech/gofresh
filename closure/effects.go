@@ -136,7 +136,7 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 		switch name {
 		case "TempDir", "Chdir", "Setenv":
 			return symbolExternalEffect(externalEffectPathMutation, pkgPath, name, "reaches testing."+name+" (process or path mutation)"), true
-		case "Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "N", "Loop", "Parallel", "ArtifactDir", "Context":
+		case "Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "Parallel", "ArtifactDir", "Context":
 			return symbolExternalEffect(externalEffectTestRuntime, pkgPath, name, "reaches testing."+name+" (test runtime configuration)"), true
 		case "Run", "Fuzz", "RunParallel", "Elapsed", "Result", "AllocsPerRun", "Benchmark", "RunBenchmarks", "RunExamples", "RunTests", "Main", "MainStart":
 			return symbolExternalEffect(externalEffectTestRuntime, pkgPath, name, "reaches testing."+name+" (test runtime execution)"), true
@@ -193,6 +193,40 @@ func auditedHarnessLogging(audited bool, pkgPath, name string) bool {
 // evidence.
 func harnessLoggingEffect(name string) externalEffect {
 	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+" (test harness logging)")
+	effect.observable = true
+	return effect
+}
+
+// auditedHarnessPacing reports whether a testing-package symbol is the
+// benchmark harness's pacing protocol: the iteration count N, the Loop
+// protocol, and the timer controls. The count is the harness's own —
+// derived from its flags and its previous iteration's timing — and the
+// timer controls move only the harness's clock and allocation
+// bookkeeping, so none is an input to the measured computation, whose
+// per-iteration result the benchmark contract makes invariant in the
+// count. Admitted as harness facts on an audited toolchain exactly as
+// the logging family is: the walk records the fact at the call site,
+// the B.N field read, and a dynamic target, and never descends into
+// the harness body; the file fold records nothing
+// (REQ-closure-observability-analysis's benchmark-pacing clause).
+// Every other B surface keeps its class.
+func auditedHarnessPacing(audited bool, pkgPath, name string) bool {
+	if !audited || pkgPath != "testing" {
+		return false
+	}
+	switch name {
+	case "N", "Loop", "ResetTimer", "StartTimer", "StopTimer":
+		return true
+	}
+	return false
+}
+
+// harnessPacingEffect is the admitted harness fact the walk records for
+// a pacing call or the B.N field read; observable, so it never blocks,
+// while the record keeps the legacy projection unverifiable — an
+// audited harness call is not purity evidence.
+func harnessPacingEffect(name string) externalEffect {
+	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+" (benchmark pacing)")
 	effect.observable = true
 	return effect
 }
