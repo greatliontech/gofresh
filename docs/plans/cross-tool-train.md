@@ -682,7 +682,7 @@ strategy bump.
       audit (was SEP 0f) — crypto/rand first; the general retirement
       of the unaudited-std scan arm is the band's endgame, not one
       chunk.
-- [ ] 118. gofresh: benchmark-loop package-scan audit (was SEP 0d) —
+- [x] 118. gofresh: benchmark-loop package-scan audit (was SEP 0d) —
       testing.Loop blocks every subject in a benchmark-bearing
       package; decide the class (admit as harness pacing like m.Run,
       or keep with the refusal naming the benchmark) — own audit.
