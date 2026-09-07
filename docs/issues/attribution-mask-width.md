@@ -18,5 +18,4 @@ closure/attribution.go, and the reachability result and seed maps in
 closure/internal/rta — which the compiler names when the mask type
 moves, and the width guard the alias absorbs.
 
-Lands: user decision (a performance trade against cancel granularity
-and per-fact memory; no measured hotspot names it today).
+Lands: a measured campaign or check names a package above 64 subjects whose slice count dominates its wall time (no measured hotspot names it today)

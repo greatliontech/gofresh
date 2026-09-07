@@ -142,7 +142,8 @@ staged campaigns — 146 inserted after 138 (the staged snapshot's
 external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
-triage, then 95 (ecosystem-blocked, re-audited at open), with the
+triage, then Band F 158–174 in its listed order, then 95
+(ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
 
@@ -759,6 +760,105 @@ strategy bump.
       the shared-dynamic-state naming pattern applies at these
       composition sites); doc deletes at close. Release, then
       consumer bumps ride.
+
+## Band F — dispositioned decisions (2026-09-07 walk of the user-decision register)
+
+Every issue whose shape derives from first principles — a demonstrated
+soundness gap, a correctness fault, or a collapse with one defensible
+form — is chartered here in execution order: soundness first, then
+correctness, then consolidations. The genuine forks stay `user decision`
+in their repos.
+
+- [ ] 158. gomutant: the never-executed bucket joins the audit sample
+      (gomutant docs/issues/never-executed-exemption-unaudited.md) — a
+      mutant whose extent the coverage attributes to no test is exempt
+      from every batch AND outside the narrowed audit, so a wrong
+      attribution is never re-scored (a probe-killed line recorded open);
+      sample the bucket into the audit exactly as the narrowed class, a
+      disagreement there the loudest signal; doc deletes at close.
+- [ ] 159. stipulator: random-seeded serving follows a transitive seeding
+      class (stipulator docs/issues/seeded-witness-serving-follows-direct-
+      call-classifier.md) — a helper-indirected rapid driver serves as
+      deterministic; serving consults a transitive seeding class resolved
+      from the recognized-driver table while the evidence classification
+      stays direct-call; doc deletes at close.
+- [ ] 160. gomutant: ephemeral hardening — the probe never writes under
+      the caller's tree (gomutant docs/issues/ephemeral-rapid-failfile-in-
+      tree.md: rapid's failfile directory and the test working directory
+      isolated into the probe's temp dir), an attested survivor's verdict
+      line and MCP row say so (ephemeral-attested-survivor-invisible.md),
+      and the attestation is keyed on the mutated file's post-edit content
+      hash rather than the edit text (ephemeral-attestation-keyed-on-edit-
+      text.md); three docs delete at close.
+- [ ] 161. stipulator: a gap can say "contradicted by design until a
+      condition fires" (stipulator docs/issues/gap-cannot-say-contradicted.md)
+      — a `contradicted` gap state reported distinctly from unwitnessed,
+      resolving only on an explicit fire, never on a passing witness while
+      unfired; doc deletes at close.
+- [ ] 162. gofresh: the repo-level vouch convention (gomutant docs/issues/
+      repo-level-vouch-source.md) — the engine sources a repository's
+      reviewed dynamic-state vouch file (pew's grammar and precedence:
+      flags extend, never remove) for every consumer; gofresh spec change;
+      release, then consumer bumps ride and pew's store-owned file
+      delegates; doc deletes at close.
+- [ ] 163. gomutant: an unreachable build leg is a stated coverage bound
+      (the interim of gomutant docs/issues/external-oracle-for-tagged-and-
+      subprocess-targets.md) — a tag selection's discovered targets that no
+      oracle reaches are recorded and rendered as a coverage bound, never a
+      silent zero; the external-oracle mode itself stays the user's fork
+      (the doc stays, retargeted to that half).
+- [ ] 164. gomutant: the window commit horizon derives from candidate
+      count (gomutant docs/issues/window-commit-horizon-for-suite-class-
+      oracles.md) — a content-stable window budget sized by the oracle
+      group's candidate count so suite-class oracles commit on a horizon
+      without moving the partition between runs of an unchanged tree; doc
+      deletes at close.
+- [ ] 165. gomutant: the MCP server's exit is diagnosable (gomutant
+      docs/issues/mcp-session-disconnect-mid-loop.md) — the server logs why
+      and where it stopped serving; the idle-session liveness witness
+      rides mcp-liveness-cancellation-witness's condition; doc deletes at
+      close.
+- [ ] 166. stipulator: witness children run with toolchain telemetry off
+      (stipulator docs/issues/telemetry-sidecar-escapes-owned-process.md) —
+      a per-run telemetry directory with the mode file off, so the
+      descendant tree is exactly what the runner owns; doc deletes at
+      close.
+- [ ] 167. stipulator: spec enforcement pointers follow retarget and are
+      judged (stipulator docs/issues/retarget-spec-enforcement-pointers.md)
+      — every "Enforced by" name resolves to a tests/proves binding by a
+      document-level walk, and retarget rewrites pointers with symbols; doc
+      deletes at close.
+- [ ] 168. gofresh: the compartment-ledger entailment is an invariant
+      (gofresh docs/issues/compartment-ledger-derivation.md) — equal
+      compartment hash ⇒ equal ledger, stated in REQ-closure-test-variant-
+      compartment with a property witness over generated compartments; doc
+      deletes at close.
+- [ ] 169. stipulator: one spelling source for remedies and knob prose
+      (stipulator docs/issues/remedy-spellings-one-source.md,
+      knob-prose-identity.md) — remedies composed from the registered verb
+      and flag names and parsed against the command tree; schema tags and
+      usage strings rendered from the guidance document's knob text; two
+      docs delete at close.
+- [ ] 170. stipulator: one record store, one backend (stipulator
+      docs/issues/two-record-stores.md) — the witness and resolution caches
+      one store parameterized by record kind, the served backend the
+      degenerate path of the owned one; doc deletes at close.
+- [ ] 171. stipulator: one completion tracker (stipulator docs/issues/
+      two-completion-mechanisms.md) — the recorder's capture-group
+      completion drives both the selective runner and the health-judged
+      form; doc deletes at close.
+- [ ] 172. stipulator: CLI hygiene — one built binary per test package
+      (stipulator docs/issues/cli-test-binary-builds.md) and per-stream
+      color (per-stream-color.md); two docs delete at close.
+- [ ] 173. pew: one source for the verb table and the guidance knobs
+      (pew docs/issues/guidance-knobs-and-verb-table.md) — the guidance
+      knob blocks generated from the spec's table; the fleet guidance
+      format's carrying rule amended in gofresh's guidance spec; doc
+      deletes at close.
+- [ ] 174. pew: `ab --out` per package and the verdict-path consolidation
+      (pew docs/issues/ab-out-multi-package.md: one artifact per package
+      under a derived path; verdict-path-consolidation.md: one vouch
+      resolver value, one row decode); two docs delete at close.
 
 ## Band E — design chunks (open with the user)
 

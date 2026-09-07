@@ -12,5 +12,4 @@ one attestation-keyed record (mode → discharges) threaded once, with
 the evidence encoding keeping the two existing field names for
 consumers.
 
-Lands: user decision (an evidence-shape change touches consumers'
-persisted records; gomutant and pew pin gofresh versions).
+Lands: cross-tool train chunk 99 (rides its discharge plumbing collapse)
