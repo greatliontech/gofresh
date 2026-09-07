@@ -709,7 +709,7 @@ strategy bump.
       init does.
 - [x] 123. gofresh: maximal-tier pure-shape selector audits (was SEP
       5; ~23) — net/url.Parse, time.Time, path/filepath.Ext.
-- [ ] 124. gofresh: enumeration targets tightened (was SEP 10;
+- [x] 124. gofresh: enumeration targets tightened (was SEP 10;
       gofresh docs/issues/enumeration-targets-over-approximated.md,
       already deleted — history in git). RIDES: gofresh
       docs/issues/range-over-func-yield-closure.md — admit the
