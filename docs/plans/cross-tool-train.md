@@ -142,7 +142,7 @@ staged campaigns — 146 inserted after 138 (the staged snapshot's
 external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
-triage, then Band F 158–177 in its listed order (175 is a design chunk opening with the user), then 95
+triage, then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -737,7 +737,7 @@ strategy bump.
       grpc-runtime-memo-and-registry-discharges.md (triage folds or
       re-charters on read); docs delete at close. Release, then
       consumer bumps ride.
-- [ ] 100. gofresh: in-module scratch discharge — reads of a
+- [x] 100. gofresh: in-module scratch discharge — reads of a
       module-interior directory the test itself mints, writes, and
       removes classify as runtime inputs no bracket can cover and
       seal the observation; tugboat's .realseam-tmp WAL smoke tier
@@ -873,6 +873,13 @@ in their repos.
       surface itself waits for a driving agent to appear; doc retargets
       at close.
 
+- [ ] 178. stipulator: policy-declared scratch namespaces (the consumer
+      half of the in-module scratch discharge, chunk 100's verdict) — a
+      capture group's policy carries `scratch_namespaces` DIR:PATTERN rows
+      with REQ-inputs-scratch-namespace's grammar, passed to the engine
+      exactly as gomutant's --scratch-namespaces are; the excluded-path
+      interim retires where a namespace covers it; tugboat's .realseam-tmp
+      is the first declaration (its session's work).
 ## Band E — design chunks (open with the user)
 
 - [ ] 15. pew: profile capture and attribution as recording
