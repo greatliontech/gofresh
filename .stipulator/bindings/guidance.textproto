@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-guidance-format"
   content_hash: "0aafb551af81f9b6477471ee59f2c89fd16c5e2f298713e677bc06a3c2601331"
+  source_hash: "5342bcc8b68930957a66d1babade885870100673a2f28cde81dff8dcd374c031"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseRefusalsNameTheOffense"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-format"
   content_hash: "0aafb551af81f9b6477471ee59f2c89fd16c5e2f298713e677bc06a3c2601331"
+  source_hash: "5342bcc8b68930957a66d1babade885870100673a2f28cde81dff8dcd374c031"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseReconstructsGeneratedDocuments"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-render"
   content_hash: "ef77565d26ef26fe1e7482a7f064a172ca892bc78e4b54e9bf89a6b30dfa61ff"
+  source_hash: "ff81991388895a1c67118b06de76217b640c896d87b11dea01fed2fca749e2d1"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseAndRenderProjections"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-render"
   content_hash: "ef77565d26ef26fe1e7482a7f064a172ca892bc78e4b54e9bf89a6b30dfa61ff"
+  source_hash: "ff81991388895a1c67118b06de76217b640c896d87b11dea01fed2fca749e2d1"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseReconstructsGeneratedDocuments"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-coverage"
   content_hash: "576c1642db1e420e8e1adad2c5f0fb79063a4523d30c0e2a5f98819334f8988a"
+  source_hash: "e435f28620139bfa3b352f1e76e13796bc7c0262b84affd4259ce658b2d2bafa"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseReconstructsGeneratedDocuments"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-coverage"
   content_hash: "576c1642db1e420e8e1adad2c5f0fb79063a4523d30c0e2a5f98819334f8988a"
+  source_hash: "e435f28620139bfa3b352f1e76e13796bc7c0262b84affd4259ce658b2d2bafa"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestCoverageIsExactPerSurface"
   role: BINDING_ROLE_TESTS
@@ -58,6 +64,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-format"
   content_hash: "0aafb551af81f9b6477471ee59f2c89fd16c5e2f298713e677bc06a3c2601331"
+  source_hash: "5342bcc8b68930957a66d1babade885870100673a2f28cde81dff8dcd374c031"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestFenceIndentationFollowsMarkdown"
   role: BINDING_ROLE_TESTS
@@ -67,6 +74,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-format"
   content_hash: "0aafb551af81f9b6477471ee59f2c89fd16c5e2f298713e677bc06a3c2601331"
+  source_hash: "5342bcc8b68930957a66d1babade885870100673a2f28cde81dff8dcd374c031"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestIndentedStructureFollowsMarkdown"
   role: BINDING_ROLE_TESTS
@@ -76,6 +84,7 @@ bindings {
 bindings {
   requirement_id: "REQ-guidance-format"
   content_hash: "0aafb551af81f9b6477471ee59f2c89fd16c5e2f298713e677bc06a3c2601331"
+  source_hash: "5342bcc8b68930957a66d1babade885870100673a2f28cde81dff8dcd374c031"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseNormalizesCarriageReturns"
   role: BINDING_ROLE_TESTS

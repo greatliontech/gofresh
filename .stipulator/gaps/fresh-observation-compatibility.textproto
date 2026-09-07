@@ -4,4 +4,5 @@
 requirement_id: "REQ-fresh-observation-compatibility"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "21fe2025b59dc8063b8b3e00069cc7ee7b50d428f67a3b0b0de5c31c62cc3326"
+source_hash: "f8033cbee47c959f22f06b90a3c756d83d37873ad2fca26ce1ec9f2d0276d6b1"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

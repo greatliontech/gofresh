@@ -4,4 +4,5 @@
 requirement_id: "REQ-closure-mutable-local"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "6bd7c54e4e255009c4b7c4af09c7ac46c69647e3a7bb62227161057772ae7046"
+source_hash: "8e9a4fb39c9c1a3f1969fa1657f731663a33309e93f82353a212b9841dcdc2b0"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

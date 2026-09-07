@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-purity-override"
   content_hash: "a45eba84aa3df948d8852642d3bb22f9f6a665e6eceb1c9a49dc4f974d2505fc"
+  source_hash: "0e3a23c4306435b0a44f6a0fd89ddff25322cdf180803bb85bd375fd41edb169"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAssumePureOverride"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanPureDirectives"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-responsibility"
   content_hash: "7b4eeb0e9db916c8270243508208c8795a9be290df05a5963a33664f18a6b1f7"
+  source_hash: "25d934e62adc705ec3f72e6a282e246d27ac7d5bbae202a48c948b05570a5c21"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEngineNeverInfersPurity"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestBuildFlagsSelectSourceAndPurity"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-input"
   content_hash: "91cd515c41e74bff6863f51dd51fb1da252c98a3b1339e99bd4d933e922834f9"
+  source_hash: "b91d828a8a0ecd190268ad954f3d098b9989589be7ec1864a9fcf35ff54cd5d7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAssumePureInputShape"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-responsibility"
   content_hash: "7b4eeb0e9db916c8270243508208c8795a9be290df05a5963a33664f18a6b1f7"
+  source_hash: "25d934e62adc705ec3f72e6a282e246d27ac7d5bbae202a48c948b05570a5c21"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestMalformedPurityAttributionCannotOverride"
   role: BINDING_ROLE_TESTS
@@ -58,6 +64,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-input"
   content_hash: "91cd515c41e74bff6863f51dd51fb1da252c98a3b1339e99bd4d933e922834f9"
+  source_hash: "b91d828a8a0ecd190268ad954f3d098b9989589be7ec1864a9fcf35ff54cd5d7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPurityInputIsSubjectPredicate"
   role: BINDING_ROLE_PROVES
@@ -67,6 +74,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-observation-separation"
   content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.CheckObserved"
   role: BINDING_ROLE_IMPLEMENTS
@@ -76,6 +84,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-observation-separation"
   content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence"
   role: BINDING_ROLE_TESTS
@@ -85,6 +94,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage"
   role: BINDING_ROLE_TESTS
@@ -94,6 +104,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-override"
   content_hash: "a45eba84aa3df948d8852642d3bb22f9f6a665e6eceb1c9a49dc4f974d2505fc"
+  source_hash: "0e3a23c4306435b0a44f6a0fd89ddff25322cdf180803bb85bd375fd41edb169"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveImmuneToObservationEvidence"
   role: BINDING_ROLE_TESTS
@@ -103,6 +114,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally"
   role: BINDING_ROLE_TESTS
@@ -112,6 +124,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAmbiguousSubjectDirectiveConfersNothing"
   role: BINDING_ROLE_TESTS
@@ -121,6 +134,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-directive"
   content_hash: "a0cfd7b0fcf8f1f3c6310136499001a4ceea34acca053cb2eaec056c5b499c3d"
+  source_hash: "4299377feb2e7f609dbb5feab9fd1f3aca2683519c7f0cab9e778c7222ad5512"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAmbiguousSubjectCallerAssertionConfersNothing"
   role: BINDING_ROLE_TESTS
@@ -130,6 +144,7 @@ bindings {
 bindings {
   requirement_id: "REQ-purity-observation-separation"
   content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestObservedEvidenceNeverSuppressesSharedDynamicState"
   role: BINDING_ROLE_TESTS

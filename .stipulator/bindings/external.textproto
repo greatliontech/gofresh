@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-external-directive"
   content_hash: "ec58e95c8bab43fdd6d06d2e820150ba4a23a6b73d4c2553933723b3c2b3b8e1"
+  source_hash: "70ea8a03ba11b0f6b31e035419f56da33530e80e4b686e1bf7a6d5bbdfe407e8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveWithholdsReuse"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-directive"
   content_hash: "ec58e95c8bab43fdd6d06d2e820150ba4a23a6b73d4c2553933723b3c2b3b8e1"
+  source_hash: "70ea8a03ba11b0f6b31e035419f56da33530e80e4b686e1bf7a6d5bbdfe407e8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveFixtureScan"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-precedence"
   content_hash: "90f1ace0b547c7a62a3bc35c4b5b527c8bfcadc5518d63e0116aeb2b694df173"
+  source_hash: "ddcfffc6e2776918a1fcaac887e3f93e25b57e93b4cfc2174650aff9b152bd11"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveConflictRefused"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-precedence"
   content_hash: "90f1ace0b547c7a62a3bc35c4b5b527c8bfcadc5518d63e0116aeb2b694df173"
+  source_hash: "ddcfffc6e2776918a1fcaac887e3f93e25b57e93b4cfc2174650aff9b152bd11"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveImmuneToObservationEvidence"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-precedence"
   content_hash: "90f1ace0b547c7a62a3bc35c4b5b527c8bfcadc5518d63e0116aeb2b694df173"
+  source_hash: "ddcfffc6e2776918a1fcaac887e3f93e25b57e93b4cfc2174650aff9b152bd11"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveWithholdsReuse"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-precedence"
   content_hash: "90f1ace0b547c7a62a3bc35c4b5b527c8bfcadc5518d63e0116aeb2b694df173"
+  source_hash: "ddcfffc6e2776918a1fcaac887e3f93e25b57e93b4cfc2174650aff9b152bd11"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveConflictScopedToScanSubjects"
   role: BINDING_ROLE_TESTS
@@ -58,6 +64,7 @@ bindings {
 bindings {
   requirement_id: "REQ-external-directive"
   content_hash: "ec58e95c8bab43fdd6d06d2e820150ba4a23a6b73d4c2553933723b3c2b3b8e1"
+  source_hash: "70ea8a03ba11b0f6b31e035419f56da33530e80e4b686e1bf7a6d5bbdfe407e8"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExternalDirectiveImmuneToObservationEvidence"
   role: BINDING_ROLE_TESTS

@@ -4,4 +4,5 @@
 requirement_id: "REQ-closure-observability-batch-equivalence"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "895ead8e1c950b42a704869ab64888bbac5bd27177629d5dc8d23f739ab6b3bd"
+source_hash: "677f0ac3cbad097aac27fd6ef1eeb73e60a4968a4b184caef517c4ff404ae555"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-explain-chain"
   content_hash: "5a549095c5463ab550e4b21f7004defda6be6c4a4c2ffdd2b9c55e06b22821f3"
+  source_hash: "685778e9b5b3d296bd1188731bde3a2bf67f55d1de0cf92ab15b4afddb397e5e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainChains"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-explain-chain"
   content_hash: "5a549095c5463ab550e4b21f7004defda6be6c4a4c2ffdd2b9c55e06b22821f3"
+  source_hash: "685778e9b5b3d296bd1188731bde3a2bf67f55d1de0cf92ab15b4afddb397e5e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainDeferralChains"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-explain-vocabulary"
   content_hash: "08d45a32c67db9fdde7334f89c24500fd232c1b9a5de0bda1e2586d4f2eac0be"
+  source_hash: "be21d656ab26f1ca37dc08f40333eaa68685d83717d22461df9ed3a235583713"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainChains"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-explain-bounded"
   content_hash: "4ccb44ebab7dcb47e57100132fd76ee2af4b2e33ca2347bf8cdd1a88e5b8302d"
+  source_hash: "ab6e12c292a3828fd9ee8d00d4ca68c9249c870e6cf20f37c8412fbdf9acad18"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainChainBound"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-explain-passive"
   content_hash: "701e7b97e03d02f1ea2cc107bda5ff7a9affd7cf7b72d5b67816ce28eab2e274"
+  source_hash: "682cb32a808f6918881b35462b63e3549c46ce96eee3bbcf367c5171a3cb3f2c"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestChainHooksArmOnlyDuringExplain"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-explain-bounded"
   content_hash: "4ccb44ebab7dcb47e57100132fd76ee2af4b2e33ca2347bf8cdd1a88e5b8302d"
+  source_hash: "ab6e12c292a3828fd9ee8d00d4ca68c9249c870e6cf20f37c8412fbdf9acad18"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainChainBoundsSurfaceDerivation"
   role: BINDING_ROLE_TESTS
