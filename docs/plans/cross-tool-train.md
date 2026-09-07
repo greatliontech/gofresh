@@ -142,7 +142,7 @@ staged campaigns — 146 inserted after 138 (the staged snapshot's
 external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
-triage, then Band F 158–174 in its listed order, then 95
+triage, then Band F 158–177 in its listed order (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -859,6 +859,19 @@ in their repos.
       (pew docs/issues/ab-out-multi-package.md: one artifact per package
       under a derived path; verdict-path-consolidation.md: one vouch
       resolver value, one row decode); two docs delete at close.
+- [ ] 176. stipulator: whole-requirement test claims on clause-structured
+      requirements are refused by default (stipulator docs/issues/
+      clause-structured-whole-claims.md; user ruling 2026-09-07) — a
+      `tests`/`proves` claim naming no clause on a requirement that
+      declares clauses refuses at write time and reads as a hygiene
+      violation for existing records, `implements` claims stay whole, a
+      corpus manifest opt-out keeps a corpus that accepts whole claims
+      honest about it; doc deletes at close.
+- [ ] 177. pew: the machine-facing step short of a second surface (pew
+      docs/issues/mcp-surface.md; user ruling 2026-09-07) — `--json` on
+      run, ab, and gc and a progress channel on the long verbs; the MCP
+      surface itself waits for a driving agent to appear; doc retargets
+      at close.
 
 ## Band E — design chunks (open with the user)
 
@@ -889,6 +902,15 @@ in their repos.
       benchmark permanently unverifiable; adopt CaptureObserved per
       arm and retire §7.8's no-proof sentence; spec-level
       verdict-model change, opens with a design discussion; doc
+      deletes at close.
+
+- [ ] 175. gofresh: subject-scoped closure identity (design, with the
+      user; gomutant docs/issues/semantic-closure-in-the-carry-gate.md;
+      user ruling 2026-09-07) — a closure identity that is both semantic
+      (the canonical member form) and scoped to the subject's own
+      reachable closure, so gomutant's carry gate can shed on a semantic
+      move of the subject's closure and carry across sibling edits; the
+      carry gate stays body hash + operator set until it lands; doc
       deletes at close.
 
 ## Ecosystem-blocked
