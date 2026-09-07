@@ -704,7 +704,7 @@ strategy bump.
       ~505) — own audit.
 - [x] 121. gofresh: fixed-argument time construction audited (was SEP
       3; ~186) — Date/AddDate/Format read no clock; own audit.
-- [ ] 122. gofresh: std init-closure exemption (was SEP 4; ~58) —
+- [x] 122. gofresh: std init-closure exemption (was SEP 4; ~58) —
       synthetic init$N closures ride the toolchain guard as named
       init does.
 - [ ] 123. gofresh: maximal-tier pure-shape selector audits (was SEP
