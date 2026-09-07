@@ -695,7 +695,7 @@ strategy bump.
       docs/issues/nodwarf5-toolchain-audit-key-mismatch.md (release,
       selection, and baked-experiment matching must use the actual
       audited toolchain identity); docs delete at close.
-- [ ] 120. gofresh: math/big joins the audited-pure set (was SEP 2;
+- [x] 120. gofresh: math/big joins the audited-pure set (was SEP 2;
       ~505) — own audit.
 - [ ] 121. gofresh: fixed-argument time construction audited (was SEP
       3; ~186) — Date/AddDate/Format read no clock; own audit.
