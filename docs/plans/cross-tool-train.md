@@ -634,7 +634,7 @@ verdict, and records the measured wall against the audit's baseline.
       docs/issues/semantic-closure-in-the-carry-gate.md) — adopt
       129's identity at both poles of the carry gate; doc deletes at
       close.
-- [ ] 139. gomutant: delta-line survivor view (field-response,
+- [x] 139. gomutant: delta-line survivor view (field-response,
       consumer report 2026-09-03; gomutant
       docs/issues/delta-line-survivor-view.md) — a --changed
       campaign's summary and result rows gain a changed-lines filter
