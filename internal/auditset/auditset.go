@@ -82,6 +82,47 @@ var purePackages = map[string]bool{
 // set.
 func PurePackage(pkgPath string) bool { return purePackages[pkgPath] }
 
+// timeSymbols is the audited surface of package time, matched by bare
+// name at every tier: fixed-argument construction and value
+// computation over Time, Duration, Month, and Weekday that reads
+// neither the clock, nor the local zone, nor the exported time.UTC
+// variable. A name shared by a pure declaration and an ambient one is
+// excluded whole: After (the timer channel and (Time).After), Local
+// and UTC (the exported variables and the methods), Unix, UnixMilli,
+// and UnixMicro (the functions install the LOCAL zone on the value
+// they construct — every later decomposition of it reads $TZ and the
+// zone database — beside the pure (Time).Unix method), Location (the
+// type name beside a method that returns the time.UTC variable for a
+// location-less Time), and AddDate (it re-enters Date through that
+// method). Now, Since, Until, Sleep, Tick, AfterFunc, NewTimer,
+// NewTicker, Parse, ParseInLocation, LoadLocation, and
+// LoadLocationFromTZData never enter. Grows only by source audit
+// (REQ-closure-observability-analysis).
+var timeSymbols = map[string]bool{
+	// construction and the type/constant names
+	"Date": true, "FixedZone": true, "ParseDuration": true,
+	"Time": true, "Duration": true, "Month": true, "Weekday": true,
+	"January": true, "February": true, "March": true, "April": true, "May": true, "June": true,
+	"July": true, "August": true, "September": true, "October": true, "November": true, "December": true,
+	"Sunday": true, "Monday": true, "Tuesday": true, "Wednesday": true, "Thursday": true, "Friday": true, "Saturday": true,
+	"Nanosecond": true, "Microsecond": true, "Millisecond": true, "Second": true, "Minute": true, "Hour": true,
+	// the layout constants: execution-free string references
+	"Layout": true, "ANSIC": true, "UnixDate": true, "RubyDate": true, "RFC822": true, "RFC822Z": true,
+	"RFC850": true, "RFC1123": true, "RFC1123Z": true, "RFC3339": true, "RFC3339Nano": true, "Kitchen": true,
+	"Stamp": true, "StampMilli": true, "StampMicro": true, "StampNano": true, "DateTime": true, "DateOnly": true, "TimeOnly": true,
+	// Time value computation
+	"Add": true, "Sub": true, "Before": true, "Equal": true, "Compare": true, "IsZero": true,
+	"Format": true, "AppendFormat": true, "String": true, "Truncate": true, "Round": true, "In": true,
+	"Zone": true, "ZoneBounds": true, "Year": true, "Day": true, "YearDay": true, "ISOWeek": true, "Clock": true,
+	"UnixNano": true,
+	// Duration value computation
+	"Hours": true, "Minutes": true, "Seconds": true, "Milliseconds": true, "Microseconds": true, "Nanoseconds": true, "Abs": true,
+}
+
+// TimeSymbol reports whether a time-package symbol name is in the
+// audited surface.
+func TimeSymbol(name string) bool { return timeSymbols[name] }
+
 // SyncMethod reports whether a sync receiver's method is in the
 // audited synchronization set.
 func SyncMethod(receiver, method string) bool { return slices.Contains(syncMethods[receiver], method) }

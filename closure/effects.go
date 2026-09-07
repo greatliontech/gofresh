@@ -1,5 +1,7 @@
 package closure
 
+import "github.com/greatliontech/gofresh/internal/auditset"
+
 type externalEffectKind uint8
 
 // The enum ORDER is the effect projection's primary sort key; the proof's
@@ -185,23 +187,31 @@ func harnessSubtestDriverEffect() externalEffect {
 // results. fmt's Sprint family qualifies (arguments' methods stay
 // visible to reachability); its Print family is classified output and
 // its Scan family classified input, so only the pure remainder lands
-// here. time.Date is calendar arithmetic
-// over its operands - the ambient timezone channel enters only through
-// the Location globals and constructors, which stay flagged (time.UTC
-// is an exported mutable var, refused like io.EOF); the bare-name
-// match also admits the equally pure decomposition (time.Time).Date at
-// the SSA tiers. The remaining names are execution-free references:
-// each is an audited type or constant name (fmt.Stringer, time.Time,
-// time.Month and its twelve constants) with no package-level callable
-// of the same name - the reference declares or denotes and executes
-// nothing, and every dispatch through a value of such a type
-// classifies at its own site. The bare-name match at the SSA tiers
-// additionally admits the value methods sharing these names -
-// (time.Time).Month - each equally pure decomposition over its
-// operands. math/big is admitted whole as a member of the audited-pure
-// package set (isSourceOnlyStandardPackage), not operation by
-// operation here. Grows only by source audit
-// (REQ-closure-observability-analysis).
+// here. time's fixed-argument construction and value computation —
+// Date and the calendar, clock-field, zone-accessor, formatting,
+// comparison, and duration operations over Time, Duration, Month, and
+// Weekday values, FixedZone included — read neither the clock, nor
+// the local zone, nor the exported time.UTC variable: the ambient
+// channels enter only through Now/Since/Until and the timers (the
+// clock), Local, the Unix constructors, and the loading constructors
+// (the local zone and the zone database), Parse (which consults Local
+// for zone abbreviations), and (Time).Location with AddDate through
+// it (the time.UTC variable, refused like io.EOF), all of which stay
+// refused. The set is a table in internal/auditset because the match
+// is by BARE NAME at every tier: a name shared by a pure declaration
+// and an ambient one (After, Local, UTC, Unix, UnixMilli, UnixMicro,
+// Location, AddDate) is excluded whole — a subject calling the pure
+// (Time).After or (Time).Unix refuses on the shared name — so the
+// table names only the collision-free surface. Execution-free
+// references — an audited type or constant name (fmt.Stringer,
+// time.Time, time.Month and its constants, time.Duration and its
+// constants, time.Weekday and its constants, the layout constants) —
+// declare
+// or denote and execute nothing, and every dispatch through a value
+// of such a type classifies at its own site. math/big is admitted
+// whole as a member of the audited-pure package set
+// (isSourceOnlyStandardPackage), not operation by operation here.
+// Grows only by source audit (REQ-closure-observability-analysis).
 func classBPureStandard(audited bool, pkgPath, name string) bool {
 	if !audited {
 		return false
@@ -213,14 +223,19 @@ func classBPureStandard(audited bool, pkgPath, name string) bool {
 			return true
 		}
 	case "time":
-		switch name {
-		case "Date", "Time", "Month",
-			"January", "February", "March", "April", "May", "June",
-			"July", "August", "September", "October", "November", "December":
-			return true
-		}
+		return auditset.TimeSymbol(name)
 	}
 	return false
+}
+
+// auditedStandardSymbol is the one ladder every tier consults for a
+// standard package's symbol-level admissions — the class-B pure
+// operations and the audited sync, pool, and reflect symbols — so a
+// fifth table can never be added at two consulting sites and missed
+// at the third.
+func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
+	return classBPureStandard(audited, pkgPath, name) || auditedSyncSymbol(audited, pkgPath, name) ||
+		auditedPoolSymbol(audited, pkgPath, name) || auditedRuntimeTypeSymbol(audited, pkgPath, name)
 }
 
 // fmtFprintFamily names fmt's writer-first print operations — the one

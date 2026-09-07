@@ -340,7 +340,14 @@ const ClosureStrategy = closure.IdentityStrategy
 // across the CPU-selected kernels, its only state invisible
 // memoization and scratch pooling, its only entropy the caller's —
 // subsuming the constructor-by-constructor admission.
-const ObservationRTA = "gofresh/observation-rta@28"
+// @29 admits time's fixed-argument construction and value computation
+// — the calendar, clock-field, zone-accessor, formatting, comparison,
+// and duration operations over Time, Duration, Month, and Weekday
+// values, FixedZone included — none of which reads the clock, the
+// local zone, or the time.UTC variable; the names that collide with an
+// ambient declaration (After, Local, UTC, the Unix constructors,
+// Location, AddDate) stay excluded whole.
+const ObservationRTA = "gofresh/observation-rta@29"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

@@ -150,7 +150,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror"} {
+	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -297,6 +297,92 @@ func TestStamp(t *testing.T) {
 	_ = Stamp()
 }
 `)
+	writeFile(t, dir, "span/span.go", `package span
+
+import "time"
+
+// Span computes with fixed arguments only: construction under a fixed
+// zone, calendar and duration arithmetic, comparison, formatting, and
+// a zone change to another fixed zone.
+func Span() string {
+	a := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600))
+	b := a.Add(400*24*time.Hour + 90*time.Minute).Round(time.Minute)
+	d := b.Sub(a).Truncate(time.Second)
+	if !a.Before(b) || a.Equal(b) || a.Compare(b) >= 0 || a.IsZero() {
+		return "order"
+	}
+	name, offset := b.Zone()
+	y, w := b.ISOWeek()
+	// (Time).UTC, Location, and AddDate share their names with ambient
+	// declarations and are excluded whole; a fixed zone and Add say
+	// the same things.
+	return d.String() + b.Format(time.RFC3339) + b.In(time.FixedZone("Y", 0)).Weekday().String() + name + string(rune('0'+offset%10)) + string(rune('0'+(y+w)%10)) + string(b.AppendFormat(nil, time.Kitchen)[0:1]) + d.Abs().String()
+}
+`)
+	writeFile(t, dir, "span/span_test.go", `package span
+
+import "testing"
+
+func TestSpan(t *testing.T) {
+	if Span() == "" {
+		t.Fatal("span")
+	}
+}
+`)
+	writeFile(t, dir, "timer/timer.go", `package timer
+
+import "time"
+
+// Wait reaches the timer channel through the name a pure method
+// shares: excluded whole.
+func Wait() {
+	<-time.After(time.Millisecond)
+}
+`)
+	writeFile(t, dir, "timer/timer_test.go", `package timer
+
+import "testing"
+
+func TestWait(t *testing.T) {
+	Wait()
+}
+`)
+	writeFile(t, dir, "parsed/parsed.go", `package parsed
+
+import "time"
+
+// Parsed reaches Parse, which consults Local for zone abbreviations.
+func Parsed() time.Time {
+	t, _ := time.Parse(time.RFC1123, "Wed, 01 Jan 2020 00:00:00 UTC")
+	return t
+}
+`)
+	writeFile(t, dir, "parsed/parsed_test.go", `package parsed
+
+import "testing"
+
+func TestParsed(t *testing.T) {
+	_ = Parsed()
+}
+`)
+	writeFile(t, dir, "unixzone/unixzone.go", `package unixzone
+
+import "time"
+
+// Epoch constructs through time.Unix, which installs the LOCAL zone:
+// the rendering reads $TZ and the zone database.
+func Epoch() string {
+	return time.Unix(0, 0).Format(time.RFC3339)
+}
+`)
+	writeFile(t, dir, "unixzone/unixzone_test.go", `package unixzone
+
+import "testing"
+
+func TestEpoch(t *testing.T) {
+	_ = Epoch()
+}
+`)
 	writeFile(t, dir, "clock/clock.go", `package clock
 
 import "time"
@@ -344,6 +430,10 @@ func TestMirror(t *testing.T) {
 		{Package: "example.com/audited/calendar", Symbol: "Year"},
 		{Package: "example.com/audited/stamp", Symbol: "Stamp"},
 		{Package: "example.com/audited/clock", Symbol: "Now"},
+		{Package: "example.com/audited/span", Symbol: "Span"},
+		{Package: "example.com/audited/timer", Symbol: "Wait"},
+		{Package: "example.com/audited/parsed", Symbol: "Parsed"},
+		{Package: "example.com/audited/unixzone", Symbol: "Epoch"},
 		{Package: "example.com/audited/mirror", Symbol: "Mirror"},
 	})
 	if err != nil {
@@ -391,6 +481,23 @@ func TestMirror(t *testing.T) {
 	if stamp.Observable || !strings.Contains(stamp.Reason, "time.UTC") {
 		t.Fatalf("Stamp = %+v, want the refusal naming the Location global - the ambient timezone channel, not the calendar arithmetic", stamp)
 	}
+	span := proofs[Subject{Package: "example.com/audited/span", Symbol: "Span"}]
+	if !span.Observable {
+		t.Fatalf("fixed-argument time subject unobservable: %+v", span)
+	}
+	// Each ambient reach refuses in its own package, naming itself:
+	// the timer channel, Parse, and the Unix constructor that installs
+	// the local zone on the value it builds.
+	for _, tc := range []struct{ pkg, symbol, reach string }{
+		{"example.com/audited/timer", "Wait", "time.After"},
+		{"example.com/audited/parsed", "Parsed", "time.Parse"},
+		{"example.com/audited/unixzone", "Epoch", "time.Unix"},
+	} {
+		proof := proofs[Subject{Package: tc.pkg, Symbol: tc.symbol}]
+		if proof.Observable || !strings.Contains(proof.Reason, tc.reach) {
+			t.Fatalf("%s.%s = %+v, want refused naming %s", tc.pkg, tc.symbol, proof, tc.reach)
+		}
+	}
 	now := proofs[Subject{Package: "example.com/audited/clock", Symbol: "Now"}]
 	if now.Observable || !strings.Contains(now.Reason, "time.Now") {
 		t.Fatalf("Now = %+v, want the ambient clock read refused by name", now)
@@ -416,6 +523,14 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		{"time", "April"}, {"time", "May"}, {"time", "June"},
 		{"time", "July"}, {"time", "August"}, {"time", "September"},
 		{"time", "October"}, {"time", "November"}, {"time", "December"},
+		{"time", "Add"}, {"time", "Sub"}, {"time", "Before"}, {"time", "Equal"}, {"time", "Compare"}, {"time", "IsZero"},
+		{"time", "Format"}, {"time", "AppendFormat"}, {"time", "String"}, {"time", "Truncate"}, {"time", "Round"},
+		{"time", "In"}, {"time", "Zone"}, {"time", "ZoneBounds"}, {"time", "Weekday"}, {"time", "Sunday"}, {"time", "Saturday"},
+		{"time", "Year"}, {"time", "Day"}, {"time", "YearDay"}, {"time", "ISOWeek"}, {"time", "Clock"},
+		{"time", "Second"}, {"time", "Minute"}, {"time", "Hour"}, {"time", "Nanosecond"}, {"time", "Microsecond"}, {"time", "Millisecond"},
+		{"time", "UnixNano"}, {"time", "FixedZone"}, {"time", "ParseDuration"},
+		{"time", "Duration"}, {"time", "Hours"}, {"time", "Minutes"}, {"time", "Seconds"}, {"time", "Milliseconds"}, {"time", "Microseconds"}, {"time", "Nanoseconds"}, {"time", "Abs"},
+		{"time", "Layout"}, {"time", "ANSIC"}, {"time", "RFC3339"}, {"time", "RFC3339Nano"}, {"time", "Kitchen"}, {"time", "DateOnly"}, {"time", "TimeOnly"}, {"time", "DateTime"}, {"time", "StampNano"},
 		{"fmt", "Stringer"}, {"fmt", "Sprint"},
 	} {
 		if !classBPureStandard(true, tc.pkg, tc.name) {
@@ -424,7 +539,15 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 	}
 	for _, tc := range []struct{ pkg, name string }{
 		{"time", "Now"}, {"time", "UTC"}, {"time", "Local"},
-		{"time", "LoadLocation"}, {"time", "FixedZone"}, {"time", "Since"},
+		{"time", "LoadLocation"}, {"time", "LoadLocationFromTZData"}, {"time", "Since"}, {"time", "Until"},
+		// A name shared by a pure declaration and an ambient one is
+		// excluded whole: After (the timer channel), the Unix constructors
+		// (they install the local zone), Location (the method returns the
+		// time.UTC variable), AddDate (re-enters Date through it).
+		{"time", "After"}, {"time", "Unix"}, {"time", "UnixMilli"}, {"time", "UnixMicro"}, {"time", "Location"}, {"time", "AddDate"},
+		{"time", "AfterFunc"}, {"time", "Sleep"}, {"time", "Tick"},
+		{"time", "NewTimer"}, {"time", "NewTicker"}, {"time", "Parse"}, {"time", "ParseInLocation"},
+		{"time", "Reset"}, {"time", "Stop"},
 		{"math/big", "NewInt"}, {"math/big", "Int"},
 		{"fmt", "State"}, {"fmt", "Print"}, {"fmt", "Formatter"},
 	} {

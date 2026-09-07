@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@28" {
-		t.Fatalf("ObservationRTA = %q, want the math/big whole-package admission over the value-provenance narrowing", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@29" {
+		t.Fatalf("ObservationRTA = %q, want the fixed-argument time admission over the math/big admission", ObservationRTA)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @12 is the math/big
-// admission beside ObservationRTA@28.
+// of serving (REQ-closure-effect-scan-memo); @13 is the fixed-argument
+// time admission beside ObservationRTA@29.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@12" {
-		t.Fatalf("effect-scan strategy = %q, want @12", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@13" {
+		t.Fatalf("effect-scan strategy = %q, want @13", closure.EffectScanStrategy())
 	}
 }

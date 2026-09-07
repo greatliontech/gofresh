@@ -30,7 +30,9 @@ import (
 // marker and selector classification both consult the set, so a scan
 // persisted under the narrower set must refuse rather than serve
 // (ObservationRTA@28 carries the same widening for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@12"
+// @13 admits time's fixed-argument construction and value computation
+// (ObservationRTA@29 carries the same widening for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@13"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

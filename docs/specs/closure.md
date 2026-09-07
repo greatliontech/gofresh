@@ -1208,13 +1208,26 @@ value-seeded source, and its two reaches into math — a Log2 that only sizes
 a conversion buffer whose content is invariant, and a correctly-rounded Sqrt
 seeding a Newton iteration — leave every result invariant, so the
 math-family exclusion's CPU-dispatch rationale does not reach it;
-time.Date included: calendar arithmetic over its operands, the ambient
-timezone channel entering only through the Location globals and
-constructors, which stay flagged — time.UTC is an exported mutable
-variable and refuses like any other; execution-free references
+time's fixed-argument construction and value computation included —
+Date, FixedZone, ParseDuration, and the calendar, clock-field,
+zone-accessor (In, Zone, ZoneBounds), rounding (Round, Truncate, IsZero),
+formatting, comparison, and duration operations over Time, Duration,
+Month, and Weekday values, none of which reads the clock, the local zone,
+or the exported time.UTC variable: the ambient channels enter only through
+Now, Since, Until, and the timers (the clock), Local, the Unix constructors
+(which install the local zone on the value they construct), and the
+loading constructors (the local zone and the zone database), Parse (which
+consults Local for zone abbreviations), and (Time).Location, which returns
+the time.UTC variable for a location-less Time, with AddDate re-entering
+Date through it — all of which stay refused, time.UTC being an exported
+mutable variable that refuses like any other; the admission is by bare
+name at every tier, so a name shared by a pure declaration and an ambient
+one — After, Local, UTC, Unix, UnixMilli, UnixMicro, Location, AddDate — is
+excluded whole, at the stated cost that a subject calling the pure method
+of a shared name ((Time).After, (Time).Unix, (Time).AddDate) refuses; execution-free references
 included: an audited type or constant name — fmt.Stringer, time.Time,
-time.Month and its twelve constants —
-declares or denotes and executes nothing, every dispatch through a
+time.Month, time.Duration, time.Weekday and their constants, time's
+layout constants — declares or denotes and executes nothing, every dispatch through a
 value of such a type classified at its own site, and the pure value
 methods sharing an audited name admitted with it) —
 is deliberately bounded by
