@@ -601,7 +601,7 @@ verdict, and records the measured wall against the audit's baseline.
       consolidation chunks. Measurement: a knob this audit deletes or
       re-derives on a bench-armed shape names its pew arms in the
       disposition and re-records in the same change set.
-- [ ] 91. gomutant: deferred-check-close adoption — the run-end and
+- [x] 91. gomutant: deferred-check-close adoption — the run-end and
       per-window producer validations run full in-process gofresh
       analysis (~25% of in-process CPU under repeated packages.Load);
       gofresh's deferred-close contract is the closing-cost lever; a
@@ -613,6 +613,13 @@ verdict, and records the measured wall against the audit's baseline.
       observed union view set serving both roles halves the warm
       campaign's observation floor; also dispositions the
       strict/union view-build-loop duplication in freshness.go.
+      Rider (91's design verdict, 2026-09-07): once one view set is
+      both checked and validated per window before that window's
+      commit, gofresh's deferred check close is sound for it
+      (REQ-fresh-coherent-view's deferred-close clause: verdicts
+      consumed only under a later successful validation of the same
+      view) — adopt WithDeferredCheckClose in the same change set and
+      re-measure the closing observation (60 ms per view warm at 91).
 - [ ] 96. gomutant: concurrent ephemeral probe overrides — two
       concurrent probes' width/ceiling snapshot-restores can
       interleave (bounded, self-healing); either the probe claim goes
