@@ -87,14 +87,16 @@ type variantParsePayload struct {
 // fileMemos is a Hasher's view of the two per-file memos: entries loaded
 // per directory on first use, and the pass's misses pending their merge.
 type fileMemos struct {
-	scans, pendingScans   map[string]map[string]effectScanPayload
-	parses, pendingParses map[string]map[string]variantParsePayload
+	scans, pendingScans         map[string]map[string]effectScanPayload
+	parses, pendingParses       map[string]map[string]variantParsePayload
+	canonical, pendingCanonical map[string]map[string]string
 }
 
 func newFileMemos() *fileMemos {
 	return &fileMemos{
 		scans: map[string]map[string]effectScanPayload{}, pendingScans: map[string]map[string]effectScanPayload{},
 		parses: map[string]map[string]variantParsePayload{}, pendingParses: map[string]map[string]variantParsePayload{},
+		canonical: map[string]map[string]string{}, pendingCanonical: map[string]map[string]string{},
 	}
 }
 
@@ -196,12 +198,20 @@ func (h *Hasher) flushFileMemos() {
 		}
 		stored = true
 	}
+	for dir, additions := range h.fileMemo.pendingCanonical {
+		cachefile.Merge(canonicalDirName, canonicalScope(), dir, additions)
+		for k, v := range additions {
+			h.fileMemo.canonical[dir][k] = v
+		}
+		stored = true
+	}
 	if stored {
 		// One package's per-file derivations count as one persisted scan.
 		h.persisted.scans++
 	}
 	h.fileMemo.pendingScans = map[string]map[string]effectScanPayload{}
 	h.fileMemo.pendingParses = map[string]map[string]variantParsePayload{}
+	h.fileMemo.pendingCanonical = map[string]map[string]string{}
 }
 
 // ReadFile implements testvariant.Source over the Hasher's once-per-pass

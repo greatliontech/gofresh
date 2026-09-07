@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [per-file-memos-one-shape](per-file-memos-one-shape.md) | the effect-scan, ledger-parse, and canonical-digest memos each spell the load-serve-pend-merge discipline; one generic per-file memo would hold it once | with the next change set touching the per-file memos |
 | [nodwarf5-toolchain-audit-key-mismatch](nodwarf5-toolchain-audit-key-mismatch.md) | audited release and selection keys use a space where the system nodwarf5 toolchain reports a hyphen; witness admissions refuse | cross-tool train chunk 119 |
 | [compartment-ledger-derivation](compartment-ledger-derivation.md) | the spec does not state that equal compartment hashes entail equal declaration ledgers, which stipulator's content-addressed ledger store now relies on (fail-closed if false) | user decision |
 | [walk-dst-selection-for-audit-key](walk-dst-selection-for-audit-key.md) | the two-axis key landed (chunk 126): dst-tagged analyses refuse admissions loudly; the dst-selection WALK remains — walking it lists dst in the selections axis | with the first judged run over a dst-tagged build selection (tugboat DST-leg campaigns, paused with the tool phase) |

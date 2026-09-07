@@ -441,12 +441,13 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 			if compartmentDir == "" {
 				compartmentDir = p.Dir
 			}
-			for _, f := range p.GoFiles {
+			compiled, embedded, _ := memberKinds(p)
+			for f := range compiled {
 				if !baseFiles[f] {
 					compiledGo[f] = true
 				}
 			}
-			for _, f := range p.EmbedFiles {
+			for f := range embedded {
 				if !baseFiles[f] {
 					embeddedData[f] = true
 				}
@@ -512,8 +513,12 @@ var analysisTestHooks struct {
 	// fileParse observes a per-file effect scan actually parsing, and
 	// variantParse a compartment member's ledger derivation, so tests
 	// pin that the persistent per-file memos served instead.
-	fileParse    func(path string)
-	variantParse func(name string)
+	fileParse func(path string)
+	// canonicalParse observes a compiled member's canonical form
+	// actually being derived (a byte-digest miss), the memo's one
+	// observable.
+	canonicalParse func(dir string)
+	variantParse   func(name string)
 }
 
 // resetCallScope arms the per-batch-call memos: one call observes one
@@ -642,7 +647,12 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	files = listing.UniqueStrings(files)
-	fh, err := h.hashFiles(p.Dir, files)
+	// The members whose canonical form is their contribution: compiled
+	// Go members that no directive embeds; every other member — data,
+	// C, assembly, a compiled member embedded as data too, the rest of
+	// a whole-directory fold — contributes its bytes.
+	_, _, canonical := memberKinds(p)
+	fh, err := h.hashFiles(p.Dir, files, canonical)
 	if err != nil {
 		return "", nil, err
 	}
@@ -655,6 +665,32 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		h.contribs[p.ImportPath] = depContribution{contribution: contribution, files: paths}
 	}
 	return contribution, paths, nil
+}
+
+// memberKinds derives one listing node's member kinds — the compiled
+// Go members (GoFiles and CgoFiles) and the embedded data members — the
+// one derivation the core contribution and the test-variant compartment
+// share. The kinds are not a partition: a member both compiled and
+// embedded (a sibling names it in a go:embed directive) is data too,
+// and canonical is false for it — its bytes reach unchanged code as
+// data, so its bytes are its contribution (REQ-closure-canonical-member,
+// REQ-closure-test-variant-compartment).
+func memberKinds(p listPkg) (compiled, embedded, canonical map[string]bool) {
+	compiled, embedded, canonical = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, set := range [][]string{p.GoFiles, p.CgoFiles} {
+		for _, f := range set {
+			compiled[f] = true
+		}
+	}
+	for _, f := range p.EmbedFiles {
+		embedded[f] = true
+	}
+	for f := range compiled {
+		if !embedded[f] {
+			canonical[f] = true
+		}
+	}
+	return compiled, embedded, canonical
 }
 
 func allPackageFiles(dir string) ([]string, error) {
@@ -1119,17 +1155,22 @@ func (h *Hasher) underCache(dir string) bool {
 	return dir == h.modCache || strings.HasPrefix(dir, h.modCache+string(filepath.Separator))
 }
 
-func hashFiles(dir string, files []string, digests map[string]string) (string, error) {
-	return hashFilesWith(dir, files, digests, readBytes)
-}
-
 // hashFiles is the fold over the Hasher's once-per-pass reads: the same
-// bytes the effect scan and the compartment ledger consume.
-func (h *Hasher) hashFiles(dir string, files []string) (string, error) {
-	return hashFilesWith(dir, files, h.fileDigests, h.readFile)
+// bytes the effect scan and the compartment ledger consume. Compiled Go
+// members fold their canonical digest (REQ-closure-canonical-member);
+// every other member its bytes.
+func (h *Hasher) hashFiles(dir string, files []string, canonical map[string]bool) (string, error) {
+	return hashFilesWith(dir, files, canonical, h.fileDigests, h.readFile, h.canonicalFileDigest)
 }
 
-func hashFilesWith(dir string, files []string, digests map[string]string, read func(string) (fileBytes, error)) (string, error) {
+// hashFilesWith folds the members' digests in name order: a member in
+// canonicalMembers folds canonical(dir, byteDigest, content) — the
+// canonical form a compiled, unembedded Go member contributes — and
+// every other member its byte digest; a nil canonical folds bytes for
+// all. The per-file digest handed to digests is always the byte digest:
+// it names the exact bytes the fold read, for movers' attribution and
+// the memo keys.
+func hashFilesWith(dir string, files []string, canonicalMembers map[string]bool, digests map[string]string, read func(string) (fileBytes, error), canonical func(dir, byteDigest string, content []byte) string) (string, error) {
 	sort.Strings(files)
 	hasher := sha256.New()
 	for _, f := range files {
@@ -1138,7 +1179,11 @@ func hashFilesWith(dir string, files []string, digests map[string]string, read f
 		if err != nil {
 			return "", fmt.Errorf("closure: read %s: %w", path, err)
 		}
-		fmt.Fprintf(hasher, "%s\x00%x\n", f, fb.sum)
+		member := fb.digest()
+		if canonicalMembers[f] && canonical != nil {
+			member = canonical(dir, member, fb.content)
+		}
+		fmt.Fprintf(hasher, "%s\x00%s\n", f, member)
 		if digests != nil {
 			// The per-file digest rides to the Hasher's memo so naming
 			// consumers reuse the exact bytes this hash was built over

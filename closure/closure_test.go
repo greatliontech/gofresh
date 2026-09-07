@@ -34,7 +34,7 @@ func TestPropHashFilesSensitive(t *testing.T) {
 	write("a.go", "package p\n")
 	write("b.go", "package p\nvar X = 1\n")
 
-	h1, err := hashFiles(dir, []string{"a.go", "b.go"}, nil)
+	h1, err := hashFilesWith(dir, []string{"a.go", "b.go"}, nil, nil, readBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,18 +43,18 @@ func TestPropHashFilesSensitive(t *testing.T) {
 	}
 
 	// Order-insensitive (files sorted internally).
-	if h2, _ := hashFiles(dir, []string{"b.go", "a.go"}, nil); h2 != h1 {
+	if h2, _ := hashFilesWith(dir, []string{"b.go", "a.go"}, nil, nil, readBytes, nil); h2 != h1 {
 		t.Errorf("hash not order-insensitive: %q vs %q", h1, h2)
 	}
 
 	// Content change ⇒ different hash (REQ-closure-mutable-local / REQ-closure-coverage at the file level).
 	write("b.go", "package p\nvar X = 2\n")
-	if h3, _ := hashFiles(dir, []string{"a.go", "b.go"}, nil); h3 == h1 {
+	if h3, _ := hashFilesWith(dir, []string{"a.go", "b.go"}, nil, nil, readBytes, nil); h3 == h1 {
 		t.Error("hash insensitive to content change")
 	}
 
 	// Missing file ⇒ error, never silently skipped.
-	if _, err := hashFiles(dir, []string{"missing.go"}, nil); err == nil {
+	if _, err := hashFilesWith(dir, []string{"missing.go"}, nil, nil, readBytes, nil); err == nil {
 		t.Error("expected error for missing file")
 	}
 }
@@ -3093,7 +3093,7 @@ func BenchmarkHashFiles(b *testing.B) {
 	}
 	files := []string{"x.go"}
 	for b.Loop() {
-		if _, err := hashFiles(dir, files, nil); err != nil {
+		if _, err := hashFilesWith(dir, files, nil, nil, readBytes, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

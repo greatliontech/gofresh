@@ -62,7 +62,8 @@ provably safe shrink rather than an optimistic guess.
 
 **REQ-closure-view-maximal** (behavior): A multi-subject analysis view MUST use the
 maximal selected test-binary closure of each subject's package as its default source
-guard, hashing every non-standard dependency whole and salting that package closure
+guard, hashing every non-standard dependency whole — each member by its canonical
+form where REQ-closure-canonical-member affords one, by its bytes otherwise — and salting that package closure
 with the subject identity. The subject package's own test-variant nodes' source
 members are excluded from that core hash: their production members already ride the
 base package's contribution, and their test-only members fold into the test-variant
@@ -1681,6 +1682,45 @@ subject MUST be hashed by its source content, never pinned by module version —
 source resolves to a working directory with no version or checksum signal, so pinning
 it by version would leave a silent content edit invisible and report the subject valid
 while its dependency moved, the exact false valid the closure exists to prevent.
+
+**REQ-closure-canonical-member** (behavior): A compiled Go member of a
+mutable-local package that no `go:embed` directive names MUST contribute its
+canonical form to the package's core contribution, never its bytes: the
+member's token stream — each token's kind and literal, every semicolon kept as
+one token whether written or inserted by the scanner, so the stream determines
+the syntax tree — with every comment dropped except the classes the toolchain
+or gofresh reads as behavior, each retained at its position in the stream
+together with its attachment — whether its comment group (comments on
+consecutive lines) is the lead group of the token that follows, ending on the
+line before it: the parser's doc rule, which decides whether a directive
+documents the declaration that follows or floats free, a blank line or a
+block comment on the declaration's own line breaking it: directive-shaped
+comments (`//go:…`, `//gofresh:…`, any tool's `//<name>:…`, in the line or
+the block form — the analyzer reads a linkname out of either), cgo's
+`//export`, the legacy `+build` constraint in any spelling go/build reads
+(vet's build-tag check fails the build when it disagrees with the
+`//go:build` line), the cgo preamble (every comment
+immediately preceding `import "C"`, or the `"C"` path inside an import group),
+and the generated-file marker under the one reading gofresh's discharges use;
+`//line` directives are not retained, they remap positions. Whitespace,
+layout, and every other comment reach the binary only as source positions,
+which this judgment rules diagnostics, not behavior (as the compartment
+ledger's inertness already does), so a comment-only edit, and a layout edit
+that inserts no statement break, leaves every identity standing, while any
+token change — an inserted semicolon included, so a one-line body reflowed
+into a block is a new form — and any change to a retained comment or its
+attachment, moves it. Every other member contributes its bytes: embedded data
+whatever its name, a compiled member a directive embeds too (its bytes reach
+unchanged code as data), C, assembly, the rest of a package folded whole for a
+cgo callback or non-toolchain assembly, and a compiled member the scanner
+refuses (text without a form). The test-variant compartment keeps its own
+fold (REQ-closure-test-variant-compartment): its header identity folds
+comments outside declarations by design. The canonical digest is derived from
+the same bytes the effect scan parses and memoized under the member's byte
+digest beside it, so a byte-equal pass pays the read alone. The residual is
+named, not new: a subject observing its own source position can change output
+under a layout-only edit, exactly as under a header-only edit the ledger rules
+inert.
 
 **REQ-closure-pinned-dep** (behavior): A pinned dependency reached by the subject
 SHOULD be identified by its module path and version rather than hashed per

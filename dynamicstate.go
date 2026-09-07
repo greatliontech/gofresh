@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/generatedmark"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -895,7 +896,7 @@ func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynam
 // shadow it. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
 func generatedProtoHeader(text string) string {
-	if !strings.HasSuffix(strings.TrimSpace(text), "DO NOT EDIT.") {
+	if !generatedmark.IsMarker(text) {
 		return ""
 	}
 	for _, generator := range []string{"protoc-gen-go-grpc", "protoc-gen-go"} {
