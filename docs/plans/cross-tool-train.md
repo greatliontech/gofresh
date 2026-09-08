@@ -846,7 +846,7 @@ in their repos.
       — a `contradicted` gap state reported distinctly from unwitnessed,
       resolving only on an explicit fire, never on a passing witness while
       unfired; doc deletes at close.
-- [ ] 162. gofresh: the repo-level vouch convention (gomutant docs/issues/
+- [x] 162. gofresh: the repo-level vouch convention (gomutant docs/issues/
       repo-level-vouch-source.md) — the engine sources a repository's
       reviewed dynamic-state vouch file (pew's grammar and precedence:
       flags extend, never remove) for every consumer; gofresh spec change;
