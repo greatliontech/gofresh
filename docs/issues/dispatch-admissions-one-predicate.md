@@ -16,8 +16,11 @@ invoke, and `scanFunction` cuts those frames on the caller side.
 
 The collapse: one predicate over (site, operand, targets) consulted
 by both the computed-call and the invoke arms, with the target-class
-clause stated once.
+clause stated once. The narrowed dispatch added a third route beside
+the two — the operand's collected functions resolving the site by
+themselves (`heldKnown` in scanCall, `narrowedTargets` at the loops)
+— so three encodings now grant one admission.
 
-Lands: with the next reachability-scoping change — the same window as
-unify-carrier-walks; the discharge-walk sibling landed as
-dischargeCulprits.
+Lands: with docs/issues/invoke-targets-narrowed-by-operand.md — the
+invoke form's narrowing is where the computed-call and invoke arms
+must meet in one predicate.

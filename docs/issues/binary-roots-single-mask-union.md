@@ -8,4 +8,6 @@ the same set in one walk, and drops the N materialized per-root maps.
 The per-root path stays for the per-subject (single-subject) scoping,
 which genuinely needs attribution.
 
-Lands: 179 (the next reachability-scoping change).
+Lands: with the next change to the attributed reach's mask assignment
+(closure/attribution.go attributedReachableSetsOnce) — the narrowing
+of dispatch targets left the per-root inventory untouched.

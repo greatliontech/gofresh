@@ -29,6 +29,6 @@ closure tier) walk the same type-parameter, receiver, and parameter
 positions under the same carrier rule and are required by comment to
 agree, enforced by nothing; one walk would name the term for both.
 
-Lands: 179 (the next reachability-scoping change — the same window as
-binary-roots-single-mask-union; the discharge-walk sibling landed as
-dischargeCulprits).
+Lands: with the next change to the carrier rule itself — the three
+recursions diverge only when that rule moves, and the reachability
+scoping that narrows dynamic targets leaves it untouched.
