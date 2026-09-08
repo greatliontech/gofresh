@@ -841,7 +841,7 @@ in their repos.
       and the attestation is keyed on the mutated file's post-edit content
       hash rather than the edit text (ephemeral-attestation-keyed-on-edit-
       text.md); three docs delete at close.
-- [ ] 161. stipulator: a gap can say "contradicted by design until a
+- [x] 161. stipulator: a gap can say "contradicted by design until a
       condition fires" (stipulator docs/issues/gap-cannot-say-contradicted.md)
       — a `contradicted` gap state reported distinctly from unwitnessed,
       resolving only on an explicit fire, never on a passing witness while
