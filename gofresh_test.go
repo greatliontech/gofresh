@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@33" {
-		t.Fatalf("ObservationRTA = %q, want the callee-parameter crossing over the benchmark-pacing admission", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@34" {
+		t.Fatalf("ObservationRTA = %q, want the crypto/rand entropy class over the callee-parameter crossing", ObservationRTA)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @16 stops classifying the
-// benchmark pacing reads beside ObservationRTA@32.
+// of serving (REQ-closure-effect-scan-memo); @17 classifies crypto/rand's
+// operations as the entropy class beside ObservationRTA@34.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@16" {
-		t.Fatalf("effect-scan strategy = %q, want @16", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@17" {
+		t.Fatalf("effect-scan strategy = %q, want @17", closure.EffectScanStrategy())
 	}
 }

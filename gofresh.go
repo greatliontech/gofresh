@@ -361,7 +361,12 @@ const ClosureStrategy = closure.IdentityStrategy
 // attributed call sites for every closed-world subject whatever its
 // enumeration state — an iterator's yield bound by the subject's range
 // statement is the canonical shape.
-const ObservationRTA = "gofresh/observation-rta@33"
+// @34 classifies crypto/rand's operations as the entropy class — an
+// external system call named as such — instead of the unaudited fallback,
+// and the file fold binds an unnamed major-versioned import's declared name
+// as a secondary beside its last element, refusing a file whose imports
+// bind one identifier.
+const ObservationRTA = "gofresh/observation-rta@34"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

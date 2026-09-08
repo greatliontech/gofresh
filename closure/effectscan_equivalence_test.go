@@ -31,6 +31,18 @@ func effectScanCorpusFiles() map[string]string {
 		"import . \"testing\"\n",
 		"import \"example.com/dep\"\n",
 		"import (\n\t\"os\"\n\t\"testing\"\n)\n",
+		// A major-versioned path binds the element before the version;
+		// two imports deriving one identifier refuse the file.
+		"import \"math/rand/v2\"\n",
+		"import r \"math/rand/v2\"\n",
+		"import . \"math/rand/v2\"\n",
+		"import (\n\t\"net\"\n\t\"example.com/dep/net/v1\"\n)\n",
+		"import (\n\t\"os\"\n\t\"example.com/dep/os/v2\"\n)\n",
+		"import (\n\t\"example.com/dep/core/v1\"\n\t\"example.com/dep/core/v2\"\n)\n",
+		"import (\n\t\"example.com/dep/alpha/v2\"\n\t\"example.com/dep/beta/v2\"\n)\n",
+		"import (\n\t\"net/http\"\n\t\"example.com/dep/http\"\n)\n",
+		"import (\n\tv2 \"net\"\n\t\"example.com/dep/mod/v2\"\n)\n",
+		"import (\n\t\"example.com/dep/mod/v2\"\n\tv2 \"net\"\n)\n",
 	}
 	bodies := []string{
 		"",
@@ -40,6 +52,12 @@ func effectScanCorpusFiles() map[string]string {
 		"func F() { _ = strings.Join(nil, \"\") }\n",
 		"func F() { _, _ = net.Dial(\"tcp\", \"x\") }\n",
 		"func F() { _ = dep.G() }\n",
+		"func F() { _ = rand.IntN(3) }\n",
+		"func F() { _ = r.IntN(3) }\n",
+		"func F() { _ = IntN(3) }\n",
+		"func F() { _ = v1.N() + v2.N() }\n",
+		"func F() { _ = alpha.N() + beta.N() }\n",
+		"func F() { _, _ = v2.Dial(\"tcp\", \"x\"); _ = mod.N() }\n",
 		"func TestX(t *testing.T) { t.Setenv(\"K\", \"V\") }\n",
 		"func TestX(t *testing.T) { u := t; u.TempDir() }\n",
 		"func TestX(t *testing.T) { var u = t; _ = u }\n",

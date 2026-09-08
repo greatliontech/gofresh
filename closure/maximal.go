@@ -444,6 +444,21 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 	}
 	imports := make([]importAlias, 0, len(file.Imports))
 	aliases := make(map[string]string, len(file.Imports))
+	var collisions []string
+	// Three tiers bind an identifier at this syntactic tier, a lower
+	// never displacing a higher: an explicit alias is ground truth; an
+	// unnamed import's last element is the derived primary (what the
+	// compiler binds for an API-version directory whose package clause
+	// really is v1); a trailing major-version element additionally
+	// derives the element before it as a secondary — the name the
+	// toolchain's package clause declares for math/rand/v2 — bound only
+	// where unclaimed and unique. A clash within a tier is what the
+	// language forbids and refuses the file fail-closed, except two
+	// derived version-element primaries, whose identifiers live on their
+	// secondaries (REQ-closure-observability-analysis).
+	secondaries := map[string][]string{}
+	versioned := map[string]bool{}
+	explicit := map[string]bool{}
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -452,9 +467,31 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 		alias := path.Base(pkgPath)
 		if spec.Name != nil {
 			alias = spec.Name.Name
+			if prior, taken := aliases[alias]; taken && explicit[alias] && prior != pkgPath && alias != "_" && alias != "." {
+				collisions = append(collisions, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias)
+			}
+			explicit[alias] = true
+			aliases[alias] = pkgPath
+			imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
+			continue
+		}
+		if derived := implicitImportName(pkgPath); derived != alias {
+			secondaries[derived] = append(secondaries[derived], pkgPath)
+			versioned[pkgPath] = true
+		}
+		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
+		if explicit[alias] {
+			continue
+		}
+		if prior, taken := aliases[alias]; taken && prior != pkgPath && alias != "_" && alias != "." && !(versioned[prior] && versioned[pkgPath]) {
+			collisions = append(collisions, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias)
 		}
 		aliases[alias] = pkgPath
-		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
+	}
+	for name, paths := range secondaries {
+		if _, claimed := aliases[name]; !claimed && len(paths) == 1 {
+			aliases[name] = paths[0]
+		}
 	}
 	var scan maximalEffectScan
 	// The preferred diagnostic derives from the same single walk's
@@ -470,6 +507,9 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 	}
 	if hasLinkname {
 		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
+	}
+	for _, collision := range collisions {
+		scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, collision))
 	}
 	for _, imp := range imports {
 		if imp.pkgPath == "testing" {
@@ -1001,12 +1041,26 @@ func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
 }
 
 func packageHasClassifiedExternalAPI(pkgPath string) bool {
-	switch pkgPath {
-	case "fmt", "os", "syscall", "golang.org/x/sys/unix", "testing", "net", "net/http", "html/template", "text/template", "plugin":
-		return true
-	default:
-		return false
+	return classBPackages[pkgPath]
+}
+
+// implicitImportName is the identifier the toolchain's package clause
+// declares for an importable standard package: the path's last element,
+// past a trailing major-version element (math/rand/v2 declares rand;
+// pinned against the toolchain's own names). The fold binds it as a
+// secondary beside the last element itself, since an API-version
+// directory declares the element as its name. A package whose declared
+// name differs from its path in any other way (a dotted or renamed last
+// element) stays outside the classified set —
+// docs/issues/fold-import-name-declared.md.
+func implicitImportName(pkgPath string) string {
+	base := path.Base(pkgPath)
+	if len(base) > 1 && base[0] == 'v' && strings.TrimLeft(base[1:], "0123456789") == "" {
+		if dir := path.Dir(pkgPath); dir != "." && dir != "/" {
+			return path.Base(dir)
+		}
 	}
+	return base
 }
 
 func trueReason(pkgPath string) string {

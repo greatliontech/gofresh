@@ -35,16 +35,42 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	aliases := make(map[string]string, len(file.Imports))
 	potentialExternal := ""
 	unauditedReason := ""
+	collisionReason := ""
+	secondaries := map[string][]string{}
+	versioned := map[string]bool{}
+	explicit := map[string]bool{}
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
 			return "", fmt.Errorf("closure: parse import in %s: %w", filename, err)
 		}
 		alias := path.Base(pkgPath)
-		if spec.Name != nil {
+		named := spec.Name != nil
+		if named {
 			alias = spec.Name.Name
+		} else if derived := referenceImportName(pkgPath); derived != alias {
+			secondaries[derived] = append(secondaries[derived], pkgPath)
+			versioned[pkgPath] = true
 		}
-		aliases[alias] = pkgPath
+		prior, taken := aliases[alias]
+		clash := taken && prior != pkgPath && alias != "_" && alias != "."
+		if named {
+			clash = clash && explicit[alias]
+			explicit[alias] = true
+		} else {
+			if explicit[alias] {
+				clash = false
+			}
+			clash = clash && !(versioned[prior] && versioned[pkgPath])
+		}
+		if clash {
+			if c := "import name collision at the file scan: " + prior + " and " + pkgPath + " both bind " + alias; collisionReason == "" || c < collisionReason {
+				collisionReason = c
+			}
+		}
+		if named || !explicit[alias] {
+			aliases[alias] = pkgPath
+		}
 		if pkgPath == "testing" {
 			if alias == "." {
 				potentialExternal = pkgPath
@@ -68,6 +94,11 @@ func referenceMaximalFileReason(filename string) (string, error) {
 		}
 	}
 
+	for name, paths := range secondaries {
+		if _, claimed := aliases[name]; !claimed && len(paths) == 1 {
+			aliases[name] = paths[0]
+		}
+	}
 	// Reparse with bodies only when imports include packages whose individual
 	// calls distinguish external operations from ordinary deterministic APIs.
 	file, err = parser.ParseFile(token.NewFileSet(), filename, content, 0)
@@ -111,6 +142,11 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	})
 	if reason == "" {
 		reason = referenceTestingMethodReason(file, aliases)
+	}
+	// A derived-name collision is an unaudited-class refusal like the
+	// selector fallback: within the class the least reason wins.
+	if collisionReason != "" && (unauditedReason == "" || collisionReason < unauditedReason) {
+		unauditedReason = collisionReason
 	}
 	if reason == "" {
 		reason = unauditedReason
@@ -174,16 +210,39 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		return maximalEffectScan{}, fmt.Errorf("closure: parse %s: %w", filename, err)
 	}
 	aliases := make(map[string]string, len(file.Imports))
+	secondaries := map[string][]string{}
+	versioned := map[string]bool{}
+	explicit := map[string]bool{}
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
 			return maximalEffectScan{}, fmt.Errorf("closure: parse import in %s: %w", filename, err)
 		}
 		alias := path.Base(pkgPath)
-		if spec.Name != nil {
+		named := spec.Name != nil
+		if named {
 			alias = spec.Name.Name
+		} else if derived := referenceImportName(pkgPath); derived != alias {
+			secondaries[derived] = append(secondaries[derived], pkgPath)
+			versioned[pkgPath] = true
 		}
-		aliases[alias] = pkgPath
+		prior, taken := aliases[alias]
+		clash := taken && prior != pkgPath && alias != "_" && alias != "."
+		if named {
+			clash = clash && explicit[alias]
+			explicit[alias] = true
+		} else {
+			if explicit[alias] {
+				clash = false
+			}
+			clash = clash && !(versioned[prior] && versioned[pkgPath])
+		}
+		if clash {
+			scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias))
+		}
+		if named || !explicit[alias] {
+			aliases[alias] = pkgPath
+		}
 		if pkgPath == "testing" {
 			if alias == "." {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
@@ -199,6 +258,11 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
 			}
+		}
+	}
+	for name, paths := range secondaries {
+		if _, claimed := aliases[name]; !claimed && len(paths) == 1 {
+			aliases[name] = paths[0]
 		}
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
@@ -498,4 +562,27 @@ func referenceInTestMain(file *ast.File, aliases map[string]string, node ast.Nod
 		return node.Pos() >= fd.Pos() && node.End() <= fd.End()
 	}
 	return false
+}
+
+// referenceImportName is the reference scan's own spelling of the
+// unnamed-import rule: the path's last element, past a trailing
+// major-version element — kept independent of the production helper
+// so the equivalence pin judges the rule, not one implementation.
+func referenceImportName(pkgPath string) string {
+	base := path.Base(pkgPath)
+	if len(base) > 1 && base[0] == 'v' {
+		digits := true
+		for _, r := range base[1:] {
+			if r < '0' || r > '9' {
+				digits = false
+				break
+			}
+		}
+		if digits {
+			if dir := path.Dir(pkgPath); dir != "." && dir != "/" {
+				return path.Base(dir)
+			}
+		}
+	}
+	return base
 }

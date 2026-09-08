@@ -104,6 +104,12 @@ func appendExternalEffect(effects []externalEffect, effect externalEffect) []ext
 }
 
 func classBEffect(pkgPath, name string) (externalEffect, bool) {
+	// The classified-package set gates every arm below: an arm for an
+	// unlisted package is dead, never a classification the dot-import
+	// backstop does not know.
+	if !classBPackages[pkgPath] {
+		return externalEffect{}, false
+	}
 	if pkgPath == "fmt" {
 		switch name {
 		case "Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln":
@@ -130,6 +136,23 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 			return symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)"), true
 		case "Link", "Linkat", "Mkdir", "Mkdirat", "Rename", "Renameat", "Renameat2", "Rmdir", "Symlink", "Symlinkat", "Unlink", "Unlinkat":
 			return symbolExternalEffect(externalEffectPathMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (path mutation)"), true
+		}
+	}
+	if pkgPath == "crypto/rand" {
+		// The package's whole operation surface is the entropy class:
+		// Read and Text read the kernel's entropy directly; Prime reads
+		// it through a reader the toolchain ignores since Go 1.26 unless
+		// a GODEBUG setting says otherwise
+		// (crypto/internal/rand.CustomReader); Int reads the reader it is
+		// given, an operand no read-side admission proves, so it stays
+		// fail-closed in the same class. An input no guard pins and no
+		// bracket records, classified as the external system call it is
+		// rather than left to the unaudited fallback. Reader, the
+		// exported variable, refuses as an unaudited selector at the
+		// file fold (REQ-closure-observability-analysis's entropy class).
+		switch name {
+		case "Read", "Text", "Int", "Prime":
+			return symbolExternalEffect(externalEffectNative, pkgPath, name, "reaches crypto/rand."+name+" (entropy)"), true
 		}
 	}
 	if pkgPath == "testing" {
@@ -240,6 +263,19 @@ func harnessSubtestDriverEffect() externalEffect {
 	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", "Run", "reaches testing.Run (test harness subtest execution)")
 	effect.observable = true
 	return effect
+}
+
+// classBPackages is the set of packages classBEffect classifies for:
+// the classifier is gated on it, so an arm for an unlisted package is
+// dead rather than a classification the maximal tier's dot-import
+// backstop (packageHasClassifiedExternalAPI) does not know — the two
+// consumers cannot disagree. It lives beside the arms because it is
+// the classifier's own gate, not an audited surface. Every listed
+// package classifies at least one name (TestClassBPackagesMatchTheArms).
+var classBPackages = map[string]bool{
+	"fmt": true, "os": true, "syscall": true, "golang.org/x/sys/unix": true, "testing": true,
+	"net": true, "net/http": true, "html/template": true, "text/template": true, "plugin": true,
+	"crypto/rand": true,
 }
 
 // classBPureStandard audits specific operations of effect-bearing

@@ -1287,7 +1287,27 @@ ListSeparator constants, and the WalkFunc type name — each a string computatio
 over its operands and the build-selected GOOS, while Abs (the working
 directory), EvalSymlinks, Glob, Walk, and WalkDir (the filesystem) stay refused
 and the package's exported error variables refuse as unaudited selectors at the
-file fold, which composes every reached package's scan — the walk's
+file fold, which composes every reached package's scan; crypto/rand's
+operations — Read and Text reading the kernel's entropy directly, Prime
+through a reader the toolchain ignores since Go 1.26 unless a GODEBUG setting
+says otherwise, Int through the reader it is given, an operand no read-side
+admission proves — are the entropy class in the one classification table both
+tiers consult, an external system call named as such (an input no guard pins
+and no bracket records, never observable), the exported Reader refusing as an
+unaudited selector at the file fold, and the unseeded math/rand sources keeping
+the unaudited fallback at both tiers until their own audit — the fold binding
+an unnamed import to its path's last element and, past a trailing
+major-version element, additionally to the element before it (the identifier
+the toolchain's package clause declares for every importable standard package)
+where no import binds that name and no second import derives it, so
+math/rand/v2's selectors resolve there while an API-version directory's v1 and
+v2 stay their own names — an explicit alias binding over either derived name
+and a derived last element over a derived version-stripped name, a lower tier
+never displacing a higher — and refusing a file whose imports bind one
+identifier within a tier, a clash this tier cannot tell from the one the
+language forbids since a package's declared name is not its to know, two
+derived version-element last elements excepted since their identifiers live on
+their secondaries — the walk's
 standard-global arm covers every standard package's exported variable and is
 the sole guard for the packages admitted whole, whose selectors the fold admits
 (io.EOF's shape); execution-free references

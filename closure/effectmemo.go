@@ -41,7 +41,12 @@ import (
 // @16 stops classifying b.N and b.Loop as package-wide configuration
 // reads: benchmark pacing is a harness fact the walk records
 // (ObservationRTA@32 carries the admission for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@16"
+// @17 classifies crypto/rand's operations as the entropy class at the
+// fold and binds an unnamed major-versioned import's declared name as a
+// secondary beside its last element, two imports binding one identifier
+// refusing the file (ObservationRTA@34 carries the same for the walk
+// tiers).
+const effectScanStrategy = "gofresh/effect-scan@17"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }
