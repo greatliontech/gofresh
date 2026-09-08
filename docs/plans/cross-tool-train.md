@@ -147,7 +147,8 @@ staged campaigns — 146 inserted after 138 (the staged snapshot's
 external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
-triage, then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
+triage, then the 125 histogram's charters 179–181 in that order (their
+recorded field mass), then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -716,10 +717,43 @@ strategy bump.
       range-desugared yield callback as a closing caller and flip the
       corpus pin deliberately in the same change set; doc deletes at
       close.
-- [ ] 125. gofresh: precision-band acceptance — re-run the charter
+- [x] 125. gofresh: precision-band acceptance — re-run the charter
       sweep on the pinned field repro and record the
       observable-subject fraction against the 0.5% baseline (was SEP
       11).
+- [ ] 179. gofresh: startup and test-main dynamic sites narrowed by
+      the closed-value judgment — both walks take a dynamic site's
+      whole-mask signature-class projection as its targets, so an
+      initializer's func-value call or interface invoke reaches every
+      standard closure or method of a matching signature in the
+      program (the 125 sweep: 961 of 2,119 cerebro subjects refuse at
+      the startup walk on encoding/json/v2.init$2,
+      internal/godebugs.init$1, crypto/internal/fips140/aes.init#2$1 —
+      closures no user code can name — 169 on archive/zip.Read and 36
+      on the property harness reached through
+      (*encoding/json.MarshalerError).Error, the invoke form); resolve
+      the site's operand through the closed-value walk under the local
+      projection, as the subject walk's resolved sites do, before the
+      RTA fallback. RIDES docs/issues/dynamic-target-init-exemption.md
+      (its field report arrived at 125; the recorded exemption shape is
+      refused — a standard closure's body is never walked, so the
+      fallback's refusal is the sound answer for a target the operand
+      genuinely carries).
+- [ ] 180. gofresh: reflect's Elem by symbol — 464 of the 125 sweep's
+      subjects refuse at the startup walk on reflect.Elem; audit
+      (Type).Elem (an invoke-nothing type-level accessor) and
+      (Value).Elem (a dereference of memory the operand pins) for the
+      audited set, admitting by symbol or recording the channel that
+      refuses each.
+- [ ] 181. gofresh: time's shared-name exclusion made
+      receiver-sensitive — 121 admitted time's fixed-argument surface
+      by bare name and so excluded whole every name a pure method
+      shares with an ambient declaration; the 125 sweep prices that
+      cost at 175 subjects (time.UTC 113, (Time).AddDate 62) beside
+      time.Parse's 115 (zone abbreviations through Local, refused
+      deliberately); admit the pure method form where the receiver
+      distinguishes it — (Time).UTC, (Time).AddDate — at every tier,
+      the package-level variable and function keeping their class.
 - [ ] 98. gofresh: stateless-value escape discharge — zero-field
       struct values cannot be observably mutated through escaped
       aliases; justification re-bases at triage on the then-current
