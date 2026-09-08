@@ -852,7 +852,7 @@ in their repos.
       flags extend, never remove) for every consumer; gofresh spec change;
       release, then consumer bumps ride and pew's store-owned file
       delegates; doc deletes at close.
-- [ ] 163. gomutant: an unreachable build leg is a stated coverage bound
+- [x] 163. gomutant: an unreachable build leg is a stated coverage bound
       (the interim of gomutant docs/issues/external-oracle-for-tagged-and-
       subprocess-targets.md) — a tag selection's discovered targets that no
       oracle reaches are recorded and rendered as a coverage bound, never a
