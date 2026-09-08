@@ -373,7 +373,13 @@ const ClosureStrategy = closure.IdentityStrategy
 // method-form registration on a constructed or the default set rides
 // the registration-facts judgment and constructing a set is an
 // allocation in every flow.
-const ObservationRTA = "gofresh/observation-rta@35"
+// @36 proves the FlagSets the program itself closes — one holder
+// stored once in initializer flow or none, every use a receiver of
+// registration, Parse, or ErrorHandling, every Parse argument nil or
+// a literal string slice, every site in initializer flow or in the
+// constructing function — so their registrations mark and poison
+// nothing and their Parse is admitted in the proving flow.
+const ObservationRTA = "gofresh/observation-rta@36"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

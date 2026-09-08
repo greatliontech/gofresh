@@ -207,6 +207,13 @@ type tier2Base struct {
 	// (REQ-closure-observability-analysis). Both computed once per base.
 	flagBacked      map[*ssa.Global]bool
 	flagUntraceable map[string]string
+	// flagProven records the carriers — constructor values and the loads
+	// of their one package-level holder — of every FlagSet the program
+	// itself closes, judged by flagSetProvenance: registrations on such
+	// a set mark and poison nothing, and its Parse and registrations are
+	// admitted in the flow that proves them
+	// (REQ-closure-observability-analysis's FlagSet provenance rule).
+	flagProven map[ssa.Value]flagSetKind
 }
 
 type tier2Analyzer struct {
@@ -216,6 +223,7 @@ type tier2Analyzer struct {
 	metas      []listPkg
 	metaByPath map[string]*listPkg
 	flagBacked map[*ssa.Global]bool
+	flagProven map[ssa.Value]flagSetKind
 	// skipOriginScan marks parameterized origins whose rooted
 	// instantiations carry the concrete forms of every site: the
 	// open-over-T origin body is never scanned, whatever path reaches it
@@ -313,6 +321,7 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 func (b *tier2Base) analyzer() *tier2Analyzer {
 	flagBacked, _ := b.flagRegistrationFacts()
 	return &tier2Analyzer{
+		flagProven:               b.flagProven,
 		h:                        b.h,
 		buildFlags:               b.buildFlags,
 		prog:                     b.prog,
@@ -842,6 +851,15 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, callerStd bool) (externalEffect, bool) {
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
+	if !classified && c.StaticCallee() == callee && flagProvenSetUse(a.flagProven, pkgPath, name, c) {
+		// Parse and registration on a set the program itself closes:
+		// the parsed values are the program's own literals, the
+		// storage ordinary state — judged program-wide by
+		// flagSetProvenance, which admits the site only in the flow
+		// that proves the set (REQ-closure-observability-analysis's
+		// FlagSet provenance rule).
+		return externalEffect{}, false
+	}
 	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !auditedStandardSymbol(a.h.SelectionAudited(), pkgPath, name) {
 		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
 		classified = true

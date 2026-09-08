@@ -19,6 +19,14 @@ AST selector and an SSA callee respectively, with the same message string
 — so a refusal's tier is undiagnosable from its reason alone (the fold's
 tier prefix is added later by the proof composition).
 
+The provenance judgment added a third syntactic escape walk beside
+`registrationAddressComputation` and `judgeCarrier`
+(`confinedLocalStorage`): each enumerates a value's referrers, admits a
+sanctioned set, and fails closed on the default arm. The flag-name
+knowledge then has four spellings — `flagSymbols`,
+`flagRegistrationSymbol`, `flagProvenSetMethod`, `flagProvenSetUse` —
+with ErrorHandling in two of them independently.
+
 The collapse: one flag surface, `auditset.FlagSurface(name) → {audited |
 registration | refused}`, consulted by `flagRegistrationSymbol` and
 `Symbol` alike, with the refused-rows test derived from it; and one

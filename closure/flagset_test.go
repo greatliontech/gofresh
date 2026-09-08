@@ -22,7 +22,10 @@ func TestFlagSetFormsRideTheRegistrationJudgment(t *testing.T) {
 	writeFile(t, dir, "go.mod", "module example.com/flagset\n\ngo 1.26\n")
 	cases := []struct{ pkg, source, refusal string }{
 		{"customset", "package customset\n\nimport \"flag\"\n\nvar verbose bool\n\nvar set = flag.NewFlagSet(\"customset\", flag.ContinueOnError)\n\nfunc init() {\n\tset.BoolVar(&verbose, \"v\", false, \"fixture flag\")\n}\n\nfunc Subject() int { return 7 }\n", ""},
-		{"customread", "package customread\n\nimport \"flag\"\n\nvar verbose bool\n\nvar set = flag.NewFlagSet(\"customread\", flag.ContinueOnError)\n\nfunc init() {\n\tset.BoolVar(&verbose, \"v\", false, \"fixture flag\")\n}\n\nfunc Subject() int {\n\tif verbose {\n\t\treturn 1\n\t}\n\treturn 7\n}\n", "flag-registered state"},
+		// A package-held set never parsed is proven (every Parse closes
+		// vacuously): its storage holds the default forever, ordinary
+		// initialized state a subject may read.
+		{"customread", "package customread\n\nimport \"flag\"\n\nvar verbose bool\n\nvar set = flag.NewFlagSet(\"customread\", flag.ContinueOnError)\n\nfunc init() {\n\tset.BoolVar(&verbose, \"v\", false, \"fixture flag\")\n}\n\nfunc Subject() int {\n\tif verbose {\n\t\treturn 1\n\t}\n\treturn 7\n}\n", ""},
 		// The fold admits the selector; the walk's standard-global arm
 		// refuses the subject-time read of the default set.
 		{"defaultread", "package defaultread\n\nimport \"flag\"\n\nfunc Subject() *flag.FlagSet { return flag.CommandLine }\n", "reaches standard global flag.CommandLine"},
@@ -36,9 +39,18 @@ func TestFlagSetFormsRideTheRegistrationJudgment(t *testing.T) {
 		// Constructing a set is an allocation in every flow; the
 		// ErrorHandling accessor rides the constant's name.
 		{"subjectnew", "package subjectnew\n\nimport \"flag\"\n\nfunc Subject() flag.ErrorHandling { return flag.NewFlagSet(\"s\", flag.PanicOnError).ErrorHandling() }\n", ""},
-		// Subject-flow registration keeps the exclusion whole through
-		// the storage judgment: a local target poisons the sink.
-		{"subjectreg", "package subjectreg\n\nimport \"flag\"\n\nfunc Subject() bool {\n\tvar v bool\n\tset := flag.NewFlagSet(\"s\", flag.ContinueOnError)\n\tset.BoolVar(&v, \"v\", false, \"fixture flag\")\n\treturn v\n}\n", "BoolVar target is not a package-level variable"},
+		// A function-local set registering the function's own local is
+		// proven: the storage is that function's, no command line
+		// reaches it.
+		{"subjectreg", "package subjectreg\n\nimport \"flag\"\n\nfunc Subject() bool {\n\tvar v bool\n\tset := flag.NewFlagSet(\"s\", flag.ContinueOnError)\n\tset.BoolVar(&v, \"v\", false, \"fixture flag\")\n\treturn v\n}\n", ""},
+		// The default set replaced by a constructed one is never proven:
+		// the standard bodies load flag.CommandLine unscanned, so the
+		// package-level families' registrations keep the mark.
+		{"defaultreplaceread", "package defaultreplaceread\n\nimport \"flag\"\n\nvar verbose bool\n\nfunc init() {\n\tflag.CommandLine = flag.NewFlagSet(\"x\", flag.ContinueOnError)\n\tflag.BoolVar(&verbose, \"v\", false, \"fixture flag\")\n}\n\nfunc Subject() bool { return verbose }\n", "flag-registered state"},
+		// The swapped-in set is never proven even as a method-form
+		// receiver: the harness parses the command line into whatever
+		// flag.CommandLine holds, a load the standard bodies make.
+		{"defaultreplacemethod", "package defaultreplacemethod\n\nimport \"flag\"\n\nvar verbose bool\n\nfunc init() {\n\tflag.CommandLine = flag.NewFlagSet(\"x\", flag.ContinueOnError)\n\tflag.CommandLine.BoolVar(&verbose, \"v\", false, \"fixture flag\")\n}\n\nfunc Subject() bool { return verbose }\n", "flag-registered state"},
 		// A startup-flow replacement of the default set adds no channel:
 		// the storage judgment is per registration call, set-blind.
 		{"defaultreplace", "package defaultreplace\n\nimport \"flag\"\n\nfunc init() { flag.CommandLine = flag.NewFlagSet(\"x\", flag.ContinueOnError) }\n\nfunc Subject() int { return 7 }\n", ""},

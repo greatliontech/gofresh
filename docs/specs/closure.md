@@ -1365,7 +1365,26 @@ Output, SetOutput, Init, Usage, Name, UnquoteUsage, and ErrHelp refuse
 by name, as do the callback families (Var, TextVar, Func, BoolFunc —
 arbitrary code at Parse) — and subject-flow registration keeps the
 exclusion whole through the storage judgment: a target that is no
-package-level variable poisons the sink. One admission in the audited set is
+package-level variable poisons the sink. A set the program itself
+closes is ordinary state, exempt from the mark and the poison: a set
+flag.NewFlagSet constructs whose every use is the receiver of a
+statically dispatched registration, Parse, or ErrorHandling call — or
+the one store, in an initializer's own frame, into a package-level
+variable of the program's own modules whose every other use is a load
+used the same way — and whose every Parse passes nil or a literal slice of string
+constants, with every registration, Parse, and ErrorHandling site in an
+initializer's own frame for a package-held set (its registrations then
+initializer-flow writes to package-level storage) or in the constructing
+function's own frame for a function-local set (its registrations then
+targeting that function's own locals, used only as loads, stores,
+selections, and the registration itself) — a site inside a closure
+literal or launched as a goroutine proves nothing; such a set's Parse
+and registrations are admitted in the flow that proves them, while its
+parsed-state readers keep their class,
+the default set is never proven (flag.Parse reads os.Args), a set
+stored into a standard variable is never proven (the standard bodies
+load it unscanned), and every other shape keeps the mark-and-poison
+judgment. One admission in the audited set is
 operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
 Fprintln) is Sprint-equivalent value computation exactly when the writer
 operand provably pins every dynamic type it can carry to an audited

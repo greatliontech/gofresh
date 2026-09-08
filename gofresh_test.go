@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@35" {
-		t.Fatalf("ObservationRTA = %q, want the FlagSet-form admission over the crypto/rand entropy class", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@36" {
+		t.Fatalf("ObservationRTA = %q, want the FlagSet provenance rule over the FlagSet-form admission", ObservationRTA)
 	}
 }
 

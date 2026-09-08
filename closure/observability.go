@@ -771,6 +771,8 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 	}
 	backed := map[*ssa.Global]bool{}
 	poisoned := map[string]string{}
+	userPaths := userModulePaths(b.prog.Pkgs)
+	proven := b.flagSetProvenance(userPaths)
 	poison := func(fn *ssa.Function, instr ssa.Instruction, what string) {
 		pkgPath := funcPkgPath(fn)
 		if pkgPath == "" {
@@ -806,7 +808,6 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 			poisoned[pkgPath] = reason
 		}
 	}
-	userPaths := userModulePaths(b.prog.Pkgs)
 	for fn := range ssautil.AllFunctions(b.prog.Prog) {
 		pkgPath := funcPkgPath(fn)
 		// The skip keys on the load's module facts, never on path shape
@@ -829,12 +830,18 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 				}
 				calleePkg, calleeName := funcPkgPath(callee), functionSymbolName(callee)
 				args := site.Common().Args
+				// The set a method-form registration belongs to: proven
+				// by flagSetProvenance, its storage is ordinary state —
+				// package-level for a package-held set, the registering
+				// function's own locals for a function-local one.
+				kind := flagSetUnproven
 				if callee.Signature != nil && len(args) > 0 &&
 					(callee.Signature.Recv() != nil || flagSetReceiverParam(callee.Signature)) {
 					// Method form: (*FlagSet).Bool and kin carry the
 					// receiver as the first argument - as an ordinary
 					// first parameter in the method-expression form,
 					// where Recv is nil.
+					kind = proven[args[0]]
 					args = args[1:]
 				}
 				switch {
@@ -843,10 +850,11 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 						poison(fn, instr, calleeName+" has no pointer argument")
 						continue
 					}
-					if g := packageLevelRoot(args[0]); g != nil {
-						backed[g] = true
-					} else {
+					g, admitted := provenStorage(kind, args[0], fn)
+					if !admitted {
 						poison(fn, instr, calleeName+" target is not a package-level variable")
+					} else if g != nil && kind != flagSetStartup {
+						backed[g] = true
 					}
 				case flagValueRegistration(calleePkg, calleeName):
 					call, ok := instr.(*ssa.Call)
@@ -863,9 +871,23 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 						if _, ok := ref.(*ssa.DebugRef); ok {
 							continue
 						}
+						// A proven local set's result is the function's
+						// own storage: reads and writes through the
+						// pointer are its uses; the pointer held
+						// anywhere else escapes as on every other set.
+						if kind == flagSetLocal {
+							if load, ok := ref.(*ssa.UnOp); ok && load.Op == token.MUL && load.X == call {
+								continue
+							}
+							if store, ok := ref.(*ssa.Store); ok && store.Addr == call {
+								continue
+							}
+						}
 						if store, ok := ref.(*ssa.Store); ok && store.Val == call {
-							if g := packageLevelRoot(store.Addr); g != nil {
-								backed[g] = true
+							if g, admitted := provenStorage(kind, store.Addr, fn); admitted && g != nil {
+								if kind != flagSetStartup {
+									backed[g] = true
+								}
 								continue
 							}
 						}
@@ -878,6 +900,322 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 	b.flagBacked = backed
 	b.flagUntraceable = poisoned
 	return backed, poisoned
+}
+
+// flagSetKind is a FlagSet's provenance verdict: unproven (the default
+// set, or any set the judgment cannot close), startup (held in one
+// package-level variable, every registration and Parse in an
+// initializer's own frame), or local (never stored, every use in the
+// constructing function's own frame). Unproven is the zero value on
+// purpose: a carrier the judgment never saw reads as unproven from the
+// map, the fail-closed default.
+type flagSetKind uint8
+
+const (
+	flagSetUnproven flagSetKind = iota
+	flagSetStartup
+	flagSetLocal
+)
+
+// flagSetProvenance judges every flag.NewFlagSet construction in the
+// program's non-standard packages and returns the carriers — the
+// constructor value and the loads of its one package-level holder — of
+// each set the program itself closes: a set whose every use is the
+// receiver of a statically dispatched registration, Parse, or
+// ErrorHandling call (or the one store into a user package-level
+// variable, made in initializer flow, whose every other use is a load
+// used the same way), and whose every Parse passes nil or a literal
+// slice of string constants. Such a set's storage is ordinary state:
+// no command line reaches it, its values are the program's own
+// literals. The flow constraint keeps the writes where the walks
+// judge writes — in an initializer's own frame for a package-held
+// set, whose registrations are then initializer-flow writes to
+// package-level storage, or in the constructing function's own frame
+// for a function-local set, whose registrations then target that
+// function's own confined locals (a subject-flow write to package
+// state through a set's Parse would be invisible to the walk, standard
+// bodies being unscanned). A frame is its own: a site inside a closure
+// literal is refused (the closure's launch is not this frame's flow to
+// judge), and a site launched as a goroutine is refused (its write
+// races the subject, whatever frame it is in). The default
+// set is never proven — flag.Parse reads os.Args — and neither is a
+// set stored into a standard variable, whose loads the standard
+// bodies make. Every unknown shape fails closed: the set keeps the
+// mark-and-poison judgment (REQ-closure-observability-analysis's
+// FlagSet provenance rule).
+func (b *tier2Base) flagSetProvenance(userPaths map[string]bool) map[ssa.Value]flagSetKind {
+	if b.flagProven != nil {
+		return b.flagProven
+	}
+	proven := map[ssa.Value]flagSetKind{}
+	var ctors []*ssa.Call
+	globalUses := map[*ssa.Global][]ssa.Instruction{}
+	for fn := range ssautil.AllFunctions(b.prog.Prog) {
+		pkgPath := funcPkgPath(fn)
+		if pkgPath == "" || (isStdImportPath(pkgPath) && !userPaths[pkgPath]) {
+			continue
+		}
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				if call, ok := instr.(*ssa.Call); ok && call.Common() != nil {
+					if callee := call.Common().StaticCallee(); callee != nil &&
+						funcPkgPath(callee) == "flag" && functionSymbolName(callee) == "NewFlagSet" {
+						ctors = append(ctors, call)
+					}
+				}
+				for _, rand := range instr.Operands(nil) {
+					if rand == nil || *rand == nil {
+						continue
+					}
+					if g, ok := (*rand).(*ssa.Global); ok {
+						globalUses[g] = append(globalUses[g], instr)
+					}
+				}
+			}
+		}
+	}
+	for _, ctor := range ctors {
+		var holder *ssa.Global
+		var carriers []ssa.Value
+		var sites []ssa.CallInstruction
+		ok := true
+		// judgeCarrier admits a carrier's uses: receiver positions of
+		// the admitted methods, and — for the constructor value alone —
+		// the one store into the holder.
+		judgeCarrier := func(v ssa.Value, allowStore bool) {
+			carriers = append(carriers, v)
+			refs := v.Referrers()
+			if refs == nil {
+				return
+			}
+			for _, ref := range *refs {
+				switch r := ref.(type) {
+				case *ssa.DebugRef:
+				case *ssa.Store:
+					g, isGlobal := r.Addr.(*ssa.Global)
+					if !allowStore || r.Val != v || !isGlobal || holder != nil ||
+						g.Pkg == nil || g.Pkg.Pkg == nil || (isStdImportPath(g.Pkg.Pkg.Path()) && !userPaths[g.Pkg.Pkg.Path()]) ||
+						!ownInitializerFrame(r.Parent()) {
+						ok = false
+						return
+					}
+					holder = g
+				case ssa.CallInstruction:
+					// A goroutine site is refused whatever its frame.
+					// No admitted method takes a *FlagSet parameter, so
+					// the carrier can stand only in receiver position.
+					common := r.Common()
+					callee := common.StaticCallee()
+					if _, launched := r.(*ssa.Go); launched || callee == nil || len(common.Args) == 0 || common.Args[0] != v ||
+						funcPkgPath(callee) != "flag" || !flagProvenSetMethod(functionSymbolName(callee)) {
+						ok = false
+						return
+					}
+					sites = append(sites, r)
+				default:
+					ok = false
+					return
+				}
+			}
+		}
+		judgeCarrier(ctor, true)
+		if ok && holder != nil {
+			for _, use := range globalUses[holder] {
+				switch u := use.(type) {
+				case *ssa.Store:
+					if u.Addr != holder || u.Val != ctor {
+						ok = false
+					}
+				case *ssa.UnOp:
+					if u.Op != token.MUL || u.X != holder {
+						ok = false
+					} else {
+						judgeCarrier(u, false)
+					}
+				case *ssa.DebugRef:
+				default:
+					ok = false
+				}
+				if !ok {
+					break
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		kind := flagSetLocal
+		if holder != nil {
+			kind = flagSetStartup
+		}
+		for _, site := range sites {
+			// A local set's sites are in the constructing function by
+			// the SSA form itself: a value's referrers are instructions
+			// of its own function, a capture being a MakeClosure the
+			// carrier judgment refused.
+			if kind == flagSetStartup && !ownInitializerFrame(site.Parent()) {
+				ok = false
+				break
+			}
+			callee := site.Common().StaticCallee()
+			if functionSymbolName(callee) == "Parse" &&
+				(len(site.Common().Args) != 2 || !closedParseArgument(site.Common().Args[1])) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		for _, carrier := range carriers {
+			proven[carrier] = kind
+		}
+	}
+	b.flagProven = proven
+	return proven
+}
+
+// flagProvenSetMethod names the FlagSet methods a proven set may be the
+// receiver of: the registration families, Parse, and the ErrorHandling
+// accessor. Every other method — the parsed-state readers, the
+// callback families, Usage — keeps the set unproven.
+func flagProvenSetMethod(name string) bool {
+	return name == "Parse" || name == "ErrorHandling" || flagRegistrationSymbol("flag", name)
+}
+
+// flagProvenSetUse reports whether a statically dispatched call is
+// Parse or a registration on a proven set's carrier — the receiver in
+// first-argument position, in the method and method-expression forms
+// alike.
+func flagProvenSetUse(proven map[ssa.Value]flagSetKind, pkgPath, name string, c *ssa.CallCommon) bool {
+	if pkgPath != "flag" || len(c.Args) == 0 || proven[c.Args[0]] == flagSetUnproven {
+		return false
+	}
+	return name == "Parse" || flagRegistrationSymbol(pkgPath, name)
+}
+
+// closedParseArgument reports whether a Parse argument is the program's
+// own literal: the nil slice, or a whole slice of an array allocation
+// whose only uses are element stores of string constants.
+func closedParseArgument(v ssa.Value) bool {
+	switch x := v.(type) {
+	case *ssa.Const:
+		return x.Value == nil
+	case *ssa.Slice:
+		if x.Low != nil || x.High != nil || x.Max != nil {
+			return false
+		}
+		alloc, ok := x.X.(*ssa.Alloc)
+		if !ok || alloc.Referrers() == nil {
+			return false
+		}
+		for _, ref := range *alloc.Referrers() {
+			switch r := ref.(type) {
+			case *ssa.DebugRef:
+			case *ssa.Slice:
+				if r != x {
+					return false
+				}
+			case *ssa.IndexAddr:
+				if r.X != alloc || r.Referrers() == nil {
+					return false
+				}
+				for _, elem := range *r.Referrers() {
+					switch e := elem.(type) {
+					case *ssa.DebugRef:
+					case *ssa.Store:
+						c, isConst := e.Val.(*ssa.Const)
+						if e.Addr != r || !isConst || c.Value == nil {
+							return false
+						}
+					default:
+						return false
+					}
+				}
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// ownInitializerFrame reports whether fn is itself an initializer
+// frame — the synthetic package initializer or a user init body, not
+// a closure literal within one: the site's flow is then the
+// initializer's own, not a launch the initializer merely performs.
+func ownInitializerFrame(fn *ssa.Function) bool {
+	return fn != nil && fn.Parent() == nil && initFlowFrame(fn)
+}
+
+// provenStorage judges a registration's storage address under the
+// set's provenance kind: a package-level root is admitted and returned
+// (the caller marks it unless the set is startup-proven); a confined
+// local allocation of fn is admitted for a local-proven set alone;
+// every other address is an untraceable sink. The pointer family takes
+// the verdict whole; the value family admits only the package-level
+// root — a local-proven set's result is used through the pointer
+// itself, and the pointer held in a local is an escape there.
+func provenStorage(kind flagSetKind, addr ssa.Value, fn *ssa.Function) (*ssa.Global, bool) {
+	switch root := addressRoot(addr).(type) {
+	case *ssa.Global:
+		return root, true
+	case *ssa.Alloc:
+		return nil, kind == flagSetLocal && root.Parent() == fn && confinedLocalStorage(root, map[ssa.Value]bool{})
+	}
+	return nil, false
+}
+
+// confinedLocalStorage reports whether a local allocation, through
+// every field and index selection of it, is used only as this frame's
+// own storage: loaded, stored into, selected further, or handed to
+// the registration write. Its address held anywhere else — stored as
+// a value, passed to another callee, captured — is an escape the flag
+// machinery could write behind a sibling subject's read. The seen map
+// only dedups: selection chains are acyclic by SSA dominance.
+func confinedLocalStorage(v ssa.Value, seen map[ssa.Value]bool) bool {
+	if seen[v] {
+		return true
+	}
+	seen[v] = true
+	refs := v.Referrers()
+	if refs == nil {
+		return true
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != v {
+				return false
+			}
+		case *ssa.Store:
+			if r.Addr != v || r.Val == v {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != v || !confinedLocalStorage(r, seen) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if r.X != v || !confinedLocalStorage(r, seen) {
+				return false
+			}
+		case ssa.CallInstruction:
+			// The registration write alone, and never launched as a
+			// goroutine (a racing write; a deferred one runs at the
+			// frame's exit, as at the carrier). No registration family
+			// takes a pointer in any position but the target, so the
+			// address can stand only as the storage argument.
+			if _, launched := r.(*ssa.Go); launched || !flagRegistrationWriteShape(r) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // flagSetReceiverParam reports whether the signature carries a
@@ -897,19 +1235,18 @@ func flagSetReceiverParam(sig *types.Signature) bool {
 		named.Obj().Pkg().Path() == "flag" && named.Obj().Name() == "FlagSet"
 }
 
-// packageLevelRoot resolves an address through field and index
-// selections to the package-level variable it roots at, or nil.
-func packageLevelRoot(v ssa.Value) *ssa.Global {
+// addressRoot resolves an address through field and index selections
+// to the value it roots at — a package-level variable, a local
+// allocation, or whatever else the chain ends in.
+func addressRoot(v ssa.Value) ssa.Value {
 	for {
 		switch x := v.(type) {
-		case *ssa.Global:
-			return x
 		case *ssa.FieldAddr:
 			v = x.X
 		case *ssa.IndexAddr:
 			v = x.X
 		default:
-			return nil
+			return v
 		}
 	}
 }
