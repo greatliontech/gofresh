@@ -754,7 +754,7 @@ strategy bump.
       deliberately); admit the pure method form where the receiver
       distinguishes it — (Time).UTC, (Time).AddDate — at every tier,
       the package-level variable and function keeping their class.
-- [ ] 182. gofresh: reflect's descriptor-view surface by symbol — the
+- [x] 182. gofresh: reflect's descriptor-view surface by symbol — the
       180 re-measurement moved the same 1,365 subjects one view method
       deeper, to reflect.Kind, and each admission on its own uncovers
       the next; audit the whole invoke-nothing read surface of
