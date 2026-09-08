@@ -12,4 +12,6 @@ one attestation-keyed record (mode → discharges) threaded once, with
 the evidence encoding keeping the two existing field names for
 consumers.
 
-Lands: cross-tool train chunk 99 (rides its discharge plumbing collapse)
+Lands: when a third execution-model attestation is introduced — the
+collapse's own trigger; the structural memo discharges landed without
+one, so the two-field plumbing stays.

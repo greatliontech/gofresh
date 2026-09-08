@@ -762,7 +762,7 @@ strategy bump.
       three rides (unify-carrier-walks, unify-discharge-walks,
       binary-roots-single-mask-union) move to 179, the band's first
       reachability-scoping change.
-- [ ] 99. gofresh: guarded deterministic memoization discharge — the
+- [x] 99. gofresh: guarded deterministic memoization discharge — the
       get-or-compute idiom (check-then-fill under mutex/Once/sync.Map,
       key-derived fill through proven-env-free functions, no
       cross-key observable escape) is warm/cold-equivalent and

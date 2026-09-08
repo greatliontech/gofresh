@@ -29,4 +29,9 @@ current attestation-free one). The 188 init-only-in-fact
 identities from the same enumeration are vouch-shaped and need no
 engine change.
 
-Lands: with the structural get-or-compute discharge charter.
+Lands: the memo class with docs/issues/immutable-after-construction-objects.md
+(the nineteen memos hold carriers — message types, options, Huffman
+nodes — so the data memo that landed does not reach them, and the
+carrier form needs the object-immutability fixpoint); the channelz
+registry, user decision (an attestation-gated subject-own registry
+entry is its own mechanism).
