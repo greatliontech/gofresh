@@ -40,6 +40,16 @@ var syncMethods = map[string][]string{
 	"Once":    {"Do"},
 }
 
+// memoMethods is the audited memo set: sync.Map with its Load, Store,
+// and LoadOrStore operations — process-memory reads and writes fed by
+// the analyzed program alone, admitted at the effect classification
+// tiers; the shared-dynamic-state discharge is the data memo's content
+// judgment, never this set's. Grows only by source audit
+// (REQ-closure-shared-dynamic-state).
+var memoMethods = map[string][]string{
+	"Map": {"Load", "Store", "LoadOrStore"},
+}
+
 // poolMethods is the audited pooling set: sync.Pool and its Get and
 // Put operations (REQ-closure-shared-dynamic-state).
 var poolMethods = map[string][]string{
@@ -60,6 +70,7 @@ var reflectImmutableTypes = []string{"Type"}
 var (
 	syncNames = names(syncMethods)
 	poolNames = names(poolMethods)
+	memoNames = names(memoMethods)
 )
 
 // purePackages is the audited-pure standard package set: packages that
@@ -241,6 +252,14 @@ func SyncName(name string) bool { return slices.Contains(syncNames, name) }
 // PoolName reports whether a sync symbol name — receiver or method —
 // belongs to the audited pooling set.
 func PoolName(name string) bool { return slices.Contains(poolNames, name) }
+
+// MemoMethod reports whether a sync receiver method is in the audited
+// memo set — sync.Map's Load, Store, and LoadOrStore.
+func MemoMethod(receiver, method string) bool { return slices.Contains(memoMethods[receiver], method) }
+
+// MemoName reports whether a sync symbol name — receiver or method —
+// belongs to the audited memo set.
+func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 
 // ReflectSymbol reports whether a reflect symbol is in the audited
 // type-identity surface.

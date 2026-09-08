@@ -48,7 +48,9 @@ import (
 // tiers).
 // @18 admits the flag package's FlagSet forms at the fold
 // (ObservationRTA@35 carries the same for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@18"
+// @19 admits sync.Map's Load, Store, and LoadOrStore (and the type
+// name) at the fold as the audited memo set.
+const effectScanStrategy = "gofresh/effect-scan@19"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

@@ -184,8 +184,8 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@37" {
-		t.Fatalf("DynamicStateStrategy = %q, want the closed-field exported dispatch over the once-filled memo", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@38" {
+		t.Fatalf("DynamicStateStrategy = %q, want the data memo over the closed-field exported dispatch", DynamicStateStrategy)
 	}
 }
 
@@ -806,9 +806,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
 // of serving (REQ-closure-effect-scan-memo); @18 admits the flag package's
-// FlagSet forms at the fold beside ObservationRTA@35.
+// FlagSet forms at the fold beside ObservationRTA@35; @19 admits sync.Map's
+// memo operations at the fold as the audited memo set.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@18" {
-		t.Fatalf("effect-scan strategy = %q, want @18", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@19" {
+		t.Fatalf("effect-scan strategy = %q, want @19", closure.EffectScanStrategy())
 	}
 }

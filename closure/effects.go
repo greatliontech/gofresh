@@ -331,7 +331,7 @@ func classBPureStandard(audited bool, pkgPath, name string) bool {
 // at the third.
 func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
 	return classBPureStandard(audited, pkgPath, name) || auditedSyncSymbol(audited, pkgPath, name) ||
-		auditedPoolSymbol(audited, pkgPath, name) || auditedRuntimeTypeSymbol(audited, pkgPath, name)
+		auditedPoolSymbol(audited, pkgPath, name) || auditedMemoSymbol(audited, pkgPath, name) || auditedRuntimeTypeSymbol(audited, pkgPath, name)
 }
 
 // fmtFprintFamily names fmt's writer-first print operations — the one

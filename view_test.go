@@ -1374,36 +1374,6 @@ func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
 	}
 }
 
-func TestRuntimeBackedSyncOperationIsUnverifiable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds a module fixture and runs the engine over it")
-	}
-	// sync.Map stands outside the audited synchronization and pooling
-	// sets, so its runtime-backed operations keep the
-	// unaudited-standard refusal (REQ-closure-shared-dynamic-state).
-	dir := writeViewModule(t, "package view\n\nimport \"sync\"\n\nfunc F() any { var m sync.Map; m.Store(\"k\", 1); v, _ := m.Load(\"k\"); return v }\n")
-	engine, err := New(WithDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.Capture(context.Background(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "sync") {
-		t.Fatalf("sync.Pool verdict = %+v, want unverifiable naming sync", verdict)
-	}
-}
-
 // A callback handed to a standard-library operation is classified by its
 // resolved target — the observation proof names os.Getenv — never widened
 // into a blanket refusal.

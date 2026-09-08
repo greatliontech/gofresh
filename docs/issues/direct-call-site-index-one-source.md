@@ -15,7 +15,12 @@ ladder (parenthesis, index, index-list) for itself.
 The collapse: one per-package call-site index — callable functions,
 their parameters by position, direct call sites, escaped functions —
 built once and consulted by all three judgments, with one
-`unwrapCallee` for the ladder. Invariants preserved: every consumer's
+`unwrapCallee` for the ladder. The index and the ladder landed for the
+two field-and-memo judgments (`callSiteIndex`, `directCallSites`,
+`resolveParam`); what remains is the init-only helper walk's own copy
+and the judge shape — `memberTypes` and `carrierFree` are two judges
+over one resolver, each restating the concrete-type or carrier-free
+test. Invariants preserved: every consumer's
 fail-closed default on an escaped or unresolvable callee; the per-variant
 scoping (the index is built from the variant's own syntax).
 

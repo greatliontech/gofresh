@@ -191,7 +191,11 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // interface field — an unexported field whose every in-package store
 // carries a concrete in-package type, parameters resolved through their
 // direct call sites — chains into every member's declaration.
-const DynamicStateStrategy = "gofresh/dynamic-state@37"
+// @38: an unexported by-value sync.Map whose every use is a Load,
+// Store, or LoadOrStore with carrier-free key and value static types —
+// an interface-typed parameter resolving through its direct call sites
+// — holds no dynamic carrier and marks nothing: the data memo.
+const DynamicStateStrategy = "gofresh/dynamic-state@38"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

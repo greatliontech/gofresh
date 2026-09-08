@@ -24,6 +24,12 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !slices.Equal(poolNames, []string{"Get", "Pool", "Put"}) {
 		t.Fatalf("pool names = %v", poolNames)
 	}
+	if !slices.Equal(memoNames, []string{"Load", "LoadOrStore", "Map", "Store"}) {
+		t.Fatalf("memo names = %v", memoNames)
+	}
+	if !MemoMethod("Map", "Load") || MemoMethod("Map", "Range") || MemoMethod("Pool", "Load") || !MemoName("LoadOrStore") || MemoName("Delete") {
+		t.Fatal("memo predicates wrong")
+	}
 	if !slices.Equal(reflectSymbols, []string{"Type", "TypeOf", "DeepEqual"}) || !slices.Equal(reflectImmutableTypes, []string{"Type"}) {
 		t.Fatalf("reflect sets = %v, %v", reflectSymbols, reflectImmutableTypes)
 	}

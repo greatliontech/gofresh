@@ -888,6 +888,7 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
+	dataMemos := dataMemoVars(audited, p)
 	dynamicPackageVar := func(obj types.Object) (*types.Var, bool) {
 		variable, ok := obj.(*types.Var)
 		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
@@ -1944,6 +1945,21 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 								dischargePool(variable)
 								readContext[ident] = true
 								return true
+							}
+						}
+						// A data memo's Load, Store, or LoadOrStore
+						// touches a sync.Map whose content provably
+						// carries no dynamic behavior: the data-only
+						// variable the invariant leaves out, marking
+						// nothing (REQ-closure-shared-dynamic-state).
+						if calledSelectors[n] && dataMemoMethod(audited, fn) {
+							if ident, ok := n.X.(*ast.Ident); ok {
+								if obj, ok := resolve(ident); ok {
+									if variable, ok := obj.(*types.Var); ok && dataMemos[variable] {
+										readContext[ident] = true
+										return true
+									}
+								}
 							}
 						}
 						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(audited, selection.Type()) {
@@ -6637,6 +6653,12 @@ func onceFieldCount(recv types.Type) int {
 	return n
 }
 
+// dataMemoMethod reports whether the method is sync.Map's Load, Store,
+// or LoadOrStore — the operations a data memo admits.
+func dataMemoMethod(audited bool, fn *types.Func) bool {
+	return auditedSyncReceiverMethod(audited, fn, auditset.MemoMethod)
+}
+
 // auditedOnceDo reports whether the method is sync.Once's Do, the
 // audited synchronization set's memo guard.
 func auditedOnceDo(audited bool, fn *types.Func) bool {
@@ -6682,6 +6704,269 @@ func onceFieldOfDo(audited bool, info *types.Info, call *ast.CallExpr) *types.Va
 		return nil
 	}
 	return field
+}
+
+// callSiteIndex is one package's direct-call-site index: the
+// unexported plain functions only ever referenced as a direct call's
+// callee, their parameters by position, the parameters that stand in
+// a write position in their own body, and every direct call site. A
+// judgment asking what a parameter can hold resolves it through the
+// call sites' arguments (REQ-closure-shared-dynamic-state).
+type callSiteIndex struct {
+	info    *types.Info
+	params  map[*types.Var]callSiteParam
+	written map[*types.Var]bool
+	escaped map[*types.Func]bool
+	calls   map[*types.Func][]*ast.CallExpr
+}
+
+type callSiteParam struct {
+	fn    *types.Func
+	index int
+	// variadic marks the trailing parameter of a variadic function:
+	// its identifier holds every argument from its position on, so no
+	// single call-site argument bounds it and it never resolves.
+	variadic bool
+}
+
+// directCallSites builds the package's call-site index.
+func directCallSites(p *packages.Package) *callSiteIndex {
+	info := p.TypesInfo
+	idx := &callSiteIndex{info: info, params: map[*types.Var]callSiteParam{}, written: map[*types.Var]bool{}, escaped: map[*types.Func]bool{}, calls: map[*types.Func][]*ast.CallExpr{}}
+	callable := map[*types.Func]bool{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Type == nil || fd.Type.Params == nil {
+				continue
+			}
+			fn, ok := info.Defs[fd.Name].(*types.Func)
+			if !ok || fn.Exported() {
+				continue
+			}
+			callable[fn] = true
+			position := 0
+			for _, field := range fd.Type.Params.List {
+				// The ellipsis on the field is the mark: it names
+				// exactly the trailing parameter, where the signature's
+				// own flag names the whole function.
+				_, variadic := field.Type.(*ast.Ellipsis)
+				for _, name := range field.Names {
+					if v, ok := info.Defs[name].(*types.Var); ok {
+						idx.params[v] = callSiteParam{fn: fn, index: position, variadic: variadic}
+					}
+					position++
+				}
+				if len(field.Names) == 0 {
+					position++
+				}
+			}
+			// A parameter standing in a write position anywhere in its
+			// body — reassigned, address-taken, a range target,
+			// incremented — no longer holds its call site's argument.
+			if fd.Body == nil {
+				continue
+			}
+			markWritten := func(expr ast.Expr) {
+				if ident, ok := expr.(*ast.Ident); ok {
+					if v, ok := info.Uses[ident].(*types.Var); ok {
+						if _, isParam := idx.params[v]; isParam {
+							idx.written[v] = true
+						}
+					}
+				}
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range n.Lhs {
+						markWritten(lhs)
+					}
+				case *ast.IncDecStmt:
+					markWritten(n.X)
+				case *ast.UnaryExpr:
+					if n.Op == token.AND {
+						markWritten(n.X)
+					}
+				case *ast.RangeStmt:
+					markWritten(n.Key)
+					markWritten(n.Value)
+				}
+				return true
+			})
+		}
+	}
+	// Direct call sites per callable, and the callables referenced any
+	// other way — a function value escapes its call sites.
+	callFun := map[ast.Expr]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			fun := unwrapCallee(call.Fun)
+			if ident, ok := fun.(*ast.Ident); ok {
+				if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
+					idx.calls[fn] = append(idx.calls[fn], call)
+					callFun[ident] = true
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok || callFun[ident] {
+				return true
+			}
+			if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
+				idx.escaped[fn] = true
+			}
+			return true
+		})
+	}
+	return idx
+}
+
+// resolveParam resolves an expression that is an identifier bound to
+// an indexed parameter — unwritten, not variadic, of a function never
+// escaped, with at least one call site — through every call site's
+// argument at that position: judge is applied to each argument (with
+// the cycle guard, so a parameter forwarded to itself refuses) and
+// must accept every one. Any other expression, or any refusing
+// argument, refuses. A variadic parameter refuses outright: its
+// identifier is the slice of every argument from its position, a
+// value one consumer may store whole.
+func (idx *callSiteIndex) resolveParam(expr ast.Expr, seen map[*types.Var]bool, judge func(arg ast.Expr, seen map[*types.Var]bool) bool) bool {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	v, ok := idx.info.Uses[ident].(*types.Var)
+	if !ok {
+		return false
+	}
+	key, ok := idx.params[v]
+	if !ok || key.variadic || idx.written[v] || idx.escaped[key.fn] || seen[v] {
+		return false
+	}
+	sites := idx.calls[key.fn]
+	if len(sites) == 0 {
+		return false
+	}
+	seen[v] = true
+	defer delete(seen, v)
+	for _, site := range sites {
+		if key.index >= len(site.Args) || !judge(site.Args[key.index], seen) {
+			return false
+		}
+	}
+	return true
+}
+
+// dataMemoVars judges which package-level sync.Map variables hold no
+// dynamic carrier: an unexported variable of type sync.Map by value
+// whose every use is the receiver of a Load, Store, or LoadOrStore
+// call whose key and value arguments have carrier-free static types —
+// a parameter of static interface type resolving through its direct
+// call sites the same way. The variable's TYPE carries dynamic
+// behavior (an interface at every key and value); its CONTENT provably
+// never does, so it is the data-only variable the invariant leaves
+// out. Any other method call — Range, Delete, Swap, CompareAndSwap,
+// CompareAndDelete, Clear — opens it; every non-call use (the address taken, the
+// variable passed or bound or rebound) is the uses walk's own mark;
+// an exported or pointer variable another package can fill is never a
+// candidate (REQ-closure-shared-dynamic-state).
+func dataMemoVars(audited bool, p *packages.Package) map[*types.Var]bool {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return nil
+	}
+	info := p.TypesInfo
+	isSyncMap := func(t types.Type) bool {
+		named, ok := types.Unalias(t).(*types.Named)
+		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
+	}
+	candidates := map[*types.Var]bool{}
+	scope := p.Types.Scope()
+	for _, name := range scope.Names() {
+		v, ok := scope.Lookup(name).(*types.Var)
+		if !ok || v.Exported() || !isSyncMap(v.Type()) {
+			continue
+		}
+		candidates[v] = true
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	var index *callSiteIndex
+	var carrierFree func(expr ast.Expr, seen map[*types.Var]bool) bool
+	carrierFree = func(expr ast.Expr, seen map[*types.Var]bool) bool {
+		for {
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			expr = paren.X
+		}
+		t := info.TypeOf(expr)
+		if t == nil {
+			return false
+		}
+		if !typeMayCarryUnknownDynamic(audited, t, map[types.Type]bool{}) {
+			return true
+		}
+		if index == nil {
+			index = directCallSites(p)
+		}
+		return index.resolveParam(expr, seen, carrierFree)
+	}
+	open := map[*types.Var]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			v, ok := info.Uses[ident].(*types.Var)
+			if !ok || !candidates[v] {
+				return true
+			}
+			// The memo set is the audited table's; every argument of an
+			// admitted operation — the key, and the value where there
+			// is one — must be carrier-free.
+			admitted := auditset.MemoMethod("Map", sel.Sel.Name)
+			for _, arg := range call.Args {
+				if !admitted {
+					break
+				}
+				admitted = carrierFree(arg, map[*types.Var]bool{})
+			}
+			if !admitted {
+				open[v] = true
+			}
+			return true
+		})
+	}
+	// Every use of the variable that is not one of these calls — the
+	// address taken, a bind, a rebind, a method value, an argument — is
+	// the uses walk's own mark: it needs no census here.
+	memos := map[*types.Var]bool{}
+	for v := range candidates {
+		if !open[v] {
+			memos[v] = true
+		}
+	}
+	return memos
 }
 
 // closedInterfaceFields judges, per unexported interface-typed field of
@@ -6738,104 +7023,7 @@ func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
 	if !any {
 		return nil
 	}
-	params := map[*types.Var]paramKey{}
-	written := map[*types.Var]bool{}
-	callable := map[*types.Func]bool{}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || fd.Name == nil || fd.Type == nil || fd.Type.Params == nil {
-				continue
-			}
-			fn, ok := info.Defs[fd.Name].(*types.Func)
-			if !ok || fn.Exported() {
-				continue
-			}
-			// A variadic parameter needs no arm: its identifier has
-			// slice type, which the concrete-named requirement below
-			// refuses, and its elements are index expressions, which
-			// resolve open.
-			callable[fn] = true
-			index := 0
-			for _, field := range fd.Type.Params.List {
-				for _, name := range field.Names {
-					if v, ok := info.Defs[name].(*types.Var); ok {
-						params[v] = paramKey{fn: fn, index: index}
-					}
-					index++
-				}
-				if len(field.Names) == 0 {
-					index++
-				}
-			}
-			// A parameter standing in a write position anywhere in its
-			// body — reassigned, address-taken, a range target,
-			// incremented — no longer holds its call site's argument.
-			if fd.Body == nil {
-				continue
-			}
-			markWritten := func(expr ast.Expr) {
-				if ident, ok := expr.(*ast.Ident); ok {
-					if v, ok := info.Uses[ident].(*types.Var); ok {
-						if _, isParam := params[v]; isParam {
-							written[v] = true
-						}
-					}
-				}
-			}
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.AssignStmt:
-					for _, lhs := range n.Lhs {
-						markWritten(lhs)
-					}
-				case *ast.IncDecStmt:
-					markWritten(n.X)
-				case *ast.UnaryExpr:
-					if n.Op == token.AND {
-						markWritten(n.X)
-					}
-				case *ast.RangeStmt:
-					markWritten(n.Key)
-					markWritten(n.Value)
-				}
-				return true
-			})
-		}
-	}
-	// Direct call sites per callable, and the callables referenced any
-	// other way — a function value escapes its call sites.
-	calls := map[*types.Func][]*ast.CallExpr{}
-	escaped := map[*types.Func]bool{}
-	callFun := map[ast.Expr]bool{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			fun := unwrapCallee(call.Fun)
-			if ident, ok := fun.(*ast.Ident); ok {
-				if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
-					calls[fn] = append(calls[fn], call)
-					callFun[ident] = true
-				}
-			}
-			return true
-		})
-	}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			ident, ok := n.(*ast.Ident)
-			if !ok || callFun[ident] {
-				return true
-			}
-			if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
-				escaped[fn] = true
-			}
-			return true
-		})
-	}
+	index := directCallSites(p)
 	// memberTypes resolves a stored expression to its member names, or
 	// reports the field open.
 	var memberTypes func(expr ast.Expr, seen map[*types.Var]bool) ([]string, bool)
@@ -6862,36 +7050,13 @@ func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
 			}
 			return []string{named.Obj().Name()}, true
 		}
-		ident, ok := expr.(*ast.Ident)
-		if !ok {
-			return nil, false
-		}
-		v, ok := info.Uses[ident].(*types.Var)
-		if !ok {
-			return nil, false
-		}
-		key, ok := params[v]
-		if !ok || written[v] || escaped[key.fn] || seen[v] {
-			return nil, false
-		}
-		sites := calls[key.fn]
-		if len(sites) == 0 {
-			return nil, false
-		}
-		seen[v] = true
-		defer delete(seen, v)
 		var members []string
-		for _, site := range sites {
-			if key.index >= len(site.Args) {
-				return nil, false
-			}
-			more, ok := memberTypes(site.Args[key.index], seen)
-			if !ok {
-				return nil, false
-			}
+		ok := index.resolveParam(expr, seen, func(arg ast.Expr, seen map[*types.Var]bool) bool {
+			more, ok := memberTypes(arg, seen)
 			members = append(members, more...)
-		}
-		return members, true
+			return ok
+		})
+		return members, ok
 	}
 	// Every store into a candidate field, whatever selection path
 	// reaches it — a promoted field through an embedding is the same

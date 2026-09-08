@@ -549,8 +549,27 @@ pooling set's content proof and the mapping set's deepened audit
 reach the same class by their own grounds). The set
 is the source-audited precursor of a structural get-or-compute
 discharge; its entries retire to that proof when it lands. It grows
-only by source audit. Under the caller-attested single-subject-process
-execution model the judgment additionally scopes per subject: the
+only by source audit. The data memo is that discharge's content-typed
+form, the engine's own verdict: an unexported package-level variable of
+type sync.Map by value whose every use in its package is the receiver
+of a Load, Store, or LoadOrStore call whose key and value arguments have
+static types carrying no dynamic behavior — an interface-typed parameter
+resolving through every direct call site's argument the same way, a
+written, escaped, or uncalled function's parameter, and the trailing
+parameter of a variadic function, refusing —
+never holds a carrier, so it is the data-only variable this invariant
+leaves out and its calls mark nothing, under no attestation and on no
+evidence record; any other use — Range, Delete, Swap, CompareAndSwap,
+CompareAndDelete, Clear, the address taken, the variable passed, bound, or
+rebound — and an exported or pointer variable keep every mark. At the
+effect classification tiers the audited memo set is sync.Map itself and
+its Load, Store, and LoadOrStore — process-memory reads and writes fed by
+the analyzed program alone, admitted unconditionally exactly as the
+pooling set's Get and Put are, the values stored and produced keeping
+their own pricing, and a file that merely declares a sync.Map recording no
+effect at the file fold — while the map's other operations keep the
+unaudited fallback at the walks. Under the caller-attested single-subject-process
+execution model the shared-dynamic-state judgment additionally scopes per subject: the
 hazard is a prior subject's execution in the same process, and under
 the attestation there is none — the only code that executes is the
 subject's own rooted flow: the subject flow and, where the subject

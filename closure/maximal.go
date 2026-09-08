@@ -1041,6 +1041,18 @@ func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "sync" && auditset.PoolName(name)
 }
 
+// auditedMemoSymbol reports whether a sync-package symbol is in the
+// audited memo set: sync.Map and its Load, Store, and LoadOrStore
+// operations, process-memory reads and writes fed by the analyzed
+// program alone, admitted at the effect classification tiers; the
+// values stored and produced keep their own classifications, and the
+// shared-dynamic-state judgment is the data memo's. sync exports no
+// top-level functions by these names. Grows only by source audit
+// (REQ-closure-shared-dynamic-state).
+func auditedMemoSymbol(audited bool, pkgPath, name string) bool {
+	return audited && pkgPath == "sync" && auditset.MemoName(name)
+}
+
 func packageHasClassifiedExternalAPI(pkgPath string) bool {
 	return classBPackages[pkgPath]
 }

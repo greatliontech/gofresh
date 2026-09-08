@@ -26,8 +26,13 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 			t.Errorf("reflect symbol %s not admitted", name)
 		}
 	}
-	for _, stray := range []string{"OnceFunc", "OnceValue", "WaitGroup", "Map", "New", "ValueOf", "Copy"} {
-		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedRuntimeTypeSymbol(true, "reflect", stray) {
+	for _, name := range []string{"Map", "Load", "Store", "LoadOrStore"} {
+		if !auditedMemoSymbol(true, "sync", name) || !auditset.MemoName(name) {
+			t.Errorf("memo name %s not admitted", name)
+		}
+	}
+	for _, stray := range []string{"OnceFunc", "OnceValue", "WaitGroup", "Range", "Delete", "Swap", "New", "ValueOf", "Copy"} {
+		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedMemoSymbol(true, "sync", stray) || auditedRuntimeTypeSymbol(true, "reflect", stray) {
 			t.Errorf("%s admitted outside the tables", stray)
 		}
 	}
