@@ -745,7 +745,7 @@ strategy bump.
       (Value).Elem (a dereference of memory the operand pins) for the
       audited set, admitting by symbol or recording the channel that
       refuses each.
-- [ ] 181. gofresh: time's shared-name exclusion made
+- [x] 181. gofresh: time's shared-name exclusion made
       receiver-sensitive — 121 admitted time's fixed-argument surface
       by bare name and so excluded whole every name a pure method
       shares with an ambient declaration; the 125 sweep prices that
