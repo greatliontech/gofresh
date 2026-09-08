@@ -83,6 +83,10 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 			}
 		}
 	}
+	// The dynamic-carrier view is built over the enumeration's own
+	// targets, before any narrowing: the narrowing consults this view
+	// (the parameter crossing), so it must not depend on it — the
+	// conservative direction, and the one that keeps the two acyclic.
 	for _, targets := range reach.dynamicTargets {
 		for target := range targets {
 			fp.dynamic[target] = true

@@ -36,6 +36,15 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		if callerIdx == nil || callerIdx.testMain {
 			continue
 		}
+		// The enumeration's targets, narrowed to what the operand can
+		// hold where the closed-value walk names the functions: a
+		// recursive local closure's call reaches its own closure, not
+		// every closure of its signature in the mask
+		// (REQ-closure-observability-analysis's narrowed dispatch).
+		targets = narrowedTargets(site, targets, a.fresh)
+		if len(targets) == 0 {
+			continue
+		}
 		// The subject-determined dispatch admission: a site whose
 		// enumerated target set is non-empty and wholly classifiable -
 		// audited harness methods or analyzed functions of indexed
@@ -516,7 +525,12 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		return
 	}
 	if parent := fn.Parent(); parent != nil {
+		// An anonymous function is its parent's content and its own
+		// body: a drained frame's nested closure executes whenever the
+		// frame's value is called, so its body is scanned here — the
+		// parent alone would leave its effects unseen.
 		a.addFunction(parent)
+		a.scanFunction(fn)
 	}
 }
 
@@ -744,7 +758,35 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// initializer's or a dynamic dispatch's argument leaking in
 	// (REQ-closure-observability-analysis's subject-determined operand).
 	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
-	resolved := fromRTA && a.rtaResolved[site] && !a.openWorld && operandClosed
+	// A computed call whose operand's functions the collector names,
+	// every one of them analyzed content of an indexed non-standard
+	// package, is resolved by the operand alone: the site needs no
+	// RTA attribution, since its targets are exactly those bodies and
+	// the scan of the operand's values has queued each of them — the
+	// drained initializer frame's recursive closure resolves here
+	// (REQ-closure-observability-analysis's narrowed dispatch).
+	heldKnown := false
+	if !c.IsInvoke() && c.StaticCallee() == nil && !(fromRTA && a.rtaResolved[site]) {
+		if held, ok := closedDynamicTargets(c.Value, a.fresh); ok {
+			heldKnown = true
+			for fn := range held {
+				idx := a.idxForFunction(fn)
+				if idx == nil || idx.std || idx.cache || idx.testMain || a.propertyHarnessAudited(idx.path) {
+					heldKnown = false
+					break
+				}
+			}
+			// The route's premise holds by the scan's own rule: every
+			// held function is a closure creation or a function
+			// constant stored into the cell from a frame this walk
+			// scans (the cell's frame or a closure it created, itself
+			// scanned as an operand), and the value scan walks an
+			// anonymous function's body when it meets it — so the
+			// site's targets are analyzed content whatever frame
+			// reached them.
+		}
+	}
+	resolved := ((fromRTA && a.rtaResolved[site]) || heldKnown) && !a.openWorld && operandClosed
 	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.subjectDeterminedInvokes[site] && operandClosed) {
 		a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
 	}

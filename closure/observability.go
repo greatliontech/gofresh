@@ -445,7 +445,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if callee := site.Common().StaticCallee(); callee != nil {
 					recordTestMainCallEffect(analyzer, callee, site)
 				}
-				for target := range reachable.dynamicTargets[site] {
+				for target := range narrowedTargets(site, reachable.dynamicTargets[site], analyzer.fresh) {
 					recordTestMainCallEffect(analyzer, target, site)
 				}
 			}
@@ -539,7 +539,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 				if callee != nil {
 					recordDirectCallEffect(analyzer, callee, site)
 				}
-				for target := range reachable.dynamicTargets[site] {
+				for target := range narrowedTargets(site, reachable.dynamicTargets[site], analyzer.fresh) {
 					recordDirectCallEffect(analyzer, target, site)
 				}
 			}

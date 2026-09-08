@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -1143,9 +1144,275 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 		return closedDynamicValue(v.Tuple, seen, done, fp)
 	case *ssa.Parameter:
 		return subjectClosedParameter(v, seen, done, fp)
+	case *ssa.UnOp:
+		// A load from a closed cell: the recursive local closure's
+		// idiom (`var visit func(); visit = func() { visit() }`) calls
+		// through the cell the closure captured.
+		if v.Op != token.MUL {
+			return false
+		}
+		cell := cellOf(v.X, map[ssa.Value]bool{})
+		return cell != nil && closedCell(cell, seen, done, fp)
 	default:
 		return false
 	}
+}
+
+// cellOf resolves a load's address to the local allocation it names —
+// the allocation itself, or a free variable bound to it by every
+// closure creation of its function (a free variable bound to different
+// cells across creations names none). Nothing else is a cell.
+func cellOf(addr ssa.Value, seen map[ssa.Value]bool) *ssa.Alloc {
+	switch a := addr.(type) {
+	case *ssa.Alloc:
+		return a
+	case *ssa.FreeVar:
+		if seen[a] {
+			return nil
+		}
+		seen[a] = true
+		var cell *ssa.Alloc
+		index := slices.Index(a.Parent().FreeVars, a)
+		if index < 0 {
+			return nil
+		}
+		for _, mk := range closureCreations(a.Parent()) {
+			// A creation binding this free variable to a different cell
+			// than another creation did names none: one closure body,
+			// two cells — the fail-closed backstop no fixture
+			// constructs.
+			if index >= len(mk.Bindings) {
+				return nil
+			}
+			bound := cellOf(mk.Bindings[index], seen)
+			if bound == nil || (cell != nil && bound != cell) {
+				return nil
+			}
+			cell = bound
+		}
+		return cell
+	}
+	return nil
+}
+
+// closureCreations lists the MakeClosure instructions creating fn.
+func closureCreations(fn *ssa.Function) []*ssa.MakeClosure {
+	var creations []*ssa.MakeClosure
+	if fn == nil || fn.Parent() == nil {
+		return nil
+	}
+	for _, block := range fn.Parent().Blocks {
+		for _, instr := range block.Instrs {
+			if mk, ok := instr.(*ssa.MakeClosure); ok && mk.Fn == fn {
+				creations = append(creations, mk)
+			}
+		}
+	}
+	return creations
+}
+
+// closedCell judges a local allocation closed for dispatch: every
+// referrer of the cell — and of every free variable a closure binds to
+// it, recursively — is a debug reference, a store into it of a closed
+// value, a load from it, or a closure creation binding it. The cell's
+// address held anywhere else (passed, stored, compared) leaves it
+// open, as does a store the walk cannot close. A cell reached again
+// while its own stores are being judged (a store of a load of itself)
+// refuses, as every cycle in the walk does; the recursive closure's
+// idiom never re-enters — a closure creation closes without recursing.
+// The walk's memo is not consulted for the cell: it records closed
+// VALUES, and a cell is an address.
+func closedCell(cell *ssa.Alloc, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if seen[cell] {
+		return false
+	}
+	seen[cell] = true
+	defer delete(seen, cell)
+	return cellReferrersClosed(cell, cell, seen, done, fp, map[ssa.Value]bool{})
+}
+
+func cellReferrersClosed(cell *ssa.Alloc, alias ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis, visited map[ssa.Value]bool) bool {
+	if visited[alias] {
+		return true
+	}
+	visited[alias] = true
+	refs := alias.Referrers()
+	if refs == nil {
+		return true
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != alias || !closedDynamicValue(r.Val, seen, done, fp) {
+				return false
+			}
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != alias {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok {
+				return false
+			}
+			for i, binding := range r.Bindings {
+				if binding == alias {
+					if i >= len(fn.FreeVars) || !cellReferrersClosed(cell, fn.FreeVars[i], seen, done, fp, visited) {
+						return false
+					}
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// closedDynamicTargets collects the functions a computed call's operand
+// can hold when the closed-value walk closes it through shapes whose
+// leaves are function values — function constants and closure
+// creations, through phis, tuple extractions, type changes, closed
+// cells, and the subject-attributed parameter crossing. A leaf the
+// walk closes without naming a function (a gate-passing harness call
+// result) or any open shape yields no set, and the enumeration's own
+// targets stand. The set bounds the operand exactly: every function
+// value that can reach the load or the parameter is one of the leaves
+// (REQ-closure-observability-analysis's narrowed dispatch).
+func closedDynamicTargets(value ssa.Value, fp *freshParamAnalysis) (map[*ssa.Function]bool, bool) {
+	if !subjectClosedDynamicValue(value, make(map[ssa.Value]bool), fp) {
+		return nil, false
+	}
+	targets := map[*ssa.Function]bool{}
+	if !collectDynamicTargets(value, targets, map[ssa.Value]bool{}, fp) {
+		return nil, false
+	}
+	return targets, true
+}
+
+func collectDynamicTargets(value ssa.Value, targets map[*ssa.Function]bool, seen map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if seen[value] {
+		return true
+	}
+	seen[value] = true
+	switch v := value.(type) {
+	case *ssa.Function:
+		targets[v] = true
+		return true
+	case *ssa.MakeClosure:
+		fn, ok := v.Fn.(*ssa.Function)
+		if !ok {
+			return false
+		}
+		targets[fn] = true
+		return true
+	case *ssa.Const:
+		// A nil function value: no target — the call cannot proceed.
+		return v.Value == nil
+	case *ssa.Phi:
+		for _, edge := range v.Edges {
+			if !collectDynamicTargets(edge, targets, seen, fp) {
+				return false
+			}
+		}
+		return true
+	case *ssa.Extract:
+		return collectDynamicTargets(v.Tuple, targets, seen, fp)
+	case *ssa.ChangeType:
+		return collectDynamicTargets(v.X, targets, seen, fp)
+	case *ssa.Convert:
+		return collectDynamicTargets(v.X, targets, seen, fp)
+	case *ssa.TypeAssert:
+		return collectDynamicTargets(v.X, targets, seen, fp)
+	case *ssa.ChangeInterface:
+		return collectDynamicTargets(v.X, targets, seen, fp)
+	case *ssa.MakeInterface:
+		return collectDynamicTargets(v.X, targets, seen, fp)
+	case *ssa.UnOp:
+		if v.Op != token.MUL {
+			return false
+		}
+		cell := cellOf(v.X, map[ssa.Value]bool{})
+		if cell == nil {
+			return false
+		}
+		return collectCellStores(cell, cell, targets, seen, fp, map[ssa.Value]bool{})
+	case *ssa.Parameter:
+		args, ok := attributedParameterArgs(v, fp)
+		if !ok {
+			return false
+		}
+		for _, arg := range args {
+			if !collectDynamicTargets(arg, targets, seen, fp) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func collectCellStores(cell *ssa.Alloc, alias ssa.Value, targets map[*ssa.Function]bool, seen map[ssa.Value]bool, fp *freshParamAnalysis, visited map[ssa.Value]bool) bool {
+	if visited[alias] {
+		return true
+	}
+	visited[alias] = true
+	refs := alias.Referrers()
+	if refs == nil {
+		return true
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.Store:
+			if r.Addr == alias && !collectDynamicTargets(r.Val, targets, seen, fp) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok {
+				return false
+			}
+			for i, binding := range r.Bindings {
+				if binding == alias && (i >= len(fn.FreeVars) || !collectCellStores(cell, fn.FreeVars[i], targets, seen, fp, visited)) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// narrowedTargets returns a computed call's targets narrowed to the
+// functions its operand can hold, within the enumeration's own set;
+// an invoke, a static call, or an operand yielding no set keeps the
+// enumeration's targets whole (REQ-closure-observability-analysis's
+// narrowed dispatch).
+func narrowedTargets(site ssa.CallInstruction, targets map[*ssa.Function]bool, fp *freshParamAnalysis) map[*ssa.Function]bool {
+	c := site.Common()
+	if c == nil || c.IsInvoke() || c.StaticCallee() != nil || len(targets) == 0 {
+		return targets
+	}
+	held, ok := closedDynamicTargets(c.Value, fp)
+	if !ok {
+		return targets
+	}
+	narrowed := make(map[*ssa.Function]bool, len(held))
+	for fn := range targets {
+		if held[fn] {
+			narrowed[fn] = true
+		}
+	}
+	// A held function the enumeration does not list is a vocabulary
+	// mismatch between the collector and RTA (a bound-method wrapper
+	// against its method, say) — a fail-closed backstop no fixture
+	// constructs, never a demonstrated bug: the enumeration's targets
+	// stand rather than an empty set admitting the site. An empty held
+	// set (a nil function value) is the one legitimate empty result.
+	if len(narrowed) == 0 && len(held) > 0 {
+		return targets
+	}
+	return narrowed
 }
 
 func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {

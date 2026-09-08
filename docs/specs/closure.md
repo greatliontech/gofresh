@@ -1156,7 +1156,10 @@ such site, each argument in
 a dynamic-reaching position closes in the calling function's own frame
 (locally constructed values under the closed-value walk with no
 cross-boundary crossing — the caller's parameters, loads, and call
-results refuse), in which case the sites' closed function values root
+results refuse, except a load from a closed cell: a local allocation whose
+every use, across the closures that capture it, is a store of a closed
+value, a load, or a closure creation binding it — the recursive local
+closure's own cell), in which case the sites' closed function values root
 the reachability walk under the subject's provenance and their
 materialized concrete types enter the runtime-type walk, so everything
 the caller can actually hand the subject is analyzed view content whose
@@ -1393,7 +1396,27 @@ reads state Parse can have written, including the unparsed default,
 and a startup reference is at best a default read and at worst an
 escape of the storage's address into subject-reachable state, an alias
 the trace cannot follow. A sink that does not trace blocks every
-subject sharing the program. The FlagSet forms are audited symbols in
+subject sharing the program. A computed call whose operand the closed-value
+walk closes through shapes naming its functions — function constants,
+closure creations, phis, tuple extractions, and type changes over them, a
+closed cell's stores, the attributed parameter crossing's arguments — takes
+those functions, within the enumeration's own set, as its targets at every
+walk (subject, startup, and test-main alike): a recursive local closure's
+call reaches its own closure, never every closure of its signature the mask
+carries, and a standard closure among a site's targets is never exempted by
+its init-family name — its body is unwalked, so only the operand's own
+functions can stand in for the class; an operand naming no function at all
+(a nil value) leaves the site nothing to classify; an operand the walk
+closes without naming a function (a gate-passing harness result), an open
+operand, an invoke, or a static call keeps the enumeration's targets whole.
+Where the subject walk's own scan reaches a computed call the enumeration
+did not attribute — a frame the object drain scans for a referenced
+initializer's content — the operand's functions resolve the site by
+themselves when every one is analyzed content of a package whose bodies
+this walk scans — first-party and indexed, neither standard, nor a
+dependency, nor the generated test main, nor the audited harness — each
+such body being scanned by the walk's own rule for the closures it meets; a
+held function of any other class keeps the computed-call refusal. The FlagSet forms are audited symbols in
 the one table every tier consults — CommandLine, NewFlagSet, the
 FlagSet, Flag, Value, Getter, and ErrorHandling names, and the
 ContinueOnError, ExitOnError, and PanicOnError constants — so a

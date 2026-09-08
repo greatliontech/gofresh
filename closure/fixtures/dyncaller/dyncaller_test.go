@@ -157,6 +157,18 @@ func TestRunCheck(t *testing.T) {
 	if RunCheck(func(n int) int { return n * 2 }, 2) != 4 {
 		t.Fatal("wrong")
 	}
+	// A cell-loaded closure — the recursive local closure's idiom — is
+	// a closed argument at the enumeration: RunCheck stays observable.
+	var down func(int) int
+	down = func(n int) int {
+		if n <= 0 {
+			return 0
+		}
+		return 1 + down(n-1)
+	}
+	if RunCheck(down, 3) != 3 {
+		t.Fatal("wrong")
+	}
 }
 
 func TestRunEffect(t *testing.T) {

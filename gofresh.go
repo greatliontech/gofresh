@@ -393,7 +393,10 @@ const ClosureStrategy = closure.IdentityStrategy
 // a literal string slice, every site in initializer flow or in the
 // constructing function — so their registrations mark and poison
 // nothing and their Parse is admitted in the proving flow.
-const ObservationRTA = "gofresh/observation-rta@36"
+// @37 narrows a computed call's enumerated targets to the functions its
+// operand can hold where the closed-value walk names them — the
+// recursive local closure's cell now closes — at every walk.
+const ObservationRTA = "gofresh/observation-rta@37"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
