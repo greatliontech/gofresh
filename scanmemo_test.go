@@ -145,7 +145,9 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	loads := 0
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
-	vouched, err := New(WithDir(dir), WithDynamicStateVouches("example.com/scanmemo/dep:Hooks"))
+	// The option takes the canonical dotted identity (REQ-vouch-input);
+	// the file below spells the same vouch in its own grammar.
+	vouched, err := New(WithDir(dir), WithDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +156,40 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	}
 	if loads == 0 {
 		t.Fatal("a changed vouch set served the unvouched scan")
+	}
+	// The repository's file feeds the same set: a file spelling the
+	// option's vouch serves the vouched scan, and a changed file misses —
+	// a persisted entry never serves a discharge under another set.
+	vouchPath := filepath.Join(dir, RepositoryVouchFile)
+	if err := os.WriteFile(vouchPath, []byte("example.com/scanmemo/dep:Hooks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loads = 0
+	fromFile, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fromFile.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+		t.Fatal(err)
+	}
+	if loads != 0 {
+		t.Fatalf("the file's set equal to the option's recomputed (%d loads), want served", loads)
+	}
+	if err := os.WriteFile(vouchPath, []byte("example.com/scanmemo/dep:Hooks\nexample.com/scanmemo/dep:Other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := changed.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+		t.Fatal(err)
+	}
+	if loads == 0 {
+		t.Fatal("a changed vouch file served the prior scan")
+	}
+	if err := os.Remove(vouchPath); err != nil {
+		t.Fatal(err)
 	}
 	// Corrupt every scan entry: the next view recomputes silently.
 	entries, _ := filepath.Glob(filepath.Join(cache, "gofresh", "scanfacts", "*.json"))

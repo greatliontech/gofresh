@@ -566,6 +566,11 @@ type Engine struct {
 	// variables the caller accepts as stable after initialization
 	// (REQ-vouch-input). Empty means no vouches.
 	dynamicStateVouches map[string]bool
+	// withoutRepositoryVouches declines the repository's reviewed vouch
+	// file at the engine's root (WithoutRepositoryVouches): a consumer
+	// that owns its own reviewed set supplies it whole through the
+	// option instead of reading two homes.
+	withoutRepositoryVouches bool
 	// singleSubjectExecution is the caller's attestation that every
 	// subject is measured in a process of its own
 	// (WithSingleSubjectExecution); it arms the audited pooling set's
@@ -731,6 +736,17 @@ func WithDynamicStateVouches(identities ...string) Option {
 			}
 		}
 	}
+}
+
+// WithoutRepositoryVouches declines the repository's reviewed vouch
+// file (RepositoryVouchFile at the engine's root), which the engine
+// otherwise reads at construction in union with WithDynamicStateVouches
+// — an option extends the reviewed set and never removes from it. A
+// consumer that owns its own reviewed standing set supplies it whole
+// through the option and declines the file, so one set has one home
+// (REQ-vouch-input).
+func WithoutRepositoryVouches() Option {
+	return func(e *Engine) { e.withoutRepositoryVouches = true }
 }
 
 // WithSingleSubjectExecution attests the caller's execution model: every
@@ -963,6 +979,17 @@ func New(opts ...Option) (*Engine, error) {
 		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
 	}
 	e.dir = root
+	// The repository's reviewed vouch set joins the caller's: the file at
+	// the root the engine is opened at — the root every view it judges
+	// shares (coherentDir) — read whole or refused, an absent file the
+	// empty set (REQ-vouch-input).
+	if !e.withoutRepositoryVouches {
+		reviewed, err := ReadVouchFile(filepath.Join(e.dir, RepositoryVouchFile))
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: %w", err)
+		}
+		WithDynamicStateVouches(reviewed...)(e)
+	}
 	if e.evidenceRoot != "" {
 		evidenceRoot, err := canonicalDir(e.evidenceRoot)
 		if err != nil {

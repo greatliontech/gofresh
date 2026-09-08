@@ -102,7 +102,18 @@ foreign variable's shared-dynamic-state downgrade for every subject reaching it.
 an input to freshness evaluation — canonical `<import path>.<Variable>` identities —
 so a consumer's committed configuration and a per-run flag reduce to the same engine
 input and gofresh itself never infers a vouch. A vouch names exactly one variable,
-never a package or a pattern.
+never a package or a pattern. The set has two channels reducing to one input: the
+repository's reviewed standing set, the file `vouches` at the root the engine is
+opened at — the one file governing every subject that engine judges, which are
+the subjects at that root alone: a module-rooted engine reads that module's
+file, a workspace-rooted engine the workspace root's — one
+`IMPORT-PATH:VARIABLE` per line, `#` comments and blank lines ignored, each line
+mapped to the canonical identity, an absent file the empty set, a malformed line
+refusing the engine naming the file and line (fail-closed: a vouch suppresses an
+unverifiable verdict, so a set that cannot be read whole is never partly honored)
+— and the caller's per-run set, which extends the reviewed set and never removes
+from it; a consumer owning its own reviewed set declines the file and supplies
+the set whole, so one set has one home.
 
 **REQ-vouch-discharge** (behavior): A vouched variable MUST be exempt from the
 shared-dynamic-state downgrade
