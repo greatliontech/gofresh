@@ -11,6 +11,7 @@
 package auditset
 
 import (
+	"go/types"
 	"slices"
 	"sort"
 	"strings"
@@ -111,16 +112,15 @@ func PurePackage(pkgPath string) bool { return purePackages[pkgPath] }
 // computation over Time, Duration, Month, and Weekday that reads
 // neither the clock, nor the local zone, nor the exported time.UTC
 // variable. A name shared by a pure declaration and an ambient one is
-// excluded whole: After (the timer channel and (Time).After), Local
-// and UTC (the exported variables and the methods), Unix, UnixMilli,
-// and UnixMicro (the functions install the LOCAL zone on the value
-// they construct — every later decomposition of it reads $TZ and the
-// zone database — beside the pure (Time).Unix method), Location (the
-// type name beside a method that returns the time.UTC variable for a
-// location-less Time), and AddDate (it re-enters Date through that
-// method). Now, Since, Until, Sleep, Tick, AfterFunc, NewTimer,
-// NewTicker, Parse, ParseInLocation, LoadLocation, and
-// LoadLocationFromTZData never enter. Grows only by source audit
+// excluded here whole — After (the timer channel), Local and UTC (the
+// exported variables), Unix, UnixMilli, and UnixMicro (the functions
+// install the LOCAL zone on the value they construct — every later
+// decomposition of it reads $TZ and the zone database), Location (the
+// type name), and AddDate — those of the method forms the receiver
+// distinguishes and the audit admits living in timeMethods for the
+// tiers that know the callee. Now, Since, Until, Sleep, Tick,
+// AfterFunc, NewTimer, NewTicker, Parse, ParseInLocation,
+// LoadLocation, and LoadLocationFromTZData never enter. Grows only by source audit
 // (REQ-closure-observability-analysis).
 var timeSymbols = map[string]bool{
 	// construction and the type/constant names
@@ -141,6 +141,30 @@ var timeSymbols = map[string]bool{
 	"UnixNano": true,
 	// Duration value computation
 	"Hours": true, "Minutes": true, "Seconds": true, "Milliseconds": true, "Microseconds": true, "Nanoseconds": true, "Abs": true,
+}
+
+// timeMethods is the audited receiver-qualified surface of package
+// time: the pure methods of Time whose bare names timeSymbols must
+// exclude for the ambient declaration sharing each — After (a
+// comparison), Unix, UnixMilli, and UnixMicro (epoch arithmetic), UTC
+// (installs the unexported UTC location, never the exported
+// variable), and AddDate (re-enters Date through the receiver's
+// location). An admitted method reads neither the clock, the local
+// zone, nor a variable program code can reach, and hands out no
+// pointer into package time's own state: Local is absent (it installs
+// the ambient Local zone), and Location is absent (for a location-less
+// Time it returns the exported UTC variable's value, the address of
+// the package's own utcLoc, through which program code could write
+// with no tier seeing the store). AddDate's own Location call is
+// standard-internal and reads the exported variable, which holds the
+// runtime's constant in every admitted program: only program code
+// spelling time.UTC can assign it, and that spelling refuses at the
+// fold in every compiled Go and cgo file of the closure. Audited on
+// go1.27.0-dst.14; time lies in no listed release's walked delta.
+// Consulted by the walk tiers alone — the fold sees no method call
+// (REQ-closure-observability-analysis).
+var timeMethods = map[string][]string{
+	"Time": {"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"},
 }
 
 // urlSymbols is the audited surface of package net/url, matched by
@@ -252,6 +276,35 @@ func SyncMethod(receiver, method string) bool { return slices.Contains(syncMetho
 // PoolMethod reports whether a sync receiver's method is in the
 // audited pooling set.
 func PoolMethod(receiver, method string) bool { return slices.Contains(poolMethods[receiver], method) }
+
+// TimeMethod reports whether a time receiver's method is in the
+// audited receiver-qualified set.
+func TimeMethod(receiver, method string) bool { return slices.Contains(timeMethods[receiver], method) }
+
+// ReceiverMethod is the one receiver-unwrap ladder every
+// receiver-qualified standard admission shares: a method declared in
+// the named standard package on a named receiver (pointer or value)
+// whose receiver and name the listed set carries. The purity tier's
+// sync admissions and the walk tiers' time admissions read it alike;
+// a nil or receiver-less function is never listed.
+func ReceiverMethod(fn *types.Func, pkgPath string, listed func(receiver, method string) bool) bool {
+	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath {
+		return false
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if pointer, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(pointer.Elem())
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil {
+		return false
+	}
+	return listed(named.Obj().Name(), fn.Name())
+}
 
 // SyncName reports whether a sync symbol name — receiver or method —
 // belongs to the audited synchronization set.

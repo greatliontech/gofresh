@@ -125,7 +125,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				// admission is a property of the operation, not of the
 				// call form (REQ-closure-observability-analysis).
 				name := functionSymbolName(target)
-				if !auditedStandardSymbol(h.SelectionAudited(), idx.path, name) {
+				if !auditedStandardCallee(h.SelectionAudited(), idx.path, name, target) {
 					effect = unauditedStandardEffect(idx.path, name)
 					ok = true
 				}
@@ -902,7 +902,7 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		// FlagSet provenance rule).
 		return externalEffect{}, false
 	}
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !auditedStandardSymbol(a.h.SelectionAudited(), pkgPath, name) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !auditedStandardCallee(a.h.SelectionAudited(), pkgPath, name, callee) {
 		effect = unauditedStandardEffect(pkgPath, name)
 		classified = true
 	}

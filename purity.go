@@ -6656,13 +6656,13 @@ func onceFieldCount(recv types.Type) int {
 // dataMemoMethod reports whether the method is sync.Map's Load, Store,
 // or LoadOrStore — the operations a data memo admits.
 func dataMemoMethod(audited bool, fn *types.Func) bool {
-	return auditedSyncReceiverMethod(audited, fn, auditset.MemoMethod)
+	return audited && auditset.ReceiverMethod(fn, "sync", auditset.MemoMethod)
 }
 
 // auditedOnceDo reports whether the method is sync.Once's Do, the
 // audited synchronization set's memo guard.
 func auditedOnceDo(audited bool, fn *types.Func) bool {
-	return auditedSyncReceiverMethod(audited, fn, func(receiver, method string) bool {
+	return audited && auditset.ReceiverMethod(fn, "sync", func(receiver, method string) bool {
 		return receiver == "Once" && method == "Do"
 	})
 }
@@ -8070,30 +8070,7 @@ func methodFactKey(fn *types.Func) string {
 // receiver-neutral because lock state cannot change dispatch. Grows
 // only by source audit (REQ-closure-shared-dynamic-state).
 func auditedSynchronization(audited bool, fn *types.Func) bool {
-	return auditedSyncReceiverMethod(audited, fn, auditset.SyncMethod)
-}
-
-// auditedSyncReceiverMethod is the one receiver-unwrap ladder the
-// purity tier's sync admissions share: a method of a sync-declared
-// named receiver (pointer or value) whose receiver and name the audited
-// set lists.
-func auditedSyncReceiverMethod(audited bool, fn *types.Func, listed func(receiver, method string) bool) bool {
-	if !audited || fn.Pkg() == nil || fn.Pkg().Path() != "sync" {
-		return false
-	}
-	sig, ok := fn.Type().(*types.Signature)
-	if !ok || sig.Recv() == nil {
-		return false
-	}
-	t := types.Unalias(sig.Recv().Type())
-	if pointer, ok := t.(*types.Pointer); ok {
-		t = types.Unalias(pointer.Elem())
-	}
-	named, ok := t.(*types.Named)
-	if !ok || named.Obj() == nil {
-		return false
-	}
-	return listed(named.Obj().Name(), fn.Name())
+	return audited && auditset.ReceiverMethod(fn, "sync", auditset.SyncMethod)
 }
 
 // auditedPooling reports whether the method is in the audited pooling
@@ -8110,7 +8087,7 @@ func auditedSyncReceiverMethod(audited bool, fn *types.Func, listed func(receive
 // keeps the fail-closed judgment at every use.
 // Grows only by source audit (REQ-closure-shared-dynamic-state).
 func auditedPooling(audited bool, fn *types.Func) bool {
-	return auditedSyncReceiverMethod(audited, fn, auditset.PoolMethod)
+	return audited && auditset.ReceiverMethod(fn, "sync", auditset.PoolMethod)
 }
 
 // provenSharedPools derives the package's content-proven pools and

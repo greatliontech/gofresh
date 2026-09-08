@@ -151,7 +151,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue"} {
+	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue", "shared", "localmethod", "poison", "poisoned", "boundmethod"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -302,6 +302,12 @@ func TestStamp(t *testing.T) {
 
 import "time"
 
+// A closed interface value dispatching a shared-name method reaches
+// the enumerated-target arm, the static call the callee arm.
+type shifter interface {
+	UTC() time.Time
+}
+
 // Span computes with fixed arguments only: construction under a fixed
 // zone, calendar and duration arithmetic, comparison, formatting, and
 // a zone change to another fixed zone.
@@ -314,9 +320,13 @@ func Span() string {
 	}
 	name, offset := b.Zone()
 	y, w := b.ISOWeek()
-	// (Time).UTC, Location, and AddDate share their names with ambient
-	// declarations and are excluded whole; a fixed zone and Add say
-	// the same things.
+	// The pure methods behind the shared names, admitted by receiver in
+	// subject flow.
+	c := b.UTC().AddDate(0, 1, 0)
+	var via shifter = c
+	if !c.After(a) || c.Unix() < a.UnixMilli()/1000 || c.UnixMicro() < 0 || !via.UTC().Equal(c) {
+		return "shared"
+	}
 	return d.String() + b.Format(time.RFC3339) + b.In(time.FixedZone("Y", 0)).Weekday().String() + name + string(rune('0'+offset%10)) + string(rune('0'+(y+w)%10)) + string(b.AppendFormat(nil, time.Kitchen)[0:1]) + d.Abs().String()
 }
 `)
@@ -416,6 +426,104 @@ func TestMirror(t *testing.T) {
 	_ = Mirror(1)
 }
 `)
+	// The same methods in startup flow — the field's refusal site —
+	// and the ambient method sharing the exclusion's name, which keeps
+	// its class, in its own package (the startup walk is package-wide).
+	writeFile(t, dir, "shared/shared.go", `package shared
+
+import "time"
+
+var base = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600))
+
+var later = base.UTC().AddDate(1, 2, 3)
+
+var facts = []int64{later.Unix(), later.UnixMilli(), later.UnixMicro()}
+
+var ordered = later.After(base)
+
+func Shared() int64 {
+	if !ordered {
+		return -1
+	}
+	return facts[0] + facts[1] + facts[2]
+}
+`)
+	writeFile(t, dir, "shared/shared_test.go", `package shared
+
+import "testing"
+
+func TestShared(t *testing.T) {
+	_ = Shared()
+}
+`)
+	writeFile(t, dir, "localmethod/localmethod.go", `package localmethod
+
+import "time"
+
+var local = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600)).Local()
+
+func Localized() int { return local.Year() }
+`)
+	writeFile(t, dir, "localmethod/localmethod_test.go", `package localmethod
+
+import "testing"
+
+func TestLocalized(t *testing.T) {
+	_ = Localized()
+}
+`)
+	// The soundness of the exported variable's read inside AddDate rests
+	// on every spelling of time.UTC refusing wherever it sits: a
+	// dependency's init assigning it poisons an otherwise clean subject.
+	writeFile(t, dir, "poison/poison.go", `package poison
+
+import "time"
+
+func init() { time.UTC = time.FixedZone("Z", 0) }
+`)
+	writeFile(t, dir, "poisoned/poisoned.go", `package poisoned
+
+import (
+	"time"
+
+	_ "example.com/audited/poison"
+)
+
+var later = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600)).UTC().AddDate(1, 0, 0)
+
+func Poisoned() int { return later.Year() }
+`)
+	writeFile(t, dir, "poisoned/poisoned_test.go", `package poisoned
+
+import "testing"
+
+func TestPoisoned(t *testing.T) {
+	_ = Poisoned()
+}
+`)
+	// The method value form binds a wrapper declaring the method it
+	// delegates to; the enumerated-target arm judges it as that method,
+	// its own body never walked.
+	writeFile(t, dir, "boundmethod/boundmethod.go", `package boundmethod
+
+import "time"
+
+var base = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600))
+
+var normalize = base.UTC
+
+var later = normalize()
+
+func Bound() int { return later.Year() }
+`)
+	writeFile(t, dir, "boundmethod/boundmethod_test.go", `package boundmethod
+
+import "testing"
+
+func TestBound(t *testing.T) {
+	_ = Bound()
+}
+`)
 	writeFile(t, dir, "elem/elem.go", `package elem
 
 import "reflect"
@@ -502,6 +610,10 @@ func TestDeref(t *testing.T) {
 		{Package: "example.com/audited/unixzone", Symbol: "Epoch"},
 		{Package: "example.com/audited/mirror", Symbol: "Mirror"},
 		{Package: "example.com/audited/elem", Symbol: "Kind"},
+		{Package: "example.com/audited/shared", Symbol: "Shared"},
+		{Package: "example.com/audited/localmethod", Symbol: "Localized"},
+		{Package: "example.com/audited/poisoned", Symbol: "Poisoned"},
+		{Package: "example.com/audited/boundmethod", Symbol: "Bound"},
 		{Package: "example.com/audited/elemname", Symbol: "Named"},
 		{Package: "example.com/audited/elemvalue", Symbol: "Deref"},
 	})
@@ -550,6 +662,14 @@ func TestDeref(t *testing.T) {
 	if stamp.Observable || !strings.Contains(stamp.Reason, "time.UTC") {
 		t.Fatalf("Stamp = %+v, want the refusal naming the Location global - the ambient timezone channel, not the calendar arithmetic", stamp)
 	}
+	bound := proofs[Subject{Package: "example.com/audited/boundmethod", Symbol: "Bound"}]
+	if !bound.Observable || bound.Reason != "" {
+		t.Fatalf("Bound = %+v, want the method value admitted as the method its wrapper declares", bound)
+	}
+	poisoned := proofs[Subject{Package: "example.com/audited/poisoned", Symbol: "Poisoned"}]
+	if poisoned.Observable || !strings.Contains(poisoned.Reason, "package scan: reaches unaudited standard operation time.UTC") {
+		t.Fatalf("Poisoned = %+v, want the dependency's assignment to time.UTC refusing the clean subject", poisoned)
+	}
 	span := proofs[Subject{Package: "example.com/audited/span", Symbol: "Span"}]
 	if !span.Observable {
 		t.Fatalf("fixed-argument time subject unobservable: %+v", span)
@@ -574,6 +694,14 @@ func TestDeref(t *testing.T) {
 	mirror := proofs[Subject{Package: "example.com/audited/mirror", Symbol: "Mirror"}]
 	if mirror.Observable || mirror.Reason == "" {
 		t.Fatalf("Mirror = %+v, want reflective value dispatch refused - the comparator admission must not open reflect", mirror)
+	}
+	shared := proofs[Subject{Package: "example.com/audited/shared", Symbol: "Shared"}]
+	if !shared.Observable || shared.Reason != "" {
+		t.Fatalf("Shared = %+v, want the receiver-qualified time methods admitted in startup flow", shared)
+	}
+	localized := proofs[Subject{Package: "example.com/audited/localmethod", Symbol: "Localized"}]
+	if localized.Observable || !strings.Contains(localized.Reason, "time.Local") {
+		t.Fatalf("Localized = %+v, want (Time).Local refused by name — it installs the ambient zone", localized)
 	}
 	kind := proofs[Subject{Package: "example.com/audited/elem", Symbol: "Kind"}]
 	if !kind.Observable || kind.Reason != "" {
@@ -654,7 +782,10 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		// A name shared by a pure declaration and an ambient one is
 		// excluded whole: After (the timer channel), the Unix constructors
 		// (they install the local zone), Location (the method returns the
-		// time.UTC variable), AddDate (re-enters Date through it).
+		// time.UTC variable), AddDate (re-enters Date through it) — the
+		// bare names; the audited method forms admit by receiver in
+		// timeMethods, Location's (a pointer into package time's own
+		// state) and Local's (the ambient zone) among the refused.
 		{"time", "After"}, {"time", "Unix"}, {"time", "UnixMilli"}, {"time", "UnixMicro"}, {"time", "Location"}, {"time", "AddDate"},
 		{"time", "AfterFunc"}, {"time", "Sleep"}, {"time", "Tick"},
 		{"time", "NewTimer"}, {"time", "NewTicker"}, {"time", "Parse"}, {"time", "ParseInLocation"},

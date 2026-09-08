@@ -1305,19 +1305,37 @@ time's fixed-argument construction and value computation included —
 Date, FixedZone, ParseDuration, and the calendar, clock-field,
 zone-accessor (In, Zone, ZoneBounds), rounding (Round, Truncate, IsZero),
 formatting, comparison, and duration operations over Time, Duration,
-Month, and Weekday values, none of which reads the clock, the local zone,
-or the exported time.UTC variable: the ambient channels enter only through
+Month, and Weekday values, none of the operations named here reading the
+clock, the local zone, or the exported time.UTC variable: the ambient
+channels enter only through
 Now, Since, Until, and the timers (the clock), Local, the Unix constructors
 (which install the local zone on the value they construct), and the
 loading constructors (the local zone and the zone database), Parse (which
-consults Local for zone abbreviations), and (Time).Location, which returns
-the time.UTC variable for a location-less Time, with AddDate re-entering
-Date through it — all of which stay refused, time.UTC being an exported
-mutable variable that refuses like any other; the admission is by bare
-name at every tier, so a name shared by a pure declaration and an ambient
-one — After, Local, UTC, Unix, UnixMilli, UnixMicro, Location, AddDate — is
-excluded whole, at the stated cost that a subject calling the pure method
-of a shared name ((Time).After, (Time).Unix, (Time).AddDate) refuses; net/url's
+consults Local for zone abbreviations) — all of which stay refused,
+time.UTC being an exported mutable variable that refuses like any other
+where program code names it; the admission is by bare name at the fold,
+which sees no method call, so a name shared by a pure declaration and an
+ambient one — After, Local, UTC, Unix, UnixMilli, UnixMicro, Location,
+AddDate — is excluded there whole, while the walk tiers, which know the
+callee's receiver, admit the pure method form the receiver distinguishes
+— its method value alike, the bound wrapper declaring the method it
+delegates to and judged as that method at the enumerated-target arm, its
+own body never walked: (Time).After,
+(Time).Unix, (Time).UnixMilli, (Time).UnixMicro, (Time).UTC (the unexported
+UTC location, never the variable), and (Time).AddDate, which re-enters Date
+through its own standard-internal Location call — the exported variable's
+value being the runtime's constant in every admitted program, since only
+program code spelling time.UTC can assign it and that spelling refuses at
+the fold over every compiled Go and cgo file of the subject's non-standard
+dependency and test listing (the audited property-harness modules and the
+generated test main excepted), a time.UTC spelling anywhere in that listing
+blocking the package's every subject as an unaudited-standard effect the
+package-scan backstop never carves out; an admitted method also hands out no
+pointer into package time's own state, so (Time).Location stays refused —
+for a location-less Time it returns the exported variable's value, the
+address of the package's own UTC location, a store through which no tier
+sees — and (Time).Local stays refused, installing the local zone on its
+result; net/url's
 escaping and composition included by symbol — QueryEscape, QueryUnescape,
 PathEscape, PathUnescape, User, UserPassword, the URL, Values, Userinfo, Error,
 EscapeError, and InvalidHostError type names, and the value methods of URL,

@@ -21,6 +21,14 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 			t.Errorf("pool name %s not admitted", name)
 		}
 	}
+	for _, name := range []string{"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"} {
+		if !auditset.TimeMethod("Time", name) || auditedStandardSymbol(true, "time", name) {
+			t.Errorf("time method %s: want receiver-qualified admission with the bare name excluded", name)
+		}
+	}
+	if auditset.TimeMethod("Time", "Local") || auditset.TimeMethod("Time", "Location") {
+		t.Error("(Time).Local or (Time).Location admitted — the ambient zone install and the pointer into package time's own state")
+	}
 	for _, name := range []string{"Type", "TypeOf", "DeepEqual", "Elem"} {
 		if !auditedRuntimeTypeSymbol(true, "reflect", name) || !auditset.ReflectSymbol(name) {
 			t.Errorf("reflect symbol %s not admitted", name)

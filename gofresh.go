@@ -400,7 +400,11 @@ const ClosureStrategy = closure.IdentityStrategy
 // (Type).Elem the descriptor read, (Value).Elem the operand-pinned
 // dereference — beside the runtime-type set (effect-scan@20 carries
 // the same for the fold).
-const ObservationRTA = "gofresh/observation-rta@38"
+// @39 admits time's pure Time methods behind the fold-excluded shared
+// names — After, Unix, UnixMilli, UnixMicro, UTC, AddDate —
+// where the walk tiers see the receiver; the fold's tables are
+// untouched.
+const ObservationRTA = "gofresh/observation-rta@39"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

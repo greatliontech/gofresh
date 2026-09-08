@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@38" {
-		t.Fatalf("ObservationRTA = %q, want reflect's Elem accessors admitted over the narrowed dispatch", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@39" {
+		t.Fatalf("ObservationRTA = %q, want time's receiver-qualified methods admitted over the Elem accessors", ObservationRTA)
 	}
 }
 

@@ -1,6 +1,11 @@
 package closure
 
-import "github.com/greatliontech/gofresh/internal/auditset"
+import (
+	"go/types"
+
+	"github.com/greatliontech/gofresh/internal/auditset"
+	"golang.org/x/tools/go/ssa"
+)
 
 type externalEffectKind uint8
 
@@ -62,6 +67,34 @@ func opaqueExternalEffect(kind externalEffectKind, reason string) externalEffect
 
 func symbolExternalEffect(kind externalEffectKind, pkgPath, name, reason string) externalEffect {
 	return externalEffect{kind: kind, packagePath: pkgPath, symbol: name, reason: reason + ambientDischargeChannel(kind)}
+}
+
+// auditedStandardMethod is the receiver-qualified arm of the walk
+// tiers' standard-symbol ladder: a standard method admitted where its
+// receiver distinguishes it from an ambient declaration sharing its
+// bare name — time's pure Time methods behind the fold-excluded shared
+// names. The fold sees no method call and has no such arm, so the
+// bare-name exclusions keep the variables and functions refused there.
+// A bound method value's wrapper declares the method it delegates to,
+// so the enumerated-target arm judges it as that method through this
+// ladder; the wrapper's own body is never walked
+// (REQ-closure-observability-analysis).
+func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
+	if !audited || fn == nil {
+		return false
+	}
+	f, ok := fn.Object().(*types.Func)
+	if !ok {
+		return false
+	}
+	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod)
+}
+
+// auditedStandardCallee is the walk tiers' whole standard admission
+// for one callee — the bare-name ladder or the receiver-qualified arm
+// — so no walk site can take one arm without the other.
+func auditedStandardCallee(audited bool, pkgPath, name string, fn *ssa.Function) bool {
+	return auditedStandardSymbol(audited, pkgPath, name) || auditedStandardMethod(audited, fn)
 }
 
 // unauditedStandardEffect is the one spelling of the fallback every
@@ -300,14 +333,15 @@ var classBPackages = map[string]bool{
 // channels enter only through Now/Since/Until and the timers (the
 // clock), Local, the Unix constructors, and the loading constructors
 // (the local zone and the zone database), Parse (which consults Local
-// for zone abbreviations), and (Time).Location with AddDate through
-// it (the time.UTC variable, refused like io.EOF), all of which stay
-// refused. The set is a table in internal/auditset because the match
-// is by BARE NAME at every tier: a name shared by a pure declaration
-// and an ambient one (After, Local, UTC, Unix, UnixMilli, UnixMicro,
-// Location, AddDate) is excluded whole — a subject calling the pure
-// (Time).After or (Time).Unix refuses on the shared name — so the
-// table names only the collision-free surface. Execution-free
+// for zone abbreviations), and (Time).Location (the time.UTC variable's
+// value, a pointer into the package's own state), all of which stay
+// refused. The set is a table in internal/auditset because this
+// match is by BARE NAME: a name shared by a pure declaration and an
+// ambient one (After, Local, UTC, Unix, UnixMilli, UnixMicro,
+// Location, AddDate) is excluded from it whole, the pure method forms
+// living in the receiver-qualified table auditedStandardCallee
+// consults where the walk knows the callee — so this table names only
+// the collision-free surface. Execution-free
 // references — an audited type or constant name (fmt.Stringer,
 // time.Time, time.Month and its constants, time.Duration and its
 // constants, time.Weekday and its constants, the layout constants) —

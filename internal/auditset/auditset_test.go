@@ -1,6 +1,8 @@
 package auditset
 
 import (
+	"go/token"
+	"go/types"
 	"slices"
 	"testing"
 )
@@ -23,6 +25,17 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	}
 	if !slices.Equal(poolNames, []string{"Get", "Pool", "Put"}) {
 		t.Fatalf("pool names = %v", poolNames)
+	}
+	if len(timeMethods) != 1 || !slices.Equal(timeMethods["Time"], []string{"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"}) {
+		t.Fatalf("time methods = %v", timeMethods)
+	}
+	for _, name := range timeMethods["Time"] {
+		if timeSymbols[name] {
+			t.Errorf("time method %s is also a bare-name symbol — the receiver-qualified set exists for names the bare table must exclude", name)
+		}
+	}
+	if !TimeMethod("Time", "UTC") || !TimeMethod("Time", "AddDate") || TimeMethod("Time", "Local") || TimeMethod("Time", "Location") || TimeMethod("Time", "Now") || TimeMethod("Duration", "UTC") || TimeMethod("Location", "String") {
+		t.Fatal("time method predicate wrong")
 	}
 	if !slices.Equal(memoNames, []string{"Load", "LoadOrStore", "Map", "Store"}) {
 		t.Fatalf("memo names = %v", memoNames)
@@ -86,5 +99,47 @@ func TestAuditedShapesAreDisjoint(t *testing.T) {
 	}
 	if Symbol("net/url", "Parse") || !Symbol("net/url", "QueryEscape") || Symbol("strings", "ToUpper") {
 		t.Fatal("Symbol answers outside its tables")
+	}
+}
+
+// The receiver ladder answers by declaring package, receiver type
+// name (one pointer level stripped), and method name — a same-named
+// method on a same-named type in another package, a receiver-less
+// function, and a nil function are never listed.
+func TestReceiverLadderKeysOnPackageReceiverAndName(t *testing.T) {
+	method := func(pkgPath, receiver, name string, pointer bool) *types.Func {
+		pkg := types.NewPackage(pkgPath, "p")
+		obj := types.NewTypeName(token.NoPos, pkg, receiver, nil)
+		named := types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+		var recv types.Type = named
+		if pointer {
+			recv = types.NewPointer(named)
+		}
+		sig := types.NewSignatureType(types.NewVar(token.NoPos, pkg, "t", recv), nil, nil, nil, nil, false)
+		return types.NewFunc(token.NoPos, pkg, name, sig)
+	}
+	if !ReceiverMethod(method("time", "Time", "UTC", false), "time", TimeMethod) || !ReceiverMethod(method("sync", "Mutex", "Lock", true), "sync", SyncMethod) {
+		t.Fatal("a listed method on its declaring package's receiver refused")
+	}
+	if ReceiverMethod(method("example.com/time", "Time", "UTC", false), "time", TimeMethod) || ReceiverMethod(method("time", "Time", "Local", false), "time", TimeMethod) || ReceiverMethod(method("time", "Duration", "UTC", false), "time", TimeMethod) {
+		t.Fatal("a foreign package, an unlisted name, or an unlisted receiver admitted")
+	}
+	free := types.NewFunc(token.NoPos, types.NewPackage("time", "time"), "UTC", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+	if ReceiverMethod(free, "time", TimeMethod) || ReceiverMethod(nil, "time", TimeMethod) {
+		t.Fatal("a receiver-less or nil function admitted")
+	}
+	universe := types.NewFunc(token.NoPos, nil, "UTC", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+	if ReceiverMethod(universe, "time", TimeMethod) {
+		t.Fatal("a package-less function admitted")
+	}
+	// A method declared on an alias of the receiver type resolves
+	// through the alias to the named type.
+	pkg := types.NewPackage("sync", "sync")
+	mutex := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "Mutex", nil), types.NewStruct(nil, nil), nil)
+	alias := types.NewAlias(types.NewTypeName(token.NoPos, pkg, "M", nil), mutex)
+	aliased := types.NewFunc(token.NoPos, pkg, "Lock", types.NewSignatureType(types.NewVar(token.NoPos, pkg, "m", types.NewPointer(alias)), nil, nil, nil, nil, false))
+	byValue := types.NewFunc(token.NoPos, pkg, "Lock", types.NewSignatureType(types.NewVar(token.NoPos, pkg, "m", alias), nil, nil, nil, nil, false))
+	if !ReceiverMethod(aliased, "sync", SyncMethod) || !ReceiverMethod(byValue, "sync", SyncMethod) {
+		t.Fatal("a method on an alias of a listed receiver (pointer or value) refused")
 	}
 }
