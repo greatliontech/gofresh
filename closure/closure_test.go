@@ -1956,11 +1956,13 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// startup flow alike.
 		{fixture: "flagreginvoke", subject: "TestProd", reason: "flag.BoolVar", absent: "package scan:"},
 		{fixture: "flagreginvokeinit", subject: "TestProd", reason: "flag.BoolVar", absent: "package scan:"},
-		// Method-form registration rides a flag.CommandLine (or
-		// NewFlagSet) mention, which the scan blocks as an unaudited
-		// symbol - the method-form sink judgment itself is pinned by
-		// the white-box registration-facts assertions.
-		{fixture: "flagregmethod", subject: "TestProd", reason: "package scan: reaches unaudited standard operation flag.CommandLine"},
+		// Method-form registration on the default set rides the same
+		// sink judgment through its receiver: flag.CommandLine is an
+		// audited selector at the fold, the storage is marked, and the
+		// subject reading none of it proves observable — the
+		// deliberate flip of the former unaudited-symbol pin
+		// (REQ-closure-observability-analysis's FlagSet forms).
+		{fixture: "flagregmethod", subject: "TestProd", observable: true},
 		// An init escaping the registered storage's address (q =
 		// &quiet) refuses at the escape site: the alias would carry
 		// parsed state past the mark.

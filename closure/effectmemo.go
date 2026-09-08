@@ -46,7 +46,9 @@ import (
 // secondary beside its last element, two imports binding one identifier
 // refusing the file (ObservationRTA@34 carries the same for the walk
 // tiers).
-const effectScanStrategy = "gofresh/effect-scan@17"
+// @18 admits the flag package's FlagSet forms at the fold
+// (ObservationRTA@35 carries the same for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@18"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

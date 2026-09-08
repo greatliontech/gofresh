@@ -147,6 +147,32 @@ var urlSymbols = map[string]bool{
 	"Unwrap": true, "Timeout": true, "Temporary": true,
 }
 
+// flagSymbols is the audited surface of package flag beside the
+// registration families the closure walks admit by name: the default
+// set's variable, the set constructor (an allocation binding its own
+// usage method), the error-handling constants, and the type names —
+// each a selector a registration's receiver or argument spells and
+// none an input channel by itself. Parse, Parsed, Lookup, Set, Args,
+// NArg, Arg, NFlag, Visit, VisitAll, PrintDefaults, Output, SetOutput,
+// Init, Usage, Name, UnquoteUsage, ErrHelp, and the callback families
+// never enter: they read or write parsed state, exit, or run arbitrary
+// code at Parse. A subject-time read of CommandLine still refuses at
+// the walk as a standard global; the registration-facts judgment
+// covers every registration's storage program-wide, the method form's
+// receiver included. CommandLine is the one exported mutable variable
+// an audited row admits: a startup-flow replacement of the default set
+// adds no channel, the storage judgment being per registration call
+// and set-blind, and every channel the variable carries is a method
+// refused by name. The admission is by bare name at every tier, so the
+// ErrorHandling name also admits the (*FlagSet).ErrorHandling accessor
+// — a field written only at construction and by Init, which refuses.
+// Audited on go1.27.0-dst.14 (REQ-closure-observability-analysis).
+var flagSymbols = map[string]bool{
+	"NewFlagSet": true, "CommandLine": true,
+	"FlagSet": true, "Flag": true, "Value": true, "Getter": true, "ErrorHandling": true,
+	"ContinueOnError": true, "ExitOnError": true, "PanicOnError": true,
+}
+
 // symbolTables is the one table of per-package audited surfaces the
 // class-B ladder consults; a widening is a row here, never a new
 // consulting site. The audited set has two shapes — a package
@@ -157,6 +183,7 @@ var symbolTables = map[string]map[string]bool{
 	"time":          timeSymbols,
 	"path/filepath": filepathSymbols,
 	"net/url":       urlSymbols,
+	"flag":          flagSymbols,
 }
 
 // Symbol reports whether a standard package's symbol name is in its

@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@34" {
-		t.Fatalf("ObservationRTA = %q, want the crypto/rand entropy class over the callee-parameter crossing", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@35" {
+		t.Fatalf("ObservationRTA = %q, want the FlagSet-form admission over the crypto/rand entropy class", ObservationRTA)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 
 // The per-file effect scan's strategy moves with every audited-set
 // widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @17 classifies crypto/rand's
-// operations as the entropy class beside ObservationRTA@34.
+// of serving (REQ-closure-effect-scan-memo); @18 admits the flag package's
+// FlagSet forms at the fold beside ObservationRTA@35.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@17" {
-		t.Fatalf("effect-scan strategy = %q, want @17", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@18" {
+		t.Fatalf("effect-scan strategy = %q, want @18", closure.EffectScanStrategy())
 	}
 }

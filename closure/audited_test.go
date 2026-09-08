@@ -519,6 +519,8 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		t.Error("math/big membership: want admitted on an audited toolchain only")
 	}
 	for _, tc := range []struct{ pkg, name string }{
+		{"flag", "NewFlagSet"}, {"flag", "CommandLine"}, {"flag", "FlagSet"}, {"flag", "Flag"}, {"flag", "Value"},
+		{"flag", "Getter"}, {"flag", "ErrorHandling"}, {"flag", "ContinueOnError"}, {"flag", "ExitOnError"}, {"flag", "PanicOnError"},
 		{"net/url", "QueryEscape"}, {"net/url", "QueryUnescape"}, {"net/url", "PathEscape"}, {"net/url", "PathUnescape"},
 		{"net/url", "User"}, {"net/url", "UserPassword"}, {"net/url", "URL"}, {"net/url", "Values"}, {"net/url", "Userinfo"},
 		{"net/url", "String"}, {"net/url", "EscapedPath"}, {"net/url", "ResolveReference"}, {"net/url", "Hostname"},
@@ -553,6 +555,15 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ pkg, name string }{
+		// flag's registration families (Bool, BoolVar, Var, Func, …) are
+		// admitted program-wide as sinks by the registration-facts
+		// judgment, never by this predicate: the rows below pin that no
+		// flag operation is pure-admitted by name.
+		{"flag", "Parse"}, {"flag", "Parsed"}, {"flag", "Lookup"}, {"flag", "Set"}, {"flag", "Args"}, {"flag", "NArg"},
+		{"flag", "Name"}, {"flag", "UnquoteUsage"},
+		{"flag", "Arg"}, {"flag", "NFlag"}, {"flag", "Visit"}, {"flag", "VisitAll"}, {"flag", "PrintDefaults"},
+		{"flag", "Output"}, {"flag", "SetOutput"}, {"flag", "Init"}, {"flag", "Usage"}, {"flag", "Var"}, {"flag", "Func"},
+		{"flag", "BoolFunc"}, {"flag", "TextVar"}, {"flag", "Bool"}, {"flag", "BoolVar"}, {"flag", "ErrHelp"},
 		{"net/url", "Parse"}, {"net/url", "ParseRequestURI"}, {"net/url", "ParseQuery"}, {"net/url", "Query"},
 		{"net/url", "JoinPath"}, {"net/url", "UnmarshalBinary"},
 		{"path/filepath", "Abs"}, {"path/filepath", "EvalSymlinks"}, {"path/filepath", "Glob"},

@@ -366,7 +366,14 @@ const ClosureStrategy = closure.IdentityStrategy
 // and the file fold binds an unnamed major-versioned import's declared name
 // as a secondary beside its last element, refusing a file whose imports
 // bind one identifier.
-const ObservationRTA = "gofresh/observation-rta@34"
+// @35 admits the flag package's FlagSet forms — the default set's
+// variable, the constructor, its constants and type names — as audited
+// symbols at every consulting tier (the file fold's selector arm, the
+// walk's direct-call fallback, and the dynamic-target arm), so a
+// method-form registration on a constructed or the default set rides
+// the registration-facts judgment and constructing a set is an
+// allocation in every flow.
+const ObservationRTA = "gofresh/observation-rta@35"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

@@ -1294,7 +1294,11 @@ says otherwise, Int through the reader it is given, an operand no read-side
 admission proves — are the entropy class in the one classification table both
 tiers consult, an external system call named as such (an input no guard pins
 and no bracket records, never observable), the exported Reader refusing as an
-unaudited selector at the file fold, and the unseeded math/rand sources keeping
+unaudited selector at the file fold, flag's CommandLine the one exported
+mutable variable an audited symbol row admits (REQ-closure-observability-analysis's
+registration clause: every channel it carries is a method refused by name, and
+the walk's standard-global arm refuses its subject-time read), and the
+unseeded math/rand sources keeping
 the unaudited fallback at both tiers until their own audit — the fold binding
 an unnamed import to its path's last element and, past a trailing
 major-version element, additionally to the element before it (the identifier
@@ -1343,10 +1347,25 @@ reads state Parse can have written, including the unparsed default,
 and a startup reference is at best a default read and at worst an
 escape of the storage's address into subject-reachable state, an alias
 the trace cannot follow. A sink that does not trace blocks every
-subject sharing the program. Parse, Lookup, and the
-callback families (Var, TextVar, Func, BoolFunc — arbitrary code at
-Parse) keep the exclusion everywhere, and subject-flow registration
-keeps the exclusion whole. One admission in the audited set is
+subject sharing the program. The FlagSet forms are audited symbols in
+the one table every tier consults — CommandLine, NewFlagSet, the
+FlagSet, Flag, Value, Getter, and ErrorHandling names, and the
+ContinueOnError, ExitOnError, and PanicOnError constants — so a
+method-form registration on the default set or on a set any flow
+constructs rides the same sink judgment through its receiver argument,
+constructing a set is an allocation in every flow, a startup-flow
+replacement of the default set adds no channel (the storage judgment is
+per registration call, set-blind), and the ErrorHandling name admits
+the accessor of the same name by bare-name collision (its field is
+written only at construction and by Init, which refuses); a
+subject-time read of CommandLine keeps the standard-global refusal, and
+every other flag name keeps its class in every flow — Parse, Parsed,
+Lookup, Set, Args, NArg, Arg, NFlag, Visit, VisitAll, PrintDefaults,
+Output, SetOutput, Init, Usage, Name, UnquoteUsage, and ErrHelp refuse
+by name, as do the callback families (Var, TextVar, Func, BoolFunc —
+arbitrary code at Parse) — and subject-flow registration keeps the
+exclusion whole through the storage judgment: a target that is no
+package-level variable poisons the sink. One admission in the audited set is
 operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
 Fprintln) is Sprint-equivalent value computation exactly when the writer
 operand provably pins every dynamic type it can carry to an audited

@@ -3,10 +3,10 @@ package flagregmethod
 import "flag"
 
 // Method-form registration and the method-expression form judge the
-// pointer argument past the receiver. The package still blocks at the
-// scan tier - flag.CommandLine is an unaudited symbol - so these
-// shapes pin the registration-facts judgment itself (the white-box
-// facts assertions), not a subject verdict.
+// pointer argument past the receiver: flag.CommandLine is an audited
+// selector, the storage is marked, and a subject reading none of it
+// proves observable. The white-box facts assertions pin the receiver
+// judgment itself.
 var (
 	verbose bool
 	quiet   bool
