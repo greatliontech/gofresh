@@ -858,7 +858,7 @@ in their repos.
       oracle reaches are recorded and rendered as a coverage bound, never a
       silent zero; the external-oracle mode itself stays the user's fork
       (the doc stays, retargeted to that half).
-- [ ] 164. gomutant: the window commit horizon derives from candidate
+- [x] 164. gomutant: the window commit horizon derives from candidate
       count (gomutant docs/issues/window-commit-horizon-for-suite-class-
       oracles.md) — a content-stable window budget sized by the oracle
       group's candidate count so suite-class oracles commit on a horizon
