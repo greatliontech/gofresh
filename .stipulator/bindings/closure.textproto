@@ -1033,8 +1033,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-refusal-channels"
-  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
-  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  content_hash: "d64d4b274cc1419882f3e22a71e63d56a3e5790ccad3f06b4a3ad36d234b7d7e"
+  source_hash: "a83eb2a45581b1f01bb012fb276e4839cfc56bf9749b30559357e2dd97715291"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAmbientEffectReasonsNameTheirDischargeChannel"
   role: BINDING_ROLE_TESTS
@@ -1043,8 +1043,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-refusal-channels"
-  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
-  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  content_hash: "d64d4b274cc1419882f3e22a71e63d56a3e5790ccad3f06b4a3ad36d234b7d7e"
+  source_hash: "a83eb2a45581b1f01bb012fb276e4839cfc56bf9749b30559357e2dd97715291"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestOpenWorldRefusalNamesTheConferringTerm"
   role: BINDING_ROLE_TESTS
@@ -1053,8 +1053,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-refusal-channels"
-  content_hash: "825986f43763326f01c71aa620f66c49bb490c63f35365e90d5c9c3150f7969a"
-  source_hash: "e93029250930da14b8f9213bbca02a4fe55d783d28e5835f31f0c83cf871c91b"
+  content_hash: "d64d4b274cc1419882f3e22a71e63d56a3e5790ccad3f06b4a3ad36d234b7d7e"
+  source_hash: "a83eb2a45581b1f01bb012fb276e4839cfc56bf9749b30559357e2dd97715291"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestUnauditedSelectionAttributesTierRefusals"
   role: BINDING_ROLE_TESTS
@@ -1063,8 +1063,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-refusal-channels"
-  content_hash: "fc879de165ab141beec4b323baf2fb065e88b6da76cc78f4ad98095aec0e5524"
-  source_hash: "b1c255c669e2b7e80e072bb82ff0e7d6835476809e1bf281df30d3456739d022"
+  content_hash: "d64d4b274cc1419882f3e22a71e63d56a3e5790ccad3f06b4a3ad36d234b7d7e"
+  source_hash: "a83eb2a45581b1f01bb012fb276e4839cfc56bf9749b30559357e2dd97715291"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityRefusalAttributesTheUnauditedSelection"
   role: BINDING_ROLE_TESTS
