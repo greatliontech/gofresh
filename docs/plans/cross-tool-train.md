@@ -148,7 +148,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -739,7 +739,7 @@ strategy bump.
       refused — a standard closure's body is never walked, so the
       fallback's refusal is the sound answer for a target the operand
       genuinely carries).
-- [ ] 180. gofresh: reflect's Elem by symbol — 464 of the 125 sweep's
+- [x] 180. gofresh: reflect's Elem by symbol — 464 of the 125 sweep's
       subjects refuse at the startup walk on reflect.Elem; audit
       (Type).Elem (an invoke-nothing type-level accessor) and
       (Value).Elem (a dereference of memory the operand pins) for the
@@ -754,6 +754,17 @@ strategy bump.
       deliberately); admit the pure method form where the receiver
       distinguishes it — (Time).UTC, (Time).AddDate — at every tier,
       the package-level variable and function keeping their class.
+- [ ] 182. gofresh: reflect's descriptor-view surface by symbol — the
+      180 re-measurement moved the same 1,365 subjects one view method
+      deeper, to reflect.Kind, and each admission on its own uncovers
+      the next; audit the whole invoke-nothing read surface of
+      reflect.Type on the pinned toolchain source (Kind, Name, String,
+      PkgPath, Size, Align, NumField, Field, FieldByName, NumMethod,
+      Key, Len, NumIn, NumOut, In, Out, Implements, AssignableTo,
+      ConvertibleTo, Comparable, and the Value forms sharing those
+      names) in one pass, admitting by symbol or recording the channel
+      that refuses each, so the sweep's next line is not a reflect
+      view method.
 - [x] 98. gofresh: stateless-value escape discharge — zero-field
       struct values cannot be observably mutated through escaped
       aliases; justification re-bases at triage on the then-current
