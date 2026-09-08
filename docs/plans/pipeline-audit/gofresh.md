@@ -119,7 +119,7 @@ Expected: default `go test ./...` from 555s to the seconds class; the fixture ti
 - **binary-roots-single-mask-union** — ⌈N/64⌉ attributed RTA analyses plus N provenance walks for a union needing none. *Lands: with the next reachability-scoping change.*
 - **attestation-keyed-record** — a `Sibling` fact-copy omission "reached a consumer e2e before any gofresh test". *Lands: user decision.*
 - **reusable-ci-workflow** — the rc-resolution contract exists in four copies; names gofresh's missing Taskfile. *Lands: user decision.*
-- Consolidation only: `unify-carrier-walks`, `unify-discharge-walks`, `registration-audit-walk-helper-unification`.
+- Consolidation only: `unify-carrier-walks`, `discharge-reason-channel-one-source` (the walk half landed as `dischargeCulprits`), `registration-audit-walk-helper-unification`.
 
 ## 8. Cross-cutting shape
 

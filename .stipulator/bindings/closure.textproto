@@ -1240,3 +1240,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "4976b0105fcd8805639dfba22b4c00058198ad61ab8182a35e504a3a8622c383"
 }
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "7b89277cdb6f3e3b7fd4fca6b129f5d08ffb4ac7d58e7a787b635c05c6e7259b"
+  source_hash: "36e5400142ec16bee05038b8698ab0df81071ea16710f0b0496034f39a7cbf7c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCulpritDischargeRecordsTheSortedPrefix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "06742573b0d07e17150235b7feca2a100adf327e24f476f5ac462af71d194ca4"
+}

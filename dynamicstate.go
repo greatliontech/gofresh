@@ -747,30 +747,7 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 		if !proof.Complete {
 			continue
 		}
-		surviving := ""
-		dischargedKeys := map[string]bool{}
-		// Every culprit the inventory names has a site entry (the
-		// composition records both together); the zero value would
-		// discharge, so the pairing is load-bearing.
-		for _, culprit := range state.rootCulprits[subject.Package] {
-			sites := state.culpritSites[subject.Package][culprit.key]
-			if sites.unattributed {
-				surviving = culprit.text
-				break
-			}
-			sited := false
-			for fn := range sites.fns {
-				if proof.Fns[fn] {
-					sited = true
-					break
-				}
-			}
-			if sited {
-				surviving = culprit.text
-				break
-			}
-			dischargedKeys[culprit.key] = true
-		}
+		surviving, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
 		if surviving == "" {
 			delete(scan.downgradeReason, subject)
 		} else {
@@ -787,12 +764,7 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 					dischargedKeys[key] = true
 				}
 			}
-			keys := make([]string, 0, len(dischargedKeys))
-			for key := range dischargedKeys {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			scan.attestationDischarges[subject] = strings.Join(keys, ",")
+			scan.attestationDischarges[subject] = joinDischargedKeys(dischargedKeys)
 		}
 	}
 	return nil
@@ -841,27 +813,7 @@ func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynam
 		if !proof.Complete {
 			continue
 		}
-		surviving := ""
-		dischargedKeys := map[string]bool{}
-		for _, culprit := range state.rootCulprits[path] {
-			sites := state.culpritSites[path][culprit.key]
-			if sites.unattributed {
-				surviving = culprit.text
-				break
-			}
-			sited := false
-			for fn := range sites.fns {
-				if proof.Fns[fn] {
-					sited = true
-					break
-				}
-			}
-			if sited {
-				surviving = culprit.text
-				break
-			}
-			dischargedKeys[culprit.key] = true
-		}
+		surviving, dischargedKeys := dischargeCulprits(proof, state, path)
 		for _, subject := range packageSubjects[path] {
 			if surviving == "" {
 				delete(scan.downgradeReason, subject)
@@ -873,16 +825,48 @@ func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynam
 			// included, exactly as the per-subject scoping records:
 			// attestation-borne acceptances (REQ-vouch-recorded).
 			if len(dischargedKeys) > 0 {
-				keys := make([]string, 0, len(dischargedKeys))
-				for key := range dischargedKeys {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-				scan.packageProcessDischarges[subject] = strings.Join(keys, ",")
+				scan.packageProcessDischarges[subject] = joinDischargedKeys(dischargedKeys)
 			}
 		}
 	}
 	return nil
+}
+
+// dischargeCulprits walks one package's root culprits against a
+// complete rooted-flow inventory — the one culprit walk both
+// reachability scopings share: the first culprit carrying an
+// unattributed mark or a site the inventory reaches survives and names
+// the downgrade, every culprit before it discharges, and nothing after
+// it is judged (the recording prefix stops at the first survivor).
+// Every culprit the inventory names has a site entry — the composition
+// records both together — and the zero value would discharge, so the
+// pairing is load-bearing (REQ-closure-shared-dynamic-state).
+func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, discharged map[string]bool) {
+	discharged = map[string]bool{}
+	for _, culprit := range state.rootCulprits[pkgPath] {
+		sites := state.culpritSites[pkgPath][culprit.key]
+		if sites.unattributed {
+			return culprit.text, discharged
+		}
+		for fn := range sites.fns {
+			if proof.Fns[fn] {
+				return culprit.text, discharged
+			}
+		}
+		discharged[culprit.key] = true
+	}
+	return "", discharged
+}
+
+// joinDischargedKeys renders a discharged-variable set in the
+// evidence's sorted, comma-joined form.
+func joinDischargedKeys(discharged map[string]bool) string {
+	keys := make([]string, 0, len(discharged))
+	for key := range discharged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 // auditedSourceListing is the audited source set: version-pinned

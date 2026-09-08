@@ -759,7 +759,9 @@ strategy bump.
       aliases; justification re-bases at triage on the then-current
       measure (the original 285-witness class was discharged in-tree
       meanwhile); zero measured mass closes the chunk unbuilt. The
-      three rides (unify-carrier-walks, unify-discharge-walks,
+      three rides (unify-carrier-walks, unify-discharge-walks — its
+      walk half landed at 179 as dischargeCulprits, the rest filed as
+      discharge-reason-channel-one-source — and
       binary-roots-single-mask-union) move to 179, the band's first
       reachability-scoping change.
 - [x] 99. gofresh: guarded deterministic memoization discharge — the

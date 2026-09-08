@@ -18,5 +18,6 @@ The collapse: one predicate over (site, operand, targets) consulted
 by both the computed-call and the invoke arms, with the target-class
 clause stated once.
 
-Lands: with the next reachability-scoping change (the same window as
-unify-carrier-walks and unify-discharge-walks).
+Lands: with the next reachability-scoping change — the same window as
+unify-carrier-walks; the discharge-walk sibling landed as
+dischargeCulprits.

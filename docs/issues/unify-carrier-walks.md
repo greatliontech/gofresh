@@ -30,4 +30,5 @@ positions under the same carrier rule and are required by comment to
 agree, enforced by nothing; one walk would name the term for both.
 
 Lands: 179 (the next reachability-scoping change — the same window as
-unify-discharge-walks and binary-roots-single-mask-union).
+binary-roots-single-mask-union; the discharge-walk sibling landed as
+dischargeCulprits).
