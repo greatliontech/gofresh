@@ -674,7 +674,7 @@ coldBufPool 647, net/http 305, errInboundClosed 54, frameAccounting
 42). Audited-set changes each carry their own source audit and
 strategy bump.
 
-- [ ] 116. gofresh: custom-FlagSet-scoped sink precision (was SEP
+- [x] 116. gofresh: custom-FlagSet-scoped sink precision (was SEP
       0b2) — scope 0b's registration poison to registrations whose
       FlagSet (or the default set) can carry os.Args, via
       Parse-argument provenance; narrows 0b's fail-closed widening.
