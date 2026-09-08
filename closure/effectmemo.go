@@ -50,7 +50,12 @@ import (
 // (ObservationRTA@35 carries the same for the walk tiers).
 // @19 admits sync.Map's Load, Store, and LoadOrStore (and the type
 // name) at the fold as the audited memo set.
-const effectScanStrategy = "gofresh/effect-scan@19"
+// @20 admits reflect's Elem at the fold beside the runtime-type set:
+// the fold's selector match is unresolved, so a field or method
+// selector through an import alias a local shadows (`r.Elem` under
+// `import r "reflect"`) spells reflect.Elem to it (ObservationRTA@38
+// carries the audit for the walk tiers).
+const effectScanStrategy = "gofresh/effect-scan@20"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

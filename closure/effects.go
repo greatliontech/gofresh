@@ -64,6 +64,14 @@ func symbolExternalEffect(kind externalEffectKind, pkgPath, name, reason string)
 	return externalEffect{kind: kind, packagePath: pkgPath, symbol: name, reason: reason + ambientDischargeChannel(kind)}
 }
 
+// unauditedStandardEffect is the one spelling of the fallback every
+// tier reaches for a standard symbol outside the audited sets — the
+// fold's selector scan, the walk's enumerated dynamic target, and the
+// walk's static callee.
+func unauditedStandardEffect(pkgPath, name string) externalEffect {
+	return symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+}
+
 // ambientDischargeChannel names the lift an ambient effect's boundary
 // affords, composed by the constructors so every reason of the kind
 // carries it (REQ-closure-refusal-channels). A network, plugin, or

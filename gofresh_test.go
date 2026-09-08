@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@37" {
-		t.Fatalf("ObservationRTA = %q, want the narrowed dispatch over the FlagSet provenance rule", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@38" {
+		t.Fatalf("ObservationRTA = %q, want reflect's Elem accessors admitted over the narrowed dispatch", ObservationRTA)
 	}
 }
 
@@ -807,9 +807,11 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 // widening, so a scan persisted under a narrower set refuses instead
 // of serving (REQ-closure-effect-scan-memo); @18 admits the flag package's
 // FlagSet forms at the fold beside ObservationRTA@35; @19 admits sync.Map's
-// memo operations at the fold as the audited memo set.
+// memo operations at the fold as the audited memo set; @20 admits
+// reflect's Elem at the fold, whose unresolved selector match a
+// shadowed import alias reaches, beside ObservationRTA@38.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@19" {
-		t.Fatalf("effect-scan strategy = %q, want @19", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@20" {
+		t.Fatalf("effect-scan strategy = %q, want @20", closure.EffectScanStrategy())
 	}
 }

@@ -8014,6 +8014,13 @@ func auditedImmutableType(audited bool, t types.Type) bool {
 	if !audited {
 		return false
 	}
+	return immutableRuntimeType(t)
+}
+
+// immutableRuntimeType is the one spelling of the audited-immutable
+// reflect types — the effect tiers' ruling and the object-closed
+// store rule read it alike.
+func immutableRuntimeType(t types.Type) bool {
 	named, ok := types.Unalias(t).(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return false
@@ -8632,12 +8639,8 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		// tiers' audited-immutable ruling; the producing expression's
 		// own operands keep their own pricing at the use walks
 		// (REQ-closure-shared-dynamic-state).
-		if t := p.TypesInfo.TypeOf(expr); t != nil {
-			if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
-				if named.Obj().Pkg().Path() == "reflect" && named.Obj().Name() == "Type" {
-					return true
-				}
-			}
+		if t := p.TypesInfo.TypeOf(expr); t != nil && immutableRuntimeType(t) {
+			return true
 		}
 		switch expr := expr.(type) {
 		case *ast.Ident:

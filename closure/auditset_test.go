@@ -21,7 +21,7 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 			t.Errorf("pool name %s not admitted", name)
 		}
 	}
-	for _, name := range []string{"Type", "TypeOf", "DeepEqual"} {
+	for _, name := range []string{"Type", "TypeOf", "DeepEqual", "Elem"} {
 		if !auditedRuntimeTypeSymbol(true, "reflect", name) || !auditset.ReflectSymbol(name) {
 			t.Errorf("reflect symbol %s not admitted", name)
 		}

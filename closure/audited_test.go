@@ -151,7 +151,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone"} {
+	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -416,6 +416,71 @@ func TestMirror(t *testing.T) {
 	_ = Mirror(1)
 }
 `)
+	writeFile(t, dir, "elem/elem.go", `package elem
+
+import "reflect"
+
+type Box struct{ N int }
+
+// The descriptor read in startup flow, its result a runtime-canonical
+// reflect.Type the subject compares.
+var boxType = reflect.TypeOf(&Box{}).Elem()
+
+func Kind() bool { return boxType == reflect.TypeOf(Box{}) }
+`)
+	writeFile(t, dir, "elem/elem_test.go", `package elem
+
+import "testing"
+
+func TestElem(t *testing.T) {
+	_ = Kind()
+}
+`)
+	// A view method beyond Elem, reached at the same walk, keeps the
+	// boundary — in its own package, the startup walk being
+	// package-wide (in subject flow the invoke itself refuses first,
+	// outside RTA).
+	writeFile(t, dir, "elemname/elemname.go", `package elemname
+
+import "reflect"
+
+type Box struct{ N int }
+
+var boxName = reflect.TypeOf(&Box{}).Elem().Name()
+
+func Named() string { return boxName }
+`)
+	writeFile(t, dir, "elemname/elemname_test.go", `package elemname
+
+import "testing"
+
+func TestNamed(t *testing.T) {
+	_ = Named()
+}
+`)
+	// The Value form is reached only through a producer, whose refusal
+	// stands — the reachability tier refuses the unsafe pointer the
+	// producer carries before any symbol is judged; in its own package
+	// so the refusal reaches no sibling row.
+	writeFile(t, dir, "elemvalue/elemvalue.go", `package elemvalue
+
+import "reflect"
+
+type Box struct{ N int }
+
+func Deref() bool {
+	b := Box{N: 3}
+	return reflect.ValueOf(&b).Elem().CanSet()
+}
+`)
+	writeFile(t, dir, "elemvalue/elemvalue_test.go", `package elemvalue
+
+import "testing"
+
+func TestDeref(t *testing.T) {
+	_ = Deref()
+}
+`)
 	h, err := NewAt(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -436,6 +501,9 @@ func TestMirror(t *testing.T) {
 		{Package: "example.com/audited/parsed", Symbol: "Parsed"},
 		{Package: "example.com/audited/unixzone", Symbol: "Epoch"},
 		{Package: "example.com/audited/mirror", Symbol: "Mirror"},
+		{Package: "example.com/audited/elem", Symbol: "Kind"},
+		{Package: "example.com/audited/elemname", Symbol: "Named"},
+		{Package: "example.com/audited/elemvalue", Symbol: "Deref"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -506,6 +574,18 @@ func TestMirror(t *testing.T) {
 	mirror := proofs[Subject{Package: "example.com/audited/mirror", Symbol: "Mirror"}]
 	if mirror.Observable || mirror.Reason == "" {
 		t.Fatalf("Mirror = %+v, want reflective value dispatch refused - the comparator admission must not open reflect", mirror)
+	}
+	kind := proofs[Subject{Package: "example.com/audited/elem", Symbol: "Kind"}]
+	if !kind.Observable || kind.Reason != "" {
+		t.Fatalf("Kind = %+v, want (Type).Elem admitted in startup flow", kind)
+	}
+	named := proofs[Subject{Package: "example.com/audited/elemname", Symbol: "Named"}]
+	if named.Observable || !strings.Contains(named.Reason, "reflect.Name") {
+		t.Fatalf("Named = %+v, want the view method beyond Elem refused by name", named)
+	}
+	deref := proofs[Subject{Package: "example.com/audited/elemvalue", Symbol: "Deref"}]
+	if deref.Observable || !strings.Contains(deref.Reason, "unsafe pointer reachable") {
+		t.Fatalf("Deref = %+v, want the Value producer's reachability refusal, never Elem's", deref)
 	}
 }
 
@@ -589,7 +669,7 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 	if !auditedRuntimeTypeSymbol(true, "reflect", "DeepEqual") {
 		t.Error("auditedRuntimeTypeSymbol(true, reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
 	}
-	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect"} {
+	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect", "Set", "SetInt", "Interface", "Field", "Index", "MethodByName", "Call"} {
 		if auditedRuntimeTypeSymbol(true, "reflect", name) {
 			t.Errorf("auditedRuntimeTypeSymbol(true, reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
 		}

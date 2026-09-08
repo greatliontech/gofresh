@@ -58,11 +58,19 @@ var poolMethods = map[string][]string{
 
 // reflectSymbols is the audited reflect surface the closure tiers
 // admit by symbol: the type-identity operations that read no dynamic
-// state (REQ-closure-shared-dynamic-state).
-var reflectSymbols = []string{"Type", "TypeOf", "DeepEqual"}
+// state, and the Elem accessors — the descriptor read and the
+// operand-pinned dereference, neither invoking anything. Audited on
+// go1.27.0-dst.14; reflect lies in no listed release's walked delta,
+// so the one audit holds under every listed selection
+// (REQ-closure-observability-analysis's audited-set boundary).
+var reflectSymbols = []string{"Type", "TypeOf", "DeepEqual", "Elem"}
 
 // reflectImmutableTypes is the audited set of reflect types whose
-// values are immutable once produced.
+// values are immutable once produced AND whose interface is sealed by
+// unexported methods, so every referent is the runtime's canonical
+// descriptor: the effect tiers' immutability ruling and the
+// object-closed store rule read one table, and a member must meet
+// both bars.
 var reflectImmutableTypes = []string{"Type"}
 
 // The name unions the closure tiers' symbol predicates read, computed

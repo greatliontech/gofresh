@@ -30,7 +30,7 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !MemoMethod("Map", "Load") || MemoMethod("Map", "Range") || MemoMethod("Pool", "Load") || !MemoName("LoadOrStore") || MemoName("Delete") {
 		t.Fatal("memo predicates wrong")
 	}
-	if !slices.Equal(reflectSymbols, []string{"Type", "TypeOf", "DeepEqual"}) || !slices.Equal(reflectImmutableTypes, []string{"Type"}) {
+	if !slices.Equal(reflectSymbols, []string{"Type", "TypeOf", "DeepEqual", "Elem"}) || !slices.Equal(reflectImmutableTypes, []string{"Type"}) {
 		t.Fatalf("reflect sets = %v, %v", reflectSymbols, reflectImmutableTypes)
 	}
 	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || !SyncMethod("Once", "Do") || SyncMethod("Once", "Lock") {

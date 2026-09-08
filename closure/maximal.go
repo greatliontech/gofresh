@@ -565,7 +565,7 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 					// sink poisons the package
 					// (REQ-closure-observability-analysis).
 				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
-					scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+					scan.add(unauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
 			}
 		}
@@ -932,12 +932,18 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 // - so it reads its operands and defeats no reachability.
 // At the SSA tiers the bare-name match also admits methods named Type
 // - notably the deterministic-pure (reflect.Value).Type; no other
-// reflect declaration is named DeepEqual. Chained
+// reflect declaration is named DeepEqual. Elem names two declarations,
+// both audited: (Type).Elem reads the canonical descriptor's element
+// (a panic on any other kind), and (Value).Elem dereferences the
+// interface words or the pointer its operand pins (nil to the zero
+// Value, a panic on any other kind) - neither calls a method. A
+// Value's producers stay unaudited, so the Value form is reached
+// only behind a producer's own refusal. Chained
 // selectors off admitted results are separate callees with their own
 // classifications at the declaration-RTA tier; this per-file scan
 // never sees them either way. reflect dispatch still defeats static
 // reachability everywhere else. Grows only by source audit
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-observability-analysis's audited-set boundary).
 func auditedRuntimeTypeSymbol(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "reflect" && auditset.ReflectSymbol(name)
 }

@@ -126,7 +126,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				// call form (REQ-closure-observability-analysis).
 				name := functionSymbolName(target)
 				if !auditedStandardSymbol(h.SelectionAudited(), idx.path, name) {
-					effect = symbolExternalEffect(externalEffectUnauditedStandard, idx.path, name, "reaches unaudited standard operation "+idx.path+"."+name)
+					effect = unauditedStandardEffect(idx.path, name)
 					ok = true
 				}
 			}
@@ -903,7 +903,7 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		return externalEffect{}, false
 	}
 	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !auditedStandardSymbol(a.h.SelectionAudited(), pkgPath, name) {
-		effect = symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, name, "reaches unaudited standard operation "+pkgPath+"."+name)
+		effect = unauditedStandardEffect(pkgPath, name)
 		classified = true
 	}
 	if osOpenFileMayMutate(callee, pkgPath, name, c) {

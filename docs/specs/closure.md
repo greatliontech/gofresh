@@ -1372,7 +1372,11 @@ methods sharing an audited name admitted with it) —
 is deliberately bounded by
 two exclusions that are soundness, not caution: reflect defeats static
 reachability itself, so only its invoke-nothing members are admitted —
-the runtime-type set and the structural comparator DeepEqual, which
+the runtime-type set; the Elem accessors, admitted by the shared name
+((Type).Elem a read of the runtime's canonical descriptor, (Value).Elem a
+dereference of the interface words or the pointer its operand pins, each
+panicking on any other kind, a Value's every producer keeping its own
+refusal); and the structural comparator DeepEqual, which
 performs no method call and compares function values by nil-ness alone —
 and registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a

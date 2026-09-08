@@ -396,7 +396,11 @@ const ClosureStrategy = closure.IdentityStrategy
 // @37 narrows a computed call's enumerated targets to the functions its
 // operand can hold where the closed-value walk names them — the
 // recursive local closure's cell now closes — at every walk.
-const ObservationRTA = "gofresh/observation-rta@37"
+// @38 admits reflect's Elem accessors by symbol at the walk tiers —
+// (Type).Elem the descriptor read, (Value).Elem the operand-pinned
+// dereference — beside the runtime-type set (effect-scan@20 carries
+// the same for the fold).
+const ObservationRTA = "gofresh/observation-rta@38"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
