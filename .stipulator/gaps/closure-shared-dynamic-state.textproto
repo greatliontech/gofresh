@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state"
 reason: "invariant needs a property witness over the mutation-shape / assertion-separation grammar; example pins anchor the named shapes"
-content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
-source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+content_hash: "eda3dd85ff9205acb5ed65e02ebb64a8da80d6b66262c1f1ccf902e0d82eefd6"
+source_hash: "896420208690b07cfe7fc82f88a2fc3befcf0ea032cb7b7ffee8221ac6eb0862"
 lands { manual { condition: "a property-test generator over dynamic-global mutation shapes exists" } }

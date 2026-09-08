@@ -2125,10 +2125,11 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 
 // dynamicStateCone selects the metadata nodes and the facts of one view
 // package's test-binary graph out of a view-wide gathering: the nodes
-// reachable over imports from the package's own listings (its plain
-// compilation, its test variants, and the intermediate recompilations
-// they induce), with each listing's fact folded under its type-checker
-// package path exactly as the solitary derivation would fold it.
+// reachable over imports from the listings the binary links (its test
+// variants and the intermediate recompilations they induce, and the
+// plain compilation only when no internal test variant replaces it),
+// with each listing's fact folded under its type-checker package path
+// exactly as the solitary derivation would fold it.
 func dynamicStateCone(meta []closure.GraphPackage, byListing map[string]closure.GraphPackage, factsByListing map[string]dynamicStateFact, viewPackage string) ([]closure.GraphPackage, map[string][]dynamicStateFact) {
 	in := map[string]bool{}
 	var visit func(listing string)
@@ -2145,11 +2146,27 @@ func dynamicStateCone(meta []closure.GraphPackage, byListing map[string]closure.
 			visit(imported)
 		}
 	}
-	// Two root families: the package's plain compilation, and every
-	// listing its test binary induces (both test variants, the
-	// intermediate recompilations, the generated test main).
+	// Two root families: every listing the package's test binary
+	// induces (both test variants, the intermediate recompilations, the
+	// generated test main), and — only when no internal test variant
+	// exists, so the binary is built from it — the package's plain
+	// compilation. With a test variant present the plain compilation is
+	// not linked into the test binary at all (every importer is
+	// recompiled against the variant), and its facts describe a
+	// declaration set the binary does not have: a proof enumerated over
+	// it — an unexported dispatch chained without the test files'
+	// declarations — would be served for a graph where a test-file
+	// declaration is linked (REQ-closure-shared-dynamic-state's
+	// per-graph judgment).
+	testVariant := false
 	for _, node := range meta {
-		if (node.PkgPath == viewPackage && node.ForTest == "") || node.ForTest == viewPackage {
+		if node.PkgPath == viewPackage && node.ForTest == viewPackage {
+			testVariant = true
+			break
+		}
+	}
+	for _, node := range meta {
+		if (node.PkgPath == viewPackage && node.ForTest == "" && !testVariant) || node.ForTest == viewPackage {
 			visit(node.ImportPath)
 		}
 	}

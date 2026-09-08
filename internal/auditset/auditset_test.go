@@ -18,7 +18,7 @@ func TestVersionListingAdmitsOnlyListedVersions(t *testing.T) {
 // The audited sets' exact contents — the goldens a source audit edits
 // (REQ-closure-shared-dynamic-state).
 func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
-	if !slices.Equal(syncNames, []string{"Lock", "Mutex", "RLock", "RUnlock", "RWMutex", "TryLock", "TryRLock", "Unlock"}) {
+	if !slices.Equal(syncNames, []string{"Do", "Lock", "Mutex", "Once", "RLock", "RUnlock", "RWMutex", "TryLock", "TryRLock", "Unlock"}) {
 		t.Fatalf("sync names = %v", syncNames)
 	}
 	if !slices.Equal(poolNames, []string{"Get", "Pool", "Put"}) {
@@ -27,7 +27,7 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !slices.Equal(reflectSymbols, []string{"Type", "TypeOf", "DeepEqual"}) || !slices.Equal(reflectImmutableTypes, []string{"Type"}) {
 		t.Fatalf("reflect sets = %v, %v", reflectSymbols, reflectImmutableTypes)
 	}
-	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || SyncMethod("Once", "Do") {
+	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || !SyncMethod("Once", "Do") || SyncMethod("Once", "Lock") {
 		t.Fatal("sync method predicate wrong")
 	}
 	if !PoolMethod("Pool", "Get") || PoolMethod("Pool", "New") {

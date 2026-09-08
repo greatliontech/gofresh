@@ -11,7 +11,7 @@ import (
 // table each, so the two spellings cannot drift apart
 // (REQ-closure-shared-dynamic-state's source-audit discipline).
 func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
-	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock"} {
+	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do"} {
 		if !auditedSyncSymbol(true, "sync", name) || !auditset.SyncName(name) {
 			t.Errorf("sync name %s not admitted", name)
 		}
@@ -26,7 +26,7 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 			t.Errorf("reflect symbol %s not admitted", name)
 		}
 	}
-	for _, stray := range []string{"Once", "Do", "WaitGroup", "Map", "New", "ValueOf", "Copy"} {
+	for _, stray := range []string{"OnceFunc", "OnceValue", "WaitGroup", "Map", "New", "ValueOf", "Copy"} {
 		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedRuntimeTypeSymbol(true, "reflect", stray) {
 			t.Errorf("%s admitted outside the tables", stray)
 		}

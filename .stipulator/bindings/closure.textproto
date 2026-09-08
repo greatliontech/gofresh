@@ -973,8 +973,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state"
-  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
-  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  content_hash: "eda3dd85ff9205acb5ed65e02ebb64a8da80d6b66262c1f1ccf902e0d82eefd6"
+  source_hash: "896420208690b07cfe7fc82f88a2fc3befcf0ea032cb7b7ffee8221ac6eb0862"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAuditedSymbolPredicatesReadTheSharedTables"
   role: BINDING_ROLE_TESTS
@@ -983,8 +983,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state"
-  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
-  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  content_hash: "eda3dd85ff9205acb5ed65e02ebb64a8da80d6b66262c1f1ccf902e0d82eefd6"
+  source_hash: "896420208690b07cfe7fc82f88a2fc3befcf0ea032cb7b7ffee8221ac6eb0862"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/auditset.TestBoundedTokenNeverShadowsALongerName"
   role: BINDING_ROLE_TESTS
@@ -1003,8 +1003,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state"
-  content_hash: "960fe329ab8a64693189b3dff3829fae4e25078decc726c1288284de23aab814"
-  source_hash: "ed0209740c5bcb1a443a9317495136bf0756e07922394ff8365d14aefef6e878"
+  content_hash: "eda3dd85ff9205acb5ed65e02ebb64a8da80d6b66262c1f1ccf902e0d82eefd6"
+  source_hash: "896420208690b07cfe7fc82f88a2fc3befcf0ea032cb7b7ffee8221ac6eb0862"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/auditset.TestAuditedSetsAreExactlyTheAuditedContents"
   role: BINDING_ROLE_TESTS
@@ -1199,4 +1199,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/closure.TestClosedFlagSetsAreOrdinaryState"
   role: BINDING_ROLE_TESTS
   shape_hash: "8a96a1b57eff11872ee9b5120343e4386feb22ee865722bff98162f172c05765"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "eda3dd85ff9205acb5ed65e02ebb64a8da80d6b66262c1f1ccf902e0d82eefd6"
+  source_hash: "896420208690b07cfe7fc82f88a2fc3befcf0ea032cb7b7ffee8221ac6eb0862"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestOnceFilledMemoKeepsTheProof"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0e442421dce7a41f311f1ff4875d95f07a88ca5ce80fc199233fef8bc4c3d4cc"
 }

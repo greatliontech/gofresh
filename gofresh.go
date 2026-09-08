@@ -181,7 +181,13 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // handed storage, which is what discharges the callee-side
 // bare-parameter skip (a stored bare parameter neither rebound nor
 // capture-broken).
-const DynamicStateStrategy = "gofresh/dynamic-state@35"
+// @36: the once-filled memo — a data-plane field or element written
+// directly in the literal a receiver-rooted sync.Once's Do runs — keeps
+// the receiver-effect proof; an unexported interface method's dispatch
+// chains into every in-package declaration of that name; sync.Once's
+// Do joins the audited synchronization set; a view's cone roots the
+// plain compilation only when no internal test variant replaces it.
+const DynamicStateStrategy = "gofresh/dynamic-state@36"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

@@ -1015,8 +1015,9 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 
 // auditedSyncSymbol reports whether a sync-package symbol is in the
 // audited synchronization set: the mutex types and their lock
-// operations, whose state cannot change dispatch and which acquire no
-// process-external state. sync exports no top-level functions by these
+// operations, and Once's Do, whose state cannot change dispatch and
+// which acquire no process-external state (the function Do runs is
+// the caller's own, judged where written). sync exports no top-level functions by these
 // names, so the method names are unambiguous. Grows only by source
 // audit (REQ-closure-shared-dynamic-state).
 func auditedSyncSymbol(audited bool, pkgPath, name string) bool {

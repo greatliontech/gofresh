@@ -7381,7 +7381,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		// type alone.
 		files := map[string]string{
 			"go.mod":       goMod,
-			"reg/reg.go":   "package reg\n\ntype fn func()\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Mut() { e.Cols[0] = \"x\" }\n\nfunc (e entry) Sneak() int {\n\tf := fn(e.Mut)\n\tf()\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Sneaks() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Sneak()\n\t}\n\treturn n\n}\n",
+			"reg/reg.go":   "package reg\n\ntype fn func()\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Mut() { e.Build = nil }\n\nfunc (e entry) Sneak() int {\n\tf := fn(e.Mut)\n\tf()\n\treturn len(e.Cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Sneaks() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Sneak()\n\t}\n\treturn n\n}\n",
 			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Sneaks() }\n",
 		}
 		dir := writeModuleTree(t, files)
@@ -8260,7 +8260,7 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.R is mutated",
 		},
 		"non-mutex sync field use marks": {
-			source:  "package view\n\nimport \"sync\"\n\ntype reg struct {\n\tonce sync.Once\n\tfn   func()\n\tn    int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.once.Do(func() {})\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
+			source:  "package view\n\nimport \"sync\"\n\ntype reg struct {\n\twg sync.WaitGroup\n\tfn func()\n\tn  int\n}\n\nvar R = &reg{}\n\nfunc (r *reg) Count() int {\n\tr.wg.Wait()\n\treturn r.n\n}\n\nfunc F() int { return R.Count() }\n",
 			culprit: "example.com/view.R is mutated",
 		},
 		"assignment writer method call marks": {

@@ -184,7 +184,7 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@35" {
+	if DynamicStateStrategy != "gofresh/dynamic-state@36" {
 		t.Fatalf("DynamicStateStrategy = %q, want the per-parameter argument-storage insertion facts", DynamicStateStrategy)
 	}
 }

@@ -320,7 +320,17 @@ object alone, its element references remaining escapes, while a capture
 nested inside the literal marks through its own shape. A direct method CALL on a statically-typed non-interface
 carrier is judged by the method's own receiver-effect proof instead: the
 declaring package proves a method unable to write receiver-reachable state —
-the receiver never stands in a write position and never escapes, values read
+the receiver never stands in a write position and never escapes, with one
+exception, the once-filled memo: a write to a receiver-rooted field or element
+whose selection hands out no mutable reach and carries no signature, placed
+directly in the function literal a receiver-rooted sync.Once's Do runs — the
+Once selected from the pointer receiver's identifier itself, the only
+by-value sync.Once field of the receiver's type, unexported, with exactly one
+Do site in its package, the fill's targets reaching no Once — so no second
+literal, second memo, other package, shared pointer, receiver copy, or re-arm
+can make two fills observable — fills at most once per receiver, so every subject observes the
+same value whichever subject filled it — the get-or-compute idiom,
+warm/cold-equivalent by construction — values read
 off it are tracked as the receiver's own — a binding whose type hands out
 mutable reach taints its local (a value copy that cannot write back flows
 freely), a receiver-rooted read is judged at its outermost selector or index
@@ -337,14 +347,22 @@ through or an escape of a tainted value refuses, and only the method's own
 return position hands one out — a return inside a nested function literal is
 an escape position, since the literal outlives the body carrying what it
 captured and no call-site result judgment sees through a signature — and it chains only into sibling methods already proven or into
-the audited synchronization set — and a call to a proven method marks nothing,
+the audited synchronization set, a dispatch of an UNEXPORTED method through a
+receiver-reachable interface value chaining into every in-package
+declaration of that name under the same fixed point (only the package's own
+types can declare it, and a composite promotes one of those declarations;
+no declaration means a nil value and refuses), while an exported method's
+dispatch keeps the escape, a composite being able to promote it from a
+foreign type — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
 each hand out no mutable reach or are audited-immutable (reflect.Type,
 runtime-canonical and never written after construction; reflect.TypeOf, its
 pure constructor, admitted with it at the effect classification tiers); a call to any unproven,
 unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
 the fail-closed mark. The audited synchronization set — sync.Mutex and
-sync.RWMutex with their lock operations, receiver-neutral and never
+sync.RWMutex with their lock operations, and sync.Once's Do (a done flag
+under a mutex running the caller's own function once, program code judged
+where it is written), receiver-neutral and never
 process-external because lock state cannot change dispatch — is admitted
 identically at the effect classification tiers, and grows only by source
 audit. The audited pooling set — `sync.Pool` with its `Get` and `Put`

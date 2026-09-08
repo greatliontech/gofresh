@@ -29,11 +29,15 @@ func (l VersionListing) Listed(key, version string) bool {
 }
 
 // syncMethods is the audited synchronization set: sync's mutex
-// receivers and the lock-shaped methods on them. Grows only by source
-// audit (REQ-closure-shared-dynamic-state).
+// receivers and the lock-shaped methods on them, and Once's Do — a
+// done flag under a mutex running the caller's own function exactly
+// once, program code judged where it is written; the Once's state
+// cannot change dispatch. Grows only by source audit
+// (REQ-closure-shared-dynamic-state).
 var syncMethods = map[string][]string{
 	"Mutex":   {"Lock", "Unlock", "TryLock"},
 	"RWMutex": {"Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock"},
+	"Once":    {"Do"},
 }
 
 // poolMethods is the audited pooling set: sync.Pool and its Get and

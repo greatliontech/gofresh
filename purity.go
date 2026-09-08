@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -6251,7 +6252,7 @@ func boundValueJudged(audited bool, p *packages.Package, roots map[types.Object]
 }
 
 // paramLeakFreeFunctions proves, per plain named function, which
-// parameters demonstrably leak nothing: the bound value never writes,
+// parameters demonstrably leak nothing: the bound value never writes a carrier,
 // escapes, or outlives the call per boundValueLeakFree. Keys are
 // "name\x00index"; the fact layer prefixes the package path. Blank and
 // unnamed parameters cannot be referenced and are leak-free by
@@ -6590,13 +6591,156 @@ func receiverRetentionFreeMethods(audited bool, p *packages.Package, readOnlyLoc
 	return proven
 }
 
+// fillSelection reports whether a write target is a field or element
+// selection whose type reaches no sync.Once — the shapes a once-filled
+// memo may set. The fill lifts only the write-position refusal: the
+// selector and index arms still visit the target at its own node as a
+// read, tainted alias or not, and refuse one whose type hands out
+// mutable reach or carries a signature, so the content a fill can set
+// is exactly what those arms admit — data. A Once is data to those
+// arms, and a fill that rewrote one would re-arm it: refused here
+// (REQ-closure-shared-dynamic-state).
+func fillSelection(info *types.Info, expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.SelectorExpr, *ast.IndexExpr:
+		return !typeReachesOnce(info.TypeOf(expr), map[types.Type]bool{})
+	}
+	return false
+}
+
+// typeReachesOnce reports whether a type is or contains sync.Once by
+// value — through named, struct, and array types.
+func typeReachesOnce(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Named:
+		if t.Obj() != nil && t.Obj().Pkg() != nil && t.Obj().Pkg().Path() == "sync" && t.Obj().Name() == "Once" {
+			return true
+		}
+		return typeReachesOnce(t.Underlying(), seen)
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if typeReachesOnce(t.Field(i).Type(), seen) {
+				return true
+			}
+		}
+	case *types.Array:
+		return typeReachesOnce(t.Elem(), seen)
+	}
+	return false
+}
+
+// onceFieldCount counts the by-value sync.Once fields of a receiver
+// type (through its pointer), the memo bound's denominator.
+func onceFieldCount(recv types.Type) int {
+	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
+		recv = ptr.Elem()
+	}
+	st, ok := types.Unalias(recv).Underlying().(*types.Struct)
+	if !ok {
+		return 0
+	}
+	n := 0
+	for i := 0; i < st.NumFields(); i++ {
+		if named, ok := types.Unalias(st.Field(i).Type()).(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Once" {
+			n++
+		}
+	}
+	return n
+}
+
+// auditedOnceDo reports whether the method is sync.Once's Do, the
+// audited synchronization set's memo guard.
+func auditedOnceDo(audited bool, fn *types.Func) bool {
+	return auditedSyncReceiverMethod(audited, fn, func(receiver, method string) bool {
+		return receiver == "Once" && method == "Do"
+	})
+}
+
+// onceFieldOfDo resolves a call of the shape `x.field.Do(f)` — Do on a
+// by-value sync.Once field selected from some value — to that field,
+// or nil for every other shape: a Do on a local, a pointer field, an
+// embedded Once reached by promotion, or a method value.
+func onceFieldOfDo(audited bool, info *types.Info, call *ast.CallExpr) *types.Var {
+	if len(call.Args) != 1 {
+		return nil
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	selection, ok := info.Selections[sel]
+	if !ok || selection.Kind() != types.MethodVal {
+		return nil
+	}
+	fn, ok := selection.Obj().(*types.Func)
+	if !ok || !auditedOnceDo(audited, fn) {
+		return nil
+	}
+	fieldSel, ok := sel.X.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	fieldSelection, ok := info.Selections[fieldSel]
+	if !ok || fieldSelection.Kind() != types.FieldVal || len(fieldSelection.Index()) != 1 {
+		return nil
+	}
+	field, ok := fieldSelection.Obj().(*types.Var)
+	if !ok {
+		return nil
+	}
+	named, ok := types.Unalias(field.Type()).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "sync" || named.Obj().Name() != "Once" {
+		return nil
+	}
+	return field
+}
+
+// unexportedDispatchTargets resolves a method call through a
+// receiver-rooted interface value to the read-only proof's chain
+// targets: the called method must be unexported and declared by an
+// interface of this package, so every body it can dispatch to is a
+// method of that name declared by one of this package's own types (a
+// foreign type cannot declare it, and a composite that promotes it
+// promotes one of these declarations); the targets are exactly those
+// declarations, and none at all means the value can only be nil and
+// refuses. A declaration without a body (implemented outside Go) is
+// no sibling under proof, so its name refuses whatever else declares
+// it. An exported method keeps the escape: a composite can
+// promote it from a foreign type beside an in-package provider of the
+// unexported ones (REQ-closure-shared-dynamic-state).
+func unexportedDispatchTargets(p *packages.Package, selection *types.Selection, fn *types.Func, declaredByName map[string][]string, bodyless map[string]bool) ([]string, bool) {
+	if p.Types == nil || fn.Exported() || fn.Pkg() != p.Types || selection.Recv() == nil || bodyless[fn.Name()] {
+		return nil, false
+	}
+	recv := types.Unalias(selection.Recv())
+	if ptr, ok := recv.(*types.Pointer); ok {
+		recv = types.Unalias(ptr.Elem())
+	}
+	if _, ok := recv.Underlying().(*types.Interface); !ok {
+		return nil, false
+	}
+	targets := append([]string(nil), declaredByName[fn.Name()]...)
+	return targets, len(targets) > 0
+}
+
 // receiverReadOnlyMethods proves, in the declaring package alone, which
 // methods cannot write receiver-reachable state: the receiver never
 // stands in a write position (assignment target, inc/dec, send,
-// address capture), never escapes (argument, return, store, binding,
-// or any unrecognized use), and chains only into sibling methods
-// already proven read-only - an intra-package fixed point, fail-closed
-// on every other shape, cross-package chains included
+// address capture) except for the once-filled memo — a data-plane
+// field or element written directly in the literal a receiver-rooted
+// sync.Once's Do runs — never escapes (argument, return, store,
+// binding, or any unrecognized use), and chains only into sibling
+// methods already proven read-only — an unexported interface method's
+// dispatch chaining into every in-package declaration of that name —
+// an intra-package fixed point, fail-closed on every other shape,
+// cross-package chains included
 // (REQ-closure-shared-dynamic-state). Keys are "Recv.Method"; the fact
 // layer prefixes the package path.
 func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool {
@@ -6608,9 +6752,15 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 		recv *ast.Ident
 	}
 	methods := map[string]methodBody{}
+	// bodyless names the receiver methods declared without a body:
+	// implemented outside Go, never a sibling under proof.
+	bodyless := map[string]bool{}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
+			if ok && fd.Recv != nil && fd.Name != nil && fd.Body == nil {
+				bodyless[fd.Name.Name] = true
+			}
 			if !ok || fd.Recv == nil || fd.Name == nil || fd.Body == nil || len(fd.Recv.List) != 1 {
 				continue
 			}
@@ -6629,6 +6779,38 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 	}
 	if len(methods) == 0 {
 		return nil
+	}
+	// onceSites counts, per sync.Once field of this package's types, the
+	// Do calls anywhere in the package — a method, a plain function, an
+	// initializer. A once-filled memo is sound only for a field with
+	// exactly one site: two literals on one Once run whichever a
+	// subject's order reaches first, and the field's value would then
+	// depend on that order. An exported field can be fired from another
+	// package, a pointer field can be shared across receivers — neither
+	// hosts a fill (REQ-closure-shared-dynamic-state).
+	onceSites := map[*types.Var]int{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if field := onceFieldOfDo(audited, p.TypesInfo, call); field != nil {
+				onceSites[field]++
+			}
+			return true
+		})
+	}
+	// declaredByName lists, per method name, every sibling key declaring
+	// it — the chain targets of an unexported-method dispatch.
+	declaredByName := map[string][]string{}
+	for key := range methods {
+		if dot := strings.LastIndex(key, "."); dot >= 0 {
+			declaredByName[key[dot+1:]] = append(declaredByName[key[dot+1:]], key)
+		}
+	}
+	for _, keys := range declaredByName {
+		sort.Strings(keys)
 	}
 	// chains[m] lists sibling method keys m's receiver chains into;
 	// disqualified[m] marks a demonstrated write or escape.
@@ -6829,6 +7011,67 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 		// what it captured, and the call-site result judgment cannot see
 		// through a signature, so a receiver-reachable result there is
 		// an escape (REQ-closure-shared-dynamic-state).
+		// onceFill marks the write statements the once-filled memo
+		// admits: an assignment or inc/dec whose every receiver-rooted
+		// target is a field or element selection (the read arms refuse a
+		// carrier-typed one at its node), placed directly in the
+		// function literal a receiver-rooted sync.Once's Do runs. The
+		// Once is the receiver's own, so the fill happens at most once
+		// per receiver and every caller — every subject — observes the
+		// same value: the get-or-compute memo, warm/cold-equivalent by
+		// construction. Any other receiver-rooted write keeps the
+		// receiver in a write position (REQ-closure-shared-dynamic-state).
+		onceFill := map[ast.Node]bool{}
+		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			field := onceFieldOfDo(audited, p.TypesInfo, call)
+			if field == nil || onceSites[field] != 1 || field.Exported() {
+				return true
+			}
+			// The Once is the receiver's own: selected from the
+			// receiver identifier itself — never through a pointer or
+			// element step, whose Once one receiver can share with
+			// another — through a pointer receiver (a value receiver's
+			// copy discards its done flag, so the literal would run on
+			// every call), and the only Once field of the receiver's
+			// type, since two memos on one receiver can read each
+			// other's targets in whichever order the subjects fill
+			// them. onceFieldOfDo established the two selector shapes
+			// the chain below asserts.
+			ident, ok := call.Fun.(*ast.SelectorExpr).X.(*ast.SelectorExpr).X.(*ast.Ident)
+			if !ok || p.TypesInfo.Uses[ident] != recvObj || onceFieldCount(recvObj.Type()) != 1 {
+				return true
+			}
+			if _, pointer := types.Unalias(recvObj.Type()).(*types.Pointer); !pointer {
+				return true
+			}
+			lit, ok := call.Args[0].(*ast.FuncLit)
+			if !ok {
+				return true
+			}
+			for _, stmt := range lit.Body.List {
+				switch stmt := stmt.(type) {
+				case *ast.AssignStmt:
+					fill := true
+					for _, lhs := range stmt.Lhs {
+						if recvRooted(lhs) && !fillSelection(p.TypesInfo, lhs) {
+							fill = false
+						}
+					}
+					if fill {
+						onceFill[stmt] = true
+					}
+				case *ast.IncDecStmt:
+					if fillSelection(p.TypesInfo, stmt.X) {
+						onceFill[stmt] = true
+					}
+				}
+			}
+			return true
+		})
 		innerReturns := map[*ast.ReturnStmt]bool{}
 		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
 			lit, ok := n.(*ast.FuncLit)
@@ -6938,13 +7181,13 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 						consume(ident)
 						continue
 					}
-					if recvRooted(lhs) {
+					if recvRooted(lhs) && !onceFill[n] {
 						disqualified[key] = true
 					}
 				}
 
 			case *ast.IncDecStmt:
-				if recvRooted(n.X) {
+				if recvRooted(n.X) && !onceFill[n] {
 					disqualified[key] = true
 				}
 			case *ast.SendStmt:
@@ -7047,7 +7290,7 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 					// invoked - so it never consumes and the selector arm
 					// refuses it.
 					if len(n.Args) == 1 && recvRooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
-						if t := p.TypesInfo.TypeOf(n); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) && !typeCarriesSignature(t, make(map[types.Type]bool)) {
+						if !callResultHandsOut(p.TypesInfo.TypeOf(n)) {
 							consume(n.Args[0])
 						}
 					}
@@ -7082,6 +7325,24 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 								}
 								break
 							}
+							// An unexported interface method is declared
+							// only by this package's own types, so a
+							// dispatch through it chains into every
+							// declaration of that name under the same
+							// fixed point (REQ-closure-shared-dynamic-state).
+							if targets, ok := unexportedDispatchTargets(p, selection, fn, declaredByName, bodyless); ok {
+								if chains[key] == nil {
+									chains[key] = map[string]bool{}
+								}
+								for _, target := range targets {
+									chains[key][target] = true
+								}
+								consume(sel.X)
+								if !instantiatedResultsHandOutNothing(audited, selection.Type()) && !governedCalls[n] {
+									disqualified[key] = true
+								}
+								break
+							}
 						}
 					}
 					disqualified[key] = true
@@ -7094,7 +7355,7 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 					// and a signature-carrying value IS its environment,
 					// so it refuses whatever the reach walk says
 					// (the receiver-stored closure launder).
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool)) {
+					if callResultHandsOut(p.TypesInfo.TypeOf(n)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
@@ -7128,7 +7389,7 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 					// the declaring package could prove every install
 					// environment-free, which this engine does not audit
 					// (the receiver-stored closure launder).
-					if t := p.TypesInfo.TypeOf(n); t == nil || typeHandsOutMutableReach(t, make(map[types.Type]bool)) || typeCarriesSignature(t, make(map[types.Type]bool)) {
+					if callResultHandsOut(p.TypesInfo.TypeOf(n)) {
 						disqualified[key] = true
 					} else {
 						consume(n.X)
