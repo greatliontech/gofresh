@@ -29,5 +29,5 @@ closure tier) walk the same type-parameter, receiver, and parameter
 positions under the same carrier rule and are required by comment to
 agree, enforced by nothing; one walk would name the term for both.
 
-Lands: with the next reachability-scoping change (the same window as
+Lands: 179 (the next reachability-scoping change — the same window as
 unify-discharge-walks and binary-roots-single-mask-union).

@@ -754,15 +754,14 @@ strategy bump.
       deliberately); admit the pure method form where the receiver
       distinguishes it — (Time).UTC, (Time).AddDate — at every tier,
       the package-level variable and function keeping their class.
-- [ ] 98. gofresh: stateless-value escape discharge — zero-field
+- [x] 98. gofresh: stateless-value escape discharge — zero-field
       struct values cannot be observably mutated through escaped
       aliases; justification re-bases at triage on the then-current
       measure (the original 285-witness class was discharged in-tree
-      meanwhile); zero measured mass closes the chunk unbuilt. RIDES
-      at this chunk (first reachability-scoping change of the band):
-      gofresh docs/issues/unify-carrier-walks.md,
-      unify-discharge-walks.md, binary-roots-single-mask-union.md —
-      three docs delete at close. Release, then consumer bumps ride.
+      meanwhile); zero measured mass closes the chunk unbuilt. The
+      three rides (unify-carrier-walks, unify-discharge-walks,
+      binary-roots-single-mask-union) move to 179, the band's first
+      reachability-scoping change.
 - [ ] 99. gofresh: guarded deterministic memoization discharge — the
       get-or-compute idiom (check-then-fill under mutex/Once/sync.Map,
       key-derived fill through proven-env-free functions, no

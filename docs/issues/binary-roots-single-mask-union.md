@@ -8,4 +8,4 @@ the same set in one walk, and drops the N materialized per-root maps.
 The per-root path stays for the per-subject (single-subject) scoping,
 which genuinely needs attribution.
 
-Lands: with the next reachability-scoping change.
+Lands: 179 (the next reachability-scoping change).

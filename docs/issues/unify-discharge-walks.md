@@ -8,4 +8,4 @@ the destination discharge map. One walk parameterized by
 semantics (stop at the first survivor) stay shared by construction
 instead of by parallel maintenance.
 
-Lands: with the next reachability-scoping change.
+Lands: 179 (the next reachability-scoping change).
