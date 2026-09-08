@@ -820,7 +820,7 @@ form — is chartered here in execution order: soundness first, then
 correctness, then consolidations. The genuine forks stay `user decision`
 in their repos.
 
-- [ ] 158. gomutant: the never-executed bucket joins the audit sample
+- [x] 158. gomutant: the never-executed bucket joins the audit sample
       (gomutant docs/issues/never-executed-exemption-unaudited.md) — a
       mutant whose extent the coverage attributes to no test is exempt
       from every batch AND outside the narrowed audit, so a wrong
