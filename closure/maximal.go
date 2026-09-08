@@ -923,31 +923,6 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	return auditset.PurePackage(pkgPath)
 }
 
-// auditedRuntimeTypeSymbol reports whether a reflect-package symbol is
-// in the audited reflect set: reflect.Type values are runtime-canonical
-// and immutable, and reflect.TypeOf is bit-deterministic pure
-// computation over its operand's static type. reflect.DeepEqual is a
-// structural comparator that invokes nothing - no method call, no
-// Call/MethodByName dispatch; function values compare by nil-ness only
-// - so it reads its operands and defeats no reachability.
-// At the SSA tiers the bare-name match also admits methods named Type
-// - notably the deterministic-pure (reflect.Value).Type; no other
-// reflect declaration is named DeepEqual. Elem names two declarations,
-// both audited: (Type).Elem reads the canonical descriptor's element
-// (a panic on any other kind), and (Value).Elem dereferences the
-// interface words or the pointer its operand pins (nil to the zero
-// Value, a panic on any other kind) - neither calls a method. A
-// Value's producers stay unaudited, so the Value form is reached
-// only behind a producer's own refusal. Chained
-// selectors off admitted results are separate callees with their own
-// classifications at the declaration-RTA tier; this per-file scan
-// never sees them either way. reflect dispatch still defeats static
-// reachability everywhere else. Grows only by source audit
-// (REQ-closure-observability-analysis's audited-set boundary).
-func auditedRuntimeTypeSymbol(audited bool, pkgPath, name string) bool {
-	return audited && pkgPath == "reflect" && auditset.ReflectSymbol(name)
-}
-
 // auditedLinknameTargets is the audited linkname-target set: standard
 // symbols whose pull-style linkname is a read-only trampoline, each
 // audited at the source of its version-pinned importer

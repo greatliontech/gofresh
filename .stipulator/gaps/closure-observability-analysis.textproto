@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-analysis"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "ed631e3ddf4e528e65c759141117ec4460fb0cbae5f512f600370ec59b660b7f"
-source_hash: "03378566ca3ae413c2ad33403fb51a149eace95d8e19c625ce8f40c2abad674c"
+content_hash: "4df6e9e0c48d9cc38447a4878a430ba84aa834b0810e505f7f9f02f5b3ebf4d1"
+source_hash: "7c0dac0cf0905938bf1d7936359106a443f5cd411b96cdb1028b337613eec99d"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

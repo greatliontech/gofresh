@@ -1390,12 +1390,30 @@ methods sharing an audited name admitted with it) —
 is deliberately bounded by
 two exclusions that are soundness, not caution: reflect defeats static
 reachability itself, so only its invoke-nothing members are admitted —
-the runtime-type set; the Elem accessors, admitted by the shared name
+the runtime-type set; the descriptor-view surface of Type — Kind, Name,
+String, PkgPath, Size, Align, FieldAlign, Bits, NumField, Field,
+FieldByIndex, FieldByName, FieldByNameFunc (its callback resolved by the
+enumeration at reflect's own match site whether constant or loaded, a
+constant scanned as an operand besides — classified either way), NumMethod,
+Len, NumIn, NumOut, In, Out,
+IsVariadic, ChanDir, Comparable, Implements, AssignableTo, ConvertibleTo,
+CanSeq, CanSeq2, and the Overflow queries, with Key admitted where the walk
+sees the descriptor's own receiver (its bare name a live iteration read's
+too) — with the Kind and ChanDir constants, the StructField and StructTag
+shapes with Get and Lookup, and every declaration in reflect sharing an
+admitted name (the Value members, the two constants' String, StructTag's
+Get and Lookup, the unexported descriptor forms), each a read of the
+descriptor or of the memory its operand pins; the Elem accessors, admitted by the shared name
 ((Type).Elem a read of the runtime's canonical descriptor, (Value).Elem a
 dereference of the interface words or the pointer its operand pins, each
 panicking on any other kind, a Value's every producer keeping its own
 refusal); and the structural comparator DeepEqual, which
 performs no method call and compares function values by nil-ness alone —
+while Method and MethodByName (they build callable Values: the
+reflective-dispatch channel, with the Call family and MakeFunc), the Value
+producers, the address results Pointer and UnsafePointer with the two Kind
+constants sharing those names (and the deprecated Ptr), and the hand-out
+Interface and Slice stay refused, each by its name —
 and registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —

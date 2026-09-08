@@ -29,9 +29,18 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 	if auditset.TimeMethod("Time", "Local") || auditset.TimeMethod("Time", "Location") {
 		t.Error("(Time).Local or (Time).Location admitted — the ambient zone install and the pointer into package time's own state")
 	}
-	for _, name := range []string{"Type", "TypeOf", "DeepEqual", "Elem"} {
-		if !auditedRuntimeTypeSymbol(true, "reflect", name) || !auditset.ReflectSymbol(name) {
-			t.Errorf("reflect symbol %s not admitted", name)
+	// fmt sits in classBPackages (the effect classifier's gate) and in
+	// the symbol tables (the pure remainder); the two sets are disjoint,
+	// the classifier consulted first at every site, so an overlap would
+	// be a silent false refusal.
+	for _, name := range []string{"Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln", "Sscan", "Sscanf", "Sscanln", "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln"} {
+		if auditset.Symbol("fmt", name) {
+			t.Errorf("fmt.%s is a classified effect and an audited symbol", name)
+		}
+	}
+	for _, name := range []string{"Type", "TypeOf", "DeepEqual", "Elem", "Kind", "NumField", "Struct", "Get"} {
+		if !classBPureStandard(true, "reflect", name) || !auditset.Symbol("reflect", name) {
+			t.Errorf("reflect symbol %s not admitted through the class-B ladder", name)
 		}
 	}
 	for _, name := range []string{"Map", "Load", "Store", "LoadOrStore"} {
@@ -40,11 +49,11 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 		}
 	}
 	for _, stray := range []string{"OnceFunc", "OnceValue", "WaitGroup", "Range", "Delete", "Swap", "New", "ValueOf", "Copy"} {
-		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedMemoSymbol(true, "sync", stray) || auditedRuntimeTypeSymbol(true, "reflect", stray) {
+		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedMemoSymbol(true, "sync", stray) || classBPureStandard(true, "reflect", stray) {
 			t.Errorf("%s admitted outside the tables", stray)
 		}
 	}
-	if auditedSyncSymbol(false, "sync", "Lock") || auditedPoolSymbol(false, "sync", "Get") || auditedRuntimeTypeSymbol(false, "reflect", "TypeOf") {
+	if auditedSyncSymbol(false, "sync", "Lock") || auditedPoolSymbol(false, "sync", "Get") || classBPureStandard(false, "reflect", "TypeOf") {
 		t.Fatal("an unaudited toolchain admitted an audited symbol")
 	}
 	if auditset.SyncName("Pool") || auditset.PoolName("Mutex") {

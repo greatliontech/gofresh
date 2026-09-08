@@ -57,14 +57,76 @@ var poolMethods = map[string][]string{
 	"Pool": {"Get", "Put"},
 }
 
-// reflectSymbols is the audited reflect surface the closure tiers
-// admit by symbol: the type-identity operations that read no dynamic
-// state, and the Elem accessors — the descriptor read and the
-// operand-pinned dereference, neither invoking anything. Audited on
-// go1.27.0-dst.14; reflect lies in no listed release's walked delta,
-// so the one audit holds under every listed selection
-// (REQ-closure-observability-analysis's audited-set boundary).
-var reflectSymbols = []string{"Type", "TypeOf", "DeepEqual", "Elem"}
+// reflectSymbols is the audited surface of package reflect, matched by
+// bare name at every tier like its peers: the runtime-type set (Type,
+// TypeOf — bit-deterministic over the operand's static type — and the
+// structural comparator DeepEqual, which calls no method and compares
+// function values by nil-ness alone); the descriptor-view surface of
+// Type, every member a read of the runtime's canonical descriptor or
+// a pure judgment over two of them, panicking on a wrong kind and
+// invoking nothing (FieldByNameFunc's callback is resolved by the
+// enumeration at reflect's own match site — a function constant is
+// scanned as an operand besides — so its body is classified either
+// way); the Kind and ChanDir constants and the
+// StructField and StructTag shapes with Get and Lookup, execution-free
+// references or string parsing; and the Elem accessors — (Type).Elem
+// the descriptor read, (Value).Elem the operand-pinned dereference.
+// The bare-name match admits every same-named declaration, so each is
+// audited: the Value members sharing a listed name (Kind, String,
+// Len, NumField, Field, FieldByIndex, FieldByName, FieldByNameFunc,
+// NumMethod, Comparable, the Overflow queries, Bool, Int, Uint, Type,
+// Elem) read the type or the memory their operand pins
+// — an addressable result's write channel is the Set family, refused
+// — and every Value is reached only behind a producer's own refusal;
+// Kind's and ChanDir's String format their constant; the unexported
+// interfaceType and structType forms are the descriptor reads the
+// exported ones delegate to. Key is absent: (*MapIter).Key shares the
+// name and reads live iteration state, so (Type).Key admits through
+// the receiver-qualified table reflectMethods instead. Chained
+// selectors off an admitted result are separate callees with their
+// own classifications at the walk tiers (a field's Tag.Get is judged
+// as StructTag's Get), and the fold never sees them either way;
+// reflect dispatch still defeats static reachability everywhere
+// else. Refused by name: Method and MethodByName (they build callable
+// Values — the reflective-dispatch channel, with the Call family and
+// MakeFunc), the producers (ValueOf, New, Zero, Indirect, the Make
+// and Of constructors), the address results (Pointer, UnsafePointer —
+// and so those two Kind constants and the deprecated Ptr), and the
+// hand-out (Interface, Slice). An admitted member hands out no pointer
+// into the package's own state: descriptors are sealed and never
+// written after construction. Audited on go1.27.0-dst.14; reflect
+// lies in no listed release's walked delta, so the one audit holds
+// under every listed selection (REQ-closure-observability-analysis's
+// audited-set boundary).
+var reflectSymbols = map[string]bool{
+	// the runtime-type set
+	"Type": true, "TypeOf": true, "DeepEqual": true, "Elem": true,
+	// the descriptor-view surface of Type
+	"Kind": true, "Name": true, "String": true, "PkgPath": true, "Size": true, "Align": true, "FieldAlign": true, "Bits": true,
+	"NumField": true, "Field": true, "FieldByIndex": true, "FieldByName": true, "FieldByNameFunc": true, "NumMethod": true,
+	"Len": true, "NumIn": true, "NumOut": true, "In": true, "Out": true, "IsVariadic": true, "ChanDir": true,
+	"Comparable": true, "Implements": true, "AssignableTo": true, "ConvertibleTo": true, "CanSeq": true, "CanSeq2": true,
+	"OverflowInt": true, "OverflowUint": true, "OverflowFloat": true, "OverflowComplex": true,
+	// the shapes and their string parsing
+	"StructField": true, "StructTag": true, "Get": true, "Lookup": true,
+	// the Kind constants whose same-named Value members read pinned memory
+	"Invalid": true, "Bool": true, "Int": true, "Int8": true, "Int16": true, "Int32": true, "Int64": true,
+	"Uint": true, "Uint8": true, "Uint16": true, "Uint32": true, "Uint64": true, "Uintptr": true,
+	"Float32": true, "Float64": true, "Complex64": true, "Complex128": true,
+	"Array": true, "Chan": true, "Func": true, "Map": true, "Struct": true,
+	// the ChanDir constants
+	"RecvDir": true, "SendDir": true, "BothDir": true,
+}
+
+// reflectMethods is the audited receiver-qualified surface of package
+// reflect: (Type).Key — the map descriptor's key-type read, a panic on
+// any other kind — whose bare name (*MapIter).Key shares with a read of live map
+// iteration state, so the name admits only where the walk sees the
+// canonical descriptor's own receiver (the unexported rtype).
+// Consulted by the walk tiers alone (REQ-closure-observability-analysis).
+var reflectMethods = map[string][]string{
+	"rtype": {"Key"},
+}
 
 // reflectImmutableTypes is the audited set of reflect types whose
 // values are immutable once produced AND whose interface is sealed by
@@ -72,7 +134,18 @@ var reflectSymbols = []string{"Type", "TypeOf", "DeepEqual", "Elem"}
 // descriptor: the effect tiers' immutability ruling and the
 // object-closed store rule read one table, and a member must meet
 // both bars.
-var reflectImmutableTypes = []string{"Type"}
+var reflectImmutableTypes = map[string]bool{"Type": true}
+
+// fmtSymbols is the audited surface of package fmt: the Sprint and
+// Append families and Errorf — value-to-value formatting whose
+// arguments' methods stay visible to reachability — and the Stringer
+// name; the Print family is classified output and the Scan family
+// input, so only the pure remainder is here
+// (REQ-closure-observability-analysis).
+var fmtSymbols = map[string]bool{
+	"Sprint": true, "Sprintf": true, "Sprintln": true, "Errorf": true,
+	"Append": true, "Appendf": true, "Appendln": true, "FormatString": true, "Stringer": true,
+}
 
 // The name unions the closure tiers' symbol predicates read, computed
 // once from the tables.
@@ -227,6 +300,8 @@ var flagSymbols = map[string]bool{
 // is in exactly one, so the two consulting predicates can never
 // answer differently for one package (pinned by the package's test).
 var symbolTables = map[string]map[string]bool{
+	"fmt":           fmtSymbols,
+	"reflect":       reflectSymbols,
 	"time":          timeSymbols,
 	"path/filepath": filepathSymbols,
 	"net/url":       urlSymbols,
@@ -281,6 +356,12 @@ func PoolMethod(receiver, method string) bool { return slices.Contains(poolMetho
 // audited receiver-qualified set.
 func TimeMethod(receiver, method string) bool { return slices.Contains(timeMethods[receiver], method) }
 
+// ReflectMethod reports whether a reflect receiver's method is in the
+// audited receiver-qualified set.
+func ReflectMethod(receiver, method string) bool {
+	return slices.Contains(reflectMethods[receiver], method)
+}
+
 // ReceiverMethod is the one receiver-unwrap ladder every
 // receiver-qualified standard admission shares: a method declared in
 // the named standard package on a named receiver (pointer or value)
@@ -322,13 +403,9 @@ func MemoMethod(receiver, method string) bool { return slices.Contains(memoMetho
 // belongs to the audited memo set.
 func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 
-// ReflectSymbol reports whether a reflect symbol is in the audited
-// type-identity surface.
-func ReflectSymbol(name string) bool { return slices.Contains(reflectSymbols, name) }
-
 // ReflectImmutable reports whether a reflect type is in the audited
 // immutable-type set.
-func ReflectImmutable(name string) bool { return slices.Contains(reflectImmutableTypes, name) }
+func ReflectImmutable(name string) bool { return reflectImmutableTypes[name] }
 
 // names is the union of a method set's receiver and method names.
 func names(set map[string][]string) []string {

@@ -73,7 +73,8 @@ func symbolExternalEffect(kind externalEffectKind, pkgPath, name, reason string)
 // tiers' standard-symbol ladder: a standard method admitted where its
 // receiver distinguishes it from an ambient declaration sharing its
 // bare name — time's pure Time methods behind the fold-excluded shared
-// names. The fold sees no method call and has no such arm, so the
+// names, and reflect's (Type).Key behind the iteration read sharing
+// it. The fold sees no method call and has no such arm, so the
 // bare-name exclusions keep the variables and functions refused there.
 // A bound method value's wrapper declares the method it delegates to,
 // so the enumerated-target arm judges it as that method through this
@@ -87,7 +88,7 @@ func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 	if !ok {
 		return false
 	}
-	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod)
+	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod) || auditset.ReceiverMethod(f, "reflect", auditset.ReflectMethod)
 }
 
 // auditedStandardCallee is the walk tiers' whole standard admission
@@ -322,10 +323,14 @@ var classBPackages = map[string]bool{
 // classBPureStandard audits specific operations of effect-bearing
 // standard packages as pure: value-to-value computation with no ambient
 // acquisition, no testlog-invisible channel, and no machine-variant
-// results. fmt's Sprint family qualifies (arguments' methods stay
-// visible to reachability); its Print family is classified output and
-// its Scan family classified input, so only the pure remainder lands
-// here. time's fixed-argument construction and value computation —
+// results — every per-package surface one table in internal/auditset
+// (fmt, reflect, time, net/url, path/filepath, flag). fmt's Sprint
+// family qualifies (arguments' methods stay visible to reachability);
+// its Print family is classified output and its Scan family classified
+// input, so only the pure remainder lands there. reflect's runtime-type
+// set and descriptor-view surface read sealed descriptors and invoke
+// nothing, its dispatch channel refused by name. time's fixed-argument
+// construction and value computation —
 // Date and the calendar, clock-field, zone-accessor, formatting,
 // comparison, and duration operations over Time, Duration, Month, and
 // Weekday values, FixedZone included — read neither the clock, nor
@@ -352,28 +357,18 @@ var classBPackages = map[string]bool{
 // (isSourceOnlyStandardPackage), not operation by operation here.
 // Grows only by source audit (REQ-closure-observability-analysis).
 func classBPureStandard(audited bool, pkgPath, name string) bool {
-	if !audited {
-		return false
-	}
-	switch pkgPath {
-	case "fmt":
-		switch name {
-		case "Sprint", "Sprintf", "Sprintln", "Errorf", "Append", "Appendf", "Appendln", "FormatString", "Stringer":
-			return true
-		}
-	}
 	// Every per-package audited surface is one table in internal/auditset.
-	return auditset.Symbol(pkgPath, name)
+	return audited && auditset.Symbol(pkgPath, name)
 }
 
 // auditedStandardSymbol is the one ladder every tier consults for a
 // standard package's symbol-level admissions — the class-B pure
-// operations and the audited sync, pool, and reflect symbols — so a
-// fifth table can never be added at two consulting sites and missed
-// at the third.
+// operations (every per-package symbol table, reflect's included) and
+// the audited sync, pool, and memo symbols — so a further table can
+// never be added at two consulting sites and missed at the third.
 func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
 	return classBPureStandard(audited, pkgPath, name) || auditedSyncSymbol(audited, pkgPath, name) ||
-		auditedPoolSymbol(audited, pkgPath, name) || auditedMemoSymbol(audited, pkgPath, name) || auditedRuntimeTypeSymbol(audited, pkgPath, name)
+		auditedPoolSymbol(audited, pkgPath, name) || auditedMemoSymbol(audited, pkgPath, name)
 }
 
 // fmtFprintFamily names fmt's writer-first print operations — the one

@@ -22,5 +22,7 @@ entropy deserves its own effect kind rather than riding Native (the
 shared rank is what lets an entropy read outrank an ambient input in
 the same file).
 
-Lands: with the next class-B widening (the band's endgame chunk for
-the unaudited-standard fallback's retirement).
+Lands: with the next change to classBEffect's own arms — the
+classifier's effect table, not the pure-side symbol tables, which
+grew three times (reflect's Elem, time's method forms, reflect's
+view surface) without touching it.

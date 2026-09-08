@@ -3,6 +3,7 @@ package auditset
 import (
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"testing"
 )
@@ -43,8 +44,30 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !MemoMethod("Map", "Load") || MemoMethod("Map", "Range") || MemoMethod("Pool", "Load") || !MemoName("LoadOrStore") || MemoName("Delete") {
 		t.Fatal("memo predicates wrong")
 	}
-	if !slices.Equal(reflectSymbols, []string{"Type", "TypeOf", "DeepEqual", "Elem"}) || !slices.Equal(reflectImmutableTypes, []string{"Type"}) {
-		t.Fatalf("reflect sets = %v, %v", reflectSymbols, reflectImmutableTypes)
+	reflectNames := slices.Sorted(maps.Keys(reflectSymbols))
+	if !slices.Equal(reflectNames, []string{"Align", "Array", "AssignableTo", "Bits", "Bool", "BothDir", "CanSeq", "CanSeq2", "Chan", "ChanDir", "Comparable", "Complex128", "Complex64", "ConvertibleTo", "DeepEqual", "Elem", "Field", "FieldAlign", "FieldByIndex", "FieldByName", "FieldByNameFunc", "Float32", "Float64", "Func", "Get", "Implements", "In", "Int", "Int16", "Int32", "Int64", "Int8", "Invalid", "IsVariadic", "Kind", "Len", "Lookup", "Map", "Name", "NumField", "NumIn", "NumMethod", "NumOut", "Out", "OverflowComplex", "OverflowFloat", "OverflowInt", "OverflowUint", "PkgPath", "RecvDir", "SendDir", "Size", "String", "Struct", "StructField", "StructTag", "Type", "TypeOf", "Uint", "Uint16", "Uint32", "Uint64", "Uint8", "Uintptr"}) || !slices.Equal(slices.Sorted(maps.Keys(reflectImmutableTypes)), []string{"Type"}) {
+		t.Fatalf("reflect sets = %v, %v", reflectNames, reflectImmutableTypes)
+	}
+	if len(reflectMethods) != 1 || !slices.Equal(reflectMethods["rtype"], []string{"Key"}) {
+		t.Fatalf("reflect methods = %v", reflectMethods)
+	}
+	for _, names := range reflectMethods {
+		for _, name := range names {
+			if reflectSymbols[name] {
+				t.Errorf("reflect method %s is also a bare-name symbol — the receiver-qualified set exists for names the bare table must exclude", name)
+			}
+		}
+	}
+	if !ReflectMethod("rtype", "Key") || ReflectMethod("MapIter", "Key") || ReflectMethod("Value", "Key") {
+		t.Fatal("reflect method predicate wrong")
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(fmtSymbols)), []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Sprint", "Sprintf", "Sprintln", "Stringer"}) {
+		t.Fatalf("fmt symbols = %v", slices.Sorted(maps.Keys(fmtSymbols)))
+	}
+	for _, name := range []string{"Pointer", "UnsafePointer", "Ptr", "Interface", "Slice", "Key", "Method", "MethodByName", "Call", "CallSlice", "MakeFunc", "ValueOf", "New", "Zero", "Indirect", "Set", "SetInt", "Index", "Addr", "Convert", "Append", "Copy", "Swapper", "Select", "MakeSlice", "MakeMap", "MakeChan", "PointerTo", "SliceOf", "MapOf", "ArrayOf", "ChanOf", "FuncOf", "StructOf", "TypeFor", "Seq", "Seq2", "Bytes", "IsNil", "IsValid", "IsZero", "MapIndex", "MapRange", "Cap"} {
+		if reflectSymbols[name] {
+			t.Errorf("reflect %s admitted — the dispatch channel, a producer, an address, or the hand-out", name)
+		}
 	}
 	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || !SyncMethod("Once", "Do") || SyncMethod("Once", "Lock") {
 		t.Fatal("sync method predicate wrong")
@@ -55,7 +78,7 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !SyncName("TryRLock") || SyncName("Pool") || !PoolName("Put") || PoolName("Lock") {
 		t.Fatal("name predicates wrong")
 	}
-	if !ReflectSymbol("TypeOf") || ReflectSymbol("ValueOf") || !ReflectImmutable("Type") || ReflectImmutable("Value") {
+	if !Symbol("reflect", "TypeOf") || Symbol("reflect", "ValueOf") || !ReflectImmutable("Type") || ReflectImmutable("Value") {
 		t.Fatal("reflect predicates wrong")
 	}
 }

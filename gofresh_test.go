@@ -178,8 +178,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@39" {
-		t.Fatalf("ObservationRTA = %q, want time's receiver-qualified methods admitted over the Elem accessors", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@40" {
+		t.Fatalf("ObservationRTA = %q, want reflect's descriptor-view surface admitted over time's receiver-qualified methods", ObservationRTA)
 	}
 }
 
@@ -809,9 +809,11 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 // FlagSet forms at the fold beside ObservationRTA@35; @19 admits sync.Map's
 // memo operations at the fold as the audited memo set; @20 admits
 // reflect's Elem at the fold, whose unresolved selector match a
-// shadowed import alias reaches, beside ObservationRTA@38.
+// shadowed import alias reaches, beside ObservationRTA@38; @21 admits
+// reflect's descriptor-view surface at the fold as a symbol table,
+// beside ObservationRTA@40.
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@20" {
-		t.Fatalf("effect-scan strategy = %q, want @20", closure.EffectScanStrategy())
+	if closure.EffectScanStrategy() != "gofresh/effect-scan@21" {
+		t.Fatalf("effect-scan strategy = %q, want @21", closure.EffectScanStrategy())
 	}
 }

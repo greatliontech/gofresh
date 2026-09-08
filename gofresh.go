@@ -404,7 +404,12 @@ const ClosureStrategy = closure.IdentityStrategy
 // names — After, Unix, UnixMilli, UnixMicro, UTC, AddDate —
 // where the walk tiers see the receiver; the fold's tables are
 // untouched.
-const ObservationRTA = "gofresh/observation-rta@39"
+// @40 admits reflect's descriptor-view surface — Type's read methods,
+// the Kind and ChanDir constants, the StructField and StructTag shapes
+// — and their same-named Value members at the walk tiers, reflect now
+// a symbol table like its peers (effect-scan@21 carries the same for
+// the fold).
+const ObservationRTA = "gofresh/observation-rta@40"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

@@ -117,7 +117,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 						reason = classified
 						return false
 					}
-					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !classBPureStandard(true, pkgPath, sel.Sel.Name) && !auditedSyncSymbol(true, pkgPath, sel.Sel.Name) && !auditedPoolSymbol(true, pkgPath, sel.Sel.Name) && !auditedMemoSymbol(true, pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
+					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
@@ -282,7 +282,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			// carve-out
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
-		} else if pkgPath != "testing" && !classBPureStandard(true, pkgPath, sel.Sel.Name) && !auditedSyncSymbol(true, pkgPath, sel.Sel.Name) && !auditedPoolSymbol(true, pkgPath, sel.Sel.Name) && !auditedMemoSymbol(true, pkgPath, sel.Sel.Name) && !auditedRuntimeTypeSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
+		} else if pkgPath != "testing" && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true

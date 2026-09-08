@@ -55,7 +55,15 @@ import (
 // selector through an import alias a local shadows (`r.Elem` under
 // `import r "reflect"`) spells reflect.Elem to it (ObservationRTA@38
 // carries the audit for the walk tiers).
-const effectScanStrategy = "gofresh/effect-scan@20"
+// @21 admits reflect's descriptor-view surface, the Kind and ChanDir
+// constants, and the StructField/StructTag shapes at the fold as a
+// per-package symbol table like its peers (ObservationRTA@40 carries
+// the same for the walk tiers). The unresolved alias match now spells
+// sixty-odd names through a shadowed import alias; that is sound
+// because the fold is a refusal-only backstop consulted after the
+// walks — a shadow adds false resolutions and removes none of the
+// file's real ones, so no proof the walks refuse is ever granted.
+const effectScanStrategy = "gofresh/effect-scan@21"
 
 // EffectScanStrategy is the persisted effect scan's strategy version.
 func EffectScanStrategy() string { return effectScanStrategy }

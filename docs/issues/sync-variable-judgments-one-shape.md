@@ -12,12 +12,12 @@ slice elements; the memo arm takes a bare identifier). The memo's
 soundness is therefore non-local: it rests on the uses walk marking
 every non-call use, pinned only end to end.
 
-Beside them, the effect tiers' audited-set admissions are five
+Beside them, the effect tiers' audited-set admissions are four
 one-line predicates (`auditedSyncSymbol`, `auditedPoolSymbol`,
-`auditedMemoSymbol`, `auditedRuntimeTypeSymbol`, and the
-`classBPureStandard` chain in `closure/effects.go`) with a
-hand-maintained mirror in the reference scan that grows a term per
-set.
+`auditedMemoSymbol`, and `classBPureStandard` over the symbol
+tables in `closure/effects.go`), joined by `auditedStandardSymbol`,
+which the reference scan now reads as one call — the per-set mirror
+is gone, the sync-side trio remains three spellings of one shape.
 
 The collapse: one sync-variable use judgment parameterized by the
 admitted call set and the declaration type, with one receiver ladder;

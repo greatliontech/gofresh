@@ -151,7 +151,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue", "shared", "localmethod", "poison", "poisoned", "boundmethod"} {
+	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue", "shared", "localmethod", "poison", "poisoned", "boundmethod", "views", "lookup", "kindptr", "fieldfunc", "fieldeffect", "fieldconst"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -524,6 +524,169 @@ func TestBound(t *testing.T) {
 	_ = Bound()
 }
 `)
+	// The descriptor-view surface in startup flow: kinds, fields, tags,
+	// implements, sizes, names, the Kind constants.
+	writeFile(t, dir, "views/views.go", `package views
+
+import "reflect"
+
+type Box struct {
+	N int `+"`"+`json:"n"`+"`"+`
+	s string
+}
+
+var boxType = reflect.TypeOf(Box{})
+
+var errorType = reflect.TypeOf((*error)(nil)).Elem()
+
+var facts = []bool{
+	boxType.Kind() == reflect.Struct,
+	boxType.NumField() == 2,
+	boxType.Field(0).Name == "N",
+	boxType.Field(0).Tag.Get("json") == "n",
+	boxType.Field(0).Type.Kind() == reflect.Int,
+	boxType.Field(1).PkgPath != "",
+	boxType.Comparable(),
+	!boxType.Implements(errorType),
+	boxType.Size() > 0 && boxType.Align() > 0,
+	boxType.String() == "views.Box" && boxType.Name() == "Box" && boxType.PkgPath() != "",
+	boxType.NumMethod() == 0,
+	reflect.TypeOf(make(chan int)).ChanDir() == reflect.BothDir,
+	reflect.TypeOf(map[string]int{}).Key().Kind() == reflect.String,
+}
+
+func Views() int {
+	n := 0
+	for _, f := range facts {
+		if f {
+			n++
+		}
+	}
+	return n
+}
+`)
+	writeFile(t, dir, "views/views_test.go", `package views
+
+import "testing"
+
+func TestViews(t *testing.T) {
+	_ = Views()
+}
+`)
+	// The reflective-dispatch channel keeps its refusal by name.
+	writeFile(t, dir, "lookup/lookup.go", `package lookup
+
+import "reflect"
+
+type Box struct{ N int }
+
+var method, found = reflect.TypeOf(Box{}).MethodByName("String")
+
+func Lookup() bool { return found && method.Index == 0 }
+`)
+	writeFile(t, dir, "lookup/lookup_test.go", `package lookup
+
+import "testing"
+
+func TestLookup(t *testing.T) {
+	_ = Lookup()
+}
+`)
+	// A Kind constant sharing its name with an address result refuses
+	// at the fold like any unaudited name.
+	writeFile(t, dir, "kindptr/kindptr.go", `package kindptr
+
+import "reflect"
+
+type Box struct{ N int }
+
+var isPointer = reflect.TypeOf(&Box{}).Kind() == reflect.Pointer
+
+func Pointerish() bool { return isPointer }
+`)
+	writeFile(t, dir, "kindptr/kindptr_test.go", `package kindptr
+
+import "testing"
+
+func TestPointerish(t *testing.T) {
+	_ = Pointerish()
+}
+`)
+	// FieldByNameFunc's callback is resolved by the enumeration at
+	// reflect's own match site whether it arrives as a constant or a
+	// loaded value (a constant is scanned as an operand besides), so a
+	// pure callback admits and a refused method inside one refuses by
+	// that method's name on either route.
+	writeFile(t, dir, "fieldfunc/fieldfunc.go", `package fieldfunc
+
+import "reflect"
+
+type Box struct{ N int }
+
+var direct, _ = reflect.TypeOf(Box{}).FieldByNameFunc(func(n string) bool { return n == "N" })
+
+var pick = func(n string) bool { return len(n) == 1 }
+
+var loaded, _ = reflect.TypeOf(Box{}).FieldByNameFunc(pick)
+
+func Found() bool { return direct.Name == loaded.Name }
+`)
+	writeFile(t, dir, "fieldfunc/fieldfunc_test.go", `package fieldfunc
+
+import "testing"
+
+func TestFound(t *testing.T) {
+	_ = Found()
+}
+`)
+	writeFile(t, dir, "fieldeffect/fieldeffect.go", `package fieldeffect
+
+import (
+	"reflect"
+	"time"
+)
+
+type Box struct{ N int }
+
+var base = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600))
+
+var pick = func(n string) bool { return base.Local().Year() > 0 && n == "N" }
+
+var found, _ = reflect.TypeOf(Box{}).FieldByNameFunc(pick)
+
+func Found() bool { return found.Name == "N" }
+`)
+	writeFile(t, dir, "fieldeffect/fieldeffect_test.go", `package fieldeffect
+
+import "testing"
+
+func TestFound(t *testing.T) {
+	_ = Found()
+}
+`)
+	writeFile(t, dir, "fieldconst/fieldconst.go", `package fieldconst
+
+import (
+	"reflect"
+	"time"
+)
+
+type Box struct{ N int }
+
+var base = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.FixedZone("X", 3600))
+
+var found, _ = reflect.TypeOf(Box{}).FieldByNameFunc(func(n string) bool { return base.Local().Year() > 0 && n == "N" })
+
+func Found() bool { return found.Name == "N" }
+`)
+	writeFile(t, dir, "fieldconst/fieldconst_test.go", `package fieldconst
+
+import "testing"
+
+func TestFound(t *testing.T) {
+	_ = Found()
+}
+`)
 	writeFile(t, dir, "elem/elem.go", `package elem
 
 import "reflect"
@@ -544,10 +707,8 @@ func TestElem(t *testing.T) {
 	_ = Kind()
 }
 `)
-	// A view method beyond Elem, reached at the same walk, keeps the
-	// boundary — in its own package, the startup walk being
-	// package-wide (in subject flow the invoke itself refuses first,
-	// outside RTA).
+	// A view method reached through an Elem result in startup flow —
+	// its own package, the startup walk being package-wide.
 	writeFile(t, dir, "elemname/elemname.go", `package elemname
 
 import "reflect"
@@ -615,6 +776,12 @@ func TestDeref(t *testing.T) {
 		{Package: "example.com/audited/poisoned", Symbol: "Poisoned"},
 		{Package: "example.com/audited/boundmethod", Symbol: "Bound"},
 		{Package: "example.com/audited/elemname", Symbol: "Named"},
+		{Package: "example.com/audited/views", Symbol: "Views"},
+		{Package: "example.com/audited/lookup", Symbol: "Lookup"},
+		{Package: "example.com/audited/kindptr", Symbol: "Pointerish"},
+		{Package: "example.com/audited/fieldfunc", Symbol: "Found"},
+		{Package: "example.com/audited/fieldeffect", Symbol: "Found"},
+		{Package: "example.com/audited/fieldconst", Symbol: "Found"},
 		{Package: "example.com/audited/elemvalue", Symbol: "Deref"},
 	})
 	if err != nil {
@@ -708,8 +875,32 @@ func TestDeref(t *testing.T) {
 		t.Fatalf("Kind = %+v, want (Type).Elem admitted in startup flow", kind)
 	}
 	named := proofs[Subject{Package: "example.com/audited/elemname", Symbol: "Named"}]
-	if named.Observable || !strings.Contains(named.Reason, "reflect.Name") {
-		t.Fatalf("Named = %+v, want the view method beyond Elem refused by name", named)
+	if !named.Observable || named.Reason != "" {
+		t.Fatalf("Named = %+v, want the view method admitted with the descriptor surface", named)
+	}
+	views := proofs[Subject{Package: "example.com/audited/views", Symbol: "Views"}]
+	if !views.Observable || views.Reason != "" {
+		t.Fatalf("Views = %+v, want the descriptor-view surface admitted in startup flow", views)
+	}
+	lookup := proofs[Subject{Package: "example.com/audited/lookup", Symbol: "Lookup"}]
+	if lookup.Observable || !strings.Contains(lookup.Reason, "startup effect: reaches unaudited standard operation reflect.MethodByName") {
+		t.Fatalf("Lookup = %+v, want the reflective-dispatch channel refused by name", lookup)
+	}
+	fieldfunc := proofs[Subject{Package: "example.com/audited/fieldfunc", Symbol: "Found"}]
+	if !fieldfunc.Observable || fieldfunc.Reason != "" {
+		t.Fatalf("fieldfunc = %+v, want FieldByNameFunc admitted with a pure callback, constant and loaded", fieldfunc)
+	}
+	fieldeffect := proofs[Subject{Package: "example.com/audited/fieldeffect", Symbol: "Found"}]
+	if fieldeffect.Observable || !strings.Contains(fieldeffect.Reason, "startup effect: reaches unaudited standard operation time.Local") {
+		t.Fatalf("fieldeffect = %+v, want the loaded callback's body classified — its refused method named", fieldeffect)
+	}
+	fieldconst := proofs[Subject{Package: "example.com/audited/fieldconst", Symbol: "Found"}]
+	if fieldconst.Observable || !strings.Contains(fieldconst.Reason, "startup effect: reaches unaudited standard operation time.Local") {
+		t.Fatalf("fieldconst = %+v, want the constant callback's body classified — its refused method named", fieldconst)
+	}
+	pointerish := proofs[Subject{Package: "example.com/audited/kindptr", Symbol: "Pointerish"}]
+	if pointerish.Observable || !strings.Contains(pointerish.Reason, "package scan: reaches unaudited standard operation reflect.Pointer") {
+		t.Fatalf("Pointerish = %+v, want the address-sharing Kind constant refused at the fold", pointerish)
 	}
 	deref := proofs[Subject{Package: "example.com/audited/elemvalue", Symbol: "Deref"}]
 	if deref.Observable || !strings.Contains(deref.Reason, "unsafe pointer reachable") {
@@ -797,15 +988,15 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 			t.Errorf("classBPureStandard(true, %s, %s) = true, want outside the audited set", tc.pkg, tc.name)
 		}
 	}
-	if !auditedRuntimeTypeSymbol(true, "reflect", "DeepEqual") {
-		t.Error("auditedRuntimeTypeSymbol(true, reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
+	if !classBPureStandard(true, "reflect", "DeepEqual") {
+		t.Error("classBPureStandard(true, reflect, DeepEqual) = false, want the invoke-nothing comparator audited")
 	}
-	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect", "Set", "SetInt", "Interface", "Field", "Index", "MethodByName", "Call"} {
-		if auditedRuntimeTypeSymbol(true, "reflect", name) {
-			t.Errorf("auditedRuntimeTypeSymbol(true, reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
+	for _, name := range []string{"ValueOf", "Value", "New", "MakeFunc", "Indirect", "Set", "SetInt", "Interface", "Index", "Method", "MethodByName", "Call", "Pointer", "UnsafePointer", "Ptr", "Slice", "Key"} {
+		if classBPureStandard(true, "reflect", name) {
+			t.Errorf("classBPureStandard(true, reflect, %s) = true, want reflect closed beyond its invoke-nothing members", name)
 		}
 	}
-	if classBPureStandard(true, "example.com/big", "NewInt") || auditedRuntimeTypeSymbol(true, "example.com/reflect", "DeepEqual") {
+	if classBPureStandard(true, "example.com/big", "NewInt") || classBPureStandard(true, "example.com/reflect", "DeepEqual") {
 		t.Error("an admission leaked to a non-standard package path")
 	}
 }
@@ -1084,8 +1275,8 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if auditedPoolSymbol(false, "sync", "Get") {
 		t.Error("auditedPoolSymbol admits sync.Get on an unaudited toolchain")
 	}
-	if auditedRuntimeTypeSymbol(false, "reflect", "TypeOf") {
-		t.Error("auditedRuntimeTypeSymbol admits reflect.TypeOf on an unaudited toolchain")
+	if classBPureStandard(false, "reflect", "TypeOf") {
+		t.Error("classBPureStandard admits reflect.TypeOf on an unaudited toolchain")
 	}
 	if auditedHarnessLogging(false, "testing", "Fatal") {
 		t.Error("auditedHarnessLogging admits testing.Fatal on an unaudited toolchain")
