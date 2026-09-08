@@ -187,7 +187,11 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // chains into every in-package declaration of that name; sync.Once's
 // Do joins the audited synchronization set; a view's cone roots the
 // plain compilation only when no internal test variant replaces it.
-const DynamicStateStrategy = "gofresh/dynamic-state@36"
+// @37: an exported method dispatched through a receiver's closed
+// interface field — an unexported field whose every in-package store
+// carries a concrete in-package type, parameters resolved through their
+// direct call sites — chains into every member's declaration.
+const DynamicStateStrategy = "gofresh/dynamic-state@37"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -799,6 +800,25 @@ type attributedUse struct {
 	literal bool
 }
 
+// unwrapCallee strips the spellings a direct call's callee can wear —
+// parentheses and an explicit generic instantiation (index and
+// index-list) — down to the expression naming it, the one ladder every
+// callee-resolving walk shares.
+func unwrapCallee(fun ast.Expr) ast.Expr {
+	for {
+		switch f := fun.(type) {
+		case *ast.ParenExpr:
+			fun = f.X
+		case *ast.IndexExpr:
+			fun = f.X
+		case *ast.IndexListExpr:
+			fun = f.X
+		default:
+			return fun
+		}
+	}
+}
+
 // plainCalleeFunc resolves a call's function expression to a plain named
 // function and its declaring package path, unwrapping parenthesization
 // and explicit generic instantiation; the generic origin carries the
@@ -806,20 +826,7 @@ type attributedUse struct {
 // resolve to nil - only a named function has a parameter fact to defer
 // to (REQ-closure-shared-dynamic-state).
 func plainCalleeFunc(p *packages.Package, fun ast.Expr) (*types.Func, string) {
-	for {
-		switch f := fun.(type) {
-		case *ast.ParenExpr:
-			fun = f.X
-			continue
-		case *ast.IndexExpr:
-			fun = f.X
-			continue
-		case *ast.IndexListExpr:
-			fun = f.X
-			continue
-		}
-		break
-	}
+	fun = unwrapCallee(fun)
 	var obj types.Object
 	switch f := fun.(type) {
 	case *ast.Ident:
@@ -1286,19 +1293,7 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 					// (parenthesized, generic-instantiated). Excess
 					// variadic arguments seed the final parameter.
 					callee := n.Fun
-				unwrapFun:
-					for {
-						switch f := callee.(type) {
-						case *ast.ParenExpr:
-							callee = f.X
-						case *ast.IndexExpr:
-							callee = f.X
-						case *ast.IndexListExpr:
-							callee = f.X
-						default:
-							break unwrapFun
-						}
-					}
+					callee = unwrapCallee(callee)
 					if ident, ok := callee.(*ast.Ident); ok {
 						if fn, ok := p.TypesInfo.Uses[ident].(*types.Func); ok {
 							if params := initOnlyParams[fn]; len(params) != 0 {
@@ -3616,20 +3611,7 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 // one callee shape whose returns a persisted proof can audit.
 func plainNamedCalleeFn(p *packages.Package, call *ast.CallExpr) *types.Func {
 	fun := call.Fun
-	for {
-		switch f := fun.(type) {
-		case *ast.ParenExpr:
-			fun = f.X
-			continue
-		case *ast.IndexExpr:
-			fun = f.X
-			continue
-		case *ast.IndexListExpr:
-			fun = f.X
-			continue
-		}
-		break
-	}
+	fun = unwrapCallee(fun)
 	var obj types.Object
 	switch fun := fun.(type) {
 	case *ast.Ident:
@@ -6702,6 +6684,385 @@ func onceFieldOfDo(audited bool, info *types.Info, call *ast.CallExpr) *types.Va
 	return field
 }
 
+// closedInterfaceFields judges, per unexported interface-typed field of
+// this package's named struct types, the concrete in-package types a
+// value stored into the field can carry — the field's member set. A
+// field is closed when every store into it, anywhere in the package
+// (an unexported field is written nowhere else), is a value whose
+// static type is a concrete in-package named type (through a pointer),
+// or a parameter of an unexported plain function that is only ever
+// called directly and never itself written in the body, resolved
+// through every call site's argument the same way; a store of any
+// other shape — an interface-typed call
+// result or field read, a method or literal parameter, an escaped
+// function, an exported function another package can call — leaves
+// the field open, and an open field appears in no set. A
+// dispatch through a closed field can reach only a member's method
+// (REQ-closure-shared-dynamic-state).
+func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return nil
+	}
+	info := p.TypesInfo
+	// Plain unexported functions and their parameters.
+	type paramKey struct {
+		fn    *types.Func
+		index int
+	}
+	// candidateField reports whether a field variable is one this
+	// judgment tracks: an unexported interface-typed field declared in
+	// this package — the one identity every store and every dispatch
+	// resolves to, whatever selection path reaches it.
+	candidateField := func(field *types.Var) bool {
+		if field == nil || !field.IsField() || field.Exported() || field.Pkg() != p.Types {
+			return false
+		}
+		_, isIface := types.Unalias(field.Type()).Underlying().(*types.Interface)
+		return isIface
+	}
+	// A package declaring no candidate field has nothing to judge.
+	any := false
+	for _, name := range p.Types.Scope().Names() {
+		typeName, ok := p.Types.Scope().Lookup(name).(*types.TypeName)
+		if !ok {
+			continue
+		}
+		st, ok := typeName.Type().Underlying().(*types.Struct)
+		if !ok {
+			continue
+		}
+		for i := 0; i < st.NumFields() && !any; i++ {
+			any = candidateField(st.Field(i))
+		}
+	}
+	if !any {
+		return nil
+	}
+	params := map[*types.Var]paramKey{}
+	written := map[*types.Var]bool{}
+	callable := map[*types.Func]bool{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Type == nil || fd.Type.Params == nil {
+				continue
+			}
+			fn, ok := info.Defs[fd.Name].(*types.Func)
+			if !ok || fn.Exported() {
+				continue
+			}
+			// A variadic parameter needs no arm: its identifier has
+			// slice type, which the concrete-named requirement below
+			// refuses, and its elements are index expressions, which
+			// resolve open.
+			callable[fn] = true
+			index := 0
+			for _, field := range fd.Type.Params.List {
+				for _, name := range field.Names {
+					if v, ok := info.Defs[name].(*types.Var); ok {
+						params[v] = paramKey{fn: fn, index: index}
+					}
+					index++
+				}
+				if len(field.Names) == 0 {
+					index++
+				}
+			}
+			// A parameter standing in a write position anywhere in its
+			// body — reassigned, address-taken, a range target,
+			// incremented — no longer holds its call site's argument.
+			if fd.Body == nil {
+				continue
+			}
+			markWritten := func(expr ast.Expr) {
+				if ident, ok := expr.(*ast.Ident); ok {
+					if v, ok := info.Uses[ident].(*types.Var); ok {
+						if _, isParam := params[v]; isParam {
+							written[v] = true
+						}
+					}
+				}
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range n.Lhs {
+						markWritten(lhs)
+					}
+				case *ast.IncDecStmt:
+					markWritten(n.X)
+				case *ast.UnaryExpr:
+					if n.Op == token.AND {
+						markWritten(n.X)
+					}
+				case *ast.RangeStmt:
+					markWritten(n.Key)
+					markWritten(n.Value)
+				}
+				return true
+			})
+		}
+	}
+	// Direct call sites per callable, and the callables referenced any
+	// other way — a function value escapes its call sites.
+	calls := map[*types.Func][]*ast.CallExpr{}
+	escaped := map[*types.Func]bool{}
+	callFun := map[ast.Expr]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			fun := unwrapCallee(call.Fun)
+			if ident, ok := fun.(*ast.Ident); ok {
+				if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
+					calls[fn] = append(calls[fn], call)
+					callFun[ident] = true
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok || callFun[ident] {
+				return true
+			}
+			if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
+				escaped[fn] = true
+			}
+			return true
+		})
+	}
+	// memberTypes resolves a stored expression to its member names, or
+	// reports the field open.
+	var memberTypes func(expr ast.Expr, seen map[*types.Var]bool) ([]string, bool)
+	memberTypes = func(expr ast.Expr, seen map[*types.Var]bool) ([]string, bool) {
+		for {
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			expr = paren.X
+		}
+		t := info.TypeOf(expr)
+		if t == nil {
+			return nil, false
+		}
+		if _, isIface := types.Unalias(t).Underlying().(*types.Interface); !isIface {
+			concrete := types.Unalias(t)
+			if ptr, ok := concrete.(*types.Pointer); ok {
+				concrete = types.Unalias(ptr.Elem())
+			}
+			named, ok := concrete.(*types.Named)
+			if !ok || named.Obj() == nil || named.Obj().Pkg() != p.Types {
+				return nil, false
+			}
+			return []string{named.Obj().Name()}, true
+		}
+		ident, ok := expr.(*ast.Ident)
+		if !ok {
+			return nil, false
+		}
+		v, ok := info.Uses[ident].(*types.Var)
+		if !ok {
+			return nil, false
+		}
+		key, ok := params[v]
+		if !ok || written[v] || escaped[key.fn] || seen[v] {
+			return nil, false
+		}
+		sites := calls[key.fn]
+		if len(sites) == 0 {
+			return nil, false
+		}
+		seen[v] = true
+		defer delete(seen, v)
+		var members []string
+		for _, site := range sites {
+			if key.index >= len(site.Args) {
+				return nil, false
+			}
+			more, ok := memberTypes(site.Args[key.index], seen)
+			if !ok {
+				return nil, false
+			}
+			members = append(members, more...)
+		}
+		return members, true
+	}
+	// Every store into a candidate field, whatever selection path
+	// reaches it — a promoted field through an embedding is the same
+	// variable.
+	fieldOf := func(structType types.Type, index int) *types.Var {
+		if ptr, ok := types.Unalias(structType).(*types.Pointer); ok {
+			structType = ptr.Elem()
+		}
+		st, ok := types.Unalias(structType).Underlying().(*types.Struct)
+		if !ok || index < 0 || index >= st.NumFields() {
+			return nil
+		}
+		if field := st.Field(index); candidateField(field) {
+			return field
+		}
+		return nil
+	}
+	members := map[*types.Var][]string{}
+	open := map[*types.Var]bool{}
+	store := func(field *types.Var, value ast.Expr) {
+		if !candidateField(field) || open[field] {
+			return
+		}
+		more, ok := memberTypes(value, map[*types.Var]bool{})
+		if !ok {
+			open[field] = true
+			delete(members, field)
+			return
+		}
+		members[field] = append(members[field], more...)
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.CompositeLit:
+				t := info.TypeOf(n)
+				if t == nil {
+					return true
+				}
+				if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
+					t = ptr.Elem()
+				}
+				for i, elt := range n.Elts {
+					if kv, ok := elt.(*ast.KeyValueExpr); ok {
+						if key, ok := kv.Key.(*ast.Ident); ok {
+							if field, ok := info.Uses[key].(*types.Var); ok {
+								store(field, kv.Value)
+							}
+						}
+						continue
+					}
+					store(fieldOf(t, i), elt)
+				}
+			case *ast.AssignStmt:
+				if len(n.Lhs) != len(n.Rhs) {
+					for _, lhs := range n.Lhs {
+						if sel, ok := lhs.(*ast.SelectorExpr); ok {
+							if selection, ok := info.Selections[sel]; ok && selection.Kind() == types.FieldVal {
+								if field, ok := selection.Obj().(*types.Var); ok {
+									open[field] = true
+									delete(members, field)
+								}
+							}
+						}
+					}
+					return true
+				}
+				for i, lhs := range n.Lhs {
+					sel, ok := lhs.(*ast.SelectorExpr)
+					if !ok {
+						continue
+					}
+					selection, ok := info.Selections[sel]
+					if !ok || selection.Kind() != types.FieldVal {
+						continue
+					}
+					if field, ok := selection.Obj().(*types.Var); ok {
+						store(field, n.Rhs[i])
+					}
+				}
+			case *ast.UnaryExpr:
+				// The field's address escapes: written through an alias
+				// the walk cannot follow.
+				if n.Op == token.AND {
+					if sel, ok := n.X.(*ast.SelectorExpr); ok {
+						if selection, ok := info.Selections[sel]; ok && selection.Kind() == types.FieldVal {
+							if field, ok := selection.Obj().(*types.Var); ok {
+								open[field] = true
+								delete(members, field)
+							}
+						}
+					}
+				}
+			case *ast.CallExpr:
+				// A conversion between struct types copies another
+				// type's fields — stores this walk attributes to that
+				// type's field variables — into this type's: every
+				// interface field of the converted-to struct opens.
+				tv, ok := info.Types[n.Fun]
+				if !ok || !tv.IsType() || len(n.Args) != 1 {
+					return true
+				}
+				to := info.TypeOf(n)
+				if to == nil {
+					return true
+				}
+				if ptr, ok := types.Unalias(to).(*types.Pointer); ok {
+					to = ptr.Elem()
+				}
+				st, ok := types.Unalias(to).Underlying().(*types.Struct)
+				if !ok || types.Identical(info.TypeOf(n.Args[0]), to) {
+					return true
+				}
+				for i := 0; i < st.NumFields(); i++ {
+					if field := fieldOf(to, i); field != nil {
+						open[field] = true
+						delete(members, field)
+					}
+				}
+			}
+			return true
+		})
+	}
+	closed := map[*types.Var][]string{}
+	for field, names := range members {
+		if open[field] || len(names) == 0 {
+			continue
+		}
+		sort.Strings(names)
+		closed[field] = slices.Compact(names)
+	}
+	return closed
+}
+
+// closedFieldDispatchTargets resolves a method call through a receiver's
+// closed interface field — `recv.f.M()`, the field selected from the
+// receiver identifier itself — to the read-only proof's chain targets:
+// every member's declaration of M. A member declaring no M (promoting
+// it instead) refuses (REQ-closure-shared-dynamic-state).
+func closedFieldDispatchTargets(info *types.Info, recvObj types.Object, sel *ast.SelectorExpr, name string, closed map[*types.Var][]string, declared map[string]bool) ([]string, bool) {
+	fieldSel, ok := sel.X.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	ident, ok := fieldSel.X.(*ast.Ident)
+	if !ok || info.Uses[ident] != recvObj {
+		return nil, false
+	}
+	selection, ok := info.Selections[fieldSel]
+	if !ok || selection.Kind() != types.FieldVal || len(selection.Index()) != 1 {
+		return nil, false
+	}
+	field, ok := selection.Obj().(*types.Var)
+	if !ok {
+		return nil, false
+	}
+	members, ok := closed[field]
+	if !ok {
+		return nil, false
+	}
+	targets := make([]string, 0, len(members))
+	for _, member := range members {
+		target := member + "." + name
+		if !declared[target] {
+			return nil, false
+		}
+		targets = append(targets, target)
+	}
+	return targets, true
+}
+
 // unexportedDispatchTargets resolves a method call through a
 // receiver-rooted interface value to the read-only proof's chain
 // targets: the called method must be unexported and declared by an
@@ -6802,13 +7163,18 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 		})
 	}
 	// declaredByName lists, per method name, every sibling key declaring
-	// it — the chain targets of an unexported-method dispatch.
+	// it — the chain targets of an unexported-method dispatch; declared
+	// is the key set itself; closedFields the member sets an exported
+	// dispatch through a receiver's closed interface field chains into.
 	declaredByName := map[string][]string{}
+	declared := map[string]bool{}
 	for key := range methods {
+		declared[key] = true
 		if dot := strings.LastIndex(key, "."); dot >= 0 {
 			declaredByName[key[dot+1:]] = append(declaredByName[key[dot+1:]], key)
 		}
 	}
+	closedFields := closedInterfaceFields(p)
 	for _, keys := range declaredByName {
 		sort.Strings(keys)
 	}
@@ -7330,7 +7696,14 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package) map[string]bool 
 							// dispatch through it chains into every
 							// declaration of that name under the same
 							// fixed point (REQ-closure-shared-dynamic-state).
-							if targets, ok := unexportedDispatchTargets(p, selection, fn, declaredByName, bodyless); ok {
+							targets, ok := unexportedDispatchTargets(p, selection, fn, declaredByName, bodyless)
+							if !ok && !bodyless[fn.Name()] {
+								// An exported method through the
+								// receiver's own closed interface field
+								// reaches only a member's declaration.
+								targets, ok = closedFieldDispatchTargets(p.TypesInfo, recvObj, sel, fn.Name(), closedFields, declared)
+							}
+							if ok {
 								if chains[key] == nil {
 									chains[key] = map[string]bool{}
 								}
@@ -7939,20 +8312,7 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 				// An explicit generic instantiation wraps the callee in
 				// an index expression - still a direct call.
 				fun := n.Fun
-				for {
-					switch f := fun.(type) {
-					case *ast.ParenExpr:
-						fun = f.X
-						continue
-					case *ast.IndexExpr:
-						fun = f.X
-						continue
-					case *ast.IndexListExpr:
-						fun = f.X
-						continue
-					}
-					break
-				}
+				fun = unwrapCallee(fun)
 				if ident, ok := fun.(*ast.Ident); ok {
 					if key, ok := funcKeyOf(p.TypesInfo.Uses[ident]); ok {
 						calls[ident] = true

@@ -12,8 +12,8 @@ import (
 // data slice element, a fill through a bound method or a local Once, a
 // carrier field inside the Do — keeps the mark. A dispatch of an
 // unexported interface method chains into every in-package declaration
-// of that name; an exported method's dispatch keeps the escape
-// (REQ-closure-shared-dynamic-state).
+// of that name; an exported method's dispatch chains through the
+// receiver's closed interface field (REQ-closure-shared-dynamic-state).
 func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -24,7 +24,9 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		valid                  bool
 	}{
 		{"once-filled data field", "func (g *gen) Value() int {\n\tg.once.Do(func() { g.n = g.impl.value() })\n\treturn g.n\n}\n", "func F() int { return G.Value() }\n", true},
-		{"exported dispatch keeps the escape", "func (g *gen) String() string { return g.impl.String() }\n", "func F() string { return G.String() }\n", false},
+		// The exported dispatch chains through the closed field: the
+		// fixture stores one concrete type into impl.
+		{"exported dispatch through the closed field", "func (g *gen) String() string { return g.impl.String() }\n", "func F() string { return G.String() }\n", true},
 		{"once-filled counter", "func (g *gen) Count() int {\n\tg.once.Do(func() { g.n++ })\n\treturn g.n\n}\n", "func F() int { return G.Count() }\n", true},
 		{"once-filled data slice element", "func (g *gen) Name() string {\n\tg.once.Do(func() { g.names[0] = \"x\" })\n\treturn g.names[0]\n}\n", "func F() string { return G.Name() }\n", true},
 		{"counter outside the once", "func (g *gen) Next() int {\n\tg.n++\n\treturn g.n\n}\n", "func F() int { return G.Next() }\n", false},

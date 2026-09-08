@@ -351,9 +351,18 @@ the audited synchronization set, a dispatch of an UNEXPORTED method through a
 receiver-reachable interface value chaining into every in-package
 declaration of that name under the same fixed point (only the package's own
 types can declare it, and a composite promotes one of those declarations;
-no declaration means a nil value and refuses), while an exported method's
-dispatch keeps the escape, a composite being able to promote it from a
-foreign type — and a call to a proven method marks nothing,
+no declaration means a nil value and refuses), and a dispatch of an exported
+method through the receiver's own closed interface field — an unexported
+field of the receiver's type whose every store in the package, a promoted
+field's store included (the field being the same variable), carries a value
+of concrete in-package static type, a parameter of an unexported plain
+function called only directly, never itself written in the body, resolving
+through every call site's argument the same way; any other stored shape, an
+escape of the field's address, or a conversion into the struct type from
+another leaving the field open — chaining into every member's
+declaration of the method (a member promoting it refuses), while any other
+exported dispatch keeps the escape, a composite being able to promote it
+from a foreign type — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
 each hand out no mutable reach or are audited-immutable (reflect.Type,
 runtime-canonical and never written after construction; reflect.TypeOf, its
