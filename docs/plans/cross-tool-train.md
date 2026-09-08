@@ -833,7 +833,7 @@ in their repos.
       deterministic; serving consults a transitive seeding class resolved
       from the recognized-driver table while the evidence classification
       stays direct-call; doc deletes at close.
-- [ ] 160. gomutant: ephemeral hardening — the probe never writes under
+- [x] 160. gomutant: ephemeral hardening — the probe never writes under
       the caller's tree (gomutant docs/issues/ephemeral-rapid-failfile-in-
       tree.md: rapid's failfile directory and the test working directory
       isolated into the probe's temp dir), an attested survivor's verdict
