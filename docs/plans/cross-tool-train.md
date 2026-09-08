@@ -827,7 +827,7 @@ in their repos.
       attribution is never re-scored (a probe-killed line recorded open);
       sample the bucket into the audit exactly as the narrowed class, a
       disagreement there the loudest signal; doc deletes at close.
-- [ ] 159. stipulator: random-seeded serving follows a transitive seeding
+- [x] 159. stipulator: random-seeded serving follows a transitive seeding
       class (stipulator docs/issues/seeded-witness-serving-follows-direct-
       call-classifier.md) — a helper-indirected rapid driver serves as
       deterministic; serving consults a transitive seeding class resolved
