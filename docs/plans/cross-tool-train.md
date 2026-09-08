@@ -678,7 +678,7 @@ strategy bump.
       0b2) — scope 0b's registration poison to registrations whose
       FlagSet (or the default set) can carry os.Args, via
       Parse-argument provenance; narrows 0b's fail-closed widening.
-- [ ] 117. gofresh: call-shaped unaudited-std scan classes narrow per
+- [x] 117. gofresh: call-shaped unaudited-std scan classes narrow per
       audit (was SEP 0f) — crypto/rand first; the general retirement
       of the unaudited-std scan arm is the band's endgame, not one
       chunk.
