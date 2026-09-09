@@ -880,9 +880,8 @@ in their repos.
       compartment hashes carry equal ledgers, stated in
       REQ-closure-test-variant-compartment with a seeded property witness
       over generated compartments and a per-axis anchor.
-- [ ] 169. stipulator: one spelling source for remedies and knob prose
-      (stipulator docs/issues/remedy-spellings-one-source.md,
-      knob-prose-identity.md) — remedies composed from the registered verb
+- [x] 169. stipulator: one spelling source for remedies and knob prose
+      — remedies composed from the registered verb
       and flag names and parsed against the command tree; schema tags and
       usage strings rendered from the guidance document's knob text; two
       docs delete at close.
