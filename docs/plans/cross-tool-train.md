@@ -871,11 +871,10 @@ in their repos.
       owned — the config home every child inherits points at an owned
       telemetry-off home, so the descendant tree is exactly what the
       runner owns.
-- [ ] 167. stipulator: spec enforcement pointers follow retarget and are
-      judged (stipulator docs/issues/retarget-spec-enforcement-pointers.md)
-      — every "Enforced by" name resolves to a tests/proves binding by a
-      document-level walk, and retarget rewrites pointers with symbols; doc
-      deletes at close.
+- [x] 167. stipulator: spec enforcement pointers follow retarget and are
+      judged — every "Enforced by" name resolves to a tests/proves binding
+      of its requirement, and retarget rewrites the pointers a moved member
+      names in the document.
 - [ ] 168. gofresh: the compartment-ledger entailment is an invariant
       (gofresh docs/issues/compartment-ledger-derivation.md) — equal
       compartment hash ⇒ equal ledger, stated in REQ-closure-test-variant-
