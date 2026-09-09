@@ -1028,7 +1028,7 @@ in their repos.
 
 ## Band R — re-audit (the standing rule; recurs at every band close or twelve chunks)
 
-- [ ] 194. gofresh: coherence re-audit — read-only, whole subsystems
+- [x] 194. gofresh: coherence re-audit — read-only, whole subsystems
       against the specs (closure tiers, guards, auditset, the fold, the
       test-variant ledger, guidance); output a chartered consolidation set,
       recorded disputes, and a re-sequencing of the queued gofresh chunks.
