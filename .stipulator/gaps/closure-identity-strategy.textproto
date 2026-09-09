@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-identity-strategy"
 reason: "the invariant's move-by-construction claim is the composition of per-derivation version constants; the example witness pins the composition and the fold discipline while a property witness or analyzer proof over derivation changes is pending"
-content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
-source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

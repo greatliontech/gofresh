@@ -280,7 +280,7 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 		t.Fatal("a bumped scan strategy served a prior generation's scan")
 	}
 	if _, ok := loadEffectScan(effectScanDirName, effectScanStrategy, key); ok {
-		t.Fatal("the bare strategy without the toolchain identity served")
+		t.Fatal("the bare strategy without the analyzing frontend served")
 	}
 	if _, ok := loadEffectScan(testingScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key); ok {
 		t.Fatal("the sibling testing-scan directory served the effect-scan entry")

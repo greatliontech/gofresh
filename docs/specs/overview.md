@@ -151,6 +151,19 @@ guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime
 configuration drift, while a test verdict, which neither can change, is not.
 
+**REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
+records under a language-series disagreement between the analyzing
+binary's build toolchain and the ambient toolchain of the tree's
+module, sampled by `go env GOVERSION` in the target module's directory
+(never the tool's own working directory: under GOTOOLCHAIN=auto the
+selected toolchain is per module). Within a major the refusal is
+directional — a frontend older than the ambient series refuses, since
+it predates the sources' language, while a newer frontend reads older
+language under the Go 1 compatibility promise; across majors both
+directions refuse; an unidentifiable version on either side refuses.
+This is the guard the closure identity's exclusion of the analyzing
+frontend rests on (REQ-closure-identity-strategy).
+
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the
 current tree — two recordings that agree on every guard but differ in commit

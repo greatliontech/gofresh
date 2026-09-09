@@ -3,7 +3,6 @@ package closure
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"runtime"
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
@@ -69,7 +68,7 @@ const effectScanStrategy = "gofresh/effect-scan@21"
 func EffectScanStrategy() string { return effectScanStrategy }
 
 // effectScanScope is the memo's full scope: the strategy version, the
-// toolchain identity, and — when the analysis' build selection is not
+// analyzing frontend's version, and — when the analysis' build selection is not
 // the audited default — the selection's audit verdict, because the
 // scan's audited-set consultations now answer per selection
 // (REQ-closure-effect-scan-memo). The default-selection scope is
@@ -77,7 +76,7 @@ func EffectScanStrategy() string { return effectScanStrategy }
 // serving; an unaudited selection's scans key separately and can
 // never serve an audited consumer or vice versa.
 func (h *Hasher) effectScanScope() string {
-	scope := effectScanStrategy + " " + runtime.Version()
+	scope := effectScanStrategy + " " + AnalyzingFrontend()
 	if !h.SelectionAudited() {
 		scope += " selection-unaudited"
 	}

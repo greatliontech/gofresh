@@ -2,8 +2,8 @@ package gofresh
 
 import (
 	"fmt"
+	"github.com/greatliontech/gofresh/closure"
 	"go/version"
-	"runtime"
 	"strings"
 )
 
@@ -46,7 +46,7 @@ import (
 // basis and BOTH directions refuse. An unidentifiable version on
 // either side refuses — unidentifiable is not agreement.
 func ToolchainSkew(ambient string) error {
-	return toolchainSkew(runtime.Version(), ambient)
+	return toolchainSkew(closure.AnalyzingFrontend(), ambient)
 }
 
 // toolchainSkew is the two-sided core, testable on both inputs.

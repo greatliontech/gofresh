@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/scanner"
 	"go/token"
-	"runtime"
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
@@ -29,7 +28,7 @@ import (
 // move a member's canonical digest bumps it, so persisted digests from
 // the prior form refuse instead of serving — and IdentityStrategy
 // (closure.go) moves with it.
-const canonicalStrategy = "gofresh/canonical-member@1"
+const canonicalStrategy = "gofresh/canonical-member@2"
 
 // canonicalDirName is the canonical-digest memo's store directory.
 const canonicalDirName = "canonical"
@@ -90,7 +89,9 @@ func retainedComment(text string) bool {
 // the stream at its position, so a directive's attachment (which
 // declaration it precedes) is part of the form. ok is false when the
 // member does not scan — the caller folds the byte digest then.
-func canonicalDigest(content []byte) (string, bool) {
+// scanCanonical tokenizes one member into the items the canonical form
+// folds; false when the scanner refuses the text.
+func scanCanonical(content []byte) ([]tokenItem, bool) {
 	fset := token.NewFileSet()
 	file := fset.AddFile("", -1, len(content))
 	var sc scanner.Scanner
@@ -105,14 +106,23 @@ func canonicalDigest(content []byte) (string, bool) {
 		if tok == token.SEMICOLON {
 			lit = ";"
 		}
-		line := file.Line(pos)
+		// Positions as written, never as a line directive adjusts them:
+		// attachment follows the parser's doc rule, which reads
+		// unadjusted positions, so a directive between a comment and
+		// its declaration leaves the attachment standing.
+		line := file.PositionFor(pos, false).Line
 		end := line
 		if tok == token.COMMENT {
-			end = file.Line(pos + token.Pos(len(lit)-1))
+			end = file.PositionFor(pos+token.Pos(len(lit)-1), false).Line
 		}
 		items = append(items, tokenItem{tok: tok, lit: lit, line: line, end: end})
 	}
-	if failed {
+	return items, !failed
+}
+
+func canonicalDigest(content []byte) (string, bool) {
+	items, ok := scanCanonical(content)
+	if !ok {
 		return "", false
 	}
 	hasher := sha256.New()
@@ -172,10 +182,14 @@ func leadGroups(items []tokenItem) map[int]bool {
 		if items[i].tok != token.COMMENT {
 			continue
 		}
-		// The group: this comment and every following comment on the
-		// line right after the previous one's end.
+		// The group: this comment and every following comment starting
+		// on the previous one's end line or the line after it — the
+		// parser's own merge rule — and the group leads the next token
+		// only when that token starts on the line right after the
+		// group's end: a group closing on the declaration's own line is
+		// a trailing comment, not its doc (the parser's lead rule).
 		j := i
-		for j+1 < len(items) && items[j+1].tok == token.COMMENT && items[j+1].line == items[j].end+1 {
+		for j+1 < len(items) && items[j+1].tok == token.COMMENT && items[j+1].line <= items[j].end+1 {
 			j++
 		}
 		if n := nextIndex(items, j); n < len(items) && items[n].line == items[j].end+1 {
@@ -259,8 +273,8 @@ func (h *Hasher) canonicalFileDigest(dir, byteDigest string, content []byte) str
 	return canon
 }
 
-// canonicalScope is the memo's scope: the strategy and the toolchain
-// identity whose parser and printer produced the form.
+// canonicalScope is the memo's scope: the strategy and the analyzing
+// frontend's version, whose scanner produced the form.
 func canonicalScope() string {
-	return canonicalStrategy + " " + runtime.Version()
+	return canonicalStrategy + " " + AnalyzingFrontend()
 }

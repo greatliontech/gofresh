@@ -676,6 +676,12 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 // the identity's version by construction. The value is opaque: a
 // consumer keying a judgment to either hash compares two records'
 // values for equality only — never parsed for which leg moved.
+//
+// The analyzing frontend is not a constituent: see AnalyzingFrontend —
+// the fold's token stream and parse are fixed across frontends for the
+// valid sources it admits; the memos key on the frontend instead — a
+// cache-miss defense for the syntax-level ones, a correctness key for
+// the type-level ones, whose payloads are the frontend's own.
 const IdentityStrategy = identityFoldStrategy + " " + canonicalStrategy + " " + variantParseStrategy
 
 // identityFoldStrategy versions what the two hashes fold beyond the

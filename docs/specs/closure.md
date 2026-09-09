@@ -85,7 +85,8 @@ together — under the same per-file name-and-content-hash discipline as the cor
 file folding, unsalted, so every subject of one package shares the compartment
 that describes the package. Under one listing configuration — the build
 selection, the platform and cgo environment the listing runs under, and the
-toolchain — and one identity strategy (REQ-closure-identity-strategy), equal
+toolchain — and one identity strategy (REQ-closure-identity-strategy, which
+excludes the analyzing frontend by design), equal
 compartment hashes carry equal ledgers: the ledger is a function of the bytes
 the hash folds, of that configuration, and of that strategy alone — a member's
 kind as the toolchain lists it follows its own name and constraints and its
@@ -111,7 +112,9 @@ whole directory (non-toolchain assembly, cgo callback blind spots) may keep test
 in the core as well: sound, merely undiscriminated. A compiled member's
 ledger derivation — its declarations and header — may be served from a
 persistent memo under the member's name and content digest, scoped by
-a parse-strategy version and the toolchain identity and batched per
+a parse-strategy version and the analyzing frontend's version (the
+frontend the analyzing process parses with — a cache-miss defense, never
+the analyzed selection's toolchain, which is a guard) and batched per
 package directory, because it is a pure function of those bytes; the compartment hash itself is recomputed
 from the bytes every pass, and the memo follows the observability
 memo's discipline verbatim. The compartment's
@@ -1779,7 +1782,8 @@ discarded incrementally rather than growing with every subject in the view.
 **REQ-closure-observability-memo** (behavior): Observability proofs MAY be
 served from a persistent memo because the proof is a pure function of its
 key's complete input identity: the caller-supplied scope (the proof-strategy
-version and the code guards — toolchain and build configuration) plus the
+version, the analyzing frontend's version, and the code guards — toolchain
+and build configuration) plus the
 package test-binary closure hash, which pins every mutable source byte the
 analyzed program is built from: the core closure hash joined with the
 test-variant compartment identity, since the compartment partition keeps
@@ -1812,7 +1816,7 @@ variable identities its code mutates after initialization
 (REQ-closure-shared-dynamic-state), and its method-directive declarations — MAY
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
-(the fact-strategy version, the code guards — toolchain and build
+(the fact-strategy version, the analyzing frontend's version, and the code guards — toolchain and build
 configuration — and the execution attestations, which change what a fact
 records, so attested and unattested sessions never serve each other's
 facts) plus the module's version pin and the version signature of every
@@ -1848,7 +1852,9 @@ at any time; changing fact semantics bumps the fact-strategy version.
 **REQ-closure-effect-scan-memo** (behavior): The fold of a version-pinned
 package's per-file effect scans MAY be served from a persistent memo,
 because that fold is a pure syntactic function of its key's complete input
-identity: the scan-strategy version and the toolchain identity — joined by
+identity: the scan-strategy version and the analyzing frontend's version
+(the frontend the analyzing process scans with, a cache-miss defense
+distinct from the analyzed selection's toolchain, a guard) — joined by
 the analysis' selection-audit verdict when the build selection is not the
 audited default, since the scan's audited-set consultations answer per
 selection and an unaudited selection's scans must never serve an audited
@@ -1882,7 +1888,8 @@ included — bumps the scan-strategy version.
 testing-effect scan MAY be served from a persistent memo, because the scan
 is a pure function of its key's complete input identity: the scan-strategy
 version plus the code guards — toolchain and build configuration — that
-the type environment depends on, plus the package test-binary closure
+the type environment depends on, plus the analyzing frontend's version,
+plus the package test-binary closure
 hash, which pins every mutable source byte the environment is built from.
 The guards come from the caller's one analysis scope, set once per
 pass, which arms every closure memo that needs them. A hit serves
@@ -1905,7 +1912,7 @@ execution attestations carried for them — MAY be served whole from a
 persistent memo, because every output is a pure function of its key's
 complete input identity — the shared-dynamic-state judgment reads the
 package's own graph and nothing of its sibling view packages
-(REQ-closure-shared-dynamic-state): the fact-strategy version and the code guards
+(REQ-closure-shared-dynamic-state): the fact-strategy version, the analyzing frontend's version, and the code guards
 (toolchain and build configuration), the execution attestations, and the
 caller's vouch set — the scope — plus the package scan key: the maximal
 closure hash joined with the test-variant compartment identity, which
@@ -1971,7 +1978,10 @@ the syntax tree — with every comment dropped except the classes the toolchain
 or gofresh reads as behavior, each retained at its position in the stream
 together with its attachment — whether its comment group (comments on
 consecutive lines) is the lead group of the token that follows, ending on the
-line before it: the parser's doc rule, which decides whether a directive
+line before it — positions read as written, never as a `//line`
+directive adjusts them, exactly as the parser reads them, so a directive
+between a comment and its declaration leaves the attachment standing:
+the parser's doc rule, which decides whether a directive
 documents the declaration that follows or floats free, a blank line or a
 block comment on the declaration's own line breaking it: directive-shaped
 comments (`//go:…`, `//gofresh:…`, any tool's `//<name>:…`, in the line or
@@ -2009,7 +2019,22 @@ ledger derivation — MUST be a fingerprint constituent exposed as data beside
 the two hashes, composed from every such derivation's own version so that a
 change to any of them moves it by construction, never restated where it
 could lag; the value is opaque, compared for equality only, never parsed for
-which derivation moved. Two hashes folded under different derivations say nothing
+which derivation moved. The analyzing frontend — the Go version the
+analyzing process scans and parses with — is not a constituent, by
+design: the canonical member form and the ledger's declarations are a
+scanner's tokens and a parser's declarations over valid Go sources,
+which Go's compatibility promise fixes across frontends in the forward
+direction — a newer frontend reads older language, and new syntax
+appears only in sources that changed — so composing it would move every
+consumer's records on each upgrade of the consumer's build toolchain for
+hashes that did not move; the reverse direction, a source newer than the
+frontend, is refused at the provenance boundary by the toolchain-skew
+check (REQ-fresh-toolchain-skew). Every persistent memo holding a derivation the
+analyzing frontend made keys on the frontend — the syntax-level memos as
+a cache-miss defense, the type-level memos (proofs, facts, scans) as a
+correctness key, their payloads being the frontend's own; the listing
+memo alone does not, its payload being the analyzed toolchain's own
+account re-verified against its inputs (REQ-closure-listing-memo). Two hashes folded under different derivations say nothing
 about each other's source: a consumer keying a judgment to a closure hash —
 gofresh's own check serves by the hash alone, which is self-describing, but a
 consumer carrying a judgment across records compares identities — compares two

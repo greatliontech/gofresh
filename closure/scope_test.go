@@ -9,21 +9,21 @@ import "testing"
 // vouch set, and the zero value arms nothing.
 func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 	scope := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2", Toolchain: "tc", BuildConfig: "bc", Vouches: []string{"b:y", "a:x"}}
-	if got, want := scope.Proofs(), "rta@1|tc|bc"; got != want {
+	if got, want := scope.Proofs(), "rta@1|tc|bc|"+AnalyzingFrontend(); got != want {
 		t.Errorf("Proofs = %q, want %q", got, want)
 	}
-	if got, want := scope.TestingScan(), testingScanStrategy+"|tc|bc"; got != want {
+	if got, want := scope.TestingScan(), testingScanStrategy+"|tc|bc|"+AnalyzingFrontend(); got != want {
 		t.Errorf("TestingScan = %q, want %q", got, want)
 	}
-	if got, want := scope.Facts(), "facts@2|tc|bc"; got != want {
+	if got, want := scope.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend(); got != want {
 		t.Errorf("Facts = %q, want %q", got, want)
 	}
-	if got, want := scope.Scan(), "facts@2|tc|bc|vouches:a:x,b:y"; got != want {
+	if got, want := scope.Scan(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|vouches:a:x,b:y"; got != want {
 		t.Errorf("Scan = %q, want %q", got, want)
 	}
 	attested := scope
 	attested.SingleSubject, attested.PackageProcess = true, true
-	if got, want := attested.Facts(), "facts@2|tc|bc|single-subject-execution|package-process-execution"; got != want {
+	if got, want := attested.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|single-subject-execution|package-process-execution"; got != want {
 		t.Errorf("attested Facts = %q, want %q", got, want)
 	}
 	if attested.Proofs() != scope.Proofs() || attested.TestingScan() != scope.TestingScan() {
@@ -39,7 +39,7 @@ func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 	if guardsOnly.Proofs() != "" || guardsOnly.Facts() != "" || guardsOnly.Scan() != "" {
 		t.Errorf("guards without a strategy armed a memo: %q %q %q", guardsOnly.Proofs(), guardsOnly.Facts(), guardsOnly.Scan())
 	}
-	if guardsOnly.TestingScan() != testingScanStrategy+"|tc|bc" {
+	if guardsOnly.TestingScan() != testingScanStrategy+"|tc|bc|"+AnalyzingFrontend() {
 		t.Errorf("the testing scan, which reads the guards alone, is inert under them: %q", guardsOnly.TestingScan())
 	}
 	strategiesOnly := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2"}

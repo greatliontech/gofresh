@@ -3,7 +3,6 @@ package closure
 import (
 	"crypto/sha256"
 	"os"
-	"runtime"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/digest"
@@ -38,9 +37,9 @@ const (
 const variantParseStrategy = "gofresh/variant-parse@1"
 
 // variantParseScope is the parse memo's scope: the strategy and the
-// toolchain identity whose parser produced the syntax.
+// analyzing frontend's version, whose parser produced the syntax.
 func variantParseScope() string {
-	return variantParseStrategy + " " + runtime.Version()
+	return variantParseStrategy + " " + AnalyzingFrontend()
 }
 
 // fileBytes is one file's content read once per pass, with its digest.

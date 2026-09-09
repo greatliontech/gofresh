@@ -440,3 +440,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "9a187903c1562c9d4a9c046655ed059b8dad5525a4861fd1bf0f5bb5a4d48c5c"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-skew"
+  content_hash: "45bb0bdbd0971ccaacc3d68563ecedf524f859f234ebf120e6565ffa00e3743e"
+  source_hash: "8dc01b391150e14704cc33cc9ab0c7efd729aa8f3ec5029f02615e40f9fc9abe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestToolchainSkewComparesLanguageSeries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3772618dfe3c017a84ae968e67e4c10a7dac861d969843c52b5b5727177fd2a8"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-skew"
+  content_hash: "45bb0bdbd0971ccaacc3d68563ecedf524f859f234ebf120e6565ffa00e3743e"
+  source_hash: "8dc01b391150e14704cc33cc9ab0c7efd729aa8f3ec5029f02615e40f9fc9abe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestToolchainSkewLabelsTheBinarySide"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "79f2f1ba9246d6a59aa955a6e20004f757d1be7ef8e567ace6e0112d94b0cd6b"
+}

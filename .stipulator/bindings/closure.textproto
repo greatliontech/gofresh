@@ -213,8 +213,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestSiblingTestAdditionMovesCompartmentNotCore"
   role: BINDING_ROLE_TESTS
@@ -223,8 +223,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestProductionEditMovesCoreNotCompartment"
   role: BINDING_ROLE_TESTS
@@ -233,8 +233,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNewTestOnlyDependencyMovesCore"
   role: BINDING_ROLE_TESTS
@@ -243,8 +243,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNoTestPackageCompartmentIsStableEmptyIdentity"
   role: BINDING_ROLE_TESTS
@@ -253,8 +253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestExternalTestPackageFilesEnterCompartmentAndLedger"
   role: BINDING_ROLE_TESTS
@@ -263,8 +263,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestLedgerNamesTheEditedAndAppendedDeclarations"
   role: BINDING_ROLE_TESTS
@@ -273,8 +273,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestVariantLedgerIsDeterministicallySorted"
   role: BINDING_ROLE_TESTS
@@ -283,8 +283,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSiblingTestAdditionStalesAsTestVariants"
   role: BINDING_ROLE_TESTS
@@ -293,8 +293,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestTestFileSubjectBodyLivesInCompartment"
   role: BINDING_ROLE_TESTS
@@ -303,8 +303,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPrePartitionRecordingFailsClosedAsTestVariants"
   role: BINDING_ROLE_TESTS
@@ -313,8 +313,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestViewServesTestVariantLedgerFromItsSnapshot"
   role: BINDING_ROLE_TESTS
@@ -323,8 +323,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
@@ -363,8 +363,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestLedgerDeltaOverRealLedgers"
   role: BINDING_ROLE_TESTS
@@ -373,8 +373,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestWidenedCoreKeepsTestFilesUndiscriminated"
   role: BINDING_ROLE_TESTS
@@ -393,8 +393,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEmbeddedGoFixtureIsDataNotSource"
   role: BINDING_ROLE_TESTS
@@ -403,8 +403,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCompiledAndEmbeddedTestFileFailsClosed"
   role: BINDING_ROLE_TESTS
@@ -413,8 +413,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestVariantLedgerTypesAreExportedData"
   role: BINDING_ROLE_TESTS
@@ -453,8 +453,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCompartmentDriftStalesWithoutPreciseAnalysis"
   role: BINDING_ROLE_TESTS
@@ -463,8 +463,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestMixedCoreAndCompartmentDriftStalesOnClosure"
   role: BINDING_ROLE_TESTS
@@ -533,8 +533,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestConstInsertionInsideGroupReadsAsChanged"
   role: BINDING_ROLE_TESTS
@@ -543,8 +543,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestInitAndVarReordersReadAsChanged"
   role: BINDING_ROLE_TESTS
@@ -553,8 +553,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestLedgerDeltaClassifiesInertness"
   role: BINDING_ROLE_TESTS
@@ -563,8 +563,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestLedgerDeltaIsDeterministicAndClassifiesMembership"
   role: BINDING_ROLE_TESTS
@@ -573,8 +573,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestDirectiveCommentsDefeatInertness"
   role: BINDING_ROLE_TESTS
@@ -583,8 +583,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/testvariant.TestDocCommentRidesTheDeclarationHash"
   role: BINDING_ROLE_TESTS
@@ -643,8 +643,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestIntermediateRecompilationsScanFromTheirOwnCompilation"
   role: BINDING_ROLE_TESTS
@@ -653,8 +653,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateLocalFactsDeriveFreshEachScan"
   role: BINDING_ROLE_TESTS
@@ -663,8 +663,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
-  source_hash: "b0ed174291403c1f77ecbbe12f2c916f1ac99bcb78f24e6df2b4cc3f37040090"
+  content_hash: "2680458ee83cccad1f15d3bfdd7d8b8f1070d2f0d75b2673e63d36b96d264544"
+  source_hash: "7e1495ac576e7194d563ac6f0f09c6f96f775f5e1bb5333ab5996d054c7a6687"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoServesEquivalentProofsWithoutLoading"
   role: BINDING_ROLE_TESTS
@@ -673,8 +673,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
-  source_hash: "b0ed174291403c1f77ecbbe12f2c916f1ac99bcb78f24e6df2b4cc3f37040090"
+  content_hash: "2680458ee83cccad1f15d3bfdd7d8b8f1070d2f0d75b2673e63d36b96d264544"
+  source_hash: "7e1495ac576e7194d563ac6f0f09c6f96f775f5e1bb5333ab5996d054c7a6687"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS
@@ -683,8 +683,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "9f34f6ee5839baebf4342605399f3b2c943e1f4d4fef1b9d3fef107722f4978e"
-  source_hash: "b0ed174291403c1f77ecbbe12f2c916f1ac99bcb78f24e6df2b4cc3f37040090"
+  content_hash: "2680458ee83cccad1f15d3bfdd7d8b8f1070d2f0d75b2673e63d36b96d264544"
+  source_hash: "7e1495ac576e7194d563ac6f0f09c6f96f775f5e1bb5333ab5996d054c7a6687"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoKeepsCompletedSlicesOnDeadline"
   role: BINDING_ROLE_TESTS
@@ -693,8 +693,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "b236ce88a87dee7f84225f6af7ae503191892ddd186b73f33434676423a3314a"
-  source_hash: "4c97cd9e5e71d63f0d714ae3f85fe2762e091867eca547c5d8682c906daf019d"
+  content_hash: "35756a5a8c6f7c645bb59922f907d3338e809329318ed9762bc88f0ce313cd9c"
+  source_hash: "ea423e05d21b3cb58433536588d0f5a83bb1e4a79658a36a5c5deff47bcee093"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoServesPinnedPackagesWithoutReads"
   role: BINDING_ROLE_TESTS
@@ -703,8 +703,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "b236ce88a87dee7f84225f6af7ae503191892ddd186b73f33434676423a3314a"
-  source_hash: "4c97cd9e5e71d63f0d714ae3f85fe2762e091867eca547c5d8682c906daf019d"
+  content_hash: "35756a5a8c6f7c645bb59922f907d3338e809329318ed9762bc88f0ce313cd9c"
+  source_hash: "ea423e05d21b3cb58433536588d0f5a83bb1e4a79658a36a5c5deff47bcee093"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoMissesOnScopeAndFileSetChange"
   role: BINDING_ROLE_TESTS
@@ -713,8 +713,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "b236ce88a87dee7f84225f6af7ae503191892ddd186b73f33434676423a3314a"
-  source_hash: "4c97cd9e5e71d63f0d714ae3f85fe2762e091867eca547c5d8682c906daf019d"
+  content_hash: "35756a5a8c6f7c645bb59922f907d3338e809329318ed9762bc88f0ce313cd9c"
+  source_hash: "ea423e05d21b3cb58433536588d0f5a83bb1e4a79658a36a5c5deff47bcee093"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEffectScanMemoFoldMatchesInlineFold"
   role: BINDING_ROLE_TESTS
@@ -723,8 +723,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "a0b1d0433ad9bd7802d0d19d26578c4bff0e1788d32a738e0615585f03d2d75b"
-  source_hash: "6b53f7e25bb33645f9903b31d3d217aae08d2fc97422cb847ab53499bd75bbda"
+  content_hash: "d7ba76539596a96d0c7bc208204fb598a39ae6bf01065f676b8d018e0ea92b23"
+  source_hash: "07bb98aac9fa2f7f74d7555c3687608eacbb76b9b40360e5f9acd34092e35230"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoServesWithoutTypeLoad"
   role: BINDING_ROLE_TESTS
@@ -733,8 +733,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "a0b1d0433ad9bd7802d0d19d26578c4bff0e1788d32a738e0615585f03d2d75b"
-  source_hash: "6b53f7e25bb33645f9903b31d3d217aae08d2fc97422cb847ab53499bd75bbda"
+  content_hash: "d7ba76539596a96d0c7bc208204fb598a39ae6bf01065f676b8d018e0ea92b23"
+  source_hash: "07bb98aac9fa2f7f74d7555c3687608eacbb76b9b40360e5f9acd34092e35230"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS
@@ -743,8 +743,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateFactsServePinnedPackagesWithoutLoading"
   role: BINDING_ROLE_TESTS
@@ -753,8 +753,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDynamicStateFactRoundTripCarriesMutationsAndMethodDirectives"
   role: BINDING_ROLE_TESTS
@@ -763,8 +763,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestDynamicStateFactStoreMissesOnScopeAndBucketChange"
   role: BINDING_ROLE_TESTS
@@ -773,8 +773,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedBucketsMoveWithImportConeVersions"
   role: BINDING_ROLE_TESTS
@@ -783,8 +783,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedBucketsExcludeModulesReachingMutableLocalSource"
   role: BINDING_ROLE_TESTS
@@ -793,8 +793,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-dynamic-state-memo"
-  content_hash: "c0597f6dd95ed766ebaf6f50969f6c73acfe5fe071b4f23b0f0801c83a1f9d6d"
-  source_hash: "5d4a6bfba8acb202323bbf8fbfaaaa1c05f2bd38f32a65e51c9682003d441cf0"
+  content_hash: "92c34d512e588ffb7e58476bece65124da14283480a3c2cfbadf4dc8b46e440b"
+  source_hash: "6e9e8e81244dd59e8aa562a6cba0e32d4876fac058cf159d012476527e99654e"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass"
   role: BINDING_ROLE_TESTS
@@ -813,8 +813,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCanonicalDigestFoldsSyntaxAndRetainedComments"
   role: BINDING_ROLE_TESTS
@@ -823,8 +823,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCanonicalDigestIsInvariantUnderCommentAndLayoutEdits"
   role: BINDING_ROLE_TESTS
@@ -833,8 +833,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCommentOnlyEditKeepsTheMaximalClosure"
   role: BINDING_ROLE_TESTS
@@ -843,8 +843,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.canonicalDigest"
   role: BINDING_ROLE_IMPLEMENTS
@@ -853,8 +853,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.hashFilesWith"
   role: BINDING_ROLE_IMPLEMENTS
@@ -863,8 +863,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestEmbeddedMembersContributeBytes"
   role: BINDING_ROLE_TESTS
@@ -873,8 +873,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.memberKinds"
   role: BINDING_ROLE_IMPLEMENTS
@@ -883,8 +883,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.retainedComment"
   role: BINDING_ROLE_IMPLEMENTS
@@ -893,8 +893,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEveryCaptureStampsTheClosureStrategy"
   role: BINDING_ROLE_TESTS
@@ -903,8 +903,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-canonical-member"
-  content_hash: "ea6b6bdca3093fd8850d98f473038017eaf07f02dd01506efbf8f6262a8867b8"
-  source_hash: "8a951a70d740e695ea302510b94ffee148bef5613cce853a9bfa78a9c3e13410"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.ClosureStrategy"
   role: BINDING_ROLE_IMPLEMENTS
@@ -913,8 +913,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-identity-strategy"
-  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
-  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+  source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestClosureStrategyVersion"
   role: BINDING_ROLE_TESTS
@@ -923,8 +923,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-identity-strategy"
-  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
-  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+  source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEveryCaptureStampsTheClosureStrategy"
   role: BINDING_ROLE_TESTS
@@ -933,8 +933,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-identity-strategy"
-  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
-  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+  source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.ClosureStrategy"
   role: BINDING_ROLE_IMPLEMENTS
@@ -943,8 +943,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-identity-strategy"
-  content_hash: "45eb872711703d7f275c7ac8ca5c2fac131c6ee84f9d084df5f1317ac2040761"
-  source_hash: "4ab22eadc467c88f4897482d40268de83bca682f98042acaea3348d3337d64cb"
+  content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+  source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.IdentityStrategy"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1023,8 +1023,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-effect-scan-memo"
-  content_hash: "b236ce88a87dee7f84225f6af7ae503191892ddd186b73f33434676423a3314a"
-  source_hash: "4c97cd9e5e71d63f0d714ae3f85fe2762e091867eca547c5d8682c906daf019d"
+  content_hash: "35756a5a8c6f7c645bb59922f907d3338e809329318ed9762bc88f0ce313cd9c"
+  source_hash: "ea423e05d21b3cb58433536588d0f5a83bb1e4a79658a36a5c5deff47bcee093"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestEffectScanStrategyVersion"
   role: BINDING_ROLE_TESTS
@@ -1123,8 +1123,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-testing-scan-memo"
-  content_hash: "a0b1d0433ad9bd7802d0d19d26578c4bff0e1788d32a738e0615585f03d2d75b"
-  source_hash: "6b53f7e25bb33645f9903b31d3d217aae08d2fc97422cb847ab53499bd75bbda"
+  content_hash: "d7ba76539596a96d0c7bc208204fb598a39ae6bf01065f676b8d018e0ea92b23"
+  source_hash: "07bb98aac9fa2f7f74d7555c3687608eacbb76b9b40360e5f9acd34092e35230"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestTestingScanStrategyVersion"
   role: BINDING_ROLE_TESTS
@@ -1263,8 +1263,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration"
   role: BINDING_ROLE_TESTS
@@ -1273,10 +1273,30 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-test-variant-compartment"
-  content_hash: "633399da9c80e8244fea00debc7607aee533074c8c8974e51489b9e033684e5f"
-  source_hash: "957d19681c13fba5eb466f34d648c7823f48c563047c33e7a83cc9466b2915b1"
+  content_hash: "dec7d93c2032b224fae23a0020829dc378a50fc1dff8ef6e16fb1ae4443440c4"
+  source_hash: "430c51a0734fd7ec8fa014f5dbcf5462662b97cb0c0222e3cf09527f62601ec7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot"
   role: BINDING_ROLE_TESTS
   shape_hash: "439f82b4709eea0295b76af6ad2f568e574d21884a79bdfe782f9b6d787f928e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-identity-strategy"
+  content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
+  source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestMemoScopesKeyOnTheOneFrontendSpelling"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c3f575dacd2029e1100c045589a0818c4cd47127ad41e981ea5b52cf172ee7d3"
+}
+
+bindings {
+  requirement_id: "REQ-closure-canonical-member"
+  content_hash: "5a2ce280b2388af336564b7cae5baaad6d66020c1b6b5d37965ec217b04bd180"
+  source_hash: "0c74e7099f18acef66635f8663ef7898fc9645050eb2656da784f527c4596151"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRetainedCommentAttachmentFollowsTheParser"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cd5c8c366f343646889a227f09d23502de1790f958a712bdd18d069afbadf474"
 }

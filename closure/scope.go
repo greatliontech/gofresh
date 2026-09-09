@@ -43,10 +43,18 @@ type AnalysisScope struct {
 // that versions it is absent: a rendering never carries a partial
 // identity.
 
-func (s AnalysisScope) guards() string { return s.Toolchain + "|" + s.BuildConfig }
+// guards is the key every type-level memo shares: the code guards of
+// the analyzed selection and the analyzing frontend's version — the
+// proofs, facts, and scans a memo holds are the analyzing frontend's
+// own derivations (go/types, SSA), which a newer frontend may derive
+// differently and the skew check permits to read older records
+// (REQ-closure-identity-strategy).
+func (s AnalysisScope) guards() string {
+	return s.Toolchain + "|" + s.BuildConfig + "|" + AnalyzingFrontend()
+}
 
 // Proofs is the observability memo's scope: the proof-strategy version
-// and the code guards.
+// and the guard key (the code guards and the analyzing frontend).
 func (s AnalysisScope) Proofs() string {
 	if s.ProofStrategy == "" {
 		return ""
@@ -55,7 +63,8 @@ func (s AnalysisScope) Proofs() string {
 }
 
 // TestingScan is the typed testing-effect scan memo's scope: its own
-// strategy version and the code guards the type environment depends on.
+// strategy version and the guard key (the code guards the type environment
+// depends on and the analyzing frontend).
 func (s AnalysisScope) TestingScan() string {
 	if s.Toolchain == "" && s.BuildConfig == "" {
 		return ""
@@ -64,7 +73,8 @@ func (s AnalysisScope) TestingScan() string {
 }
 
 // Facts is the dynamic-state fact memo's scope: the fact-strategy
-// version, the code guards, and the execution attestations, which change
+// version, the guard key (the code guards and the analyzing frontend),
+// and the execution attestations, which change
 // what a fact records.
 func (s AnalysisScope) Facts() string {
 	if s.FactStrategy == "" {

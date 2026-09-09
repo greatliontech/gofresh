@@ -190,7 +190,7 @@ func TestDynamicStateStrategyVersion(t *testing.T) {
 }
 
 func TestClosureStrategyVersion(t *testing.T) {
-	if ClosureStrategy != "gofresh/closure@1 gofresh/canonical-member@1 gofresh/variant-parse@1" {
+	if ClosureStrategy != "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@1" {
 		t.Fatalf("ClosureStrategy = %q, want the composition of the fold, canonical-member, and compartment derivations", ClosureStrategy)
 	}
 }

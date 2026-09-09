@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"github.com/greatliontech/gofresh/closure"
 	"testing"
 
 	"github.com/greatliontech/gofresh/guard"
@@ -16,17 +17,17 @@ import (
 func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	guards := guard.Guards{Toolchain: "tc", BuildConfig: "bc"}
 	plain := (&Engine{}).analysisScope(guards)
-	if got, want := plain.Proofs(), ObservationRTA+"|tc|bc"; got != want {
+	if got, want := plain.Proofs(), ObservationRTA+"|tc|bc|"+closure.AnalyzingFrontend(); got != want {
 		t.Errorf("Proofs = %q, want %q", got, want)
 	}
-	if got, want := plain.Facts(), DynamicStateStrategy+"|tc|bc"; got != want {
+	if got, want := plain.Facts(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend(); got != want {
 		t.Errorf("Facts = %q, want %q", got, want)
 	}
-	if got, want := plain.Scan(), DynamicStateStrategy+"|tc|bc|vouches:"; got != want {
+	if got, want := plain.Scan(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend()+"|vouches:"; got != want {
 		t.Errorf("Scan = %q, want %q", got, want)
 	}
 	attested := (&Engine{singleSubjectExecution: true, packageProcessExecution: true, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
-	if got, want := attested.Facts(), DynamicStateStrategy+"|tc|bc|single-subject-execution|package-process-execution"; got != want {
+	if got, want := attested.Facts(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend()+"|single-subject-execution|package-process-execution"; got != want {
 		t.Errorf("attested Facts = %q, want %q", got, want)
 	}
 	if got, want := attested.Scan(), attested.Facts()+"|vouches:a.example/x:Y,example.com/dep:Hooks"; got != want {

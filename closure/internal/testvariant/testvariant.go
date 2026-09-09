@@ -40,9 +40,8 @@ type TestVariantLedger struct {
 	// FileHeaders is sorted by File and carries one entry per compartment
 	// file: for a compiled Go member the hash covers the non-declaration
 	// remainder — package clause, imports, build constraints, and comments
-	// outside declarations; for every other member (embedded data whatever
-	// its name, non-Go compiled inputs) it covers the whole file, with
-	// Embedded set.
+	// outside declarations; for every other member (embedded data,
+	// whatever its name) it covers the whole file, with Embedded set.
 	FileHeaders []TestVariantFileHeader
 }
 
@@ -102,9 +101,10 @@ type TestVariantDeclaration struct {
 // TestVariantFileHeader is one compartment file's non-declaration identity.
 // A compiled Go member's hash covers its non-declaration remainder; every
 // other member — embedded data whatever its name, a .go-named testdata
-// fixture included, and non-Go compiled inputs — carries Embedded true and a
-// whole-content hash, because its bytes feed unchanged code rather than
-// declare any (REQ-closure-test-variant-compartment).
+// fixture included — carries Embedded true and a whole-content hash,
+// because its bytes feed unchanged code rather than declare any; a
+// non-Go compiled input is never a member (the variant node repeats the
+// base's SFiles and CFiles) (REQ-closure-test-variant-compartment).
 type TestVariantFileHeader struct {
 	File     string // relative to the package directory
 	Hash     string
@@ -440,9 +440,13 @@ func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[st
 			ledger.FileHeaders = append(ledger.FileHeaders, header)
 			continue
 		}
-		// Every non-compiled member — embedded data whatever its name, and
-		// non-Go compiled inputs — has no declarations; its whole content is
-		// its header identity, marked Embedded so movement defeats inertness.
+		// Every non-compiled member — embedded data, whatever its name —
+		// has no declarations; its whole content is its header identity,
+		// marked Embedded so movement defeats inertness. (A non-Go
+		// compiled input never reaches here: the variant node repeats
+		// the base's SFiles and CFiles, so one is never test-only; a
+		// constrained-out one rides no listing, and a test file that
+		// embeds one makes it a member as embedded data.)
 		ledger.FileHeaders = append(ledger.FileHeaders, TestVariantFileHeader{File: f, Hash: contentDigest, Embedded: true})
 	}
 	sort.Slice(ledger.Declarations, func(i, j int) bool {
