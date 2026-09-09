@@ -98,6 +98,24 @@ register.
   writes must name the judgment the user owns; a derivable design is
   slotted, never parked (ruling 2026-09-09).
 
+- **Standing rule — the re-audit band (ruling 2026-09-09).** The
+  per-chunk consolidation scan sees only what a chunk touched, so
+  cross-subsystem drift accumulates unseen while chunks fix and bolt
+  on. A re-audit band therefore runs at every band close or after
+  every twelve landed chunks, whichever comes first, and is never
+  deferred to the train's end: one audit chunk per repo (gofresh,
+  gomutant, stipulator, pew), read-only, fresh reviewers reading
+  whole subsystems against the specs — duplicated mechanisms,
+  parallel abstractions at the wrong altitude, vestigial scaffolding,
+  two code concepts where the spec has one, spec clauses that no
+  longer describe the emergent shape — with every candidate
+  dispositioned as a chartered consolidation chunk or a recorded
+  dispute, and the queued chunks re-sequenced under the emergent
+  shape (some merge, some dissolve). The audit's output is a replan,
+  never a fix. The chunk-open gate counts landed chunks since the
+  last audit; reaching twelve opens the band ahead of whatever is
+  queued. The first band (194–197) opens after 183.
+
 ## Execution order
 
 Replanned 2026-09-02 (user ruling: no wasted work; audit the four
@@ -156,7 +174,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09) and 184–193 after 178 (175 is a design chunk opening with the user), then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1006,6 +1024,22 @@ in their repos.
       persisted fact; the consumers' rapid vouch trimmed at their bumps;
       gomutant docs/issues/vmm-finding-admission-refusals.md rides it;
       doc deletes at close.
+
+## Band R — re-audit (the standing rule; recurs at every band close or twelve chunks)
+
+- [ ] 194. gofresh: coherence re-audit — read-only, whole subsystems
+      against the specs (closure tiers, guards, auditset, the fold, the
+      test-variant ledger, guidance); output a chartered consolidation set,
+      recorded disputes, and a re-sequencing of the queued gofresh chunks.
+- [ ] 195. gomutant: coherence re-audit — the engine's window/schedule/
+      estimate models, the findings document and its posture model (183's
+      landing read here), the two faces, the scratch channel; same output.
+- [ ] 196. stipulator: coherence re-audit — the backends/golang witness
+      pipeline (derive, witnessrun, served, freshness), the record stores,
+      compile/coverage/views, the two faces and remedy; same output.
+- [ ] 197. pew: coherence re-audit — the verdict path, the store and vouch
+      files, ab/run/status verbs, the guidance; same output; the replan
+      across all four repos closes the band.
 
 ## Band E — design chunks (open with the user)
 
