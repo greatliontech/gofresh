@@ -1008,9 +1008,7 @@ in their repos.
       application, and attribution, tree-escape and build-selection
       refusals preserved; both spellings pinned; the persisted
       campaign/freshness boundary stated; doc deletes at close.
-- [ ] 190. gofresh: the analyzing frontend named once (gofresh
-      docs/issues/parser-toolchain-in-identity-strategy.md,
-      ledger-non-go-member-arm-unreachable.md) — the canonical member
+- [x] 190. gofresh: the analyzing frontend named once — the canonical member
       form is a go/scanner token stream and the ledger's parse a
       go/parser one, so the analyzing toolchain is an input to the fold;
       IdentityStrategy composes it (today the memo scopes key on
