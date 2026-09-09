@@ -3,6 +3,7 @@ package guidance
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -103,6 +104,10 @@ func TestParseAndRenderProjections(t *testing.T) {
 			t.Errorf("Long(mcp, ephemeral) missing %q:\n%s", want, mcpLong)
 		}
 	}
+	// The knobs block lists the surface's knobs in document order, whole.
+	if want := "knobs:\n  test_pkg — the deciding test's import path.\n  batch_edits — inline edits, MCP only.\n\nwhen:"; !strings.Contains(mcpLong, want) {
+		t.Errorf("Long(mcp, ephemeral) knobs block is not the document's order:\n%s", mcpLong)
+	}
 	if strings.Contains(mcpLong, "batch —") || strings.Contains(mcpLong, "test-pkg") {
 		t.Errorf("Long(mcp, ephemeral) leaked cli spellings:\n%s", mcpLong)
 	}
@@ -117,6 +122,9 @@ func TestParseAndRenderProjections(t *testing.T) {
 	}
 	if strings.Contains(cliLong, "batch_edits") {
 		t.Errorf("Long(cli, ephemeral) leaked the mcp-only knob:\n%s", cliLong)
+	}
+	if want := "knobs:\n  test-pkg — the deciding test's import path.\n  batch — the batch file path, CLI only.\n\nwhen:"; !strings.Contains(cliLong, want) {
+		t.Errorf("Long(cli, ephemeral) knobs block is not the document's order:\n%s", cliLong)
 	}
 	// The fenced example survives whole, at column zero.
 	if !strings.Contains(mcpLong, "example:\n```sh\ngomutant ephemeral --batch probe.json\n# the deciding test names the kill\n```") {
@@ -153,6 +161,104 @@ func TestParseAndRenderProjections(t *testing.T) {
 	}
 	if _, err := doc.Long("web", "run"); err == nil {
 		t.Fatal("unknown surface rendered")
+	}
+}
+
+// A knob is addressed per surface by the verb's and its own spelling
+// there, the knob verbatim; a knob documented on the other surface
+// only, a sibling verb's knob, an unknown knob, and an unknown verb are
+// refused by name (REQ-guidance-render).
+func TestKnobIsAddressedPerSurfaceWithItsTextVerbatim(t *testing.T) {
+	doc, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var knobbed []Verb
+	for _, v := range doc.Verbs {
+		if len(v.Knobs) > 0 {
+			knobbed = append(knobbed, v)
+		}
+	}
+	if len(knobbed) == 0 {
+		t.Fatal("the sample documents no verb with knobs")
+	}
+	for _, verb := range knobbed {
+		for _, surface := range []string{"mcp", "cli"} {
+			vspell, vok := on(verb.Surfaces, verb.Name, surface)
+			if !vok {
+				continue
+			}
+			for _, k := range verb.Knobs {
+				spelling, exists := on(k.Surfaces, k.Name, surface)
+				got, err := doc.Knob(surface, vspell, spelling)
+				if !exists {
+					if err == nil {
+						t.Fatalf("%s: knob %q is not on this surface, yet found: %+v", surface, k.Name, got)
+					}
+					continue
+				}
+				if err != nil || !reflect.DeepEqual(got, k) {
+					t.Fatalf("%s %s %s: %+v, %v; want %+v", surface, vspell, spelling, got, err, k)
+				}
+			}
+			if _, err := doc.Knob(surface, vspell, "no-such-knob"); err == nil || !strings.Contains(err.Error(), vspell) || !strings.Contains(err.Error(), "no-such-knob") {
+				t.Fatalf("%s: an unknown knob: %v; want a refusal naming the verb and the knob", surface, err)
+			}
+			// A sibling verb's knob is not this verb's: a spelling only
+			// the sibling documents on this surface refuses under this verb.
+			mine := map[string]bool{}
+			for _, kn := range knobsOn(&verb, surface) {
+				mine[kn.spelling] = true
+			}
+			for _, other := range knobbed {
+				if other.Name == verb.Name {
+					continue
+				}
+				for _, kn := range knobsOn(&other, surface) {
+					if mine[kn.spelling] {
+						continue
+					}
+					if _, err := doc.Knob(surface, vspell, kn.spelling); err == nil {
+						t.Fatalf("%s %s: %s's knob %q was served as this verb's", surface, vspell, other.Name, kn.spelling)
+					}
+				}
+			}
+		}
+	}
+	if _, err := doc.Knob("mcp", "no-such-verb", "x"); err == nil {
+		t.Fatal("an unknown verb was found")
+	}
+	// A knob spelled differently per surface is addressed by its
+	// spelling there and by nothing else: the mcp name is not a cli
+	// spelling, nor the cli spelling an mcp name.
+	var spelledVerb string
+	for _, v := range doc.Verbs {
+		for _, k := range v.Knobs {
+			if k.Name == "test_pkg" {
+				spelledVerb, _ = on(v.Surfaces, v.Name, "cli")
+			}
+		}
+	}
+	if spelledVerb == "" {
+		t.Fatal("the sample no longer carries the per-surface-spelled knob")
+	}
+	if k, err := doc.Knob("cli", spelledVerb, "test-pkg"); err != nil || k.Name != "test_pkg" {
+		t.Fatalf("cli spelling: %+v, %v", k, err)
+	}
+	if _, err := doc.Knob("cli", spelledVerb, "test_pkg"); err == nil {
+		t.Fatal("the mcp name found a cli knob")
+	}
+	mcpVerb := ""
+	for _, v := range doc.Verbs {
+		if sp, ok := on(v.Surfaces, v.Name, "cli"); ok && sp == spelledVerb {
+			mcpVerb, _ = on(v.Surfaces, v.Name, "mcp")
+		}
+	}
+	if _, err := doc.Knob("mcp", mcpVerb, "test-pkg"); err == nil {
+		t.Fatal("the cli spelling found an mcp knob")
+	}
+	if _, err := doc.Knob("web", knobbed[0].Name, "x"); err == nil {
+		t.Fatal("an unknown surface was accepted")
 	}
 }
 
@@ -368,6 +474,11 @@ func TestCoverageIsExactPerSurface(t *testing.T) {
 	if err != nil || len(defects) != 1 || !strings.Contains(defects[0], `registered mcp verb "init" has no guidance section`) {
 		t.Fatalf("cli-only verb on mcp: %v err=%v", defects, err)
 	}
+	// Two documented knobs unregistered on one verb report in document
+	// order — the one walk's order, pinned as a whole list.
+	if got, err := doc.Coverage("mcp", map[string][]string{"ephemeral": nil}); err != nil || len(got) < 2 || got[0] != `verb "ephemeral": documented knob "test_pkg" not registered` || got[1] != `verb "ephemeral": documented knob "batch_edits" not registered` {
+		t.Errorf("two documented-side defects = %q, %v; want the registered verb's knobs first, in document order", got, err)
+	}
 }
 
 // For any model-generated valid document — fenced examples, surface
@@ -480,6 +591,11 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 				for _, k := range m.knobs {
 					if spelling, exists := on(k.Surfaces, k.Name, s.Surface); exists {
 						params = append(params, spelling)
+						// The knob projection over every generated knob: its
+						// spelling on this surface resolves to the knob verbatim.
+						if kn, err := doc.Knob(s.Surface, s.Name, spelling); err != nil || !reflect.DeepEqual(kn, k) {
+							t.Fatalf("iter %d: Knob(%s, %s, %s) = %+v, %v; want %+v", iter, s.Surface, s.Name, spelling, kn, err, k)
+						}
 					}
 				}
 				registered[s.Surface][s.Name] = params

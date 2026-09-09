@@ -61,7 +61,8 @@ label's own line; `**knobs:**` followed by zero or more single-line
 items of the form `` - `name` (surfaces) — prose `` — the
 parenthesized surface list optional with the verb-level grammar and
 meaning, leading indentation tolerated, the em-dash separator
-literal — with knob names unique per verb, or the literal `none`;
+literal — with knob names unique per verb and their per-surface
+spellings unique per verb and surface, or the literal `none`;
 `**when:**` followed by non-empty prose to the next field;
 `**example:**` followed by non-empty prose or fenced code to the
 end of the subsection. Fenced code follows the markdown rules the
@@ -77,21 +78,24 @@ content. A per-surface name may be backtick-wrapped; a half-wrapped
 or empty-wrapped name refuses, and an alias equal to the canonical
 name refuses as redundant.
 
-**REQ-guidance-render** (behavior): Rendering MUST be a projection
-of the parsed document with no synthesized prose, addressed per
-surface by the surface's own spelling: the one-line purpose renders
-verbatim as the tool-level description (an MCP tool's
-`Description`, a CLI command's `Short`); the long rendering of a
-verb is, in order, the purpose, a `knobs:` block listing each knob
-on that surface as its surface spelling `— prose` (or `knobs:
-none`), a `when:` block, and an `example:` block whose body starts
-on its own line so fenced code stays column-zero — exactly those
-labels, no others; the orientation rendering is the decision map's
-body verbatim; and the help rendering is the long rendering without
-its knobs: block — for a surface that renders its own knob list (a
-CLI's flag help), where the block would print every knob twice in
-two wordings. A requested surface or name the document does not
-carry is an error, never an empty rendering.
+**REQ-guidance-render** (behavior): Rendering MUST be a projection of
+the parsed document with no synthesized prose, addressed per surface by
+the surface's own spelling: the one-line purpose renders verbatim as the
+tool-level description (an MCP tool's `Description`, a CLI command's
+`Short`); the long rendering of a verb is, in order, the purpose, a
+`knobs:` block listing each knob on that surface as its surface spelling
+`— prose` (or `knobs: none`), a `when:` block, and an `example:` block
+whose body starts on its own line so fenced code stays column-zero —
+exactly those labels, no others; the orientation rendering is the
+decision map's body verbatim; the knob projection serves one knob of a
+verb, the verb addressed by its spelling on the surface and the knob by
+its own, the knob verbatim — a knob the verb documents on the other
+surface only, an unknown knob, and an unknown verb are refused by name;
+and the help rendering is the long rendering without its knobs: block —
+for a surface that renders its own knob list (a CLI's flag help), where
+the block would print every knob twice in two wordings. A requested
+surface or name the document does not carry is an error, never an empty
+rendering.
 
 **REQ-guidance-coverage** (behavior): The package MUST provide the
 per-surface coverage judgment a consuming tool's drift binding
@@ -117,12 +121,14 @@ knob's own prose owns its per-surface spellings.
 
 **REQ-guidance-single-source** (invariant): A consuming tool's
 tool-level served prose MUST be read from the parsed document at
-initialization — never a second literal. Per-parameter schema and
-flag usage strings remain compile-time surface plumbing; the
-coverage judgment, bound per surface in the consuming repo, keeps
-them enumerated by the document. The drift guard is structural —
-name coverage plus served-bytes identity; prose accuracy against
-the consuming repo's own spec is review's to hold, not a mechanical
-judgment. Enforced in each consuming repo by its guidance
-requirement and binding; in this repo the format and projections
-are enforced by the package's own tests.
+initialization — never a second literal. Per-parameter schema and flag
+usage strings are the document's knob prose rendered — each knob read
+through the parsed document's knob projection, never a second literal —
+and the coverage judgment, bound per surface in the consuming repo,
+keeps them enumerated by the document. The drift guard is structural —
+name coverage plus served-bytes identity, the consuming repo's binding
+comparing each served knob string with the projection; prose accuracy
+against the consuming repo's own spec is review's to hold, not a
+mechanical judgment. Enforced in each consuming repo by its guidance
+requirement and binding; in this repo the format and projections are
+enforced by the package's own tests.

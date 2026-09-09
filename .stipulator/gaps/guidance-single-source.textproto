@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-guidance-single-source"
 reason: "gofresh has no MCP or CLI surface; the single-source invariant is enforced by each consuming repo's guidance requirement and binding (stipulator REQ-mcp-guidance, gomutant REQ-mcp-guidance, pew REQ-pew-guidance — all landed with train chunk 111's legs)"
-content_hash: "b9d6ab478e17c15fa9898eecfcbf035a2526d1aaf57c84e89aef8b78cdd80cba"
-source_hash: "701b5d41dac6122baa4a6d3b19c8e2c14202497d46c3f4ba3b075881962bb6fb"
+content_hash: "f1e453b72af24413dd946d4d1621ecc73a9cae4375fb60d75e7a4c4c2d376dd0"
+source_hash: "411f2364496ada8a5d8fbb17a8c389ad5186408fe0782fe5adb29681ae0ba4f3"
 lands { manual { condition: "gofresh grows an own serving surface (only then can this repo carry its own enforcement)" } }

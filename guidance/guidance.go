@@ -510,6 +510,44 @@ func (d *Document) Description(surface, name string) (string, error) {
 	return v.Does, nil
 }
 
+// Knob is one knob of a verb addressed per surface — the verb by its
+// spelling on that surface, the knob by its own — with the knob's text
+// verbatim: the one read a consumer rendering per-parameter prose (a
+// schema description, a flag's usage) takes, so the document stays the
+// single source of every knob's words (REQ-guidance-render). A knob
+// the verb documents on the other surface only is not found.
+func (d *Document) Knob(surface, verb, name string) (Knob, error) {
+	v, err := d.resolve(surface, verb)
+	if err != nil {
+		return Knob{}, err
+	}
+	for _, kn := range knobsOn(v, surface) {
+		if kn.spelling == name {
+			return kn.Knob, nil
+		}
+	}
+	return Knob{}, fmt.Errorf("guidance: verb %q documents no knob %q on the %s surface", verb, name, surface)
+}
+
+// spelledKnob is a knob under its spelling on one surface.
+type spelledKnob struct {
+	Knob
+	spelling string
+}
+
+// knobsOn is the verb's knobs on one surface, each under its spelling
+// there, in document order — the one walk the knob projection, the
+// long rendering, and the coverage judgment share.
+func knobsOn(v *Verb, surface string) []spelledKnob {
+	var out []spelledKnob
+	for _, k := range v.Knobs {
+		if spelling, exists := on(k.Surfaces, k.Name, surface); exists {
+			out = append(out, spelledKnob{Knob: k, spelling: spelling})
+		}
+	}
+	return out
+}
+
 // Long is the verb's full rendering on a surface: the purpose, the
 // knobs: block under the surface's knob spellings, the when: block,
 // and the example: block — the example body on its own lines so
@@ -524,11 +562,9 @@ func (d *Document) Long(surface, name string) (string, error) {
 	b.WriteString(v.Does)
 	b.WriteString("\n\nknobs:")
 	listed := false
-	for _, k := range v.Knobs {
-		if spelling, exists := on(k.Surfaces, k.Name, surface); exists {
-			fmt.Fprintf(&b, "\n  %s — %s", spelling, k.Text)
-			listed = true
-		}
+	for _, kn := range knobsOn(v, surface) {
+		fmt.Fprintf(&b, "\n  %s — %s", kn.spelling, kn.Text)
+		listed = true
 	}
 	if !listed {
 		b.WriteString(" none")
@@ -592,10 +628,8 @@ func (d *Document) Coverage(surface string, registered map[string][]string) ([]s
 		matched[verb] = true
 		v := &d.Verbs[vi]
 		documented := map[string]bool{}
-		for _, k := range v.Knobs {
-			if spelling, exists := on(k.Surfaces, k.Name, surface); exists {
-				documented[spelling] = true
-			}
+		for _, kn := range knobsOn(v, surface) {
+			documented[kn.spelling] = true
 		}
 		registeredSet := map[string]bool{}
 		params := append([]string(nil), registered[verb]...)
@@ -609,10 +643,9 @@ func (d *Document) Coverage(surface string, registered map[string][]string) ([]s
 				defects = append(defects, fmt.Sprintf("verb %q: registered knob %q undocumented", verb, p))
 			}
 		}
-		for _, k := range v.Knobs {
-			spelling, exists := on(k.Surfaces, k.Name, surface)
-			if exists && !registeredSet[spelling] {
-				defects = append(defects, fmt.Sprintf("verb %q: documented knob %q not registered", verb, spelling))
+		for _, kn := range knobsOn(v, surface) {
+			if !registeredSet[kn.spelling] {
+				defects = append(defects, fmt.Sprintf("verb %q: documented knob %q not registered", verb, kn.spelling))
 			}
 		}
 	}
