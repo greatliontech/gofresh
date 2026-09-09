@@ -40,4 +40,4 @@ The consumers' standing rapid vouch (`pgregory.net/rapid:anyRuneGen`)
 cannot be trimmed before this lands; the chunk-99 close-out records
 that deviation.
 
-Lands: user decision
+Lands: cross-tool train chunk 193

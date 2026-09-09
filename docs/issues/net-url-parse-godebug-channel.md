@@ -32,4 +32,4 @@ Two lifting shapes, both changing what a guard means:
 Either widens the guard model; which, and whether the field mass
 (~23) earns it, is the user's.
 
-Lands: user decision.
+Lands: cross-tool train chunk 191

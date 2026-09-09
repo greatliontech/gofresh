@@ -90,6 +90,14 @@ register.
   defect; Band P's per-tool chunks land the entry guidance and a test
   that pins it derives from the spec.
 
+- **Cross-session filings are triage inputs.** An issue filed into
+  the train by another session carries `Lands: awaiting triage`; the
+  next chunk-open gate slots it (a chunk of this plan or a checkable
+  condition) or records a genuine fork as `Lands: user decision` with
+  its arms stated. A `Lands: user decision` the train's own session
+  writes must name the judgment the user owns; a derivable design is
+  slotted, never parked (ruling 2026-09-09).
+
 ## Execution order
 
 Replanned 2026-09-02 (user ruling: no wasted work; audit the four
@@ -148,7 +156,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order (175 is a design chunk opening with the user), then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09) and 184–193 after 178 (175 is a design chunk opening with the user), then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -721,7 +729,7 @@ strategy bump.
       sweep on the pinned field repro and record the
       observable-subject fraction against the 0.5% baseline (was SEP
       11).
-- [ ] 179. gofresh: startup and test-main dynamic sites narrowed by
+- [x] 179. gofresh: startup and test-main dynamic sites narrowed by
       the closed-value judgment — both walks take a dynamic site's
       whole-mask signature-class projection as its targets, so an
       initializer's func-value call or interface invoke reaches every
@@ -889,6 +897,14 @@ in their repos.
       docs/issues/two-record-stores.md) — the witness and resolution caches
       one store parameterized by record kind, the served backend the
       degenerate path of the owned one; doc deletes at close.
+- [ ] 183. gomutant: measured, committable, and reusable findings distinct
+      at the run surface (gomutant docs/issues/measured-findings-reuse-
+      diagnostics.md) — the run summary and the attestation verdict state
+      the record's posture beside its counts (measured outcome,
+      committability, reuse refusal with its reason channel and the
+      linked package), so a consumer never mistakes a committed record for
+      current reusable evidence; the stored-observation and later-judgment
+      reasons name their channels; both faces; doc deletes at close.
 - [ ] 171. stipulator: one completion tracker (stipulator docs/issues/
       two-completion-mechanisms.md) — the recorder's capture-group
       completion drives both the selective runner and the health-judged
@@ -926,6 +942,70 @@ in their repos.
       exactly as gomutant's --scratch-namespaces are; the excluded-path
       interim retires where a namespace covers it; tugboat's .realseam-tmp
       is the first declaration (its session's work).
+
+- [ ] 184. stipulator: one terse clause per face (stipulator docs/issues/
+      knob-terse-clause-per-face.md) — a knob's document line carries a
+      clause per surface where the faces' spellings differ, the render
+      picks its face's, the cross-face prose leaves the parenthesis; the
+      two-surfaces ruling applied to knob prose; doc deletes at close.
+- [ ] 185. stipulator: the ledger store as a record kind (stipulator
+      docs/issues/ledger-store-as-a-record-kind.md) — recordstore.Name gains
+      the one-segment form, the compartment ledger sub-store becomes a
+      nested store (its temporary, scan, atomic write, and sweep the
+      core's; the concurrent-install sparing rule stays its own); doc
+      deletes at close.
+- [ ] 186. gomutant: the execution window's cost models in one home
+      (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
+      home stating the three questions (membership, order, execution),
+      their permitted inputs, and the constants beside the invariants that
+      tie them; the partition stays a function of tree + order + worker
+      count; doc deletes at close.
+- [ ] 187. gomutant: ephemeral probes run outside the caller's tree
+      (gomutant docs/issues/ephemeral-probe-writes-under-the-callers-tree.md)
+      — the probe's oracle runs through the scratch channel REQ-mut-overlay
+      already runs shaped candidates through, its cost stated per probe,
+      the tree promise kept whole (the promise is never narrowed to fit
+      the code); doc deletes at close.
+- [ ] 188. gomutant: explicit fixture package selection loads a testdata
+      package (gomutant docs/issues/explicit-testdata-package-selection.md)
+      — an explicit oracle selector or campaign target under testdata is
+      loaded on demand through loading, test selection, mutation
+      application, and attribution, tree-escape and build-selection
+      refusals preserved; both spellings pinned; the persisted
+      campaign/freshness boundary stated; doc deletes at close.
+- [ ] 189. gofresh: the ledger's non-Go member arm settled (gofresh
+      docs/issues/ledger-non-go-member-arm-unreachable.md) — whether any
+      test-only non-Go compiled input is constructible under the listing
+      is decided by construction; if none is, the arm and its clause
+      prose are deleted, else the arm gains its first pin; doc deletes at
+      close.
+- [ ] 190. gofresh: the parser's toolchain rides the identity strategy
+      (gofresh docs/issues/parser-toolchain-in-identity-strategy.md) — the
+      memo already treats a toolchain move as a new derivation, so the
+      strategy composes the toolchain identity too, and every consumer
+      keys ledgers across it; REQ-closure-identity-strategy amended; doc
+      deletes at close.
+- [ ] 191. gofresh: GODEBUG joins the code-result guard (gofresh
+      docs/issues/net-url-parse-godebug-channel.md) — the process-level
+      channel captured for every result kind, the in-process Setenv
+      channel poisoned as shared dynamic state (a subject mutating GODEBUG
+      marks every GODEBUG-reading admission in the binary), net/url's
+      parsing half then admitted by symbol; doc deletes at close.
+- [ ] 192. gofresh: dependency closures reached by reference (gofresh
+      docs/issues/dependency-nested-closures-outside-the-drain.md) — the
+      dependency facts carry a per-function effect summary the drain
+      consults for a referenced dependency function, so a dependency's
+      nested closure reached only by reference has its effects seen
+      without walking standard bodies; doc deletes at close.
+- [ ] 193. gofresh: immutability after construction as a proven property
+      (gofresh docs/issues/immutable-after-construction-objects.md) — the
+      per-package fixpoint over types (all fields unexported, every
+      method read-only, no outside assignment or address-taking, no
+      conversion, results hand out no mutable reach), a value handed
+      into such a construction not leaked, immutable type keys a new
+      persisted fact; the consumers' rapid vouch trimmed at their bumps;
+      gomutant docs/issues/vmm-finding-admission-refusals.md rides it;
+      doc deletes at close.
 
 ## Band E — design chunks (open with the user)
 

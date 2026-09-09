@@ -20,4 +20,4 @@ per-function effect summary the drain consults for a referenced
 function. Hoisting the scan above the class filter would walk standard
 bodies the design leaves unwalked.
 
-Lands: user decision
+Lands: cross-tool train chunk 192

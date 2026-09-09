@@ -14,4 +14,4 @@ should ride the identity strategy (every consumer re-measuring on each
 toolchain move) or the ledger's parse be pinned to a syntax version
 independent of the toolchain is a design call.
 
-Lands: user decision
+Lands: cross-tool train chunk 190
