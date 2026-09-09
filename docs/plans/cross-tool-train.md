@@ -174,7 +174,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands — the cross-repo order settles at 197's close, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user) — the cross-repo order settles at 197's close, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -921,13 +921,10 @@ in their repos.
       linked package), so a consumer never mistakes a committed record for
       current reusable evidence; the stored-observation and later-judgment
       reasons name their channels; both faces; doc deletes at close.
-- [ ] 171. stipulator: one completion tracker (stipulator docs/issues/
-      two-completion-mechanisms.md) — the recorder's capture-group
-      completion drives both the selective runner and the health-judged
-      form; doc deletes at close.
-- [ ] 172. stipulator: CLI hygiene — one built binary per test package
-      (stipulator docs/issues/cli-test-binary-builds.md) and per-stream
-      color (per-stream-color.md); two docs delete at close.
+- [ ] 172. stipulator: per-stream color (stipulator docs/issues/
+      per-stream-color.md) — style decided once from NO_COLOR/TERM and
+      both streams' isatty becomes a per-stream styler; doc deletes at
+      close (its test-binary half moved to 228 by audit 196).
 - [ ] 173. pew: one source for the verb table and the guidance knobs
       (pew docs/issues/guidance-knobs-and-verb-table.md) — the guidance
       knob blocks generated from the spec's table; the fleet guidance
@@ -968,8 +965,10 @@ in their repos.
       docs/issues/ledger-store-as-a-record-kind.md) — recordstore.Name gains
       the one-segment form, the compartment ledger sub-store becomes a
       nested store (its temporary, scan, atomic write, and sweep the
-      core's; the concurrent-install sparing rule stays its own); doc
-      deletes at close.
+      core's; the concurrent-install sparing rule stays its own); the
+      two hand-rolled copies of recordstore.Digest (derive.go's group
+      digest, telemetry.go's home digest beside its own Root call) read
+      the core's; doc deletes at close.
 - [ ] 186. gomutant: the execution window's cost models in one home
       (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
       home stating the three questions (membership, order, execution),
@@ -1043,7 +1042,7 @@ in their repos.
 - [x] 195. gomutant: coherence re-audit — the engine's window/schedule/
       estimate models, the findings document and its posture model (183's
       landing read here), the two faces, the scratch channel; same output.
-- [ ] 196. stipulator: coherence re-audit — the backends/golang witness
+- [x] 196. stipulator: coherence re-audit — the backends/golang witness
       pipeline (derive, witnessrun, served, freshness), the record stores,
       compile/coverage/views, the two faces and remedy; same output.
 - [ ] 197. pew: coherence re-audit — the verdict path, the store and vouch
@@ -1215,6 +1214,76 @@ in their repos.
       predicate; documentlock_other's missing ensureLockIgnore;
       Coverage.Merge's receiver mutation behind a value signature; the
       three edit value types stay (two are wire-pinned).
+
+## Band I — stipulator under the emergent shape (chartered by audit 196)
+
+- [ ] 221. stipulator: soundness conformance between the policy record
+      and the engine — the repository vouch file is neither declined
+      (gofresh's WithoutRepositoryVouches, the "one set, one home" the
+      producer's clause requires of a consumer owning its set) nor
+      partitioned into the capture-group key; the witness command's
+      -mod and -pgo flags never reach the engine's build flags and the
+      PGO profile's content is digested by nothing (spurious reuse on a
+      profile edit at a stable path); module_root is in neither key
+      table though the identity table claims completeness (two
+      invocations differing only by it share one capture group); the
+      provenance probe spawns outside the owned boundary
+      (REQ-policy-cancellation's "every child process"). Code, with the
+      identity table's claim made true or the omission stated.
+- [ ] 223. stipulator: one witness pipeline (stipulator docs/issues/
+      two-completion-mechanisms.md, publish-refusal-ladders.md,
+      executor-diagnostics-trio.md) — the selective runner's 592-line
+      runWitnesses and the health-judged recorder (Derive, covered,
+      invocationCompleted, publishRemaining, publishGroup) are two
+      implementations of one spec object, which REQ-evidence-freshness-
+      degrade already frames as one path with an empty served set; one
+      group tracker, one refusal ladder with one reason vocabulary, one
+      publish path; invariants: REQ-policy-cancellation's unit of
+      persistence, REQ-evidence-freshness-no-health's serving integrity;
+      the last of the parallel pairs 170 collapsed; docs delete at close.
+- [ ] 222. stipulator: the spec chunk — the policy's blanket purity
+      assertion (assume_pure, invocation-wide, set on this corpus's own
+      three invocations) stated beside REQ-evidence-witness-freshness's
+      in-source opt-in; REQ-core-proto-io carves out the intra-
+      invocation resolver protocol as the store-layout clause carves out
+      record files; the derived policy constants (the two timeouts)
+      stated or their omission stated; REQ-go-owned-processes'
+      toolchain-query half enumerates the provenance probe. Spec only;
+      re-consented.
+- [ ] 224. stipulator: one verb core per verb across both faces — prune
+      written twice end to end with two serving-class predicates
+      (ServingClassRequired on the CLI, ServingEvidence on MCP); MCP's
+      verifyPipeline seam generalized so each verb's core takes a
+      face-supplied renderer and the faces keep their defaults; wire's
+      one-projection claim made true (protojson.Marshal at verify.go,
+      gate.go, check.go and the four StructuredContent bypasses read the
+      canonical projection); the 2,329-line MCP server split per verb to
+      mirror internal/cmd.
+- [ ] 225. stipulator: the small folds — one reason tally behind two
+      caps (ReasonHistogram, blockerRows) and one diagnostic heading;
+      refKey once (compile, bundle).
+- [ ] 226. stipulator: golang.go split by its three subsystems
+      (resolution and shape hashing, witness classification and the
+      seeding walk, generated detection) with the classifier's three
+      body inspections one per-view pass (stipulator docs/issues/
+      witness-verdict-one-body-classifier.md); doc deletes at close.
+- [ ] 227. stipulator: the vestigial sweep — three build-tagged
+      atomicReplace declarations with no call site (the Windows arm
+      dragging kernel32), the legacy .stipulator/cache removal on every
+      load with no writer, Backend.members write-only, testEvent's two
+      unread fields, the Toolchain/ToolchainContext dead pair, two
+      injection seams with no injection site, a test-only option
+      mechanism, resolutioncache.Record.Key, the six test-only wrappers
+      over production entries, and ResolverChildMain's second argv
+      routing.
+- [ ] 228. stipulator: the test surface (stipulator docs/issues/
+      cli-test-binary-builds.md) — one built CLI binary per package run
+      behind sync.Once; the byte-identical firstClause helpers one; the
+      temp-module builders across the Go backend's tests one; the
+      comment-stripped freshfixture copies of fixturemod folded onto it;
+      the policyderive workspace fixture made real (its go.work names two
+      members that do not exist, so the derive path never meets a real
+      workspace); doc deletes at close.
 
 ## Band E — design chunks (open with the user)
 
