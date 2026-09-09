@@ -864,11 +864,9 @@ in their repos.
       group's candidate count so suite-class oracles commit on a horizon
       without moving the partition between runs of an unchanged tree; doc
       deletes at close.
-- [ ] 165. gomutant: the MCP server's exit is diagnosable (gomutant
-      docs/issues/mcp-session-disconnect-mid-loop.md) — the server logs why
-      and where it stopped serving; the idle-session liveness witness
-      rides mcp-liveness-cancellation-witness's condition; doc deletes at
-      close.
+- [x] 165. gomutant: the MCP server's exit is diagnosable — the server
+      logs why and where it stopped serving; the idle-session liveness
+      witness rides mcp-liveness-cancellation-witness's condition.
 - [ ] 166. stipulator: witness children run with toolchain telemetry off
       (stipulator docs/issues/telemetry-sidecar-escapes-owned-process.md) —
       a per-run telemetry directory with the mode file off, so the
