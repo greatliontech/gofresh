@@ -114,7 +114,8 @@ register.
   shape (some merge, some dissolve). The audit's output is a replan,
   never a fix. The chunk-open gate counts landed chunks since the
   last audit; reaching twelve opens the band ahead of whatever is
-  queued. The first band (194–197) opens after 183.
+  queued. The first band (194–197) closed 2026-09-09; the count of
+  landed chunks since the last audit restarts at zero from there.
 
 ## Execution order
 
@@ -174,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user) — the cross-repo order settles at 197's close, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -925,15 +926,26 @@ in their repos.
       per-stream-color.md) — style decided once from NO_COLOR/TERM and
       both streams' isatty becomes a per-stream styler; doc deletes at
       close (its test-binary half moved to 228 by audit 196).
-- [ ] 173. pew: one source for the verb table and the guidance knobs
-      (pew docs/issues/guidance-knobs-and-verb-table.md) — the guidance
-      knob blocks generated from the spec's table; the fleet guidance
-      format's carrying rule amended in gofresh's guidance spec; doc
-      deletes at close.
-- [ ] 174. pew: `ab --out` per package and the verdict-path consolidation
-      (pew docs/issues/ab-out-multi-package.md: one artifact per package
-      under a derived path; verdict-path-consolidation.md: one vouch
-      resolver value, one row decode); two docs delete at close.
+- [ ] 173. pew: the flag usage strings rendered from the guidance
+      document (pew docs/issues/guidance-knobs-and-verb-table.md) — pew's
+      REQ-pew-guidance already names the document the authoritative
+      superset and gofresh's REQ-guidance-render its projection, so every
+      flag usage literal (the --vouch text triplicated, --bench-dir in two
+      wordings) renders through guidance.Knob as stipulator's do, the
+      §12 table staying pinned to the DefValues; no fleet-format change;
+      after 229; doc deletes at close.
+- [ ] 174. pew: `ab --out` per package and one verdict path (pew
+      docs/issues/ab-out-multi-package.md, verdict-path-consolidation.md)
+      — one artifact per package under a derived path, its encoding
+      (pew-ab: 1, dirty, pkg, pew-ab-ref, pew-ab-side) stated in §12;
+      stat's working-tree arm adopts the batched per-package check
+      (today verdictForRecs builds a whole-program view per benchmark and
+      a second on the inert-growth rider; checkOne has no production
+      caller); pew's vouch grammar and file reader deleted for gofresh's
+      ReadVouchFile and ParseVouchEntry with the four process-wide vouch
+      globals a threaded value; one recording-row decode feeds admission,
+      the fingerprint, the closed set, and --explain; after 229; two docs
+      delete at close.
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
       clause-structured-whole-claims.md; user ruling 2026-09-07) — a
@@ -942,11 +954,11 @@ in their repos.
       violation for existing records, `implements` claims stay whole, a
       corpus manifest opt-out keeps a corpus that accepts whole claims
       honest about it; doc deletes at close.
-- [ ] 177. pew: the machine-facing step short of a second surface (pew
-      docs/issues/mcp-surface.md; user ruling 2026-09-07) — `--json` on
-      run, ab, and gc and a progress channel on the long verbs; the MCP
-      surface itself waits for a driving agent to appear; doc retargets
-      at close.
+- [ ] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
+      mcp-surface.md; user ruling 2026-09-07) — the progress channel half
+      landed with REQ-pew-progress (every verb's 30 s cadence line); the
+      MCP surface itself waits for a driving agent to appear; doc
+      retargets at close.
 
 - [ ] 178. stipulator: policy-declared scratch namespaces (the consumer
       half of the in-module scratch discharge, chunk 100's verdict) — a
@@ -1045,7 +1057,7 @@ in their repos.
 - [x] 196. stipulator: coherence re-audit — the backends/golang witness
       pipeline (derive, witnessrun, served, freshness), the record stores,
       compile/coverage/views, the two faces and remedy; same output.
-- [ ] 197. pew: coherence re-audit — the verdict path, the store and vouch
+- [x] 197. pew: coherence re-audit — the verdict path, the store and vouch
       files, ab/run/status verbs, the guidance; same output; the replan
       across all four repos closes the band.
 
@@ -1284,6 +1296,50 @@ in their repos.
       the policyderive workspace fixture made real (its go.work names two
       members that do not exist, so the derive path never meets a real
       workspace); doc deletes at close.
+
+## Band J — pew under the emergent shape (chartered by audit 197)
+
+- [ ] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (pew docs/issues/
+      gofresh-corpus-pin-lag.md, serve-proven-blocked-by-benchmark-loop.md)
+      — six releases consumed at once: the harness-pacing audit that
+      lifts serve-proven's inertness (today run's default serves only
+      empty-bodied benchmarks), the canonical closure member (every
+      recording re-measures once) with Fingerprint.ClosureStrategy's
+      key-set decision for pew's writer and reader, the evidence-root
+      anchoring, the repository vouch file — pew's reviewed set lives at
+      the store root by REQ-pew-vouch-source, so the engine declines the
+      module's file (WithoutRepositoryVouches) and the home stays one —
+      and guidance.Knob for 173; both docs delete at close.
+- [ ] 230. pew: the artifact-format bound — G5 and REQ-pew-artifact-format
+      promise every stored .txt parseable by benchfmt and plain benchstat,
+      and pew's own writer breaks it: the runtime-inputs and test-variant-
+      ledger lines grow past benchfmt's 64 KiB scanner bound, which pew's
+      reader survives only by lifting them out before parsing; the two
+      blob encodings are bounded (chunked, or digests with a sidecar the
+      spec sanctions) so the promise holds as stated — the spec is never
+      narrowed to the escape hatch.
+- [ ] 231. pew: the hygiene sweep — the vestigial exports (store.List and
+      its predicate, recordingFromPath, gitblob.State, run.ExecuteBinary,
+      run.Execute's test-only seam); one containment predicate for three
+      named and seven inline ones and one longest-existing-prefix
+      resolver; one go-command constructor for the five identical
+      bridges, closing the provenance probe's unresolved dir and unpinned
+      PWD structurally (§9's one environment policy); the shared source-
+      scan seam out of gc.go and the scratch helpers out of it; four
+      engine constructors one; gc's two full store walks one; ab's
+      duplicated count check; a fused doc block; the six recording
+      builders and two duplicated helpers in the tests one.
+- [ ] 232. pew: the spec chunk — §11's "never by shelling to a git
+      binary" and "the only subprocesses are the Go toolchain" against
+      ab's seven git invocations (go-git cannot create linked worktrees:
+      ab requires a git binary, stated, with the install story); the
+      contradicting format-1 sentence deleted; --explain's stream stated
+      (stderr) and unified; the reader-injected pew-format-invalid key
+      stated or renamed out of the pew- namespace; REQ-pew-derived-state
+      given a two-item payload list so its shortfall is a clause gap
+      (pew docs/issues/derived-state-recompute-invariance-witness.md's
+      rationale predates stipulator's clause claims) — the first case for
+      spec-wide-requirement-forming; re-consented.
 
 ## Band E — design chunks (open with the user)
 
