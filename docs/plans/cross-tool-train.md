@@ -875,11 +875,11 @@ in their repos.
       judged — every "Enforced by" name resolves to a tests/proves binding
       of its requirement, and retarget rewrites the pointers a moved member
       names in the document.
-- [ ] 168. gofresh: the compartment-ledger entailment is an invariant
-      (gofresh docs/issues/compartment-ledger-derivation.md) — equal
-      compartment hash ⇒ equal ledger, stated in REQ-closure-test-variant-
-      compartment with a property witness over generated compartments; doc
-      deletes at close.
+- [x] 168. gofresh: the compartment-ledger entailment is an invariant —
+      under one listing configuration and identity strategy, equal
+      compartment hashes carry equal ledgers, stated in
+      REQ-closure-test-variant-compartment with a seeded property witness
+      over generated compartments and a per-axis anchor.
 - [ ] 169. stipulator: one spelling source for remedies and knob prose
       (stipulator docs/issues/remedy-spellings-one-source.md,
       knob-prose-identity.md) — remedies composed from the registered verb
