@@ -1232,7 +1232,7 @@ in their repos.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
-- [ ] 221. stipulator: soundness conformance between the policy record
+- [x] 221. stipulator: soundness conformance between the policy record
       and the engine — the repository vouch file is neither declined
       (gofresh's WithoutRepositoryVouches, the "one set, one home" the
       producer's clause requires of a consumer owning its set) nor
