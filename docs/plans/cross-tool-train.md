@@ -914,9 +914,8 @@ in their repos.
 - [x] 170. stipulator: one record store, one backend — the witness and resolution caches
       one store parameterized by record kind, the served backend the
       degenerate path of the owned one; doc deletes at close.
-- [ ] 183. gomutant: measured, committable, and reusable findings distinct
-      at the run surface (gomutant docs/issues/measured-findings-reuse-
-      diagnostics.md) — the run summary and the attestation verdict state
+- [x] 183. gomutant: measured, committable, and reusable findings distinct
+      at the run surface — the run summary and the attestation verdict state
       the record's posture beside its counts (measured outcome,
       committability, reuse refusal with its reason channel and the
       linked package), so a consumer never mistakes a committed record for
