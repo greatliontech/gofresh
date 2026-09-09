@@ -1121,7 +1121,7 @@ in their repos.
 
 ## Band H — gomutant under the emergent shape (chartered by audit 195)
 
-- [ ] 208. gomutant: three correctness faults the audit found — the
+- [x] 208. gomutant: three correctness faults the audit found — the
       baseline path classifies a build failure by matching the harness
       output for "[build failed]" (a passing baseline whose test prints
       the string refuses) where results.md names the harness's own event
@@ -1133,8 +1133,13 @@ in their repos.
       on MCP and unlimited on the CLI — one derivation, one meaning.
 - [ ] 207. gomutant: face parity through one rendering seam — the MCP
       attest_survivor writes the document, echoes, then loads a tree and
-      demotes a toolchain-skew failure to a posture warning where
-      REQ-exec-provenance runs the check before the write (the CLI does)
+      demotes the load ladder's refusal — a toolchain skew, the go1.24
+      build-events floor, or a GODEBUG that silences those events — to a
+      posture warning where REQ-exec-provenance runs the check before
+      the write (the CLI does), and the ladder's environment arm —
+      input-decidable — sits at the load's head, after the lock
+      REQ-exec-preparation places last (the one stage order decides
+      its stage)
       and REQ-exec-preparation wants one stage order on both faces; the
       banked summary (REQ-exec-banked-summary, face-neutral) renders on
       the CLI alone while cancellation is an MCP campaign's ordinary end;
