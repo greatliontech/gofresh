@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1131,7 +1131,7 @@ in their repos.
       a toolchain the load refuses; the MCP ephemeral derives oracle
       bounds twice so `oracle_memory_mib:-1` yields the default ceiling
       on MCP and unlimited on the CLI — one derivation, one meaning.
-- [ ] 207. gomutant: face parity through one rendering seam — the MCP
+- [x] 207. gomutant: face parity through one rendering seam — the MCP
       attest_survivor writes the document, echoes, then loads a tree and
       demotes the load ladder's refusal — a toolchain skew, the go1.24
       build-events floor, or a GODEBUG that silences those events — to a
@@ -1229,6 +1229,16 @@ in their repos.
       predicate; documentlock_other's missing ensureLockIgnore;
       Coverage.Merge's receiver mutation behind a value signature; the
       three edit value types stay (two are wire-pinned).
+- [ ] 233. gomutant: MCP campaign observability (from
+      mcp-run-observability, 2026-09-09) — a long campaign's caller must
+      distinguish progress, a slow phase, completion, and cancellation
+      without a progress token or retained notifications: a run-state
+      record beside the findings document (the run's identity, the
+      current stretch, the target in flight, elapsed, committed count)
+      the caller can read while the run lives and after it ends, and a
+      preflight form of run on the MCP face (the CLI's --plan); the
+      surface question the visibility ruling decides — never a silent
+      wait.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
