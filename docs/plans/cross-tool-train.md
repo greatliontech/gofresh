@@ -174,7 +174,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user), then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102 — the cross-repo order settles at 197's close, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -989,18 +989,21 @@ in their repos.
       application, and attribution, tree-escape and build-selection
       refusals preserved; both spellings pinned; the persisted
       campaign/freshness boundary stated; doc deletes at close.
-- [ ] 189. gofresh: the ledger's non-Go member arm settled (gofresh
-      docs/issues/ledger-non-go-member-arm-unreachable.md) — whether any
-      test-only non-Go compiled input is constructible under the listing
-      is decided by construction; if none is, the arm and its clause
-      prose are deleted, else the arm gains its first pin; doc deletes at
-      close.
-- [ ] 190. gofresh: the parser's toolchain rides the identity strategy
-      (gofresh docs/issues/parser-toolchain-in-identity-strategy.md) — the
-      memo already treats a toolchain move as a new derivation, so the
-      strategy composes the toolchain identity too, and every consumer
-      keys ledgers across it; REQ-closure-identity-strategy amended; doc
-      deletes at close.
+- [ ] 190. gofresh: the analyzing frontend named once (gofresh
+      docs/issues/parser-toolchain-in-identity-strategy.md,
+      ledger-non-go-member-arm-unreachable.md) — the canonical member
+      form is a go/scanner token stream and the ledger's parse a
+      go/parser one, so the analyzing toolchain is an input to the fold;
+      IdentityStrategy composes it (today the memo scopes key on
+      runtime.Version() while the strategy claims equality across it —
+      the triage first reproduces a scanner move yielding equal
+      ClosureStrategy with unequal hashes) and every memo scope reads
+      the one spelling; the spec's two toolchain axes — the analyzing
+      frontend and the analyzed selection — distinguished in every memo
+      clause; the ledger's non-Go compiled member arm settled by
+      construction (deleted with its prose if no test-only non-Go
+      compiled input is constructible, else pinned) in the same strategy
+      bump, so consumers re-measure once; both docs delete at close.
 - [ ] 191. gofresh: GODEBUG joins the code-result guard (gofresh
       docs/issues/net-url-parse-godebug-channel.md) — the process-level
       channel captured for every result kind, the in-process Setenv
@@ -1039,7 +1042,79 @@ in their repos.
       files, ab/run/status verbs, the guidance; same output; the replan
       across all four repos closes the band.
 
+## Band G — gofresh under the emergent shape (chartered by audit 194)
+
+- [ ] 198. gofresh: the spec chunk — contract the code holds and the spec
+      does not: ToolchainSkew's directional cross-major fail-closed
+      refusal and the consumers' GOVERSION sampling obligation
+      (provenance.go) specified; the shared-substrate sentence names
+      guidance, shortgates, and shapecorpus; an index in the overview
+      whose pointer graph reaches every spec document; the seam's typed
+      control flow (ErrViewChanged, UnknownSubjectsError) and
+      Progress.Detail's diagnostics channel pinned; the repository vouch
+      union and its precedence over a caller's set stated beside
+      REQ-vouch-input; REQ-explain-passive re-observes the view's inputs
+      and may straddle a later edit. Spec only; re-consented.
+- [ ] 199. gofresh: a typed downgrade class on closure.Closure (gofresh
+      docs/issues/discharge-reason-channel-one-source.md) — the verdict
+      decision discriminates the shared-dynamic-state downgrade on a
+      reason-string prefix composed at three sites; the class carries
+      it, the reason text follows; doc deletes at close.
+- [ ] 200. gofresh: the mega-requirements decomposed — REQ-closure-
+      shared-dynamic-state (one 8,300-word paragraph, 224 cites),
+      REQ-closure-observability-analysis, and REQ-closure-test-variant-
+      compartment (four separable contracts) split into per-sub-contract
+      IDs so a sub-rule's edit re-consents itself alone and a cite names
+      a rule; every cite and binding retargeted through the tool; before
+      193 so the fixpoint's clauses have addressable IDs.
+- [ ] 201. gofresh: the API-surface sweep — pre-v1 clean break: the
+      implicit-environment overload families collapse to their explicit-
+      environment form (guard.Capture/CaptureContext/CaptureForContext
+      and siblings, runtimeinput.Adopt/Incomplete/Absolute/Relative/Dirty,
+      ScanPureDirectivesWithBuildFlags, closure.NewAtContext); the
+      exported functions whose signatures require internal/gotool's
+      EnvSnapshot unexported or the type promoted; six dead functions
+      deleted; the two fixture packages under internal/ rehomed under
+      closure/fixtures; the three-hop testvariant alias chain cut to one;
+      one release; pew's one call moves at its bump.
+- [ ] 203. gofresh: one memo scope, one versioning rule (gofresh
+      docs/issues/memo-scope-axes.md, per-file-memos-one-shape.md) — eight
+      persistent memo classes render their scope four ways and only the
+      listing memo carries a record version; AnalysisScope the one
+      source, every memo versioned by the one rule; docs delete at close.
+- [ ] 204. gofresh: auditset's receiver side as one table — the five
+      parallel method tables and their predicates one package-keyed
+      map behind the one ladder, as symbolTables already is; BoundedToken
+      rehomed out of the audited-set package.
+- [ ] 205. gofresh + consumers: one guidance plumbing — an exported
+      embed-accessor shape and a Progress diagnostic sink in gofresh; at
+      each consumer's next bump the three identical accessors read it,
+      gomutant's and pew's knob prose renders from the document as
+      stipulator's does (REQ-guidance-single-source), and the vouch
+      grammar's three copies read ParseVouchEntry (rides
+      vouch-file-consumer-homes).
+- [ ] 206. gofresh: the test surface — one file-map fixture writer for
+      the seven copies, the per-test cache-home settings collapsed onto
+      the package TestMains, the shared helpers out of view_test.go, the
+      ambiguity arm pinned once, the reference effect scan's budget
+      stated; the four package-global hook surfaces and the process-
+      global memo root under one seam (fixture-tier-parallelism's
+      precondition); the TestTier2 names renamed for the tiers the spec
+      names.
+
 ## Band E — design chunks (open with the user)
+
+- [ ] 202. gofresh: the dynamic-state tier's home and walk context
+      (design, with the user) — purity.go and dynamicstate.go implement
+      REQ-closure-shared-dynamic-state in the root package while the
+      spec home and every peer tier live under closure/; four functions
+      of 675–1,760 lines with `audited` hand-threaded through 34
+      signatures and `singleSubject` beside it; the collapse is a walk
+      context carrying the selection's audit, the subject scope, the
+      package, and the explain hooks, and the tier moved under closure/;
+      invariants: the per-package-graph judgment and the fail-closed
+      zero value; unblocks 193's fixpoint, 191's poisoning rule, and the
+      four filed walk unifications.
 
 - [ ] 15. pew: profile capture and attribution as recording
       companions (pew docs/issues/profile-capture-attribution.md and

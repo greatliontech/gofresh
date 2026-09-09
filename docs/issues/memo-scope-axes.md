@@ -16,6 +16,6 @@ composition state (the flat fact map the fixed points read) — so each
 role carries fields the other never sets. Splitting the composition
 result into its own type makes each unrepresentable.
 
-Lands: when a third per-file derivation is memoized or the fold's read
+Lands: cross-tool train chunk 203
 paths are next changed (the per-directory memo and the read path), and
 when the dynamic-state derivation is next changed (the result type).

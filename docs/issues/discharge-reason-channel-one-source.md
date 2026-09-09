@@ -16,4 +16,4 @@ the channel clause spelled once, and a reason naming an unhonored
 channel unrepresentable. (The culprit walk itself is one function,
 `dischargeCulprits`, since the discharge-walk fold.)
 
-Lands: with the next change to the downgrade reason's composition.
+Lands: cross-tool train chunk 199
