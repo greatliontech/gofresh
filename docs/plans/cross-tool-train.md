@@ -867,11 +867,10 @@ in their repos.
 - [x] 165. gomutant: the MCP server's exit is diagnosable — the server
       logs why and where it stopped serving; the idle-session liveness
       witness rides mcp-liveness-cancellation-witness's condition.
-- [ ] 166. stipulator: witness children run with toolchain telemetry off
-      (stipulator docs/issues/telemetry-sidecar-escapes-owned-process.md) —
-      a per-run telemetry directory with the mode file off, so the
-      descendant tree is exactly what the runner owns; doc deletes at
-      close.
+- [x] 166. stipulator: every Go child runs with the toolchain's telemetry
+      owned — the config home every child inherits points at an owned
+      telemetry-off home, so the descendant tree is exactly what the
+      runner owns.
 - [ ] 167. stipulator: spec enforcement pointers follow retarget and are
       judged (stipulator docs/issues/retarget-spec-enforcement-pointers.md)
       — every "Enforced by" name resolves to a tests/proves binding by a
