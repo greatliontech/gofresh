@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,10 +26,14 @@ func writeTestVariantModule(t *testing.T, files map[string]string) string {
 
 func computeAt(t *testing.T, dir string, subjects ...Subject) map[Subject]Closure {
 	t.Helper()
-	h, err := NewAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	return computeUnder(t, dir, nil, nil, subjects...)
+}
+
+// computeUnder is computeAt under a listing configuration: an environment
+// (nil for the process's own) and build flags.
+func computeUnder(t *testing.T, dir string, env []string, buildFlags []string, subjects ...Subject) map[Subject]Closure {
+	t.Helper()
+	h := hasherUnder(t, dir, env, buildFlags)
 	closures, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
@@ -36,17 +41,37 @@ func computeAt(t *testing.T, dir string, subjects ...Subject) map[Subject]Closur
 	return closures
 }
 
-func ledgerAt(t *testing.T, dir, pkgPath string) TestVariantLedger {
+func hasherUnder(t *testing.T, dir string, env []string, buildFlags []string) *Hasher {
 	t.Helper()
-	h, err := NewAt(dir)
+	var h *Hasher
+	var err error
+	if env == nil {
+		h, err = NewAt(dir, buildFlags...)
+	} else {
+		h, err = NewAtContextEnv(context.Background(), dir, env, buildFlags...)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
+	return h
+}
+
+func ledgerAt(t *testing.T, dir, pkgPath string) TestVariantLedger {
+	t.Helper()
+	ledger, _ := ledgerUnder(t, dir, nil, nil, pkgPath)
+	return ledger
+}
+
+// ledgerUnder is the compartment's ledger and its member files under a
+// listing configuration.
+func ledgerUnder(t *testing.T, dir string, env []string, buildFlags []string, pkgPath string) (TestVariantLedger, []string) {
+	t.Helper()
+	h := hasherUnder(t, dir, env, buildFlags)
 	ledger, err := h.TestVariantLedger(pkgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ledger
+	return ledger, append([]string(nil), h.testVariants[pkgPath].Files...)
 }
 
 // The partition inverse of

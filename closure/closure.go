@@ -438,21 +438,23 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 			if compartmentDir == "" {
 				compartmentDir = p.Dir
 			}
+			// Membership is the test-only file list — the listing's
+			// source files minus the base — and a kind is recorded for a
+			// member only, so a kind for a non-member is unrepresentable.
 			compiled, embedded, _ := memberKinds(p)
-			for f := range compiled {
-				if !baseFiles[f] {
-					compiledGo[f] = true
-				}
-			}
-			for f := range embedded {
-				if !baseFiles[f] {
-					embeddedData[f] = true
-				}
-			}
 			for _, f := range p.SourceFiles() {
-				if !baseFiles[f] && !seenTestOnly[f] {
+				if baseFiles[f] {
+					continue
+				}
+				if !seenTestOnly[f] {
 					seenTestOnly[f] = true
 					testOnly = append(testOnly, f)
+				}
+				if compiled[f] {
+					compiledGo[f] = true
+				}
+				if embedded[f] {
+					embeddedData[f] = true
 				}
 			}
 			continue

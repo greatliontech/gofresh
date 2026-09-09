@@ -83,7 +83,18 @@ hash over the package's own test-only files — each own test-variant node's fil
 set minus the base package's file set, in-package and external variants folded
 together — under the same per-file name-and-content-hash discipline as the core's
 file folding, unsalted, so every subject of one package shares the compartment
-that describes the package. A package with no test files records the defined
+that describes the package. Under one listing configuration — the build
+selection, the platform and cgo environment the listing runs under, and the
+toolchain — and one identity strategy (REQ-closure-identity-strategy), equal
+compartment hashes carry equal ledgers: the ledger is a function of the bytes
+the hash folds, of that configuration, and of that strategy alone — a member's
+kind as the toolchain lists it follows its own name and constraints and its
+siblings' embed directives, which the hash folds, under the configuration —
+while the hash is unsalted by any of them, so a ledger is a fact of the hash,
+the configuration, and the strategy together, never of the hash alone.
+Consumer obligation: a consumer keying ledgers per compartment hash keys per
+listing configuration and identity strategy too. A package with no test files
+records the defined
 constant empty-set identity, stable for as long as the package has none; the
 empty string is never a computed compartment, so an empty recorded compartment
 identifies a recording that predates the compartment and fails closed to stale
@@ -196,7 +207,10 @@ name: test-only embedded bytes feed unchanged declarations that read them.
 Inertness is
 Go-semantics data — it claims the delta cannot change the behavior of any
 unchanged declaration and nothing more; what inertness licenses is the
-consumer's policy, never gofresh's.
+consumer's policy, never gofresh's. Enforced by
+`TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration`
+and
+`TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
 
 ## Blind spots
 
