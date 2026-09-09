@@ -911,8 +911,7 @@ in their repos.
       and flag names and parsed against the command tree; schema tags and
       usage strings rendered from the guidance document's knob text; two
       docs delete at close.
-- [ ] 170. stipulator: one record store, one backend (stipulator
-      docs/issues/two-record-stores.md) — the witness and resolution caches
+- [x] 170. stipulator: one record store, one backend — the witness and resolution caches
       one store parameterized by record kind, the served backend the
       degenerate path of the owned one; doc deletes at close.
 - [ ] 183. gomutant: measured, committable, and reusable findings distinct
