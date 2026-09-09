@@ -174,7 +174,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102 — the cross-repo order settles at 197's close, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, then 215 (design, with the user), 95 last when its SDK prerequisite lands — the cross-repo order settles at 197's close, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -976,12 +976,20 @@ in their repos.
       their permitted inputs, and the constants beside the invariants that
       tie them; the partition stays a function of tree + order + worker
       count; doc deletes at close.
-- [ ] 187. gomutant: ephemeral probes run outside the caller's tree
-      (gomutant docs/issues/ephemeral-probe-writes-under-the-callers-tree.md)
-      — the probe's oracle runs through the scratch channel REQ-mut-overlay
-      already runs shaped candidates through, its cost stated per probe,
-      the tree promise kept whole (the promise is never narrowed to fit
-      the code); doc deletes at close.
+- [ ] 187. gomutant: mutant runs outside the caller's tree (gomutant
+      docs/issues/ephemeral-probe-writes-under-the-callers-tree.md) — the
+      tree-write mechanism is one on both paths (go test runs each binary
+      in the real package directory: run.go's probe and campaign
+      executors alike), so REQ-mut-overlay's "a mutant run must not write
+      into the tree" is breached by every relatively writing test; the
+      probe takes the scratch channel shaped candidates already run
+      through, its cost stated per probe; the campaign path opens with
+      the fork settled explicitly rather than implemented narrowly — two
+      whole-tree copies per candidate is not a campaign cost, so either
+      a cheaper containment (a run directory the binary is spawned in)
+      lands or the spec's promise is qualified to name the campaign
+      residual, the latter the user's call (an issue doc at the open);
+      the promise is never narrowed silently; doc deletes at close.
 - [ ] 188. gomutant: explicit fixture package selection loads a testdata
       package (gomutant docs/issues/explicit-testdata-package-selection.md)
       — an explicit oracle selector or campaign target under testdata is
@@ -1032,7 +1040,7 @@ in their repos.
       against the specs (closure tiers, guards, auditset, the fold, the
       test-variant ledger, guidance); output a chartered consolidation set,
       recorded disputes, and a re-sequencing of the queued gofresh chunks.
-- [ ] 195. gomutant: coherence re-audit — the engine's window/schedule/
+- [x] 195. gomutant: coherence re-audit — the engine's window/schedule/
       estimate models, the findings document and its posture model (183's
       landing read here), the two faces, the scratch channel; same output.
 - [ ] 196. stipulator: coherence re-audit — the backends/golang witness
@@ -1102,7 +1110,122 @@ in their repos.
       precondition); the TestTier2 names renamed for the tiers the spec
       names.
 
+## Band H — gomutant under the emergent shape (chartered by audit 195)
+
+- [ ] 208. gomutant: three correctness faults the audit found — the
+      baseline path classifies a build failure by matching the harness
+      output for "[build failed]" (a passing baseline whose test prints
+      the string refuses) where results.md names the harness's own event
+      and buildRejected beside it already reads that event; the
+      load-time toolchain floor (go1.24, build events) refuses every load
+      but the attest path's provenance check omits it, so attest admits
+      a toolchain the load refuses; the MCP ephemeral derives oracle
+      bounds twice so `oracle_memory_mib:-1` yields the default ceiling
+      on MCP and unlimited on the CLI — one derivation, one meaning.
+- [ ] 207. gomutant: face parity through one rendering seam — the MCP
+      attest_survivor writes the document, echoes, then loads a tree and
+      demotes a toolchain-skew failure to a posture warning where
+      REQ-exec-provenance runs the check before the write (the CLI does)
+      and REQ-exec-preparation wants one stage order on both faces; the
+      banked summary (REQ-exec-banked-summary, face-neutral) renders on
+      the CLI alone while cancellation is an MCP campaign's ordinary end;
+      the audit's disagreement rate rides the CLI report, not
+      RunSummary; four grammars hand-mirrored (decisions, analysis
+      events, execution events with the audit-flip payload folded flat,
+      the banked epilogue) become Text() methods beside
+      PreparationEvent's, RunSummary carrying the audit and banked
+      payloads, the faces keeping prefix and column policy alone; one
+      findings-path resolver, one guidance accessor, one target-source
+      preamble, one delta-cut acquisition.
+- [ ] 211. gomutant: the vestigial and façade sweep — ~30 names with no
+      caller (the non-Context wrapper pairs production never takes,
+      readInput, gitref.output, gitOutput, subjectView.inspect, five
+      engine helpers), the exported-but-test-only tree methods
+      (FilterTargets, DescribeTargets, Load, Fresh*, InspectFinding*, the
+      five merge wrappers onto their Against forms, UpdateDocument*,
+      ApplyEdits, Committability, Export — which drops a version-12
+      coverage bound: carried or deleted), the tracked baselines.json
+      residue, the orphan panicky fixture, two false comments (a
+      vanished identifier; gitref "never execs git"), the sideline
+      name's ordinal arm no store has ever taken and the per-version
+      narrative recording bumps with no code arm.
+- [ ] 209. gomutant: the spec chunk — execution.md's "a launched
+      candidate contributes its observation even when compilation
+      rejection discards it" contradicts results.md and the code
+      (amended to results.md's rule); the load-time toolchain floor
+      stated beside the skew refusal; the tree-root vouches file and
+      the sideline name grammar stated as contract; REQ-exec-run-status's
+      decision grammar admits `candidates` on a served decision (results
+      already requires the count); REQ-exec-oracle-run's six contracts
+      and REQ-result-stale's three carve-outs split into sibling ids so
+      an edit re-consents its own rule; re-consented through the tool.
+- [ ] 212. gomutant: one splice — driftFindingCounts, extendFindingCounts,
+      and spliceFindingCounts share their opening, their scores walk, and
+      their tally tail (47 lines identical between two) and differ only
+      in which candidate subset re-measured; one splice over a
+      re-measured index set with a carry policy, the four splice*Finding
+      wrappers following; invariants: candidate conservation, carried
+      survivors keeping their buckets, kill attribution completeness;
+      after 209's sibling split names the carve-outs.
+- [ ] 210. gomutant: the vouch file at the tree root and gofresh's
+      grammar (gofresh docs/issues/vouch-file-consumer-homes.md's gomutant
+      arm) — every engine opens WithDir(module dir), so in a go.work tree
+      the tree-root vouches file governs nothing (fail-closed today);
+      the root file read once through gofresh's ReadVouchFile and its
+      entries through ParseVouchEntry, gomutant's line-for-line
+      re-implementation deleted.
+- [ ] 213. gomutant: one seam struct — fifteen mutable package-level
+      test seams across run.go, schedule.go, ephemeral.go, and
+      freshness.go, two of them duplicates of one engine function each
+      (coveredPositions ≡ campaignCoveredPositions, groupBaselineProbe ≡
+      phaseBaselineProbe), and the seam fields on Options, in one struct
+      in one file.
+- [ ] 214. gomutant: the engine's catalog and spawn fan (gomutant
+      docs/issues/engine-run-scoped-oracle-value.md, probe-seam-tuple.md)
+      — five variant emitters of one token shape and ~35 family-rank
+      literals across seven files become one table the emitters and the
+      inventory test read; eight spawn entries into runMutantBase and
+      three into the probe become one request struct; docs delete at
+      close.
+- [ ] 216. gomutant: one classified evidence check — evidencePrecheck
+      with evidencePairsValid (boolean) and inspectContext (classified)
+      run the same five checks in different order and strictness; the
+      boolean derives from the classified one.
+- [ ] 217. gomutant: record-parse discipline — LoadExemptions and
+      LoadEphemeralAttestations read with plain Unmarshal where the
+      findings document refuses duplicate keys, trailing data, and nulls
+      under the same "a malformed record refuses" clauses; one decoder;
+      inlineFindingFields gains the inventory test its sibling has and
+      the five tags it omits.
+- [ ] 218. gomutant: the store's report path (gomutant docs/issues/
+      store-report-path-walk.md) — Store.Layer walks the full manifest
+      per record at six sites and keeps the first reason; the two memos
+      of one entry (cache, judged) one entry-state record the report path
+      consults; doc deletes at close.
+- [ ] 219. gomutant: the test surface — one fixture home (the 37 CopyFS
+      sites, three fixtureDir declarations, twelve git-fixture builders,
+      53 inline example modules), the byte-identical face cache-isolation
+      tests and the eight per-face scenario rewrites one face-scenario
+      table that pins the faces decide alike (the net that would have
+      caught 207's four divergences), with the stated limit that the
+      root package's in-package tests keep their unexported reach.
+- [ ] 220. gomutant: the named smalls — the ephemeral option tuple onto
+      EphemeralRequest; longestBaselineFor reading the bank key through
+      its composer; PackageSkip.Dark carrying the whole skip-radius
+      predicate; documentlock_other's missing ensureLockIgnore;
+      Coverage.Merge's receiver mutation behind a value signature; the
+      three edit value types stay (two are wire-pinned).
+
 ## Band E — design chunks (open with the user)
+
+- [ ] 215. gomutant: Tree.Run decomposed (design, with the user) — a
+      2,713-line function holding the campaign's state in 52 locals and
+      19 closures, three of 380–480 lines; a campaign struct with methods
+      makes the state nameable and testable and is the precondition for
+      the splice collapse's siblings and any future window work; the
+      root package's 80 methods on a four-field Tree span seven roles
+      worth naming; after 207, 211, 186, and 212 have shrunk its
+      surroundings.
 
 - [ ] 202. gofresh: the dynamic-state tier's home and walk context
       (design, with the user) — purity.go and dynamicstate.go implement
