@@ -1255,7 +1255,7 @@ in their repos.
       provenance probe spawns outside the owned boundary
       (REQ-policy-cancellation's "every child process"). Code, with the
       identity table's claim made true or the omission stated.
-- [ ] 223. stipulator: one witness pipeline (stipulator docs/issues/
+- [x] 223. stipulator: one witness pipeline (stipulator docs/issues/
       two-completion-mechanisms.md, publish-refusal-ladders.md,
       executor-diagnostics-trio.md) — the selective runner's 592-line
       runWitnesses and the health-judged recorder (Derive, covered,
