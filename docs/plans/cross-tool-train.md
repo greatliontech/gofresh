@@ -1239,6 +1239,13 @@ in their repos.
       preflight form of run on the MCP face (the CLI's --plan); the
       surface question the visibility ruling decides — never a silent
       wait.
+- [ ] 238. stipulator: the parent-hosted engine loads' owned boundary
+      (the contradicted gap on REQ-go-owned-processes, declared at 222)
+      — the analysis engines the served backend hosts spawn the package
+      loader's go list in the parent's process group, so a cancelled
+      load ends its go list and not the loader's descendants: the
+      mechanism decision (the engines in the resolver child, or a
+      group-isolated loader spawn gofresh offers) and the gap's close.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
