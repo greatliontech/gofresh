@@ -47,11 +47,11 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := runtimeinput.CaptureBracket(tmp, []string{"data"})
+	bracket, err := riCaptureBracket(tmp, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := runtimeinput.FromTestLog([]byte("open data/fixture.txt\n"), tmp, tmp,
+	obs, err := riFromTestLog([]byte("open data/fixture.txt\n"), tmp, tmp,
 		runtimeinput.WithCompletedProcess("package-test-binary:mover"), runtimeinput.WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)

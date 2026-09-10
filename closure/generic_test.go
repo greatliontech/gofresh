@@ -62,7 +62,7 @@ func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Key"}
 
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func Key[K comparable](k K) string {
 
 func UseInt() string { return Key[int](1) }
 `)
-	h2, err := NewAt(edited)
+	h2, err := newAt(edited)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func UseEffect() string { return Effectful[int](1) }
 `)
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Effectful"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func Orphan[K comparable](k K) string {
 `)
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Orphan"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func Orphan[K comparable](k K) string {
 
 func orphanProbe() string { return os.Getenv("ORPHAN") }
 `)
-	h2, err := NewAt(edited)
+	h2, err := newAt(edited)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestAttributedAnalysisConvertsUnsupportedShapesToErrors(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := writeGenericFixture(t, genericFixtureBody)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func UseInt() string {
 	dir := writeGenericFixture(t, body)
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Value"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func UseInt() string {
 	dir := writeGenericFixture(t, body)
 	const pkg = "example.com/generic"
 	subject := Subject{Package: pkg, Symbol: "Counter.N"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func Outer[T any](v T) string { return Inner(v) }
 func UseInt() string { return Outer[int](1) }
 `)
 	const pkg = "example.com/generic"
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func UseInt() string {
 }
 `)
 	const pkg = "example.com/generic"
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

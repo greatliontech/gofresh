@@ -347,7 +347,7 @@ func TestProd(t *testing.T) {
 	}
 }
 `)
-	h, err := NewAt(filepath.Join(dir, "prop"))
+	h, err := newAt(filepath.Join(dir, "prop"))
 	if err != nil {
 		t.Fatal(err)
 	}

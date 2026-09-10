@@ -133,7 +133,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 		}
 	}
 	varKey := pkgPath + "." + varName
-	notice, err := closure.ToolchainSelectionNoticeResolvedContext(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags, nil)
+	notice, err := closure.ToolchainSelectionNoticeResolved(ctx, v.engine.dir, v.engine.env, v.engine.buildFlags, nil)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}

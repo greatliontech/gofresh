@@ -51,7 +51,7 @@ func TestBracketCaptureAndRevalidateAgreeOnUnchangedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	roots := []string{"data", "top.txt", "ghost", external}
-	bracket, err := CaptureBracket(moduleDir, roots)
+	bracket, err := ambientCaptureBracket(moduleDir, roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,14 +67,14 @@ func TestBracketCaptureAndRevalidateAgreeOnUnchangedTree(t *testing.T) {
 			t.Fatalf("unchanged tree revalidated as moved: %q", reason)
 		}
 	}
-	normalized, err := CaptureBracket(moduleDir, []string{"./data", "data", "top.txt", "ghost", "data", external})
+	normalized, err := ambientCaptureBracket(moduleDir, []string{"./data", "data", "top.txt", "ghost", "data", external})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if normalized.fingerprint != bracket.fingerprint {
 		t.Fatal("equivalent root declarations produced distinct fingerprints")
 	}
-	empty, err := CaptureBracket(moduleDir, nil)
+	empty, err := ambientCaptureBracket(moduleDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestBracketMovesOnPersistedMutation(t *testing.T) {
 			if err := os.WriteFile(external, []byte("external"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			bracket, err := CaptureBracket(moduleDir, []string{"data", "top.txt", "ghost", external})
+			bracket, err := ambientCaptureBracket(moduleDir, []string{"data", "top.txt", "ghost", external})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -243,7 +243,7 @@ func TestBracketMovesOnPersistedMutation(t *testing.T) {
 func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) {
 	moduleDir := bracketTree(t)
 	volatile := filepath.Join(moduleDir, "data", "sub")
-	bracket, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/sub"))
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/sub"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) 
 
 	// A root that is itself excluded contributes nothing: mutations anywhere
 	// beneath it leave the fingerprint unmoved.
-	rootExcluded, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data"))
+	rootExcluded, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestBracketRootRefusedByHashingSemanticsIsUnverifiable(t *testing.T) {
 	if err := os.Symlink(externalDir, filepath.Join(moduleDir, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	escaped, err := CaptureBracket(moduleDir, []string{"data", "escape"})
+	escaped, err := ambientCaptureBracket(moduleDir, []string{"data", "escape"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
 	if err := os.WriteFile(fixed, []byte("package sub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"data", externalDir})
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data", externalDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
 	if unchanged || !strings.Contains(reason, externalDir) {
 		t.Fatalf("rewrite under the absolute root: unchanged=%t reason=%q, want moved naming the root", unchanged, reason)
 	}
-	recaptured, err := CaptureBracket(moduleDir, []string{"data", externalDir})
+	recaptured, err := ambientCaptureBracket(moduleDir, []string{"data", externalDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"data", link})
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data", link})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
 	if err := os.MkdirAll(volatile, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	excluded, err := CaptureBracket(moduleDir, []string{"data", real}, WithBracketExcludedPaths(filepath.Join(real, "vol")))
+	excluded, err := ambientCaptureBracket(moduleDir, []string{"data", real}, WithBracketExcludedPaths(filepath.Join(real, "vol")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestAbsoluteRootContainingVolatileOSRootIsRefused(t *testing.T) {
 		t.Skip("no volatile OS roots on this platform")
 	}
 	moduleDir := bracketTree(t)
-	if _, err := CaptureBracket(moduleDir, []string{"data", filepath.Dir(guard.VolatileOSRoots[0])}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
+	if _, err := ambientCaptureBracket(moduleDir, []string{"data", filepath.Dir(guard.VolatileOSRoots[0])}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
 		t.Fatalf("root above a volatile OS root: %v; want the refusal", err)
 	}
 	// A link that resolves into a volatile tree passes the lexical
@@ -456,14 +456,14 @@ func TestAbsoluteRootContainingVolatileOSRootIsRefused(t *testing.T) {
 	if err := os.Symlink(guard.VolatileOSRoots[0], link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"data", link})
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data", link})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(bracket.Reason(), "resolves into a volatile OS root") {
 		t.Fatalf("link into a volatile tree: reason %q, want the resolved refusal", bracket.Reason())
 	}
-	if clean, err := CaptureBracket(moduleDir, []string{"data"}); err != nil || clean.Reason() != "" {
+	if clean, err := ambientCaptureBracket(moduleDir, []string{"data"}); err != nil || clean.Reason() != "" {
 		t.Fatalf("a fingerprinted bracket reports a reason: %q, %v", clean.Reason(), err)
 	}
 }
@@ -472,7 +472,7 @@ func TestAbsoluteRootContainingVolatileOSRootIsRefused(t *testing.T) {
 // nothing walks the whole filesystem.
 func TestFilesystemRootIsRefusedAsBracketRoot(t *testing.T) {
 	moduleDir := bracketTree(t)
-	if _, err := CaptureBracket(moduleDir, []string{"data", string(filepath.Separator)}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
+	if _, err := ambientCaptureBracket(moduleDir, []string{"data", string(filepath.Separator)}); err == nil || !strings.Contains(err.Error(), "filesystem root") {
 		t.Fatalf("filesystem root: %v; want the refusal", err)
 	}
 }
@@ -483,7 +483,7 @@ func TestFilesystemRootIsRefusedAsBracketRoot(t *testing.T) {
 // refused rather than read as unchanged.
 func TestBracketRevalidateRefusesForeignModuleViewAndUnsealedBracket(t *testing.T) {
 	moduleDir := bracketTree(t)
-	bracket, err := CaptureBracket(moduleDir, []string{"data"})
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,41 +511,41 @@ func TestBracketRevalidateRefusesForeignModuleViewAndUnsealedBracket(t *testing.
 func TestCaptureBracketRejectsMalformedRootsAndPatterns(t *testing.T) {
 	moduleDir := bracketTree(t)
 	for _, roots := range [][]string{{""}, {"../outside"}, {".."}, {"bad\nname"}, {"nul\x00byte"}} {
-		if _, err := CaptureBracket(moduleDir, roots); err == nil {
+		if _, err := ambientCaptureBracket(moduleDir, roots); err == nil {
 			t.Errorf("CaptureBracket accepted roots %q", roots)
 		}
 	}
-	if _, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("")); err == nil {
+	if _, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("")); err == nil {
 		t.Fatal("CaptureBracket accepted an empty exclusion pattern")
 	}
 	// Exclusion identities enter the same newline-framed preimage as roots,
 	// so framing bytes could alias a different exclusion set.
 	for _, pattern := range []string{"bad\nname", "nul\x00byte", "cr\rname"} {
-		if _, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths(pattern)); err == nil {
+		if _, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths(pattern)); err == nil {
 			t.Errorf("CaptureBracket accepted unrepresentable exclusion %q", pattern)
 		}
 	}
 }
 
-// TestCaptureBracketContextHonorsCancellation covers REQ-inputs-context
+// TestCaptureBracketHonorsCancellation covers REQ-inputs-context
 // semantics for bracket capture: cancellation is observed between roots and
 // within file and directory hashing, without a partial bracket.
-func TestCaptureBracketContextHonorsCancellation(t *testing.T) {
+func TestCaptureBracketHonorsCancellation(t *testing.T) {
 	moduleDir := bracketTree(t)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := CaptureBracketContext(canceled, moduleDir, []string{"data"}); !errors.Is(err, context.Canceled) {
+	if _, err := CaptureBracket(canceled, moduleDir, []string{"data"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled capture = %v, want context.Canceled", err)
 	}
 	for after := 1; after < 8; after++ {
 		ctx := &cancelAfterChecks{Context: context.Background(), after: after}
-		if _, err := CaptureBracketContext(ctx, moduleDir, []string{"data", "top.txt"}); !errors.Is(err, context.Canceled) {
+		if _, err := CaptureBracket(ctx, moduleDir, []string{"data", "top.txt"}); !errors.Is(err, context.Canceled) {
 			t.Fatalf("capture after %d checks = %v, want context.Canceled", after, err)
 		}
 	}
 	//lint:ignore SA1012 the nil-context refusal is the behavior under pin
-	if _, err := CaptureBracketContext(nil, moduleDir, []string{"data"}); err == nil {
-		t.Fatal("CaptureBracketContext accepted a nil context")
+	if _, err := CaptureBracket(nil, moduleDir, []string{"data"}); err == nil {
+		t.Fatal("CaptureBracket accepted a nil context")
 	}
 }
 
@@ -630,7 +630,7 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 			}
 			opts = append(opts, WithBracketExcludedPaths(filepath.ToSlash(rel)))
 		}
-		bracket, err := CaptureBracket(moduleDir, []string{"data"}, opts...)
+		bracket, err := ambientCaptureBracket(moduleDir, []string{"data"}, opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -690,7 +690,7 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 	}
 	capture := func(t *testing.T, moduleDir string) Bracket {
 		t.Helper()
-		b, err := CaptureBracket(moduleDir, []string{"lib"})
+		b, err := ambientCaptureBracket(moduleDir, []string{"lib"})
 		if err != nil {
 			t.Fatal(err)
 		}

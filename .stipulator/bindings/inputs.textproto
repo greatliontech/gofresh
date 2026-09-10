@@ -88,7 +88,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.Merge"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "98b82f75bcf6738eeaf00c807d42ce471a287aeb37e3bc21f707297c7fb6eadb"
+  shape_hash: "47b8798b53033230b1511ca6a308e0c5966cb642a659fc9dfbaf89d4bd31175e"
 }
 
 bindings {
@@ -118,7 +118,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.Dirty"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "8c01f7ba0ad98250b14d59cb857b2d321d90436210f0a89757b8c3ae5f129fe8"
+  shape_hash: "5e672d9fe284dd112203c088ca3318b4dc154afc57e58ddb92e91c390124eadc"
 }
 
 bindings {
@@ -176,9 +176,9 @@ bindings {
   content_hash: "edf598e14d36c3c8a6c254b890a253574595b87ab5a1e11b41fc7732a1c9c16a"
   source_hash: "f8096d3c731ed8a40e83e469174f6993b4855300f4dab8d2bbf0ea1378df1659"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "86a9d3e6c818737aebc30614e327026c2b2e1e0e42b01652bed6b6f8d9dec2c3"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -246,9 +246,9 @@ bindings {
   content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
   source_hash: "59923ecfef18e51879ed6e5f1b12f7963cb5f83c0d9269d29169fe493ac2300b"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLogEnv"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "86a9d3e6c818737aebc30614e327026c2b2e1e0e42b01652bed6b6f8d9dec2c3"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -298,7 +298,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.CaptureBracket"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "b614f8b367bedbe33b0def53a79e97864b581425f63eed7952210e9156248b15"
+  shape_hash: "a9beeebbbfade9817f09a8881bbf6283758ab9f17846f37641ddcc0bfe2ca646"
 }
 
 bindings {
@@ -348,7 +348,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.CaptureBracket"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "b614f8b367bedbe33b0def53a79e97864b581425f63eed7952210e9156248b15"
+  shape_hash: "a9beeebbbfade9817f09a8881bbf6283758ab9f17846f37641ddcc0bfe2ca646"
 }
 
 bindings {
@@ -848,7 +848,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -868,7 +868,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -898,7 +898,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -918,7 +918,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.Incomplete"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "f772a69405a8efe48533ed9ad6c9be513ce230db7c68d7994c7b145003581511"
+  shape_hash: "f59d8c16d6ac3138d162c9679ec3cb7b111bbe49680f2948144d8f2a5a141d84"
 }
 
 bindings {
@@ -926,9 +926,9 @@ bindings {
   content_hash: "8bde1e32613986d2d9d355ffe1afc99c37a2c52728f8244628b9107b180b622b"
   source_hash: "e3732d64697855f3305dfdb1729f3685e7b100b15ccae3041fae3c89650c2ecf"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCurrentContextHonorsCancellation"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCurrentHonorsCancellation"
   role: BINDING_ROLE_TESTS
-  shape_hash: "87e07ce01f1104789f419a95d3cfe7b74a52298a2f9972c6f31a272cc0bd4bbc"
+  shape_hash: "549d6a547233cc6309c12d37df871be194929a10aa2e0bb4e9ce3439a1263890"
 }
 
 bindings {
@@ -936,9 +936,9 @@ bindings {
   content_hash: "8bde1e32613986d2d9d355ffe1afc99c37a2c52728f8244628b9107b180b622b"
   source_hash: "e3732d64697855f3305dfdb1729f3685e7b100b15ccae3041fae3c89650c2ecf"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCurrentContextStopsBetweenInputsAndFileChunks"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCurrentStopsBetweenInputsAndFileChunks"
   role: BINDING_ROLE_TESTS
-  shape_hash: "b5ec11f0f0749a6d7eb49dd03df9b6bd38b9c783ab34b3be614add9dc2175035"
+  shape_hash: "c4142f98ebe25cefcc7b70e3bd6e4a576aa0ac841060912d638d103b2616af97"
 }
 
 bindings {
@@ -946,9 +946,9 @@ bindings {
   content_hash: "8bde1e32613986d2d9d355ffe1afc99c37a2c52728f8244628b9107b180b622b"
   source_hash: "e3732d64697855f3305dfdb1729f3685e7b100b15ccae3041fae3c89650c2ecf"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.CurrentContext"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.Current"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "3cf9b664b91cf3c94125f2cb729791505d14272405171d74a647dc83cc395fb1"
+  shape_hash: "a7ba798256350c14b0a3f08e6275b7e36207b987deb8d478490acd21a1d1d192"
 }
 
 bindings {
@@ -968,7 +968,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "965b1c7eda534b86f1c23ed2c6d66e563bc39155727c2131216f4a75ac71179c"
+  shape_hash: "9cbd7771c1a63d387534a5e52437a42a5866f7778314250039cd1a7f372ff4da"
 }
 
 bindings {
@@ -1449,4 +1449,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFilesystemRootIsRefusedAsBracketRoot"
   role: BINDING_ROLE_TESTS
   shape_hash: "9b3d4dee6beec5565cca1c21d7130746697db476d8b9d6d107d5bae1a92277f8"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-dirty"
+  content_hash: "f2fb9e999c57b6048be03b4a1f660a4b9a1401521ac1f6d88c60aa34f11442cb"
+  source_hash: "6c43c978f36942acfd196217aed94a675727587e2f0e851609ec3e1dde1c635d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestDirtyRevalidatesWithSuppliedEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "05267e5a6da7cab87b3384198304fa75c6cf9736f050b0498f066946bbecf7ff"
 }

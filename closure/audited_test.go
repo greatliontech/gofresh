@@ -104,7 +104,7 @@ func TestRegistered(t *testing.T) {
 	_ = Registered()
 }
 `)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +750,7 @@ func TestDeref(t *testing.T) {
 	_ = Deref()
 }
 `)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1029,7 +1029,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1496,7 +1496,7 @@ func Count(root string) int {
 	return n
 }
 `)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1617,7 +1617,7 @@ func BenchmarkResultField(b *testing.B) {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "elapsed/elapsed_test.go", "package elapsed\n\nimport \"testing\"\n\nfunc BenchmarkElapsed(b *testing.B) {\n\tfor b.Loop() {\n\t}\n\t_ = b.Elapsed()\n}\n")
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1675,7 +1675,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,7 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 		{Package: "example.com/maximal", Symbol: "F"},
 		{Package: "example.com/maximal", Symbol: "G"},
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/opaqueasm"
 	subject := Subject{Package: pkg, Symbol: "BenchmarkOpaqueASM"}
-	h, err := NewAt("..")
+	h, err := newAt("..")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestComputeMaximalBatchConservativelyMarksExternalPackageCode(t *testing.T)
 	if err := os.WriteFile(filepath.Join(dir, "external.go"), []byte("package external\n\nimport \"os\"\n\nfunc Read() { _, _ = os.ReadFile(\"fixture\") }\nfunc Pure() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestComputeMaximalBatchConservativelyMarksDotImportedExternalCode(t *testin
 	if err := os.WriteFile(filepath.Join(dir, "external.go"), []byte("package dotexternal\n\nimport . \"os\"\n\nfunc Read() { _, _ = ReadFile(\"fixture\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(tc.source), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			h, err := NewAt(dir)
+			h, err := newAt(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -293,7 +293,7 @@ func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "benchmark_test.go"), []byte("package wrapper\n\nfunc F(b *Bench) { _ = b.Elapsed() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "wrapper.go"), []byte("package wrapper\n\nimport \"example.com/wrapper/dep\"\n\ntype B = dep.B\nfunc F(b *B) { _ = b.Elapsed() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestComputeMaximalBatchDoesNotClassifyUnrelatedPackageMethod(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(dir, "worker_test.go"), []byte("package wrapper\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestComputeMaximalBatchConservativelyMarksNonGoEdges(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h, err := NewAt(dir)
+			h, err := newAt(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -601,7 +601,7 @@ func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 	writeFile(t, dir, "data.txt", "before\n")
 	subject := Subject{Package: "example.com/embedhash", Symbol: "Data"}
 
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +638,7 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "data.txt", "after\n")
-	h2, err := NewAt(dir)
+	h2, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

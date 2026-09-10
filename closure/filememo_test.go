@@ -37,7 +37,7 @@ var fileMemoSubjects = []Subject{{Package: "example.com/fm", Symbol: "P"}, {Pack
 // the compartment members it derived.
 func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []string, []string) {
 	t.Helper()
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestCompartmentParsesServeOnTheScanKeyPath(t *testing.T) {
 	defer func() { analysisTestHooks.variantParse = nil }()
 	keys := make([]string, 2)
 	for i := range keys {
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}

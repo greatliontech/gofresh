@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // writeTree materialises files under dir (directories created as
@@ -74,7 +74,7 @@ func listingEnv(goflags, gowork string) []string {
 // Hasher, and the listing error if any.
 func listFrom(t *testing.T, dir, pkg string, env []string, snapshot *gotool.EnvSnapshot, flags ...string) ([]listPkg, int, *Hasher, error) {
 	t.Helper()
-	h, err := NewAtContextEnvSnapshot(context.Background(), dir, env, snapshot, flags...)
+	h, err := NewAt(context.Background(), dir, env, snapshot, flags...)
 	if err != nil {
 		t.Fatal(err)
 	}

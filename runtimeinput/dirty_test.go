@@ -25,7 +25,7 @@ func TestDirtyEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "fixture.dat"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -36,11 +36,11 @@ func TestDirtyEvidence(t *testing.T) {
 	rel := rels[0]
 
 	matching := fakeInspector{reproducible: map[string]bool{rel: true}}
-	if dirty, err := Dirty(st, moduleDir, "c", matching); err != nil || dirty {
+	if dirty, err := ambientDirty(st, moduleDir, "c", matching); err != nil || dirty {
 		t.Errorf("reproducible input: dirty=%v err=%v, want false", dirty, err)
 	}
 	different := fakeInspector{reproducible: map[string]bool{}}
-	if dirty, err := Dirty(st, moduleDir, "c", different); err != nil || !dirty {
+	if dirty, err := ambientDirty(st, moduleDir, "c", different); err != nil || !dirty {
 		t.Errorf("non-reproducible input: dirty=%v err=%v, want true", dirty, err)
 	}
 }
@@ -66,20 +66,20 @@ func TestMergedManifestDirtyEvidenceIsMonotone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	committed, err := FromTestLog([]byte("open committed.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-committed"), WithBracket(testBracket(t, moduleDir)))
+	committed, err := ambientFromTestLog([]byte("open committed.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-committed"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated, err := FromTestLog([]byte("open generated.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-generated"), WithBracket(testBracket(t, moduleDir)))
+	generated, err := ambientFromTestLog([]byte("open generated.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker-generated"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := Merge(moduleDir, committed, generated)
+	merged, err := ambientMerge(moduleDir, committed, generated)
 	if err != nil {
 		t.Fatal(err)
 	}
 	inspector := fakeInspector{reproducible: map[string]bool{"pkg/committed.txt": true}}
-	dirty, err := Dirty(merged, moduleDir, "commit", inspector)
+	dirty, err := ambientDirty(merged, moduleDir, "commit", inspector)
 	if err != nil || !dirty {
 		t.Fatalf("merged dirty evidence = %v, %v; want true, nil", dirty, err)
 	}
@@ -87,19 +87,19 @@ func TestMergedManifestDirtyEvidenceIsMonotone(t *testing.T) {
 
 func TestDirtyDoesNotHideInspectionFailure(t *testing.T) {
 	moduleDir := t.TempDir()
-	state, err := FromTestLog([]byte("open absent\nopen broken\n"), moduleDir, moduleDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err := ambientFromTestLog([]byte("open absent\nopen broken\n"), moduleDir, moduleDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantErr := errors.New("inspect failed")
 	inspector := &inspecting{present: map[string]bool{}, fail: map[string]error{"broken": wantErr}}
-	if dirty, err := Dirty(state, moduleDir, "commit", inspector); !errors.Is(err, wantErr) || dirty {
+	if dirty, err := ambientDirty(state, moduleDir, "commit", inspector); !errors.Is(err, wantErr) || dirty {
 		t.Fatalf("Dirty = %v, %v; want false, inspect failed", dirty, err)
 	}
 	if got := strings.Join(inspector.calls, ","); got != "absent,broken" {
 		t.Fatalf("inspection calls = %q, want both paths", got)
 	}
-	if _, err := Dirty(state, moduleDir, "commit", nil); err == nil {
+	if _, err := ambientDirty(state, moduleDir, "commit", nil); err == nil {
 		t.Fatal("nil inspector accepted")
 	}
 }
@@ -110,7 +110,7 @@ func TestDirtyRejectsStateThatMovedBeforeInspection(t *testing.T) {
 	if err := os.WriteFile(path, []byte("recorded"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := FromTestLog([]byte("open fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err := ambientFromTestLog([]byte("open fixture.dat\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +118,12 @@ func TestDirtyRejectsStateThatMovedBeforeInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	inspector := fakeInspector{reproducible: map[string]bool{"pkg/fixture.dat": true}}
-	if dirty, err := Dirty(state, moduleDir, "commit", inspector); err == nil || dirty {
+	if dirty, err := ambientDirty(state, moduleDir, "commit", inspector); err == nil || dirty {
 		t.Fatalf("Dirty = %v, %v; want moved-state error", dirty, err)
 	}
 }
 
-func TestDirtyEnvRevalidatesWithSuppliedEnvironment(t *testing.T) {
+func TestDirtyRevalidatesWithSuppliedEnvironment(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	path := filepath.Join(packageDir, "fixture.dat")
 	if err := os.WriteFile(path, []byte("recorded"), 0o644); err != nil {
@@ -131,15 +131,15 @@ func TestDirtyEnvRevalidatesWithSuppliedEnvironment(t *testing.T) {
 	}
 	t.Setenv("GOWORK", "/ambient/workspace")
 	env := []string{"GOWORK=/explicit/workspace"}
-	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.dat\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog([]byte("getenv GOWORK\nopen fixture.dat\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	inspector := fakeInspector{reproducible: map[string]bool{"pkg/fixture.dat": true}}
-	if dirty, err := DirtyEnv(state, moduleDir, "commit", inspector, env); err != nil || dirty {
-		t.Fatalf("DirtyEnv = %v, %v; want false, nil", dirty, err)
+	if dirty, err := Dirty(state, moduleDir, "commit", inspector, env); err != nil || dirty {
+		t.Fatalf("Dirty = %v, %v; want false, nil", dirty, err)
 	}
-	if dirty, err := Dirty(state, moduleDir, "commit", inspector); err == nil || dirty {
+	if dirty, err := ambientDirty(state, moduleDir, "commit", inspector); err == nil || dirty {
 		t.Fatalf("ambient Dirty = %v, %v; want moved-state error", dirty, err)
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // auditedToolchainSelections is the one toolchain-source listing of
@@ -417,7 +417,7 @@ func toolchainSelectionDegradation(sourceListed bool, version, bakedExperiment s
 	return selectionDegradation{fmt.Sprintf("selection %q under %s is unwalked", key, version), " until the selection delta is walked and listed"}
 }
 
-// ToolchainSelectionNoticeResolvedContext is the resolving entry of the
+// ToolchainSelectionNoticeResolved is the resolving entry of the
 // notice for callers without a Hasher (a consumer attributing the
 // degradation at its own configuration tier): it reads the effective
 // GOFLAGS and GOEXPERIMENT under the caller's environment —
@@ -425,7 +425,7 @@ func toolchainSelectionDegradation(sourceListed bool, version, bakedExperiment s
 // answers ToolchainSelectionNotice over them. Resolution failure
 // returns its error so the caller fails loudly instead of silently
 // losing the notice.
-func ToolchainSelectionNoticeResolvedContext(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot) (string, error) {
+func ToolchainSelectionNoticeResolved(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot) (string, error) {
 	goflags, goexperiment, err := resolveSelectionEnv(ctx, dir, env, snapshot)
 	if err != nil {
 		return "", err
@@ -488,7 +488,7 @@ func resolveSelectionEnv(ctx context.Context, dir string, env []string, snapshot
 	if snapshot != nil {
 		return snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT"), nil
 	}
-	out, err := gotool.RunInContextEnv(ctx, dir, env, "env", "GOFLAGS", "GOEXPERIMENT")
+	out, err := gotool.Run(ctx, dir, env, "env", "GOFLAGS", "GOEXPERIMENT")
 	if err != nil {
 		return "", "", err
 	}

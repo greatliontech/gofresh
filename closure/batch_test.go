@@ -22,7 +22,7 @@ func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestTier2WidensInitializedMutableGlobalDispatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestAttributedRTARootMasks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestAttributedRTAHonorsCancellationDuringTraversal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "batchbound.go"), []byte(source.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := subjects[len(subjects)-1]
-	solo, err := NewAt(dir)
+	solo, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 		{Package: batchIsolationPackage, Symbol: "TestStandardDynamic"},
 		{Package: batchIsolationPackage, Symbol: "Production"},
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestStandardDynamicTargetMasksRemainSubjectLocal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("batched analysis (%s): %v", subject.Symbol, err)
 		}
-		independentHasher, err := New()
+		independentHasher, err := newAt("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -438,7 +438,7 @@ func TestAttributedRTASkipsTypeParameterShapes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}

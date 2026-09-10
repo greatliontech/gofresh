@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -1045,10 +1045,10 @@ func canonicalDir(dir string) (string, error) {
 // Capture records the closure hash and code-result guard values for subject, whose code lives
 // under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
 // inputs are added by the caller from the run's completion-asserted testlog
-// (runtimeinput.FromTestLogEnv), from an incomplete process
-// (runtimeinput.IncompleteEnv), by re-admitting a persisted manifest union
-// (runtimeinput.AdoptEnv), or by combining several process observations
-// (runtimeinput.MergeEnv) under the producer processes' environment —
+// (runtimeinput.FromTestLog), from an incomplete process
+// (runtimeinput.Incomplete), by re-admitting a persisted manifest union
+// (runtimeinput.Adopt), or by combining several process observations
+// (runtimeinput.Merge) under the producer processes' environment —
 // WithProducerEnv when declared, else the environment supplied to
 // WithEnv; revalidation recomputes under that same environment, so
 // ingesting under any other is the incoherent mixing the

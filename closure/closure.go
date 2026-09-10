@@ -27,8 +27,8 @@ import (
 
 	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/closure/internal/testvariant"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
@@ -230,35 +230,14 @@ func (h *Hasher) Persisted() (proofs, scans int) {
 	return h.persisted.proofs, h.persisted.scans
 }
 
-func New() (*Hasher, error) { return NewAt("") }
-
-// NewAt builds a Hasher rooted at dir ("" = the process working directory) and
-// the producing build's executable flags: every package load and go invocation
-// resolves under both, so the analyzed tree and build selection are explicit
-// inputs, never implicit cwd or default-build coupling (REQ-closure-analysis).
-func NewAt(dir string, buildFlags ...string) (*Hasher, error) {
-	return NewAtContext(context.Background(), dir, buildFlags...)
-}
-
-// NewAtContext is NewAt with caller-owned cancellation for closure analysis.
-func NewAtContext(ctx context.Context, dir string, buildFlags ...string) (*Hasher, error) {
-	return NewAtContextEnv(ctx, dir, os.Environ(), buildFlags...)
-}
-
-// NewAtContextEnv builds a Hasher using env as the complete immutable process
-// environment for package loading, Go commands, and source selection.
-func NewAtContextEnv(ctx context.Context, dir string, env []string, buildFlags ...string) (*Hasher, error) {
-	return NewAtContextEnvSnapshot(ctx, dir, env, nil, buildFlags...)
-}
-
-// NewAtContextEnvBracket is NewAtContextEnvSnapshot for a precise-analysis
+// NewBracketAt is NewAt for a precise-analysis
 // bracket that persists memo entries: GOMODCACHE resolves from the
 // construction snapshot, but GOFLAGS is validated LIVE — a bracket's loads
 // read the go env file at spawn, so an overlay written after view
 // construction must refuse here, before any load can derive memo values
 // under a key whose GOFLAGS digest predates it
 // (REQ-closure-observability-memo's byte-equivalence).
-func NewAtContextEnvBracket(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
+func NewBracketAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
@@ -276,7 +255,7 @@ func NewAtContextEnvBracket(ctx context.Context, dir string, env []string, snaps
 	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, live); err != nil {
 		return nil, err
 	}
-	h, err := NewAtContextEnvSnapshot(ctx, dir, env, snapshot, buildFlags...)
+	h, err := NewAt(ctx, dir, env, snapshot, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -288,9 +267,16 @@ func NewAtContextEnvBracket(ctx context.Context, dir string, env []string, snaps
 	return h, nil
 }
 
-// NewAtContextEnvSnapshot is NewAtContextEnv resolving GOMODCACHE and
-// validating GOFLAGS from the pass's one env snapshot when non-nil.
-func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
+// NewAt builds a Hasher analyzing the tree at dir ("" = the current
+// directory) under env as the complete immutable process environment
+// for package loading, Go commands, and source selection, and under
+// buildFlags as the producing build's executable flags: every package
+// load and go invocation resolves under both, so the analyzed tree and
+// build selection are explicit inputs, never implicit cwd or
+// default-build coupling (REQ-closure-analysis). A non-nil snapshot
+// resolves GOMODCACHE and validates GOFLAGS from the pass's one env
+// snapshot.
+func NewAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
@@ -320,7 +306,7 @@ func NewAtContextEnvSnapshot(ctx context.Context, dir string, env []string, snap
 		// selection-bearing values; a resolution failure refuses
 		// construction loudly rather than silently disabling every
 		// stdlib admission.
-		out, err := gotool.RunInContextEnv(ctx, dir, normalized, "env", "GOMODCACHE", "GOFLAGS", "GOEXPERIMENT")
+		out, err := gotool.Run(ctx, dir, normalized, "env", "GOMODCACHE", "GOFLAGS", "GOEXPERIMENT")
 		if err != nil {
 			return nil, err
 		}
@@ -1241,7 +1227,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)
-	out, err := gotool.RunInContextEnv(h.ctx, h.dir, h.env, args...)
+	out, err := gotool.Run(h.ctx, h.dir, h.env, args...)
 	if err != nil {
 		return nil, err
 	}

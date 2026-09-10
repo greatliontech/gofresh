@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // The selection axis of the toolchain-audit key: build flags
@@ -185,14 +185,14 @@ func TestUnwalkedTagSelectionRefusesObservability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	def, err := NewAt(fixture)
+	def, err := newAt(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !def.SelectionAudited() {
 		t.Fatal("default-selection hasher reports unaudited")
 	}
-	tagged, err := NewAt(fixture, "-tags=dst")
+	tagged, err := newAt(fixture, "-tags=dst")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	t.Setenv("GOENV", "warm")
 	dir := t.TempDir()
 	env := environmentWith("GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
-	notice, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, env, nil, nil)
+	notice, err := ToolchainSelectionNoticeResolved(context.Background(), dir, env, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,11 +295,11 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice, err = ToolchainSelectionNoticeResolvedContext(context.Background(), dir, env, nil, snapshot)
+	notice, err = ToolchainSelectionNoticeResolved(context.Background(), dir, env, nil, snapshot)
 	if err != nil || !strings.Contains(notice, `selection "dup"`) {
 		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
 	}
-	clean, err := ToolchainSelectionNoticeResolvedContext(context.Background(), dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
+	clean, err := ToolchainSelectionNoticeResolved(context.Background(), dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
 	if err != nil || clean != "" {
 		t.Fatalf("default selection resolved a notice: %v %q", err, clean)
 	}

@@ -87,7 +87,7 @@ func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 		}
 		writeFile(t, dir, pkg+"/mod/v2/mod.go", "package mod\n\nfunc N() int { return 1 }\n")
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

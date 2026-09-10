@@ -31,7 +31,7 @@ func TestValidateTestLogOptionsRefusesMalformedDeclarationsPreSpawn(t *testing.T
 	// two malformed declarations name the same (first) refusal on both.
 	opts := []TestLogOption{withToolchainRoot("relative/go"), WithStaticInputRoot("/abs/corpus")}
 	pre := ValidateTestLogOptions(opts...)
-	_, ingest := FromTestLogEnv(nil, "/tmp/m", "/tmp/m", nil, opts...)
+	_, ingest := FromTestLog(nil, "/tmp/m", "/tmp/m", nil, opts...)
 	if pre == nil || ingest == nil || pre.Error() != ingest.Error() {
 		t.Errorf("pre-spawn %v and ingest %v disagree", pre, ingest)
 	}

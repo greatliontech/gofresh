@@ -63,7 +63,7 @@ func TestClosedCellNarrowsComputedCallTargets(t *testing.T) {
 		writeFile(t, dir, tc.pkg+"/"+tc.pkg+".go", tc.source)
 		subjects = append(subjects, Subject{Package: "example.com/narrow/" + tc.pkg, Symbol: "Subject"})
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

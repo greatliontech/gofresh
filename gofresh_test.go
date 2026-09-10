@@ -360,7 +360,7 @@ func TestBuildFlagsRejectOverlay(t *testing.T) {
 	if _, err := New(WithBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("engine accepted overlay: %v", err)
 	}
-	if _, err := ScanPureDirectivesInWithBuildFlags(t.TempDir(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
+	if _, err := ScanPureDirectives(t.TempDir(), os.Environ(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("purity scanner accepted overlay: %v", err)
 	}
 }
@@ -388,14 +388,14 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 
 	const pkg = "example.com/tagged"
 	flags := []string{"-tags=special"}
-	defaultPure, err := ScanPureDirectivesIn(tmp, pkg)
+	defaultPure, err := scanPureDirectivesIn(tmp, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !defaultPure(Subject{Package: pkg, Symbol: "Selected"}) {
 		t.Fatal("default build did not find its purity directive")
 	}
-	specialPure, err := ScanPureDirectivesInWithBuildFlags(tmp, flags, pkg)
+	specialPure, err := ScanPureDirectives(tmp, os.Environ(), flags, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,9 +510,9 @@ func TestWithDirOutOfTree(t *testing.T) {
 		t.Fatalf("round trip = %+v, %v", v, err)
 	}
 	// The directive scanner honors the same root.
-	pred, err := ScanPureDirectivesIn(tmp, "example.com/tiny")
+	pred, err := scanPureDirectivesIn(tmp, "example.com/tiny")
 	if err != nil {
-		t.Fatalf("ScanPureDirectivesIn: %v", err)
+		t.Fatalf("ScanPureDirectives: %v", err)
 	}
 	if !pred(Subject{Package: "example.com/tiny", Symbol: "Add"}) {
 		t.Fatal("out-of-tree directive not honored")

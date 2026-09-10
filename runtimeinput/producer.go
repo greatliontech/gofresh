@@ -80,7 +80,7 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 		return ProducerFrame{reason: fmt.Sprintf("package directory %s lies outside the tree; no observation bracket can cover it", pkgDir)}
 	}
 	roots := append([]string{filepath.ToSlash(rel)}, opts.BracketPaths...)
-	bracket, err := CaptureBracketContext(ctx, root, roots,
+	bracket, err := CaptureBracket(ctx, root, roots,
 		WithBracketExcludedPaths(append([]string{".git"}, opts.ExcludedPaths...)...))
 	if err != nil {
 		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
@@ -148,7 +148,7 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 		return Observation{}, "", err
 	}
 	incomplete := func(reason string) (Observation, string, error) {
-		observation, err := IncompleteEnv(f.Root, in.Identity, reason, in.Env)
+		observation, err := Incomplete(f.Root, in.Identity, reason, in.Env)
 		return observation, reason, err
 	}
 	if in.IncompleteReason != "" {
@@ -226,7 +226,7 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	for _, namespace := range in.ScratchNamespaces {
 		opts = append(opts, WithScratchNamespace(namespace.Dir, namespace.Pattern))
 	}
-	observation, err := FromTestLogEnv(log, f.Root, f.PkgDir, in.Env, opts...)
+	observation, err := FromTestLog(log, f.Root, f.PkgDir, in.Env, opts...)
 	if err != nil {
 		return incomplete(fmt.Sprintf("testlog ingestion failed: %v", err))
 	}

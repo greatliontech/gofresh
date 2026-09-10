@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
@@ -60,7 +60,7 @@ func resolveRoots(ctx context.Context, treeRoot, pkgDir string, env []string) (r
 	if cached, ok := rootsCache.Load(key); ok {
 		return cached.(resolvedRoots), nil
 	}
-	out, err := gotool.RunInContextEnv(ctx, pkgDir, env, "env", "GOROOT", "GOMODCACHE", "GOCACHE")
+	out, err := gotool.Run(ctx, pkgDir, env, "env", "GOROOT", "GOMODCACHE", "GOCACHE")
 	if err != nil {
 		return resolvedRoots{}, err
 	}

@@ -17,7 +17,7 @@ func BenchmarkComputeObservabilityBatch(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		h, err := New()
+		h, err := newAt("")
 		if err != nil {
 			b.Fatal(err)
 		}

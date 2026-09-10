@@ -44,7 +44,7 @@ func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
 	if err := os.RemoveAll(pkgDir); err != nil {
 		t.Fatal(err)
 	}
-	h2, err := NewAt(dir)
+	h2, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	if !reflect.DeepEqual(derived, flat) {
 		t.Fatalf("miss-path composite diverged from the flat fold:\n got %+v\nwant %+v", derived, flat)
 	}
-	h2, err := NewAt(dir)
+	h2, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/host\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

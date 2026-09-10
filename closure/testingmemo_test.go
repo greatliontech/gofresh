@@ -54,7 +54,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	writeFile(t, dir, "plain/plain.go", "package plain\n\nfunc P() int { return 0 }\n")
 	loads := countTestingScanLoads(t)
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 		t.Fatalf("derived scan carries no testing facts: %+v", derived)
 	}
 
-	second, err := NewAt(dir)
+	second, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 
 	// Without a caller-supplied scope the memo is disabled: the scan
 	// loads even though a matching entry exists under some scope.
-	bare, err := NewAt(dir)
+	bare, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 
 	// An effect-free scan round-trips as a hit: the recorded absence of
 	// testing effects serves without a load.
-	third, err := NewAt(dir)
+	third, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if len(emptyDerived.effects) != 0 || emptyDerived.preferred != "" {
 		t.Fatalf("plain package scan carries facts: %+v", emptyDerived)
 	}
-	fourth, err := NewAt(dir)
+	fourth, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broken, err := NewAt(dir)
+	broken, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	dir := testingScanModule(t)
 	loads := countTestingScanLoads(t)
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 		t.Fatalf("derivation loads = %d, want 1", *loads)
 	}
 
-	otherScope, err := NewAt(dir)
+	otherScope, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "scan_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := NewAt(dir)
+	moved, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	recomputed, err := NewAt(dir)
+	recomputed, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

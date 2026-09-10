@@ -45,7 +45,7 @@ func TestUse(t *testing.T) {
 		}
 	}
 	const pkg = "example.com/gm"
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDraw(t *testing.T) {
 		}
 	}
 	const pkg = "example.com/gms"
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

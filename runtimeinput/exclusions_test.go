@@ -31,7 +31,7 @@ func TestExcludedPathsAreNeverRecorded(t *testing.T) {
 			"stat " + rel + "\n" +
 			"open fixture.txt\n")
 
-	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(".git"), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(".git"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestExcludedPathsAreNeverRecorded(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(git, "HEAD"), []byte("ref: other"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	after, err := Current(state.Manifest, moduleDir)
+	after, err := ambientCurrent(state.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestExclusionBoundaryIsPathSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := FromTestLogEnv([]byte("open "+rel+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(".git"), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog([]byte("open "+rel+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(".git"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestExclusionOfRootListingKeepsChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := FromTestLogEnv([]byte("open "+relRoot+"\nopen "+relSpec+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths("."), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog([]byte("open "+relRoot+"\nopen "+relSpec+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths("."), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestExclusionAbsoluteKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := []byte("open " + filepath.Join(outside, "blob.bin") + "\nopen fixture.txt\n")
-	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(outside), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(outside), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestExcludedChdirStillTracksWorkingDirectory(t *testing.T) {
 	// exclusion by a path relative to the new cwd: only correct cwd
 	// tracking through the excluded chdir resolves it to deep/kept.txt.
 	log := []byte("chdir " + rel + "\nopen ../kept.txt\n")
-	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths("deep/scratch"), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths("deep/scratch"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestExcludedChdirStillTracksWorkingDirectory(t *testing.T) {
 // must never silently read as the root listing.
 func TestEmptyExclusionPatternRefused(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	if _, err := FromTestLogEnv([]byte("open x\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(""), WithBracket(testBracket(t, moduleDir))); err == nil {
+	if _, err := FromTestLog([]byte("open x\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithExcludedPaths(""), WithBracket(testBracket(t, moduleDir))); err == nil {
 		t.Fatal("empty exclusion pattern accepted")
 	}
 }
@@ -213,7 +213,7 @@ func TestExcludedPathsOutrankClassificationRefusals(t *testing.T) {
 			"open /proc/sys/net/core/somaxconn\n" +
 			"open fixture.txt\n")
 
-	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
+	state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
 		WithExcludedPaths("/", "/proc/sys/net/core/somaxconn"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +236,7 @@ func TestExcludedPathsOutrankClassificationRefusals(t *testing.T) {
 	// Without the exclusion, the same observations refuse — the pin
 	// that the discharge comes from the declaration, not from a
 	// classifier change.
-	state, err = FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err = FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestExclusionOutranksExistenceBindingAndChdir(t *testing.T) {
 			"stat " + filepath.Join(outside, "missing") + "\n" +
 			"chdir /\n")
 
-	state, err := FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
+	state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"),
 		WithExcludedPaths(outside, "/"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestExclusionOutranksExistenceBindingAndChdir(t *testing.T) {
 
 	// Without the exclusions the same stats record and the chdir target
 	// refuses — the discharge comes from the declaration.
-	state, err = FromTestLogEnv(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err = FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}

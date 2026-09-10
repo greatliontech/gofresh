@@ -4,7 +4,7 @@
 provenance inspection: a `CommitInspector` a caller supplies so a
 recording can carry whether its inputs were committed. Across gofresh
 and its three consumers no type implements `CommitInspector`, `Dirty`
-has no caller, and `DirtyEnv` only test callers (runtimeinput/dirty.go).
+has only test callers (runtimeinput/dirty.go).
 The clause specifies a mechanism nothing selects, so it is either a
 capability awaiting its adopter — gomutant's committed-baseline
 provenance is the plausible one, where a finding's `Dirty` is derived

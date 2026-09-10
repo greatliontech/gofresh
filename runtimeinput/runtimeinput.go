@@ -135,14 +135,10 @@ type pathInput struct {
 }
 
 // Incomplete constructs canonical evidence for a process whose runtime-input
-// observation did not complete. Process must identify that contributing process
-// uniquely and consistently across every observation in a merge.
-func Incomplete(moduleDir, process, reason string) (Observation, error) {
-	return IncompleteEnv(moduleDir, process, reason, os.Environ())
-}
-
-// IncompleteEnv is Incomplete with env as the complete process environment.
-func IncompleteEnv(moduleDir, process, reason string, env []string) (Observation, error) {
+// observation did not complete, under env as the complete process
+// environment. Process must identify that contributing process uniquely
+// and consistently across every observation in a merge.
+func Incomplete(moduleDir, process, reason string, env []string) (Observation, error) {
 	if err := validateProcess(process); err != nil {
 		return Observation{}, err
 	}
@@ -164,15 +160,10 @@ func IncompleteEnv(moduleDir, process, reason string, env []string) (Observation
 	return newObservation(state, process, "incomplete"), nil
 }
 
-// Absolute revalidates state under moduleDir and returns equivalent evidence
-// whose path identities are all absolute. This permits sound cross-module merge.
-func Absolute(observation Observation, moduleDir string) (Observation, error) {
-	return AbsoluteEnv(observation, moduleDir, os.Environ())
-}
-
-// AbsoluteEnv is Absolute with env as the complete process environment used to
-// revalidate the input and compute the converted state.
-func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Observation, error) {
+// Absolute revalidates state under moduleDir and env and returns equivalent
+// evidence whose path identities are all absolute. This permits sound
+// cross-module merge.
+func Absolute(observation Observation, moduleDir string, env []string) (Observation, error) {
 	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
 		name: "absolute",
 		convert: func(moduleDir, path string) pathID {
@@ -181,19 +172,13 @@ func AbsoluteEnv(observation Observation, moduleDir string, env []string) (Obser
 	})
 }
 
-// Relative revalidates state under moduleDir and returns equivalent evidence
-// whose path identities lexically under the module are module-relative,
-// external identities unchanged. This is the portable persisted form: the
-// converted identities revalidate under any checkout of the same content, so
-// evidence is keyed by what was measured, never by the checkout root that
-// measured it (REQ-inputs-relative-identities).
-func Relative(observation Observation, moduleDir string) (Observation, error) {
-	return RelativeEnv(observation, moduleDir, os.Environ())
-}
-
-// RelativeEnv is Relative with env as the complete process environment used
-// to revalidate the input and compute the converted state.
-func RelativeEnv(observation Observation, moduleDir string, env []string) (Observation, error) {
+// Relative revalidates state under moduleDir and env and returns equivalent
+// evidence whose path identities lexically under the module are
+// module-relative, external identities unchanged. This is the portable
+// persisted form: the converted identities revalidate under any checkout
+// of the same content, so evidence is keyed by what was measured, never by
+// the checkout root that measured it (REQ-inputs-relative-identities).
+func Relative(observation Observation, moduleDir string, env []string) (Observation, error) {
 	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
 		name: "relative",
 		convert: func(moduleDir, path string) pathID {
@@ -295,12 +280,6 @@ func convertIdentityKinds(observation Observation, moduleDir string, env []strin
 		}
 	}
 	return sealObservation(converted, records, observation.empty), nil
-}
-
-// FromTestLog builds a runtime-input manifest from a Go testlog stream and
-// computes its digest against the current filesystem and environment.
-func FromTestLog(log []byte, moduleDir, packageDir string, opts ...TestLogOption) (Observation, error) {
-	return FromTestLogEnv(log, moduleDir, packageDir, os.Environ(), opts...)
 }
 
 // TestLogOption configures observation construction from a testlog.
@@ -698,18 +677,10 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 	return false
 }
 
-// FromTestLogEnv is FromTestLog with env as the complete process environment
-// inherited by the observed test process. Env fidelity is a caller-side
-// soundness input: the PWD bounded admission (REQ-inputs-unbounded)
-// compares the env's PWD against the spawn directory, so an env that is
-// not byte-for-byte what the process actually inherited can admit a
-// value the process never read. packageDir fidelity is the same class:
-// the parent-traversal congruence discharge
-// (REQ-inputs-path-congruence) resolves relative reads against it, so a
-// packageDir that is not the faithful spawn path — a lexically collapsed
-// traversal through a symlink, a path the process never ran in — can
-// admit a read against the wrong base.
-func FromTestLogEnv(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
+// FromTestLog builds a runtime-input manifest from a Go testlog stream and
+// computes its digest against the current filesystem and env, the
+// complete process environment the producing process ran under.
+func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
 	cfg, err := applyTestLogOptions(opts)
 	if err != nil {
 		return Observation{}, err
@@ -1121,20 +1092,14 @@ func validateObservation(observation Observation, _ bool) error {
 }
 
 // Adopt re-admits a persisted encoded manifest as a completed observation
-// under process, an attributable identity of the caller's choosing
-// (REQ-inputs-adoption). The manifest must be the canonical encoding; every
-// recorded identity re-evaluates against the current module view, and any
-// disagreement is refused naming the moved inputs. Adoption re-admits recorded
-// evidence — it observes nothing new and confers no completeness beyond what
-// the manifest recorded. The result participates in ordinary Merge.
-func Adopt(encoded, moduleDir, process string) (Observation, error) {
-	return AdoptEnv(encoded, moduleDir, process, os.Environ())
-}
-
-// AdoptEnv is Adopt with env as the complete process environment used to
-// re-evaluate the persisted evidence. Canonical-encoding enforcement lives in
-// decode — the one gate every manifest string passes.
-func AdoptEnv(encoded, moduleDir, process string, env []string) (Observation, error) {
+// under process, an attributable identity of the caller's choosing, and
+// env, the complete process environment (REQ-inputs-adoption). The
+// manifest must be the canonical encoding; every recorded identity
+// re-evaluates against the current module view, and any disagreement is
+// refused naming the moved inputs. Adoption re-admits recorded evidence —
+// it observes nothing new and confers no completeness beyond what the
+// manifest recorded. The result participates in ordinary Merge.
+func Adopt(encoded, moduleDir, process string, env []string) (Observation, error) {
 	if err := validateProcess(process); err != nil {
 		return Observation{}, err
 	}
@@ -1147,7 +1112,7 @@ func AdoptEnv(encoded, moduleDir, process string, env []string) (Observation, er
 		return Observation{}, err
 	}
 	if current.Manifest != encoded {
-		movers, moveErr := MovedInputs(encoded, moduleDir, env)
+		movers, moveErr := MovedInputs(context.Background(), encoded, moduleDir, env)
 		switch {
 		case moveErr != nil:
 			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved; attribution unavailable: %w", moveErr)
@@ -1160,19 +1125,15 @@ func AdoptEnv(encoded, moduleDir, process string, env []string) (Observation, er
 	return newObservation(current, process, "adopted"), nil
 }
 
-// Merge revalidates independently completed runtime-input observations against one
-// current module view, then returns their deterministic manifest union. Process
-// identities must be unique and stable across the contributing process set. Passing no observations
-// deliberately produces the encoded observation-free manifest; structurally
-// unfinished, moved, or malformed states are rejected. A finalized state from
-// Incomplete is accepted as explicit unverifiable evidence.
-func Merge(moduleDir string, observations ...Observation) (Observation, error) {
-	return MergeEnv(moduleDir, os.Environ(), observations...)
-}
-
-// MergeEnv is Merge with env as the complete process environment used to
-// revalidate every input and compute the merged state.
-func MergeEnv(moduleDir string, env []string, observations ...Observation) (Observation, error) {
+// Merge revalidates independently completed runtime-input observations
+// against one current module view under env, then returns their
+// deterministic manifest union. Process identities must be unique and
+// stable across the contributing process set. Passing no observations
+// deliberately produces the encoded observation-free manifest;
+// structurally unfinished, moved, or malformed states are rejected. A
+// finalized state from Incomplete is accepted as explicit unverifiable
+// evidence.
+func Merge(moduleDir string, env []string, observations ...Observation) (Observation, error) {
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
 		return Observation{}, err
@@ -1236,23 +1197,9 @@ func MergeEnv(moduleDir string, env []string, observations ...Observation) (Obse
 	return sealObservation(state, records, len(records) == 0), nil
 }
 
-// Current recomputes the runtime-input digest for an encoded manifest.
-func Current(encoded, moduleDir string) (State, error) {
-	return CurrentContext(context.Background(), encoded, moduleDir)
-}
-
-// CurrentContext recomputes the runtime-input digest under ctx.
-func CurrentContext(ctx context.Context, encoded, moduleDir string) (State, error) {
-	return CurrentEnvContext(ctx, encoded, moduleDir, os.Environ())
-}
-
-// CurrentEnv recomputes a manifest using env as the complete process environment.
-func CurrentEnv(encoded, moduleDir string, env []string) (State, error) {
-	return CurrentEnvContext(context.Background(), encoded, moduleDir, env)
-}
-
-// CurrentEnvContext is CurrentContext with env as the complete process environment.
-func CurrentEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
+// Current recomputes the runtime-input digest for an encoded manifest
+// under moduleDir and env, with caller-owned cancellation.
+func Current(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
 	if ctx == nil {
 		return State{OK: false}, errors.New("runtimeinputs: nil context")
 	}
@@ -2290,12 +2237,7 @@ func Describe(encoded, moduleDir string) (Description, error) {
 // result with a moved combined digest cannot occur: beyond the entries, the
 // combined digest folds only recorded-verbatim data (the version and the
 // unverifiable reasons), which cannot move at check time.
-func MovedInputs(encoded, moduleDir string, env []string) ([]string, error) {
-	return MovedInputsContext(context.Background(), encoded, moduleDir, env)
-}
-
-// MovedInputsContext is MovedInputs under caller-owned cancellation.
-func MovedInputsContext(ctx context.Context, encoded, moduleDir string, env []string) ([]string, error) {
+func MovedInputs(ctx context.Context, encoded, moduleDir string, env []string) ([]string, error) {
 	if ctx == nil {
 		return nil, errors.New("runtimeinputs: nil context")
 	}

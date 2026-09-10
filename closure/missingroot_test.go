@@ -32,7 +32,7 @@ func TestExternal(t *testing.T) {
 	}
 }
 `)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

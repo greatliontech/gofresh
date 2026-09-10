@@ -65,7 +65,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 	f.Add(uint64(255))
 	f.Fuzz(func(t *testing.T, seed uint64) {
 		dir, subjects := floorModule(t, seed)
-		batchHasher, err := NewAt(dir)
+		batchHasher, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 			t.Fatal(err)
 		}
 		for _, subject := range subjects {
-			fresh, err := NewAt(dir)
+			fresh, err := newAt(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 		if err := os.WriteFile(rootFile, append(content, []byte("\nfunc edited() {}\n")...), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		edited, err := NewAt(dir)
+		edited, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}

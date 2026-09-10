@@ -7,14 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/render"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -321,7 +322,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if err != nil {
 		return observationFacts{}, err
 	}
-	hasher, err = closure.NewAtContextEnvSnapshot(ctx, e.dir, e.env, snapshot, e.buildFlags...)
+	hasher, err = closure.NewAt(ctx, e.dir, e.env, snapshot, e.buildFlags...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -345,7 +346,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// reads those keys before execution, so a moved delivered width
 	// stales the evidence instead of hiding behind an analysis-env
 	// stand-in.
-	guards, err := guard.CaptureForContextEnvSnapshotRuntime(ctx, observedGuardDir(moduleDir), e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
+	guards, err := guard.Capture(ctx, observedGuardDir(moduleDir), e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -951,15 +952,7 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 	if recorded.RuntimeInputs != "" {
 		// An unevaluable runtime-input guard is absence of proof: Stale, never
 		// valid (REQ-guard-completeness).
-		current := v.runtimeCurrent
-		if current == nil {
-			current = runtimeinput.CurrentContext
-			if v.engine != nil {
-				current = func(ctx context.Context, encoded, root string) (runtimeinput.State, error) {
-					return runtimeinput.CurrentEnvContext(ctx, encoded, root, v.engine.evidenceEnv())
-				}
-			}
-		}
+		current := v.runtimeCheck()
 		if cached, ok := shared[recorded.RuntimeInputs]; ok {
 			return cached, nil
 		}
@@ -1364,7 +1357,24 @@ func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string,
 	if v.engine == nil {
 		return nil, nil
 	}
-	return runtimeinput.MovedInputsContext(ctx, encoded, v.evidenceRoot(), v.engine.evidenceEnv())
+	return runtimeinput.MovedInputs(ctx, encoded, v.evidenceRoot(), v.engine.evidenceEnv())
+}
+
+// runtimeCheck is the view's one runtime-input check: the injected seam
+// where a test set one, else the engine's evidence environment, else — on
+// an engine-less view, the direct-construct test shape — the ambient
+// environment, exactly the engine's own default under New without WithEnv.
+func (v *View) runtimeCheck() func(context.Context, string, string) (runtimeinput.State, error) {
+	if v.runtimeCurrent != nil {
+		return v.runtimeCurrent
+	}
+	return func(ctx context.Context, encoded, root string) (runtimeinput.State, error) {
+		env := os.Environ()
+		if v.engine != nil {
+			env = v.engine.evidenceEnv()
+		}
+		return runtimeinput.Current(ctx, encoded, root, env)
+	}
 }
 
 // observedGuardDir is the directory a guard observation captures in,
@@ -1431,11 +1441,7 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 		observed, evaluated := observedByManifest[state.Manifest]
 		if !evaluated {
 			var err error
-			if v.runtimeCurrent != nil {
-				observed, err = v.runtimeCurrent(ctx, state.Manifest, v.evidenceRoot())
-			} else {
-				observed, err = runtimeinput.CurrentEnvContext(ctx, state.Manifest, v.evidenceRoot(), v.engine.evidenceEnv())
-			}
+			observed, err = v.runtimeCheck()(ctx, state.Manifest, v.evidenceRoot())
 			if err != nil {
 				return err
 			}
@@ -1583,7 +1589,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	if viewTestHooks.snapshot != nil {
 		viewTestHooks.snapshot(v.facts.snapshot)
 	}
-	hasher, err = closure.NewAtContextEnvBracket(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
+	hasher, err = closure.NewBracketAt(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
 	if viewTestHooks.beforeAnalysis != nil {
 		viewTestHooks.beforeAnalysis()
 	}

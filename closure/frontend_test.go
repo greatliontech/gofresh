@@ -47,7 +47,7 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	if want := "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@1"; IdentityStrategy != want {
 		t.Fatalf("the identity strategy is %q, want the composed %q — a derivation moved, or a bump was reverted; update the golden consciously", IdentityStrategy, want)
 	}
-	allowed := map[string]bool{"AnalyzingFrontend": true, "auditedToolchainSource": true, "ToolchainSelectionNotice": true, "NewAtContextEnvSnapshot": true}
+	allowed := map[string]bool{"AnalyzingFrontend": true, "auditedToolchainSource": true, "ToolchainSelectionNotice": true, "NewAt": true}
 	tracked := map[string]bool{"canonicalScope": false, "effectScanScope": false, "variantParseScope": false, "guards": false}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

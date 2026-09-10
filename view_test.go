@@ -36,7 +36,7 @@ func testObservationBracket(t *testing.T, moduleDir string, roots ...string) run
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
-	bracket, err := runtimeinput.CaptureBracket(moduleDir, roots)
+	bracket, err := riCaptureBracket(moduleDir, roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestExternal(t *testing.T) {
 	if strings.Contains(oracleFingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("oracle observation proof = %+v, want isolated analyzed disposition", oracleFingerprint.ObservationProof)
 	}
-	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("external test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("external test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 	if !fingerprint.ObservationProof.Observable {
 		t.Fatalf("observed fingerprint = %+v", fingerprint)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if withoutManifest.Status != Unverifiable {
 		t.Fatalf("proof without completed manifest = %+v, want unverifiable", withoutManifest)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("# test log\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("# test log\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if verdict.Status != Unverifiable {
 		t.Fatalf("tampered proof = %+v, want unverifiable", verdict)
 	}
-	malformed, err := runtimeinput.FromTestLog([]byte("# test log\n\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-malformed"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	malformed, err := riFromTestLog([]byte("# test log\n\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-malformed"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1760,7 +1760,7 @@ func TestBatchMarksRuntimeInputDriftStale(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1820,7 +1820,7 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 	}
 	// The producer frames at the workspace root: the member's process
 	// reads the root fixture cwd-relatively, recorded tree-relative.
-	state, err := runtimeinput.FromTestLog([]byte("open ../shared/fixture\n"), root, member, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, root, "member", "shared/fixture")))
+	state, err := riFromTestLog([]byte("open ../shared/fixture\n"), root, member, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, root, "member", "shared/fixture")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1909,7 +1909,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	producerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
-	state, err := runtimeinput.FromTestLogEnv([]byte("getenv GOFRESH_TEST_WIDTH\n"), dir, dir, producerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := runtimeinput.FromTestLog([]byte("getenv GOFRESH_TEST_WIDTH\n"), dir, dir, producerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1954,7 +1954,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOFRESH_TEST_WIDTH\n"), obsDir, obsDir, obsProducerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, obsDir)))
+		obs, err := runtimeinput.FromTestLog([]byte("getenv GOFRESH_TEST_WIDTH\n"), obsDir, obsDir, obsProducerEnv, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, obsDir)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2057,11 +2057,11 @@ func TestRuntimeInputDriftIsSubjectLocal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stateA, err := runtimeinput.FromTestLog([]byte("open a\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-a"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	stateA, err := riFromTestLog([]byte("open a\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-a"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stateB, err := runtimeinput.FromTestLog([]byte("open b\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-b"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	stateB, err := riFromTestLog([]byte("open b\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-b"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2113,7 +2113,7 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2171,7 +2171,7 @@ func TestRuntimeInputDriftDoesNotOverrideStale(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2219,7 +2219,7 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2268,7 +2268,7 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2417,7 +2417,7 @@ func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorded := map[Subject]Fingerprint{}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2443,7 +2443,7 @@ func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
 	current.runtimeCurrent = func(hookCtx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
 		observations++
 		cancel()
-		return runtimeinput.CurrentContext(hookCtx, encoded, moduleDir)
+		return riCurrentCtx(hookCtx, encoded, moduleDir)
 	}
 	if _, err := current.CheckBatch(ctx, recorded); !errors.Is(err, context.Canceled) {
 		t.Fatalf("CheckBatch cancelled during runtime observation = %v, want context.Canceled", err)
@@ -2792,7 +2792,7 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2948,7 +2948,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3021,7 +3021,7 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		}
 		captured[subject] = fingerprint
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), filepath.Join(dir, "b"), dir, runtimeinput.WithCompletedProcess("b test"), runtimeinput.WithBracket(testObservationBracket(t, filepath.Join(dir, "b"), ".", filepath.Join(dir, "fixture"))))
+	state, err := riFromTestLog([]byte("open fixture\n"), filepath.Join(dir, "b"), dir, runtimeinput.WithCompletedProcess("b test"), runtimeinput.WithBracket(testObservationBracket(t, filepath.Join(dir, "b"), ".", filepath.Join(dir, "fixture"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3178,7 +3178,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+			state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3202,7 +3202,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 				v.runtimeCurrent = func(ctx context.Context, encoded, moduleDir string) (runtimeinput.State, error) {
 					calls++
 					if calls == 1 {
-						return runtimeinput.CurrentContext(ctx, encoded, moduleDir)
+						return riCurrentCtx(ctx, encoded, moduleDir)
 					}
 					return runtimeinput.State{}, nil
 				}
@@ -3309,7 +3309,7 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 	if !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("budgeted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3383,7 +3383,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 	}
 
 	// A manifest-carrying record's window reads once, at close.
-	state, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3431,7 +3431,7 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	state, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9453,7 +9453,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9477,7 +9477,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation2, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test 2"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation2, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test 2"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9627,7 +9627,7 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.IncompleteEnv(dir, "probe", "probe reason", os.Environ())
+	observation, err := runtimeinput.Incomplete(dir, "probe", "probe reason", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9979,7 +9979,7 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

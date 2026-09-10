@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/greatliontech/gofresh/closure"
 )
 
 // The construction pass reports its units — each package's listing and
@@ -171,7 +169,7 @@ func TestOperationBoundaryReportsOncePerOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hasher, err := closure.NewAt(dir)
+	hasher, err := closureNewAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

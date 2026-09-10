@@ -102,15 +102,8 @@ func WithBracketExcludedPaths(patterns ...string) BracketOption {
 // hash — an unreadable object — makes the bracket unverifiable, carrying the
 // refusing reason, rather than silently narrowing coverage. Declaring a root
 // is the caller's assertion that the surface it names was mutation-free for
-// the span, with the same soundness responsibility
-// as an exclusion.
-func CaptureBracket(moduleDir string, roots []string, opts ...BracketOption) (Bracket, error) {
-	return CaptureBracketContext(context.Background(), moduleDir, roots, opts...)
-}
-
-// CaptureBracketContext is CaptureBracket observing ctx cancellation between
-// and within root fingerprints.
-func CaptureBracketContext(ctx context.Context, moduleDir string, roots []string, opts ...BracketOption) (Bracket, error) {
+// the span, with the same soundness responsibility as an exclusion.
+func CaptureBracket(ctx context.Context, moduleDir string, roots []string, opts ...BracketOption) (Bracket, error) {
 	if ctx == nil {
 		return Bracket{}, errors.New("runtimeinputs: nil context")
 	}

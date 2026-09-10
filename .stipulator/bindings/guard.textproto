@@ -186,9 +186,9 @@ bindings {
   content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
   source_hash: "4bd2d7410a39011cfb9ea103a27821b748ba549111ebd3cc3a4b54104b167e70"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/guard.CaptureForContext"
+  symbol: "github.com/greatliontech/gofresh/guard.Capture"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "2c04b93a94db8b5a236f1f638a4a50e2007f1463cc2d3e8c28d0359d82de1e47"
+  shape_hash: "95bcb7886afbfa25c40ee7c4fc1471d3ba5bad40a6e3f5d7ae8e0d37b0a25023"
 }
 
 bindings {
@@ -279,4 +279,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestSiblingSharesObservationAndIsolatesTransactions"
   role: BINDING_ROLE_TESTS
   shape_hash: "2b2dd000366a5d8c9b1c6134e8dbdca030f2f44ca0eac2c0a4c2193f70470d90"
+}
+
+bindings {
+  requirement_id: "REQ-guard-runtimeconfig"
+  content_hash: "368d93d23b51c1981f972acc8a8d0eea91451771064cfe65f8b104522d245932"
+  source_hash: "f1487fe5a4f2f12f5c5403ccb706c054cacee68ce4903dfb53771df639dd817e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d8dcb244d01d69c7dc337219cf474fd3bdb2ad9de50cd2b8da74e6b7ae8190f4"
 }

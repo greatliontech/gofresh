@@ -31,7 +31,7 @@ func TestAmbiguousRootDegradesSubjectLocally(t *testing.T) {
 	const pkg = "example.com/ambroot"
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
 	sibling := Subject{Package: pkg, Symbol: "Compute"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

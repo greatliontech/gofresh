@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 func producerModule(t *testing.T) (string, string) {
@@ -79,7 +79,7 @@ func TestProducerFacadeMatchesHandAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hand, err := FromTestLogEnv(log, frame.Root, frame.PkgDir, env,
+	hand, err := FromTestLog(log, frame.Root, frame.PkgDir, env,
 		WithCompletedProcess("worker"), WithBracket(*frame.bracket),
 		WithExcludedPaths(".", ".git"))
 	if err != nil {
@@ -296,7 +296,7 @@ func TestProducerFacadeResolvesGuardRootsFromTheEnvironment(t *testing.T) {
 	root, pkgDir := producerModule(t)
 	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
 	env := producerEnv(pkgDir)
-	goroot, err := gotool.RunInContextEnv(context.Background(), pkgDir, env, "env", "GOROOT")
+	goroot, err := gotool.Run(context.Background(), pkgDir, env, "env", "GOROOT")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestProducerFacadeResolvesTheTempRootFromTheEnvironment(t *testing.T) {
 		t.Fatal("an in-tree TMPDIR declared an ephemeral root")
 	}
 	broken := producerEnv(pkgDir, "GOTOOLCHAIN=go9.99.99+auto")
-	if _, err := gotool.RunInContextEnv(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
+	if _, err := gotool.Run(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
 		t.Skip("the toolchain answers under an invalid GOTOOLCHAIN; no failing environment to pin")
 	}
 	_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: broken})

@@ -999,11 +999,11 @@ func TestMaximalHashReal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/gotool"
+	const pkg = "github.com/greatliontech/gofresh/gotool"
 	a, err := h.maximalHash(pkg)
 	if err != nil {
 		t.Fatalf("maximalHash: %v", err)
@@ -1025,11 +1025,11 @@ func TestListMemoizes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/gotool"
+	const pkg = "github.com/greatliontech/gofresh/gotool"
 	first, err := h.list(pkg)
 	if err != nil {
 		t.Fatalf("list (first): %v", err)
@@ -1059,7 +1059,7 @@ func TestListUsesBuildFlags(t *testing.T) {
 	writeFile(t, dir, "selected_default.go", "//go:build !special\n\npackage tagged\n\nfunc Selected() int { return 1 }\n")
 	writeFile(t, dir, "selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 2 }\n")
 
-	h, err := NewAt(dir, "-tags=special")
+	h, err := newAt(dir, "-tags=special")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1090,7 +1090,7 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1098,15 +1098,15 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 	// (a) A production function in a package that also has tests: resolved via the
 	// test-variant package, which compiles the package WITH its test files and so
 	// holds production and test symbols alike.
-	const withTests = "github.com/greatliontech/gofresh/internal/gotool"
-	a, aReach, err := computeTier2ResultAndReach(h, withTests, "RunIn")
+	const withTests = "github.com/greatliontech/gofresh/gotool"
+	a, aReach, err := computeTier2ResultAndReach(h, withTests, "Run")
 	if err != nil {
-		t.Fatalf("analysis of production func RunIn: %v", err)
+		t.Fatalf("analysis of production func Run: %v", err)
 	}
 	if len(aReach) == 0 {
 		t.Fatal("empty reachability for a resolvable production subject")
 	}
-	if again, err := computeTier2Result(h, withTests, "RunIn"); err != nil || !reflect.DeepEqual(again, a) {
+	if again, err := computeTier2Result(h, withTests, "Run"); err != nil || !reflect.DeepEqual(again, a) {
 		t.Errorf("nondeterministic: %+v vs %+v (err %v)", again, a, err)
 	}
 	// The projection's total order is what makes the equality above — and
@@ -1195,7 +1195,7 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 			"package a\n\nfunc G() {}\n",
 			"package r\n\nimport \"example.com/triangle/a\"\n\nfunc Use() { a.G() }\n\nfunc G() {}\n",
 		)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
@@ -1213,7 +1213,7 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 			"package a\n\nfunc A() {}\n",
 			"package r\n\nimport \"example.com/triangle/a\"\n\nfunc Use() { a.A() }\n",
 		)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
@@ -1234,7 +1234,7 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1301,7 +1301,7 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1333,7 +1333,7 @@ func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1359,7 +1359,7 @@ func TestReachIncludesTestMainRoot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1377,7 +1377,7 @@ func TestAnalysisReachStaysSubjectPrecise(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1418,7 +1418,7 @@ func TestExternalTestBenchmarkRoots(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1501,7 +1501,7 @@ func TestStdWrapperClassBUnverifiable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1519,7 +1519,7 @@ func TestStdCallbackMethodStaysReached(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1546,7 +1546,7 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 	// promotes observed file I/O to valid (REQ-closure-blindspot, REQ-inputs-guard). The fixtures span the
 	// pre-testlog window (init/TestMain/CWD-relative) and post-testlog reads, plus
 	// path/filesystem mutations and mixed file+network dependence.
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1615,7 +1615,7 @@ func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1642,7 +1642,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds whole-program SSA and proves observability")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2003,7 +2003,7 @@ func TestFlagRegistrationFacts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2077,7 +2077,7 @@ func TestOpenFileFlagsUseSelectedGOOS(t *testing.T) {
 	if !found {
 		env = append(env, "GOOS=plan9")
 	}
-	h, err := NewAtContextEnv(context.Background(), "", env)
+	h, err := newAtEnv(context.Background(), "", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2102,7 +2102,7 @@ func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2162,7 +2162,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 		{Package: base + "harnessmain", Symbol: "TestPlant"},
 		{Package: base + "harnesslog", Symbol: "TestReadFileFatal"},
 	}
-	batchHasher, err := New()
+	batchHasher, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2172,7 +2172,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	}
 	statuses := map[bool]int{}
 	for _, subject := range subjects {
-		independentHasher, err := New()
+		independentHasher, err := newAt("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2203,7 +2203,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	// One shared Hasher running the production maximal→observe sequence
 	// over warm list and effect caches must yield the same dispositions as
 	// the fresh batch above.
-	sharedHasher, err := New()
+	sharedHasher, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2230,7 +2230,7 @@ func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	if _, err := provenanceReachable(ctx, nil, 1, &rta.Result{}, false, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("provenanceReachable = %v, want context.Canceled", err)
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2263,7 +2263,7 @@ func TestTier2ReflectWidens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2281,7 +2281,7 @@ func TestTier2GenericInterfaceEscapeAnalyzesMethodBody(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2306,7 +2306,7 @@ func TestTier2ConstGroupAnalyzesWithoutWiden(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2330,7 +2330,7 @@ func TestNonToolchainAssemblyWidensAndBlocks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2760,7 +2760,7 @@ func TestImportBindingAnalyzesWithoutWiden(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2778,7 +2778,7 @@ func TestTier2ASMTargetInterfaceInvokeWidens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2796,7 +2796,7 @@ func TestTier2GenericPostRTAInvokeWidens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2814,7 +2814,7 @@ func TestTier2ReflectReferenceScansClassB(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2952,7 +2952,7 @@ func TestLinknameLocalTargetResolvesWithoutWiden(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3034,7 +3034,7 @@ func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

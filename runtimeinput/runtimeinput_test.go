@@ -32,27 +32,27 @@ func (c *cancelAfterChecks) Err() error {
 	return nil
 }
 
-func TestCurrentContextHonorsCancellation(t *testing.T) {
+func TestCurrentHonorsCancellation(t *testing.T) {
 	moduleDir := t.TempDir()
-	state, err := Merge(moduleDir)
+	state, err := ambientMerge(moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := CurrentEnvContext(ctx, state.Manifest, moduleDir, os.Environ()); !errors.Is(err, context.Canceled) {
+	if _, err := Current(ctx, state.Manifest, moduleDir, os.Environ()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled current check = %v, want context.Canceled", err)
 	}
 }
 
-func TestCurrentContextStopsBetweenInputsAndFileChunks(t *testing.T) {
+func TestCurrentStopsBetweenInputsAndFileChunks(t *testing.T) {
 	moduleDir := t.TempDir()
 	encoded, err := encode(manifest{Version: manifestVersion, Env: []envInput{{Name: "A", Digest: testEntryDigest}, {Name: "B", Digest: testEntryDigest}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	envCtx := &cancelAfterChecks{Context: context.Background(), after: 3}
-	if _, err := CurrentEnvContext(envCtx, encoded, moduleDir, []string{"A=1", "B=2"}); !errors.Is(err, context.Canceled) {
+	if _, err := Current(envCtx, encoded, moduleDir, []string{"A=1", "B=2"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("between-environment cancellation = %v, want context.Canceled", err)
 	}
 	path := filepath.Join(moduleDir, "large")
@@ -76,7 +76,7 @@ func testBracket(t *testing.T, moduleDir string, roots ...string) Bracket {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
-	bracket, err := CaptureBracket(moduleDir, roots)
+	bracket, err := ambientCaptureBracket(moduleDir, roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,32 +95,32 @@ func testDirs(t *testing.T) (string, string) {
 
 func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
 	moduleDir := t.TempDir()
-	incomplete, err := Incomplete(moduleDir, "worker", "test process timed out")
+	incomplete, err := ambientIncomplete(moduleDir, "worker", "test process timed out")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !incomplete.OK || !incomplete.Unverifiable || !strings.Contains(incomplete.Reason, "timed out") {
 		t.Fatalf("Incomplete = %+v", incomplete)
 	}
-	empty, err := Merge(moduleDir)
+	empty, err := ambientMerge(moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if incomplete.Manifest == empty.Manifest {
 		t.Fatal("incomplete observation equals completed empty observation")
 	}
-	merged, err := Merge(moduleDir, empty, incomplete)
+	merged, err := ambientMerge(moduleDir, empty, incomplete)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !merged.Unverifiable || !strings.Contains(merged.Reason, "timed out") {
 		t.Fatalf("merged incomplete evidence = %+v", merged)
 	}
-	if _, err := Incomplete(moduleDir, "worker", " "); err == nil {
+	if _, err := ambientIncomplete(moduleDir, "worker", " "); err == nil {
 		t.Fatal("Incomplete accepted an empty reason")
 	}
 	for _, reason := range []string{"line\nbreak", "carriage\rreturn", "nul\x00byte", string([]byte{0xff})} {
-		if _, err := Incomplete(moduleDir, "worker", reason); err == nil {
+		if _, err := ambientIncomplete(moduleDir, "worker", reason); err == nil {
 			t.Errorf("Incomplete accepted unsafe reason %q", reason)
 		}
 	}
@@ -137,23 +137,23 @@ func TestAbsoluteIdentitiesMergeAcrossModuleRoots(t *testing.T) {
 	if err := os.WriteFile(pathB, []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a, err := FromTestLog([]byte("open a.txt\n"), moduleA, packageA, WithCompletedProcess("module-a"), WithBracket(testBracket(t, moduleA)))
+	a, err := ambientFromTestLog([]byte("open a.txt\n"), moduleA, packageA, WithCompletedProcess("module-a"), WithBracket(testBracket(t, moduleA)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := FromTestLog([]byte("open b.txt\n"), moduleB, packageB, WithCompletedProcess("module-b"), WithBracket(testBracket(t, moduleB)))
+	b, err := ambientFromTestLog([]byte("open b.txt\n"), moduleB, packageB, WithCompletedProcess("module-b"), WithBracket(testBracket(t, moduleB)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err = Absolute(a, moduleA)
+	a, err = ambientAbsolute(a, moduleA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err = Absolute(b, moduleB)
+	b, err = ambientAbsolute(b, moduleB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := Merge(t.TempDir(), a, b)
+	merged, err := ambientMerge(t.TempDir(), a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,14 +175,14 @@ func TestAbsoluteIdentitiesNeverSuppressUnverifiability(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(packageDir, "link")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	state, err := FromTestLog([]byte("open link\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err := ambientFromTestLog([]byte("open link\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !state.Unverifiable {
 		t.Fatal("external symlink target was not unverifiable before conversion")
 	}
-	converted, err := Absolute(state, moduleDir)
+	converted, err := ambientAbsolute(state, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,14 +194,14 @@ func TestAbsoluteIdentitiesNeverSuppressUnverifiability(t *testing.T) {
 	if err := os.WriteFile(regular, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err = FromTestLog([]byte("open regular.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err = ambientFromTestLog([]byte("open regular.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(regular, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Absolute(state, moduleDir); err == nil {
+	if _, err := ambientAbsolute(state, moduleDir); err == nil {
 		t.Fatal("Absolute accepted a moved state")
 	}
 }
@@ -219,7 +219,7 @@ func TestEnvDigestChangesWithoutStoringValue(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	t.Setenv("PEW_SECRET_TOKEN", "first-secret")
 
-	st, err := FromTestLog([]byte("# test log\ngetenv PEW_SECRET_TOKEN\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\ngetenv PEW_SECRET_TOKEN\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestEnvDigestChangesWithoutStoringValue(t *testing.T) {
 		t.Fatalf("manifest stores env value: %q", manifestJSON)
 	}
 
-	same, err := Current(st.Manifest, moduleDir)
+	same, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current same: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestEnvDigestChangesWithoutStoringValue(t *testing.T) {
 	}
 
 	t.Setenv("PEW_SECRET_TOKEN", "second-secret")
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current changed: %v", err)
 	}
@@ -252,29 +252,29 @@ func TestEnvDigestChangesWithoutStoringValue(t *testing.T) {
 	}
 }
 
-func TestCurrentEnvUsesSuppliedEnvironment(t *testing.T) {
+func TestCurrentUsesSuppliedEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOWORK", "/ambient/workspace")
 	env := []string{"GOWORK=/explicit/workspace"}
-	state, err := FromTestLogEnv([]byte("getenv GOWORK\n"), dir, dir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
+	state, err := FromTestLog([]byte("getenv GOWORK\n"), dir, dir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := CurrentEnv(state.Manifest, dir, env)
+	current, err := ambientCurrentEnv(state.Manifest, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if current != state.State {
 		t.Fatalf("explicitly finalized state moved under the same env:\n%+v\n%+v", state, current)
 	}
-	ambient, err := Current(state.Manifest, dir)
+	ambient, err := ambientCurrent(state.Manifest, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ambient.Digest == state.Digest {
 		t.Fatal("explicit GOWORK state was finalized from ambient GOWORK")
 	}
-	changed, err := CurrentEnv(state.Manifest, dir, []string{"GOWORK=/other/workspace"})
+	changed, err := ambientCurrentEnv(state.Manifest, dir, []string{"GOWORK=/other/workspace"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestCurrentEnvUsesSuppliedEnvironment(t *testing.T) {
 
 func TestFromTestLogMarksPWDUnverifiable(t *testing.T) {
 	dir := t.TempDir()
-	state, err := FromTestLogEnv([]byte("getenv PWD\n"), dir, dir, []string{"PWD=/caller"}, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
+	state, err := FromTestLog([]byte("getenv PWD\n"), dir, dir, []string{"PWD=/caller"}, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,38 +301,38 @@ func TestEnvironmentStateAbsoluteAndMergeUseSuppliedEnvironment(t *testing.T) {
 	}
 	t.Setenv("GOWORK", "/ambient/workspace")
 	env := []string{"GOWORK=/explicit/workspace"}
-	state, err := FromTestLogEnv([]byte("getenv GOWORK\nopen fixture.txt\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	state, err := FromTestLog([]byte("getenv GOWORK\nopen fixture.txt\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := AbsoluteEnv(state, moduleDir, env)
+	absolute, err := Absolute(state, moduleDir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Absolute(state, moduleDir); err == nil {
+	if _, err := ambientAbsolute(state, moduleDir); err == nil {
 		t.Fatal("ambient Absolute accepted a state finalized under a different environment")
 	}
-	incomplete, err := IncompleteEnv(moduleDir, "worker-incomplete", "worker interrupted", env)
+	incomplete, err := Incomplete(moduleDir, "worker-incomplete", "worker interrupted", env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mergeDir := t.TempDir()
-	merged, err := MergeEnv(mergeDir, env, absolute, incomplete)
+	merged, err := Merge(mergeDir, env, absolute, incomplete)
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := CurrentEnv(merged.Manifest, mergeDir, env)
+	current, err := ambientCurrentEnv(merged.Manifest, mergeDir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if current != merged.State || !merged.Unverifiable {
 		t.Fatalf("merged explicit-environment state = %+v, current = %+v", merged, current)
 	}
-	if _, err := Merge(mergeDir, absolute, incomplete); err == nil {
+	if _, err := ambientMerge(mergeDir, absolute, incomplete); err == nil {
 		t.Fatal("ambient Merge accepted states finalized under a different environment")
 	}
-	if _, err := MergeEnv(mergeDir, []string{"GOWORK=/other/workspace"}, absolute); err == nil {
-		t.Fatal("MergeEnv accepted a state finalized under a different supplied environment")
+	if _, err := Merge(mergeDir, []string{"GOWORK=/other/workspace"}, absolute); err == nil {
+		t.Fatal("Merge accepted a state finalized under a different supplied environment")
 	}
 }
 
@@ -340,44 +340,44 @@ func TestAmbientConstructionWrappersMatchAmbientEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOWORK", "/ambient/workspace")
 	env := os.Environ()
-	fromAmbient, err := FromTestLog([]byte("getenv GOWORK\n"), dir, dir, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
+	fromAmbient, err := ambientFromTestLog([]byte("getenv GOWORK\n"), dir, dir, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromEnv, err := FromTestLogEnv([]byte("getenv GOWORK\n"), dir, dir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
+	fromEnv, err := FromTestLog([]byte("getenv GOWORK\n"), dir, dir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(fromAmbient, fromEnv) {
 		t.Fatalf("FromTestLog wrapper differs from ambient Env variant:\n%+v\n%+v", fromAmbient, fromEnv)
 	}
-	incompleteAmbient, err := Incomplete(dir, "worker-incomplete", "interrupted")
+	incompleteAmbient, err := ambientIncomplete(dir, "worker-incomplete", "interrupted")
 	if err != nil {
 		t.Fatal(err)
 	}
-	incompleteEnv, err := IncompleteEnv(dir, "worker-incomplete", "interrupted", env)
+	incompleteEnv, err := Incomplete(dir, "worker-incomplete", "interrupted", env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(incompleteAmbient, incompleteEnv) {
 		t.Fatal("Incomplete wrapper differs from ambient Env variant")
 	}
-	absoluteAmbient, err := Absolute(fromAmbient, dir)
+	absoluteAmbient, err := ambientAbsolute(fromAmbient, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	absoluteEnv, err := AbsoluteEnv(fromEnv, dir, env)
+	absoluteEnv, err := Absolute(fromEnv, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(absoluteAmbient, absoluteEnv) {
 		t.Fatal("Absolute wrapper differs from ambient Env variant")
 	}
-	mergedAmbient, err := Merge(dir, absoluteAmbient, incompleteAmbient)
+	mergedAmbient, err := ambientMerge(dir, absoluteAmbient, incompleteAmbient)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mergedEnv, err := MergeEnv(dir, env, absoluteEnv, incompleteEnv)
+	mergedEnv, err := Merge(dir, env, absoluteEnv, incompleteEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestFileDigestChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := FromTestLog([]byte("# test log\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestFileDigestChanges(t *testing.T) {
 	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -418,14 +418,14 @@ func TestOpenFileMetadataMovesDigest(t *testing.T) {
 	if err := os.WriteFile(path, []byte("same bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -444,14 +444,14 @@ func TestOpenDirectoryEntryMetadataMovesDigest(t *testing.T) {
 	if err := os.WriteFile(path, []byte("same bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -463,14 +463,14 @@ func TestOpenDirectoryEntryMetadataMovesDigest(t *testing.T) {
 func TestMissingFileAppearanceMovesDigest(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	path := filepath.Join(packageDir, "later.txt")
-	st, err := FromTestLog([]byte("# test log\nopen later.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen later.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
 	if err := os.WriteFile(path, []byte("now here"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -482,14 +482,14 @@ func TestMissingFileAppearanceMovesDigest(t *testing.T) {
 func TestExternalDirectoryIsUnverifiable(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	externalDir := t.TempDir()
-	st, err := FromTestLog([]byte("# test log\nopen "+externalDir+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen "+externalDir+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
 	if !st.Unverifiable || !strings.Contains(st.Reason, "external directory") {
 		t.Fatalf("got unverifiable=%v reason=%q, want external directory", st.Unverifiable, st.Reason)
 	}
-	same, err := Current(st.Manifest, moduleDir)
+	same, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestStatObservationIsUnverifiable(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nstat "+path+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nstat "+path+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestStatObservationIsUnverifiable(t *testing.T) {
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cur, err := Current(st.Manifest, moduleDir)
+	cur, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestSymlinkDirectoryHashesInternalTarget(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	st, err := FromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestSymlinkDirectoryHashesInternalTarget(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "two.txt"), []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestSymlinkDirectoryToExternalTargetIsUnverifiable(t *testing.T) {
 	if err := os.Symlink(external, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen data\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestSymlinkDirectoryToExternalTargetIsUnverifiable(t *testing.T) {
 	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: pkg/data") {
 		t.Fatalf("got unverifiable=%v reason=%q, want uncovered escaping identity", st.Unverifiable, st.Reason)
 	}
-	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data"}, Digest: testEntryDigest}}}), moduleDir)
+	current, err := ambientCurrent(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data"}, Digest: testEntryDigest}}}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -621,7 +621,7 @@ func TestSymlinkFileToExternalTargetIsUnverifiable(t *testing.T) {
 	if err := os.Symlink(external, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	st, err := FromTestLog([]byte("open data.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("open data.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +631,7 @@ func TestSymlinkFileToExternalTargetIsUnverifiable(t *testing.T) {
 	if !st.Unverifiable || !strings.Contains(st.Reason, "not covered by observation bracket: pkg/data.txt") {
 		t.Fatalf("state = %+v, want uncovered escaping identity", st)
 	}
-	current, err := Current(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data.txt"}, Digest: testEntryDigest}}}), moduleDir)
+	current, err := ambientCurrent(rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "pkg/data.txt"}, Digest: testEntryDigest}}}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,11 +649,11 @@ func TestUnixBackslashPathRemainsV1Compatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, name), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open "+name+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("open "+name+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Current(st.Manifest, moduleDir); err != nil {
+	if _, err := ambientCurrent(st.Manifest, moduleDir); err != nil {
 		t.Fatalf("Current rejected package-produced v1 path: %v", err)
 	}
 }
@@ -674,7 +674,7 @@ func TestSymlinkedModuleRootKeepsInternalDirectoryVerifiable(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	st, err := FromTestLog([]byte("# test log\nopen data\n"), linkModule, filepath.Join(linkModule, "pkg"), WithCompletedProcess("worker"), WithBracket(testBracket(t, linkModule)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen data\n"), linkModule, filepath.Join(linkModule, "pkg"), WithCompletedProcess("worker"), WithBracket(testBracket(t, linkModule)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestChdirResolvesRelativePaths(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nchdir sub\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nchdir sub\nopen fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -708,7 +708,7 @@ func TestChdirResolvesRelativePaths(t *testing.T) {
 	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(st.Manifest, moduleDir)
+	changed, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestCongruentParentTraversalResolvesLexically(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("# test log\nopen ../fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("# test log\nopen ../fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatalf("FromTestLog: %v", err)
 	}
@@ -738,7 +738,7 @@ func TestCongruentParentTraversalResolvesLexically(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "fixture.txt"), []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cur, err := Current(st.Manifest, moduleDir)
+	cur, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatalf("Current: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestTraversalVerificationFailuresStaySealed(t *testing.T) {
 		"non-directory crossing": "open fixture.txt/../fixture.txt\n",
 		"vanished component":     "open gone/../fixture.txt\n",
 	} {
-		st, err := FromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+		st, err := ambientFromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -782,7 +782,7 @@ func TestVolatileTraversalRefusesWithoutProbing(t *testing.T) {
 		return orig(p)
 	}
 	t.Cleanup(func() { congruenceProbe = orig })
-	st, err := FromTestLog([]byte("open /proc/self/../environ\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("open /proc/self/../environ\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +804,7 @@ func TestSymlinkedWorkingDirectoryTraversalIsUnverifiable(t *testing.T) {
 	if err := os.Symlink(packageDir, linked); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	st, err := FromTestLog([]byte("open ../fixture.txt\n"), moduleDir, linked, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("open ../fixture.txt\n"), moduleDir, linked, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,7 +819,7 @@ func TestSymlinkParentTraversalIsUnverifiable(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(packageDir, "link")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	st, err := FromTestLog([]byte("open link/../fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("open link/../fixture.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -834,7 +834,7 @@ func TestAbsolutePathAfterChdirDoesNotAcquireRelativeDisposition(t *testing.T) {
 	if err := os.WriteFile(absolute, []byte("fixture"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("chdir .\nopen "+absolute+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog([]byte("chdir .\nopen "+absolute+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,7 +852,7 @@ func TestAbsolutePathAfterChdirDoesNotAcquireRelativeDisposition(t *testing.T) {
 func TestCurrentRejectsRelativePathTraversal(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	encoded := rawManifest(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "../secret.txt"}, Digest: testEntryDigest}}})
-	if _, err := Current(encoded, moduleDir); err == nil {
+	if _, err := ambientCurrent(encoded, moduleDir); err == nil {
 		t.Fatal("Current accepted a relative path escaping the module")
 	}
 }
@@ -865,7 +865,7 @@ func TestCurrentRejectsMalformedManifestIdentities(t *testing.T) {
 		{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathAbs, Path: "relative"}, Digest: testEntryDigest}}},
 	} {
 		encoded := rawManifest(t, m)
-		if _, err := Current(encoded, moduleDir); err == nil {
+		if _, err := ambientCurrent(encoded, moduleDir); err == nil {
 			t.Fatalf("Current accepted malformed manifest: %+v", m)
 		}
 	}
@@ -935,16 +935,16 @@ func TestMergeUnionsIndependentProcessManifests(t *testing.T) {
 	}
 	t.Setenv("MERGE_A", "a")
 	t.Setenv("MERGE_B", "b")
-	a, err := FromTestLog([]byte("getenv MERGE_A\nopen a.txt\nunknown first\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
+	a, err := ambientFromTestLog([]byte("getenv MERGE_A\nopen a.txt\nunknown first\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := FromTestLog([]byte("getenv MERGE_B\nopen b.txt\nbadline\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
+	b, err := ambientFromTestLog([]byte("getenv MERGE_B\nopen b.txt\nbadline\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	merged, err := Merge(moduleDir, a, b)
+	merged, err := ambientMerge(moduleDir, a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -970,7 +970,7 @@ func TestMergeUnionsIndependentProcessManifests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "b.txt"), []byte("changed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Current(merged.Manifest, moduleDir)
+	changed, err := ambientCurrent(merged.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,11 +981,11 @@ func TestMergeUnionsIndependentProcessManifests(t *testing.T) {
 
 func TestCompletedObservationRequiresProcessAssertion(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	if _, err := FromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir); err == nil {
+	if _, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir); err == nil {
 		t.Fatal("completed log accepted without process assertion")
 	}
 	for _, process := range []string{"", "line\nbreak", "nul\x00byte", string([]byte{0xff})} {
-		if _, err := FromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess(process), WithBracket(testBracket(t, moduleDir))); err == nil {
+		if _, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess(process), WithBracket(testBracket(t, moduleDir))); err == nil {
 			t.Errorf("completed log accepted invalid process %q", process)
 		}
 	}
@@ -1003,7 +1003,7 @@ func TestCompletedObservationRetainsMalformedRecords(t *testing.T) {
 		"oversized record": oversized,
 	} {
 		t.Run(name, func(t *testing.T) {
-			observation, err := FromTestLog(log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+			observation, err := ambientFromTestLog(log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1016,47 +1016,47 @@ func TestCompletedObservationRetainsMalformedRecords(t *testing.T) {
 
 func TestMergeRejectsConflictingEvidenceForOneProcess(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	first, err := FromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	first, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Incomplete(moduleDir, "worker", "worker interrupted")
+	second, err := ambientIncomplete(moduleDir, "worker", "worker interrupted")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Merge(moduleDir, first, second); err == nil {
+	if _, err := ambientMerge(moduleDir, first, second); err == nil {
 		t.Fatal("conflicting evidence for one process was merged")
 	}
 }
 
 func TestProducerOperationsRejectRecomputedState(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	state, err := Current(rawManifest(t, manifest{Version: manifestVersion}), moduleDir)
+	state, err := ambientCurrent(rawManifest(t, manifest{Version: manifestVersion}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	forged := Observation{State: state}
-	if _, err := Merge(moduleDir, forged); err == nil {
+	if _, err := ambientMerge(moduleDir, forged); err == nil {
 		t.Fatal("merge accepted checker-recomputed state")
 	}
-	if _, err := Absolute(forged, moduleDir); err == nil {
+	if _, err := ambientAbsolute(forged, moduleDir); err == nil {
 		t.Fatal("absolute conversion accepted checker-recomputed state")
 	}
-	if _, err := Dirty(forged, moduleDir, "commit", fakeInspector{}); err == nil {
+	if _, err := ambientDirty(forged, moduleDir, "commit", fakeInspector{}); err == nil {
 		t.Fatal("dirty inspection accepted checker-recomputed state")
 	}
-	valid, err := FromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	valid, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	valid.State = state
-	if _, err := Merge(moduleDir, valid); err == nil {
+	if _, err := ambientMerge(moduleDir, valid); err == nil {
 		t.Fatal("merge accepted transplanted state under genuine provenance")
 	}
-	if _, err := Absolute(valid, moduleDir); err == nil {
+	if _, err := ambientAbsolute(valid, moduleDir); err == nil {
 		t.Fatal("absolute conversion accepted transplanted state under genuine provenance")
 	}
-	if _, err := Dirty(valid, moduleDir, "commit", fakeInspector{}); err == nil {
+	if _, err := ambientDirty(valid, moduleDir, "commit", fakeInspector{}); err == nil {
 		t.Fatal("dirty inspection accepted transplanted state under genuine provenance")
 	}
 }
@@ -1066,18 +1066,18 @@ func TestMergeRejectsRelativeAndAbsoluteEvidenceForOneProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "fixture"), []byte("fixture"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	relative, err := FromTestLog([]byte("open fixture\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	relative, err := ambientFromTestLog([]byte("open fixture\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := Absolute(relative, moduleDir)
+	absolute, err := ambientAbsolute(relative, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Merge(moduleDir, relative, absolute); err == nil {
+	if _, err := ambientMerge(moduleDir, relative, absolute); err == nil {
 		t.Fatal("relative and absolute evidence for one process were merged")
 	}
-	absoluteAgain, err := Absolute(absolute, moduleDir)
+	absoluteAgain, err := ambientAbsolute(absolute, moduleDir)
 	if err != nil || !reflect.DeepEqual(absoluteAgain, absolute) {
 		t.Fatalf("absolute conversion is not idempotent: %+v != %+v, err=%v", absoluteAgain, absolute, err)
 	}
@@ -1085,26 +1085,26 @@ func TestMergeRejectsRelativeAndAbsoluteEvidenceForOneProcess(t *testing.T) {
 
 func TestAbsolutePreservesCompletedVersusIncompleteOrigin(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	completed, err := FromTestLog([]byte("\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	completed, err := ambientFromTestLog([]byte("\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	incomplete, err := Incomplete(moduleDir, "worker", "malformed testlog line")
+	incomplete, err := ambientIncomplete(moduleDir, "worker", "malformed testlog line")
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err = Absolute(completed, moduleDir)
+	completed, err = ambientAbsolute(completed, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	incomplete, err = Absolute(incomplete, moduleDir)
+	incomplete, err = ambientAbsolute(incomplete, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if completed.State != incomplete.State {
 		t.Fatalf("test precondition failed: completed=%+v incomplete=%+v", completed.State, incomplete.State)
 	}
-	if _, err := Merge(moduleDir, completed, incomplete); err == nil {
+	if _, err := ambientMerge(moduleDir, completed, incomplete); err == nil {
 		t.Fatal("absolute conversion erased completed-versus-incomplete provenance")
 	}
 }
@@ -1116,27 +1116,27 @@ func TestAbsoluteProcessViewIgnoresUnrelatedMergedProcesses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a, err := FromTestLog([]byte("open a\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
+	a, err := ambientFromTestLog([]byte("open a\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := FromTestLog([]byte("open b\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
+	b, err := ambientFromTestLog([]byte("open b\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole, err := Merge(moduleDir, a, b)
+	whole, err := ambientMerge(moduleDir, a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole, err = Absolute(whole, moduleDir)
+	whole, err = ambientAbsolute(whole, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err = Absolute(a, moduleDir)
+	a, err = ambientAbsolute(a, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Merge(moduleDir, whole, a); err != nil {
+	if _, err := ambientMerge(moduleDir, whole, a); err != nil {
 		t.Fatalf("unrelated process changed absolute view for worker-a: %v", err)
 	}
 }
@@ -1146,14 +1146,14 @@ func TestMergeAlgebra(t *testing.T) {
 	states := make([]Observation, 3)
 	for i, log := range []string{"getenv C\n", "getenv A\n", "getenv B\n"} {
 		var err error
-		states[i], err = FromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess(fmt.Sprintf("worker-%d", i)), WithBracket(testBracket(t, moduleDir)))
+		states[i], err = ambientFromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess(fmt.Sprintf("worker-%d", i)), WithBracket(testBracket(t, moduleDir)))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	merge := func(inputs ...Observation) Observation {
 		t.Helper()
-		st, err := Merge(moduleDir, inputs...)
+		st, err := ambientMerge(moduleDir, inputs...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1178,7 +1178,7 @@ func TestMergeAlgebra(t *testing.T) {
 
 func TestMergeZeroIsExplicitEmptyManifest(t *testing.T) {
 	moduleDir, _ := testDirs(t)
-	st, err := Merge(moduleDir)
+	st, err := ambientMerge(moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1189,10 +1189,10 @@ func TestMergeZeroIsExplicitEmptyManifest(t *testing.T) {
 	if err != nil || m.Version != manifestVersion || len(m.Env)+len(m.Paths)+len(m.Unverifiable) != 0 {
 		t.Fatalf("zero merge manifest = %+v err=%v", m, err)
 	}
-	if _, err := Merge(moduleDir, Observation{}); err == nil {
+	if _, err := ambientMerge(moduleDir, Observation{}); err == nil {
 		t.Fatal("empty merge input accepted as observation-free manifest")
 	}
-	nested, err := Merge(moduleDir, st)
+	nested, err := ambientMerge(moduleDir, st)
 	if err != nil || !reflect.DeepEqual(nested, st) {
 		t.Fatalf("nested zero merge = %+v, %v; want identity", nested, err)
 	}
@@ -1201,16 +1201,16 @@ func TestMergeZeroIsExplicitEmptyManifest(t *testing.T) {
 func TestMergeRejectsChildThatMovedBeforeUnion(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	t.Setenv("MERGE_COHERENCE", "first")
-	first, err := FromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
+	first, err := ambientFromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MERGE_COHERENCE", "second")
-	second, err := FromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
+	second, err := ambientFromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Merge(moduleDir, first, second); err == nil {
+	if _, err := ambientMerge(moduleDir, first, second); err == nil {
 		t.Fatal("merge accepted child states finalized under different input values")
 	}
 }
@@ -1226,7 +1226,7 @@ func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
 			Digest:   "supplied",
 			OK:       true,
 		}
-		if _, err := Merge(moduleDir, newObservation(state, "worker", "complete")); err == nil {
+		if _, err := ambientMerge(moduleDir, newObservation(state, "worker", "complete")); err == nil {
 			t.Fatalf("Merge accepted %s", raw)
 		}
 	}
@@ -1262,7 +1262,7 @@ func TestManifestDecoderRejectsUnknownAndTrailingData(t *testing.T) {
 		`{"V":1}`,
 	} {
 		encoded := base64.RawURLEncoding.EncodeToString([]byte(raw))
-		if _, err := Current(encoded, moduleDir); err == nil {
+		if _, err := ambientCurrent(encoded, moduleDir); err == nil {
 			t.Fatalf("Current accepted non-v1 manifest %s", raw)
 		}
 	}
@@ -1272,7 +1272,7 @@ func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	log := append([]byte("open "), 0xff)
 	log = append(log, '\n')
-	st, err := FromTestLog(log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	st, err := ambientFromTestLog(log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1318,7 +1318,7 @@ func FuzzMergeAlgebra(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			state, err := Current(encoded, moduleDir)
+			state, err := ambientCurrent(encoded, moduleDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1338,7 +1338,7 @@ func FuzzMergeAlgebra(f *testing.F) {
 		}
 		merge := func(inputs ...Observation) Observation {
 			t.Helper()
-			st, err := Merge(moduleDir, inputs...)
+			st, err := ambientMerge(moduleDir, inputs...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1373,7 +1373,7 @@ func FuzzMergeAlgebra(f *testing.F) {
 		// way one can lack bracket provenance, since the bracket-gated
 		// constructor is the sole completed path — is refused, never merged
 		// silently (REQ-inputs-completed-observation).
-		if _, err := Merge(moduleDir, Observation{State: ma.State}); err == nil {
+		if _, err := ambientMerge(moduleDir, Observation{State: ma.State}); err == nil {
 			t.Fatal("merge accepted a completed state without construction provenance")
 		}
 	})

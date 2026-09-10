@@ -18,12 +18,12 @@ func completedFromLog(t *testing.T, dir, log string, opts ...TestLogOption) Obse
 	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(dir, []string{"data"})
+	bracket, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	opts = append([]TestLogOption{WithCompletedProcess("package-test-binary:guard"), WithBracket(bracket)}, opts...)
-	obs, err := FromTestLog([]byte(log), dir, dir, opts...)
+	obs, err := ambientFromTestLog([]byte(log), dir, dir, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestGuardCoveredSymlinkedRoot(t *testing.T) {
 // or unclean roots are refused at construction.
 func TestGuardCoveredRootValidation(t *testing.T) {
 	for _, bad := range []string{"", "relative/root", "/unclean//root", "/trail/"} {
-		_, err := FromTestLog([]byte(""), t.TempDir(), ".", WithCompletedProcess("package-test-binary:x"), withToolchainRoot(bad))
+		_, err := ambientFromTestLog([]byte(""), t.TempDir(), ".", WithCompletedProcess("package-test-binary:x"), withToolchainRoot(bad))
 		if err == nil || !strings.Contains(err.Error(), "guard-covered root") {
 			t.Fatalf("root %q accepted: %v", bad, err)
 		}
@@ -507,7 +507,7 @@ func TestBuildCacheRootCoversToolchainMediatedReads(t *testing.T) {
 	}
 
 	// A relative root is refused exactly as the sibling classes refuse it.
-	if _, err := FromTestLog([]byte("open x\n"), dir, dir, withBuildCacheRoot("relative/path")); err == nil {
+	if _, err := ambientFromTestLog([]byte("open x\n"), dir, dir, withBuildCacheRoot("relative/path")); err == nil {
 		t.Fatal("relative build-cache root accepted")
 	}
 }
@@ -570,7 +570,7 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 		t.Fatal("undeclared temp root recorded nothing")
 	}
 
-	if _, err := FromTestLog([]byte("open x\n"), dir, dir, withEphemeralTempRoot("relative/tmp")); err == nil {
+	if _, err := ambientFromTestLog([]byte("open x\n"), dir, dir, withEphemeralTempRoot("relative/tmp")); err == nil {
 		t.Fatal("relative ephemeral root accepted")
 	}
 
@@ -618,22 +618,22 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 	if err := os.MkdirAll(interior, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	interiorBracket, err := CaptureBracket(dir, []string{"data"})
+	interiorBracket, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
+	if _, err := ambientFromTestLog([]byte("open "+deeper+"\n"), dir, dir,
 		WithCompletedProcess("package-test-binary:guard"), WithBracket(interiorBracket),
 		withEphemeralTempRoot(interior)); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
 		t.Fatalf("module-interior ephemeral root error = %v", err)
 	}
 	// An UNRESOLVABLE interior root refuses identically: the declared
 	// form's interiority is checkable without resolution.
-	missingBracket, err := CaptureBracket(dir, []string{"data"})
+	missingBracket, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FromTestLog([]byte("open "+deeper+"\n"), dir, dir,
+	if _, err := ambientFromTestLog([]byte("open "+deeper+"\n"), dir, dir,
 		WithCompletedProcess("package-test-binary:guard"), WithBracket(missingBracket),
 		withEphemeralTempRoot(filepath.Join(dir, "missing"))); err == nil || !strings.Contains(err.Error(), "inside the module tree") {
 		t.Fatalf("unresolvable interior root error = %v", err)
@@ -662,7 +662,7 @@ func TestMachineFactIdentitiesDigestAsStableProjection(t *testing.T) {
 	// stat time) and the MHz lines may have — the projection digest
 	// must hold all three equal.
 	for i := 0; i < 2; i++ {
-		cur, err := CurrentEnv(st.Manifest, dir, nil)
+		cur, err := ambientCurrentEnv(st.Manifest, dir, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -785,11 +785,11 @@ func TestVolatileOSPathsClassifyLexically(t *testing.T) {
 	// An ephemeral temp root under a volatile OS root refuses at
 	// declaration: it would vacate volatile reads recordless while the
 	// scratch walk probed them.
-	leg, err := CaptureBracket(dir, []string{"data"})
+	leg, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), withEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+	if _, err := ambientFromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), withEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
 		t.Fatalf("ephemeral root under /proc accepted: %v", err)
 	}
 
@@ -811,7 +811,7 @@ func TestVolatileOSPathsClassifyLexically(t *testing.T) {
 
 	// A declared bracket root under a volatile OS root fails loud at
 	// declaration: its fingerprint could only ever move.
-	if _, err := CaptureBracket(dir, []string{"/proc/stat"}); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+	if _, err := ambientCaptureBracket(dir, []string{"/proc/stat"}); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
 		t.Fatalf("bracket root under /proc accepted: %v", err)
 	}
 }
@@ -979,11 +979,11 @@ func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 	}
 	fromEnv := func(env []string) (bool, string, Description) {
 		t.Helper()
-		bracket, err := CaptureBracket(dir, []string{"data"})
+		bracket, err := ambientCaptureBracket(dir, []string{"data"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		obs, err := FromTestLogEnv([]byte("getenv PWD\n"), dir, dir, env,
+		obs, err := FromTestLog([]byte("getenv PWD\n"), dir, dir, env,
 			WithCompletedProcess("package-test-binary:guard"), WithBracket(bracket))
 		if err != nil {
 			t.Fatal(err)
@@ -1044,7 +1044,7 @@ func TestExternalDirectoryStatBindsExistence(t *testing.T) {
 		t.Fatalf("existence entry not recorded cleanly: %+v", d)
 	}
 	for i := 0; i < 2; i++ {
-		cur, err := CurrentEnv(st.Manifest, dir, nil)
+		cur, err := ambientCurrentEnv(st.Manifest, dir, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1056,7 +1056,7 @@ func TestExternalDirectoryStatBindsExistence(t *testing.T) {
 	if err := os.RemoveAll(outside); err != nil {
 		t.Fatal(err)
 	}
-	cur, err := CurrentEnv(st.Manifest, dir, nil)
+	cur, err := ambientCurrentEnv(st.Manifest, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1067,7 +1067,7 @@ func TestExternalDirectoryStatBindsExistence(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("now a file"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cur, err = CurrentEnv(st.Manifest, dir, nil)
+	cur, err = ambientCurrentEnv(st.Manifest, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1144,7 +1144,7 @@ func TestAbsentExternalStatBindsAbsence(t *testing.T) {
 	if len(d.Paths) != 1 || len(d.Unverifiable) != 0 {
 		t.Fatalf("absence entry not recorded cleanly: %+v", d)
 	}
-	cur, err := CurrentEnv(st.Manifest, dir, nil)
+	cur, err := ambientCurrentEnv(st.Manifest, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1155,7 +1155,7 @@ func TestAbsentExternalStatBindsAbsence(t *testing.T) {
 	if err := os.WriteFile(probe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cur, err = CurrentEnv(st.Manifest, dir, nil)
+	cur, err = ambientCurrentEnv(st.Manifest, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1177,7 @@ func TestEphemeralRootNeverSwallowsModuleInteriorReads(t *testing.T) {
 	}
 	log := "open " + filepath.Join(moduleDir, "pkg", "sb-1", "out.txt") + "\n" +
 		"open " + filepath.Join(outer, "gone", "scratch.txt") + "\n"
-	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
+	obs, err := ambientFromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
 		withEphemeralTempRoot(outer))
 	if err != nil {
@@ -1211,7 +1211,7 @@ func TestEphemeralRootRefusesAliasRouteIntoModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := "open " + filepath.Join(outer, "alias", "pkg", "sb-1", "out.txt") + "\n"
-	obs, err := FromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
+	obs, err := ambientFromTestLog([]byte(log), moduleDir, filepath.Join(moduleDir, "pkg"),
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)),
 		withEphemeralTempRoot(outer))
 	if err != nil {

@@ -25,7 +25,7 @@ func TestStaticInputRootsSkipPinnedReads(t *testing.T) {
 	}
 	log := "open " + pinned + "\nstat " + pinned + "\nopen " + gomod + "\nstat " + gomod + "\n"
 
-	st, err := FromTestLog([]byte(log), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte(log), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "pkg")),
 		WithStaticInputRoot("cmd"), WithStaticInputRoot("go.mod"))
 	if err != nil {
@@ -42,7 +42,7 @@ func TestStaticInputRootsSkipPinnedReads(t *testing.T) {
 		t.Fatalf("static-covered reads recorded: %+v", d)
 	}
 
-	bare, err := FromTestLog([]byte(log), moduleDir, packageDir,
+	bare, err := ambientFromTestLog([]byte(log), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "pkg")))
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestStaticInputResolutionIsFailClosed(t *testing.T) {
 	}
 
 	missing := "open " + filepath.Join(static, "gone.go") + "\n"
-	st, err := FromTestLog([]byte(missing), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte(missing), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "pkg")),
 		WithStaticInputRoot("cmd"))
 	if err != nil {
@@ -89,7 +89,7 @@ func TestStaticInputResolutionIsFailClosed(t *testing.T) {
 	}
 
 	escape := "open " + filepath.Join(static, "escape.txt") + "\n"
-	st, err = FromTestLog([]byte(escape), moduleDir, packageDir,
+	st, err = ambientFromTestLog([]byte(escape), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "pkg")),
 		WithStaticInputRoot("cmd"))
 	if err != nil {
@@ -130,7 +130,7 @@ func TestStaticInputRootRefusesUnsoundResolutions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, root := range []string{"self", "vendor-ext", "no-such-surface"} {
-		_, err := FromTestLog([]byte("# test log\n"), moduleDir, packageDir,
+		_, err := ambientFromTestLog([]byte("# test log\n"), moduleDir, packageDir,
 			WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "pkg")),
 			WithStaticInputRoot(root))
 		if err == nil {

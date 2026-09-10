@@ -211,7 +211,7 @@ func TestAmbiguousSubjectDirectiveConfersNothing(t *testing.T) {
 
 	// The public directive scan refuses the same attribution: the pure
 	// predicate must never claim a collapsed identity.
-	pred, err := ScanPureDirectivesIn(dir, pkg)
+	pred, err := scanPureDirectivesIn(dir, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

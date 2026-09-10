@@ -28,7 +28,7 @@ func TestOpenObservedEvidenceTravelsAcrossCheckouts(t *testing.T) {
 	if err := os.WriteFile(target, []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestOpenObservedEvidenceTravelsAcrossCheckouts(t *testing.T) {
 		}
 	}
 	touchFuture(t, target)
-	after, err := Current(obs.Manifest, moduleDir)
+	after, err := ambientCurrent(obs.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestOpenObservedEvidenceTravelsAcrossCheckouts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secondRoot, "pkg", "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := Current(obs.Manifest, secondRoot)
+	moved, err := ambientCurrent(obs.Manifest, secondRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestStatObservedEvidenceStaysMetadataBound(t *testing.T) {
 	if err := os.WriteFile(target, []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestStatObservedEvidenceStaysMetadataBound(t *testing.T) {
 		t.Fatalf("stat entry not metadata-bound: %+v", m.Paths)
 	}
 	touchFuture(t, target)
-	after, err := Current(obs.Manifest, moduleDir)
+	after, err := ambientCurrent(obs.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestStatUpgradesAnOpenObservedEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open a.txt\nstat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open a.txt\nstat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,15 +127,15 @@ func TestMergeUnionsObservationClasses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opened, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
+	opened, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	statted, err := FromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
+	statted, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := Merge(moduleDir, opened, statted)
+	merged, err := ambientMerge(moduleDir, opened, statted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,15 +157,15 @@ func TestRelativeIdentitiesTravelAcrossCheckoutRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := Absolute(obs, moduleDir)
+	absolute, err := ambientAbsolute(obs, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := Relative(absolute, moduleDir)
+	relative, err := ambientRelative(absolute, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestRelativeIdentitiesTravelAcrossCheckoutRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secondRoot, "pkg", "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := Current(relative.Manifest, secondRoot)
+	moved, err := ambientCurrent(relative.Manifest, secondRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestConversionsPreserveMetadataClass(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,17 +226,17 @@ func TestConversionsPreserveMetadataClass(t *testing.T) {
 		}
 	}
 	metadataBound("observation", obs)
-	absolute, err := Absolute(obs, moduleDir)
+	absolute, err := ambientAbsolute(obs, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadataBound("Absolute", absolute)
-	relative, err := Relative(absolute, moduleDir)
+	relative, err := ambientRelative(absolute, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadataBound("Relative", relative)
-	again, err := Absolute(relative, moduleDir)
+	again, err := ambientAbsolute(relative, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,22 +254,22 @@ func TestConversionCollapsesKindsUnderClassUnion(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opened, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
+	opened, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	statted, err := FromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
+	statted, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Absolutize only one side, then merge under a foreign root: the
 	// merged manifest carries the SAME file as a rel identity (open,
 	// content-bound) and an abs identity (stat, metadata-bound).
-	absStatted, err := Absolute(statted, moduleDir)
+	absStatted, err := ambientAbsolute(statted, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := Merge(moduleDir, opened, absStatted)
+	merged, err := ambientMerge(moduleDir, opened, absStatted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestConversionCollapsesKindsUnderClassUnion(t *testing.T) {
 		t.Fatalf("fixture did not produce both kinds: %+v", m.Paths)
 	}
 	// Relative maps both onto one rel identity: one entry, class union.
-	relative, err := Relative(merged, moduleDir)
+	relative, err := ambientRelative(merged, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,11 +302,11 @@ func TestRelativeExternalIdentitiesStayAbsolute(t *testing.T) {
 	if err := os.WriteFile(external, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open "+external+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open "+external+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := Relative(obs, moduleDir)
+	relative, err := ambientRelative(obs, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,14 +327,14 @@ func TestRelativeRefusesMovedState(t *testing.T) {
 	if err := os.WriteFile(target, []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(target, []byte("changed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Relative(obs, moduleDir); err == nil || !strings.Contains(err.Error(), "state moved before relative identity conversion") {
+	if _, err := ambientRelative(obs, moduleDir); err == nil || !strings.Contains(err.Error(), "state moved before relative identity conversion") {
 		t.Fatalf("moved state accepted: %v", err)
 	}
 }
@@ -347,19 +347,19 @@ func TestRelativeRoundTripsWithAbsolute(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := Absolute(obs, moduleDir)
+	absolute, err := ambientAbsolute(obs, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := Relative(absolute, moduleDir)
+	relative, err := ambientRelative(absolute, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := Absolute(relative, moduleDir)
+	again, err := ambientAbsolute(relative, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}

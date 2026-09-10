@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // TestObservedCaptureReusesConstructionSnapshot pins that the

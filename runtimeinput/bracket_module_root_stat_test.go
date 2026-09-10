@@ -19,7 +19,7 @@ func TestModuleRootBracketCoversInteriorStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("# test log\nstat config.yaml\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("# test log\nstat config.yaml\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestModuleRootBracketCoversInteriorStats(t *testing.T) {
 	if err := os.Chmod(filepath.Join(packageDir, "config.yaml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	current, err := Current(st.Manifest, moduleDir)
+	current, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,12 @@ func TestModuleRootBracketCoversInteriorStats(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(moduleDir, "toolstate"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	excluded, err := CaptureBracketContext(context.Background(), moduleDir, []string{"."},
+	excluded, err := CaptureBracket(context.Background(), moduleDir, []string{"."},
 		WithBracketExcludedPaths("toolstate"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err = FromTestLog([]byte("# test log\nstat "+filepath.Join(moduleDir, "toolstate", "cache")+"\n"), moduleDir, packageDir,
+	st, err = ambientFromTestLog([]byte("# test log\nstat "+filepath.Join(moduleDir, "toolstate", "cache")+"\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(excluded))
 	if err != nil {
 		t.Fatal(err)

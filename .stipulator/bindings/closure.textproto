@@ -1300,3 +1300,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cd5c8c366f343646889a227f09d23502de1790f958a712bdd18d069afbadf474"
 }
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "7eca65459b0a1ad3aa596bb1c37ba832331f80045ff0c0cae541667b116b076c"
+  source_hash: "be0a8ffc3946dffde25a5b3813c7a642466b47517bc0165361781a9a1298f0f9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPublicPackagesReadNoAmbientEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "67ac4f0e78305ef1213a3b778509b8331ef2e424cb92ce1c5666534a8413ee6b"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "7eca65459b0a1ad3aa596bb1c37ba832331f80045ff0c0cae541667b116b076c"
+  source_hash: "be0a8ffc3946dffde25a5b3813c7a642466b47517bc0165361781a9a1298f0f9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAmbientReadsNameEveryAmbientReader"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "798edc32abc1d354769b491e890590cf7e51e6fb61f249aa9933fa136bf2b6e2"
+}
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "7eca65459b0a1ad3aa596bb1c37ba832331f80045ff0c0cae541667b116b076c"
+  source_hash: "be0a8ffc3946dffde25a5b3813c7a642466b47517bc0165361781a9a1298f0f9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestRunRefusesANilEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d11ecd59a89e243d514d5c6e18227961532b0fdb52bc705cc4f86eb26fb88bf5"
+}

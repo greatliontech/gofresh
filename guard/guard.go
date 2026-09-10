@@ -17,11 +17,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
@@ -47,66 +46,35 @@ const (
 	Measurement
 )
 
-// Capture gathers code-result guard values. Use CaptureFor for a measurement.
-// moduleDir is the directory `go`
-// resolves the toolchain and build environment in — a go.mod toolchain directive
-// and GOTOOLCHAIN are relative to it, so it must be the directory the result is
-// produced in — while the machine and runtime-config guards are host and process
-// facts independent of it.
-// buildInputs are the build-affecting parts of the caller's invocation that gofresh
-// cannot observe from `go env`: CLI flags passed to `go test`/`go build` outside
-// GOFLAGS (-tags, -gcflags, -ldflags, -pgo) and PGO profile content (the caller
-// passes a content digest, not the path). The caller supplies what it used, the same
-// way it supplies commit/dirty; digesting them closes the false-valid hole where a
-// build-input change leaves buildconfig unmoved (REQ-guard-buildconfig,
-// REQ-guard-buildconfig-failclosed). None used ⇒ pass none.
-func Capture(moduleDir string, buildInputs ...string) (Guards, error) {
-	return CaptureFor(moduleDir, CodeResult, buildInputs...)
-}
-
-// CaptureFor gathers the guard values applicable to kind.
-func CaptureFor(moduleDir string, kind Kind, buildInputs ...string) (Guards, error) {
-	return CaptureForContext(context.Background(), moduleDir, kind, buildInputs...)
-}
-
-// CaptureContext is Capture with caller-owned cancellation for subprocess-backed guards.
-func CaptureContext(ctx context.Context, moduleDir string, buildInputs ...string) (Guards, error) {
-	return CaptureForContext(ctx, moduleDir, CodeResult, buildInputs...)
-}
-
-// CaptureForContext is CaptureFor with caller-owned cancellation for subprocess-backed guards.
-func CaptureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs ...string) (Guards, error) {
-	return captureForContext(ctx, moduleDir, kind, buildInputs, gatherFacts, runtimeConfig)
-}
-
-// CaptureForContextEnv is CaptureForContext with env as the complete process
-// environment used by Go subprocesses and environment-backed guards.
-func CaptureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs ...string) (Guards, error) {
-	return CaptureForContextEnvSnapshot(ctx, moduleDir, env, kind, nil, buildInputs...)
-}
-
-// CaptureForContextEnvSnapshot is CaptureForContextEnv deriving the
-// build-config digest from the pass's one env snapshot when non-nil - the
-// snapshot's raw JSON is byte-identical to a direct probe, so the digest
-// cannot drift. The toolchain guard always probes `go version` live: its
-// string carries the HOST platform, which `go env`'s target GOOS/GOARCH
-// does not describe.
-func CaptureForContextEnvSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
-	return CaptureForContextEnvSnapshotRuntime(ctx, moduleDir, env, env, kind, snapshot, buildInputs...)
-}
-
-// CaptureForContextEnvSnapshotRuntime is CaptureForContextEnvSnapshot
-// with the measurement guard's runtime-config digest computed from
-// runtimeEnv - the environment the measured processes actually run
-// under, when it differs from the analysis env (a caller injecting a
-// GOMAXPROCS cap into the processes it spawns). The runtime reads
-// these keys before execution, so they move scheduling behavior with
-// no other guard moving: digesting them from a stand-in environment
-// would let evidence serve across a width the measured process never
-// saw. Toolchain and build-config guards stay on env - they describe
-// the analysis identity, which the caller keeps agreeing on
-// build-identity keys.
-func CaptureForContextEnvSnapshotRuntime(ctx context.Context, moduleDir string, env, runtimeEnv []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
+// Capture gathers the guard values applicable to kind. moduleDir is the
+// directory `go` resolves the toolchain and build environment in — a
+// go.mod toolchain directive and GOTOOLCHAIN are relative to it, so it
+// must be the directory the result is produced in — while the machine and
+// runtime-config guards are host and process facts independent of it. The
+// guards are captured under env as the complete process environment of the Go
+// subprocesses and environment-backed guards, with the measurement
+// guard's runtime-config digest computed from runtimeEnv — the
+// environment the measured processes actually run under, when it
+// differs from the analysis env (a caller injecting a GOMAXPROCS cap into
+// the processes it spawns): the runtime reads these keys before
+// execution, so they move scheduling behaviour with no other guard
+// moving, and digesting them from a stand-in environment would let
+// evidence serve across a width the measured process never saw.
+// Toolchain and build-config guards stay on env — they describe the
+// analysis identity. A non-nil snapshot supplies the build-config digest
+// from the pass's one env snapshot (its raw JSON is byte-identical to a
+// direct probe, so the digest cannot drift); the toolchain guard always
+// probes `go version` live, whose string carries the HOST platform that
+// `go env`'s target GOOS/GOARCH does not describe. buildInputs are the
+// build-relevant inputs the caller passed OUTSIDE GOFLAGS — CLI flags to
+// `go test`/`go build` (-tags, -gcflags, -ldflags, -pgo) and PGO profile
+// content as a content digest, never a path (GOFLAGS itself is digested
+// from the environment): the caller supplies what it used, the same way
+// it supplies commit/dirty, and digesting them closes the false-valid hole
+// where a build-input change leaves buildconfig unmoved
+// (REQ-guard-buildconfig, REQ-guard-buildconfig-failclosed). None used ⇒
+// pass none.
+func Capture(ctx context.Context, moduleDir string, env, runtimeEnv []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
 	normalized, err := processenv.Normalize(env)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: %w", err)
@@ -115,30 +83,26 @@ func CaptureForContextEnvSnapshotRuntime(ctx context.Context, moduleDir string, 
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: runtime env: %w", err)
 	}
-	return captureForContextEnvSnapshot(ctx, moduleDir, normalized, kind, snapshot, buildInputs, gatherFacts, func([]string) string { return runtimeConfigEnv(normalizedRuntime) })
+	return captureForSnapshot(ctx, moduleDir, normalized, kind, snapshot, buildInputs, gatherFacts, func([]string) string { return runtimeConfig(normalizedRuntime) })
 }
 
-func captureForContext(ctx context.Context, moduleDir string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
-	return captureForContextEnv(ctx, moduleDir, os.Environ(), kind, buildInputs, machine, func([]string) string { return runtimeGuard() })
+func captureFor(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
+	return captureForSnapshot(ctx, moduleDir, env, kind, nil, buildInputs, machine, runtimeGuard)
 }
 
-func captureForContextEnv(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
-	return captureForContextEnvSnapshot(ctx, moduleDir, env, kind, nil, buildInputs, machine, runtimeGuard)
-}
-
-func captureForContextEnvSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
+func captureForSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
-	tc, err := toolchainContextEnv(ctx, moduleDir, env)
+	tc, err := toolchainOf(ctx, moduleDir, env)
 	if err != nil {
 		return Guards{}, err
 	}
 	var bc string
 	if snapshot != nil {
-		bc, err = buildConfigDigestEnv(snapshot.JSON, env, buildInputs)
+		bc, err = buildConfigDigest(snapshot.JSON, env, buildInputs)
 	} else {
-		bc, err = buildConfigContextEnv(ctx, moduleDir, env, buildInputs)
+		bc, err = buildConfigOf(ctx, moduleDir, env, buildInputs)
 	}
 	if err != nil {
 		return Guards{}, err
@@ -183,19 +147,11 @@ func Compare(recorded, current Guards, kind Kind) string {
 	return ""
 }
 
-// toolchain is the `go version` identity minus the redundant leading prefix — e.g.
+// toolchainOf is the `go version` identity minus the redundant leading prefix — e.g.
 // "go1.26.4 linux/amd64", including any custom or experiment suffix, which affects
 // code generation and so must be part of the guard.
-func toolchain(dir string) (string, error) {
-	return toolchainContext(context.Background(), dir)
-}
-
-func toolchainContext(ctx context.Context, dir string) (string, error) {
-	return toolchainContextEnv(ctx, dir, os.Environ())
-}
-
-func toolchainContextEnv(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := gotool.RunInContextEnv(ctx, dir, env, "version")
+func toolchainOf(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := gotool.Run(ctx, dir, env, "version")
 	if err != nil {
 		return "", err
 	}
@@ -219,36 +175,24 @@ var buildConfigGoEnvKeys = []string{
 // env vars — that change which .pc files cgo resolves and thus the compiled code.
 var buildConfigOSEnvKeys = []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"}
 
-// buildConfig digests the build-affecting settings that can change generated code
+// buildConfigOf digests the build-affecting settings that can change generated code
 // without moving the toolchain, machine, or source guards: the observable `go env`
 // settings and OS pkg-config vars, plus the caller-supplied buildInputs (its CLI
 // build flags and PGO profile content — the parts of the build invocation gofresh
 // cannot observe). An unparseable `go env` output fails closed
 // (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
-func buildConfig(dir string, buildInputs []string) (string, error) {
-	return buildConfigContext(context.Background(), dir, buildInputs)
-}
-
-func buildConfigContext(ctx context.Context, dir string, buildInputs []string) (string, error) {
-	return buildConfigContextEnv(ctx, dir, os.Environ(), buildInputs)
-}
-
-func buildConfigContextEnv(ctx context.Context, dir string, env, buildInputs []string) (string, error) {
-	out, err := gotool.RunInContextEnv(ctx, dir, env, "env", "-json")
+func buildConfigOf(ctx context.Context, dir string, env, buildInputs []string) (string, error) {
+	out, err := gotool.Run(ctx, dir, env, "env", "-json")
 	if err != nil {
 		return "", err
 	}
-	return buildConfigDigestEnv(out, env, buildInputs)
+	return buildConfigDigest(out, env, buildInputs)
 }
 
 // buildConfigDigest parses the `go env -json` output and digests the build-affecting
 // settings plus buildInputs. A malformed env output fails closed with an error
 // (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
-func buildConfigDigest(envJSON []byte, buildInputs []string) (string, error) {
-	return buildConfigDigestEnv(envJSON, os.Environ(), buildInputs)
-}
-
-func buildConfigDigestEnv(envJSON []byte, processEnv, buildInputs []string) (string, error) {
+func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string, error) {
 	var env map[string]string
 	if err := json.Unmarshal(envJSON, &env); err != nil {
 		return "", fmt.Errorf("guard: parse go env: %w", err)
@@ -286,11 +230,7 @@ var runtimeConfigEnvKeys = []string{"GOGC", "GODEBUG", "GOMEMLIMIT", "GOMAXPROCS
 
 // runtimeConfig digests the runtime-config environment (fixed key order; values not
 // stored in clear text).
-func runtimeConfig() string {
-	return runtimeConfigEnv(os.Environ())
-}
-
-func runtimeConfigEnv(env []string) string {
+func runtimeConfig(env []string) string {
 	var b strings.Builder
 	for _, k := range runtimeConfigEnvKeys {
 		value, _ := processenv.Lookup(env, k)

@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -14,51 +13,30 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"golang.org/x/tools/go/packages"
 )
 
-// ScanPureDirectives loads pkgPaths and returns a purity predicate marking every
-// symbol whose declaration carries a //gofresh:pure directive (REQ-purity-directive).
-// It is the durable, in-code form of a purity assertion — written once and honored
-// automatically by every consumer of the engine. The returned predicate is for
-// inspection; callers use WithAssumePure only for additional caller-owned assertions.
-// gofresh never infers purity from behavior (REQ-purity-responsibility).
+// ScanPureDirectives loads pkgPaths from dir ("" = the current directory)
+// under env as the complete process environment and buildFlags as the
+// build selection, and returns a purity predicate marking every symbol
+// whose declaration carries a //gofresh:pure directive
+// (REQ-purity-directive). It is the durable, in-code form of a purity
+// assertion — written once and honored automatically by every consumer of
+// the engine. The returned predicate is for inspection; callers use
+// WithAssumePure only for additional caller-owned assertions. gofresh
+// never infers purity from behavior (REQ-purity-responsibility).
 //
-// A symbol is named as the closure engine resolves it: a function by its name, a
-// method as "Type.Method" with the receiver's pointer star and generics dropped.
-func ScanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectivesInWithBuildFlags("", nil, pkgPaths...)
-}
-
-// ScanPureDirectivesIn scans under an explicit tree root ("" = the process
-// working directory), for callers fingerprinting a tree they do not run
-// inside.
-func ScanPureDirectivesIn(dir string, pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectivesInWithBuildFlags(dir, nil, pkgPaths...)
-}
-
-// ScanPureDirectivesWithBuildFlags scans the packages selected by buildFlags under
-// the process working directory. The flags must match the producing build, so a
-// directive in a mutually exclusive unselected file cannot confer purity on the
-// selected declaration (REQ-purity-directive, REQ-guard-buildconfig).
-func ScanPureDirectivesWithBuildFlags(buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectivesInWithBuildFlags("", buildFlags, pkgPaths...)
-}
-
-// ScanPureDirectivesInWithBuildFlags scans under an explicit tree root and the
-// producing build's executable flags.
-func ScanPureDirectivesInWithBuildFlags(dir string, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
-	scan, err := scanSubjectsInWithBuildFlags(context.Background(), dir, buildFlags, pkgPaths...)
+// A symbol is named as the closure engine resolves it: a function by its
+// name, a method as "Type.Method" with the receiver's pointer star and
+// generics dropped.
+func ScanPureDirectives(dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
+	scan, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, env, buildFlags, pkgPaths...)
 	if err != nil {
 		return nil, err
 	}
 	return scan.directivePure, nil
-}
-
-func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
-	return scanSubjectsInWithBuildFlagsEnv(ctx, dir, os.Environ(), buildFlags, pkgPaths...)
 }
 
 // sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
@@ -69,7 +47,7 @@ func scanSubjectsInWithBuildFlags(ctx context.Context, dir string, buildFlags []
 const sharedDynamicStatePrefix = "package graph shares mutated dynamic state: "
 
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
-	hasher, err := closure.NewAtContextEnv(ctx, dir, env, buildFlags...)
+	hasher, err := closure.NewAt(ctx, dir, env, nil, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +146,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		viewTestHooks.typedLoad()
 	}
 	hasher.Unit("typecheck", "", 0, len(patterns))
-	load, err := closure.LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, snapshot, patterns...)
+	load, err := closure.LoadViewPackages(ctx, dir, env, buildFlags, snapshot, patterns...)
 	if err != nil {
 		return nil, nil, err
 	}

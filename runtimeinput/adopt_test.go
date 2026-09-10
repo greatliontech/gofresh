@@ -41,23 +41,23 @@ func TestAdoptedUnionMergesLikeFreshObservations(t *testing.T) {
 	stateB := adoptTestState(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "fixture.txt"}, Digest: testEntryDigest}}}, dir, env)
 	obsA := newObservation(stateA, "proc-a", "test")
 	obsB := newObservation(stateB, "proc-b", "test")
-	union, err := MergeEnv(dir, env, obsA, obsB)
+	union, err := Merge(dir, env, obsA, obsB)
 	if err != nil {
 		t.Fatal(err)
 	}
 	persisted := union.State.Manifest
 
-	adopted, err := AdoptEnv(persisted, dir, "persisted-union", env)
+	adopted, err := Adopt(persisted, dir, "persisted-union", env)
 	if err != nil {
-		t.Fatalf("AdoptEnv: %v", err)
+		t.Fatalf("Adopt: %v", err)
 	}
 	stateC := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_B", Digest: testEntryDigest}}}, dir, env)
 	obsC := newObservation(stateC, "proc-c", "test")
-	widened, err := MergeEnv(dir, env, adopted, obsC)
+	widened, err := Merge(dir, env, adopted, obsC)
 	if err != nil {
 		t.Fatalf("merge with adopted union: %v", err)
 	}
-	fresh, err := MergeEnv(dir, env, obsA, obsB, obsC)
+	fresh, err := Merge(dir, env, obsA, obsB, obsC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,9 +79,9 @@ func TestAdoptRefusesMovedManifestNamingTheMover(t *testing.T) {
 	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := AdoptEnv(state.Manifest, dir, "persisted-union", env)
+	_, err := Adopt(state.Manifest, dir, "persisted-union", env)
 	if err == nil || !strings.Contains(err.Error(), "moved") || !strings.Contains(err.Error(), "fixture.txt") {
-		t.Fatalf("AdoptEnv after move = %v, want refusal naming fixture.txt", err)
+		t.Fatalf("Adopt after move = %v, want refusal naming fixture.txt", err)
 	}
 }
 
@@ -91,11 +91,11 @@ func TestAdoptRefusesNonCanonicalEncoding(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ADOPT_A=1"}
 	state := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_A", Digest: testEntryDigest}}}, dir, env)
-	if _, err := AdoptEnv(state.Manifest+"A", dir, "persisted-union", env); err == nil {
-		t.Fatal("AdoptEnv accepted a tampered encoding")
+	if _, err := Adopt(state.Manifest+"A", dir, "persisted-union", env); err == nil {
+		t.Fatal("Adopt accepted a tampered encoding")
 	}
-	if _, err := AdoptEnv("", dir, "persisted-union", env); err == nil {
-		t.Fatal("AdoptEnv accepted an empty manifest string")
+	if _, err := Adopt("", dir, "persisted-union", env); err == nil {
+		t.Fatal("Adopt accepted an empty manifest string")
 	}
 	// A semantically equal but re-serialized manifest — valid base64, valid
 	// JSON, non-canonical byte form — must refuse at the canonical-encoding
@@ -105,9 +105,9 @@ func TestAdoptRefusesNonCanonicalEncoding(t *testing.T) {
 		t.Fatal(err)
 	}
 	reserialized := base64.RawURLEncoding.EncodeToString(append(raw, ' '))
-	_, err = AdoptEnv(reserialized, dir, "persisted-union", env)
+	_, err = Adopt(reserialized, dir, "persisted-union", env)
 	if err == nil || !strings.Contains(err.Error(), "canonical") {
-		t.Fatalf("AdoptEnv(re-serialized) = %v, want canonical-encoding refusal", err)
+		t.Fatalf("Adopt(re-serialized) = %v, want canonical-encoding refusal", err)
 	}
 }
 
@@ -120,18 +120,18 @@ func TestAdoptBoundaryValidationAndProvenance(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ADOPT_A=1"}
 	state := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_A", Digest: testEntryDigest}}}, dir, env)
-	if _, err := AdoptEnv(state.Manifest, dir, "", env); err == nil {
-		t.Fatal("AdoptEnv accepted an empty process identity")
+	if _, err := Adopt(state.Manifest, dir, "", env); err == nil {
+		t.Fatal("Adopt accepted an empty process identity")
 	}
-	if _, err := AdoptEnv(state.Manifest, dir, "p", []string{"ADOPT_A=1", "ADOPT_A=2"}); err == nil {
-		t.Fatal("AdoptEnv accepted a duplicate-key environment")
+	if _, err := Adopt(state.Manifest, dir, "p", []string{"ADOPT_A=1", "ADOPT_A=2"}); err == nil {
+		t.Fatal("Adopt accepted a duplicate-key environment")
 	}
-	adopted, err := AdoptEnv(state.Manifest, dir, "p", env)
+	adopted, err := Adopt(state.Manifest, dir, "p", env)
 	if err != nil {
 		t.Fatal(err)
 	}
 	genuine := newObservation(state, "p", "complete")
-	if _, err := MergeEnv(dir, env, adopted, genuine); err == nil || !strings.Contains(err.Error(), "conflicting observations") {
+	if _, err := Merge(dir, env, adopted, genuine); err == nil || !strings.Contains(err.Error(), "conflicting observations") {
 		t.Fatalf("merge of adopted and genuine evidence under one process = %v, want provenance conflict refusal", err)
 	}
 }
@@ -142,11 +142,11 @@ func TestAdoptCarriesUnverifiableReasons(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ADOPT_A=1"}
 	state := adoptTestState(t, manifest{Version: manifestVersion, Unverifiable: []string{"incomplete: proc-x"}}, dir, env)
-	adopted, err := AdoptEnv(state.Manifest, dir, "persisted-union", env)
+	adopted, err := Adopt(state.Manifest, dir, "persisted-union", env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := MergeEnv(dir, env, adopted)
+	merged, err := Merge(dir, env, adopted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,15 +164,15 @@ func TestAdoptCarriesUnverifiableReasons(t *testing.T) {
 func TestAdoptObservationFreeManifest(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ADOPT_A=1"}
-	empty, err := MergeEnv(dir, env)
+	empty, err := Merge(dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	adopted, err := AdoptEnv(empty.State.Manifest, dir, "persisted-union", env)
+	adopted, err := Adopt(empty.State.Manifest, dir, "persisted-union", env)
 	if err != nil {
-		t.Fatalf("AdoptEnv(observation-free): %v", err)
+		t.Fatalf("Adopt(observation-free): %v", err)
 	}
-	remerged, err := MergeEnv(dir, env, adopted)
+	remerged, err := Merge(dir, env, adopted)
 	if err != nil {
 		t.Fatal(err)
 	}

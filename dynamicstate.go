@@ -1037,7 +1037,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if len(testedWithIntermediates) > 0 {
 		sort.Strings(testedWithIntermediates)
 		hasher.Unit("typecheck", "", 0, len(testedWithIntermediates))
-		graphLoad, err := closure.LoadViewGraphEnv(ctx, dir, env, buildFlags, testedWithIntermediates...)
+		graphLoad, err := closure.LoadViewGraph(ctx, dir, env, buildFlags, testedWithIntermediates...)
 		if err != nil {
 			return nil, err
 		}
@@ -1121,7 +1121,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			viewTestHooks.dynamicStateMissLoad(patterns)
 		}
 		hasher.Unit("typecheck", "", 0, len(patterns))
-		missLoad, err := closure.LoadViewPackagesEnv(ctx, dir, env, buildFlags, patterns...)
+		missLoad, err := closure.LoadViewPackages(ctx, dir, env, buildFlags, nil, patterns...)
 		if err != nil {
 			return nil, err
 		}

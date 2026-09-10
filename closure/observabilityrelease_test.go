@@ -16,7 +16,7 @@ func TestObservabilityBatchReleasesPrograms(t *testing.T) {
 		{Package: base + "observable", Symbol: "TestReadFile"},
 		{Package: base + "observablestat", Symbol: "TestStat"},
 	}
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestObservabilityBatchReleasesProgramOnUnrootedGroup(t *testing.T) {
 		t.Skip("runs the engine over the fixture corpus")
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observable"
-	h, err := New()
+	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,7 @@ func TestLanguageShapeCanaries(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			h, err := NewAt(dir)
+			h, err := newAt(dir)
 			if err != nil {
 				t.Errorf("canary load: %v", err)
 				return

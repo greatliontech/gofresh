@@ -29,7 +29,7 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 	const pkg = "example.com/viewload"
 	subjects := []Subject{{Package: pkg, Symbol: "TestF"}}
 
-	unshared, err := NewAt(dir)
+	unshared, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,11 +38,11 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	load, err := LoadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, pkg)
+	load, err := loadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := NewAt(dir)
+	shared, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,11 @@ func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
 	const pkg = "example.com/viewloadmiss"
 	subjects := []Subject{{Package: pkg, Symbol: "TestF"}}
 
-	load, err := LoadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, "example.com/viewloadmiss/other")
+	load, err := loadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, "example.com/viewloadmiss/other")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

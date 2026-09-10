@@ -256,7 +256,7 @@ func TestEmbeddedMembersContributeBytes(t *testing.T) {
 	subjects := []Subject{{Package: "example.com/em", Symbol: "Len"}}
 	fold := func() string {
 		t.Helper()
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}

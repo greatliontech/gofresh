@@ -19,7 +19,7 @@ func TestScratchNamespaceAdmitsEndpointAbsentReads(t *testing.T) {
 	}
 	bracket := testBracket(t, moduleDir)
 	log := []byte("open input.txt\nopen bench-a1b2c3/data.txt\nstat bench-a1b2c3\n")
-	st, err := FromTestLog(log, moduleDir, packageDir,
+	st, err := ambientFromTestLog(log, moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -44,7 +44,7 @@ func TestScratchNamespaceAdmitsEndpointAbsentReads(t *testing.T) {
 func TestScratchNamespacePreservesAbsenceProbesOutsideIt(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("open tuning.yaml\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open tuning.yaml\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -60,7 +60,7 @@ func TestScratchNamespacePreservesAbsenceProbesOutsideIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packageDir, "tuning.yaml"), []byte("tuned"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	current, err := Current(st.Manifest, moduleDir)
+	current, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestScratchNamespacePreExistingMatchStaysObserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("open bench-old/keep.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-old/keep.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -111,7 +111,7 @@ func TestScratchNamespaceSurvivingScratchStaysObserved(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(leaked, "out.txt"), []byte("leaked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open bench-leak/out.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-leak/out.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -146,7 +146,7 @@ func TestScratchNamespaceConsumedAndRemovedSealsBracket(t *testing.T) {
 	if err := os.RemoveAll(victim); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open bench-victim/data.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-victim/data.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -174,7 +174,7 @@ func TestScratchNamespaceInertWithoutBracketCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir, "pkg")
-	st, err := FromTestLog([]byte("open "+filepath.Join(moduleDir, "other", "bench-x", "gone.txt")+"\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open "+filepath.Join(moduleDir, "other", "bench-x", "gone.txt")+"\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("other", "bench-*"))
 	if err != nil {
@@ -206,14 +206,14 @@ func TestScratchNamespaceExcludedSubtreeAliasStaysSealed(t *testing.T) {
 	if err := os.Symlink("excl", filepath.Join(packageDir, "bench-link")); err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"."}, WithBracketExcludedPaths("pkg/excl"))
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"."}, WithBracketExcludedPaths("pkg/excl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(excl, "data.txt")); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open bench-link/data.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-link/data.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -241,7 +241,7 @@ func TestScratchNamespacePreExistingMatchVetoesDepth(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("open bench-old/gone.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-old/gone.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -265,11 +265,11 @@ func TestScratchNamespaceUnderBracketExclusionAdmitsNothing(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"."}, WithBracketExcludedPaths("pkg/sub"))
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"."}, WithBracketExcludedPaths("pkg/sub"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open sub/bench-x/gone.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open sub/bench-x/gone.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg/sub", "bench-*"))
 	if err != nil {
@@ -294,7 +294,7 @@ func TestScratchNamespaceDanglingLinkAncestorStaysObserved(t *testing.T) {
 	if err := os.Symlink("nowhere-at-all", filepath.Join(packageDir, "bench-dang")); err != nil {
 		t.Fatal(err)
 	}
-	st, err := FromTestLog([]byte("open bench-dang/x.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-dang/x.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {
@@ -349,7 +349,7 @@ func TestRecordedDirectoryDigestSharesCarveOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("open data\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open data\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestRecordedDirectoryDigestSharesCarveOut(t *testing.T) {
 	if err := os.Remove(scratch); err != nil {
 		t.Fatal(err)
 	}
-	current, err := Current(st.Manifest, moduleDir)
+	current, err := ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestRecordedDirectoryDigestSharesCarveOut(t *testing.T) {
 	if err := os.Chmod(data, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	current, err = Current(st.Manifest, moduleDir)
+	current, err = ambientCurrent(st.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestScratchNamespaceEscapingLinkStaysObserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir)
-	st, err := FromTestLog([]byte("open bench-link/gone.txt\n"), moduleDir, packageDir,
+	st, err := ambientFromTestLog([]byte("open bench-link/gone.txt\n"), moduleDir, packageDir,
 		WithCompletedProcess("worker"), WithBracket(bracket),
 		WithScratchNamespace("pkg", "bench-*"))
 	if err != nil {

@@ -23,7 +23,7 @@ func TestContributionMemoServesWhatAMissDerives(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte("package memo\n\nfunc M() int { return 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestBatchEntriesDiscardStaleContributionEntries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte("package memo\n\nfunc M() int { return 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestBatchEntriesDiscardStaleContributionEntries(t *testing.T) {
 	if batched[subject] != independent[subject] {
 		t.Fatalf("batch served a pre-call memo generation: %+v vs %+v", batched[subject], independent[subject])
 	}
-	h2, err := NewAt(dir)
+	h2, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

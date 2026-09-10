@@ -71,7 +71,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 	axis := " (judged under an unaudited toolchain selection: selection \"dst\" under " + runtime.Version() + " is unwalked)"
 	var cold Observability
 	for pass, want := range []int{1, 0} {
-		h, err := NewAt(dir, "-tags=dst")
+		h, err := newAt(dir, "-tags=dst")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 			t.Fatalf("warm proof %+v differs from cold %+v", proof, cold)
 		}
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

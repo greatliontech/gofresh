@@ -84,7 +84,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	// cache; the scan memo would serve the first scan's outputs whole.
 	viewTestHooks.scanMemoOff = true
 	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func (Widget) External() int { return 2 }
 			t.Fatal(err)
 		}
 	}
-	load, err := closure.LoadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, "example.com/factsrc")
+	load, err := closureLoadViewPackagesEnv(context.Background(), dir, os.Environ(), nil, "example.com/factsrc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +995,7 @@ func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct atomic.Pointer[registry]\n\nfunc Track(k string) {\n\tif r := acct.Load(); r != nil {\n\t\tr.live[k] = true\n\t}\n}\n\nfunc Enable() func() {\n\tacct.Store(&registry{live: map[string]bool{}})\n\treturn func() { acct.Store(nil) }\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1023,7 +1023,7 @@ func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\nvar hooks atomic.Pointer[hookSet]\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1055,7 +1055,7 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 		"dyn/dyn.go": "package dyn\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\ntype Q = atomic.Pointer[hookSet]\n\nvar hooks Q\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,7 +1088,7 @@ func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype P atomic.Pointer[registry]\n\nvar acct P\n\nfunc Cell() *P {\n\treturn &acct\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1116,7 +1116,7 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype hooks struct {\n\tfire func()\n}\n\nfunc Data(p *atomic.Pointer[registry]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Bounded[T interface{ atomic.Pointer[registry] }](p *T) int {\n\tif p != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Dyn(p *atomic.Pointer[hooks]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1149,7 +1149,7 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype config struct {\n\tn int\n}\n\ntype box struct {\n\tcfg  atomic.Pointer[config]\n\thook func()\n}\n\nvar state box\n\nfunc Read() {\n\tif f := state.hook; f != nil {\n\t\tf()\n\t}\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1178,7 +1178,7 @@ func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"unsafe\"\n\ntype Pointer[T any] struct {\n\tp unsafe.Pointer\n}\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct Pointer[registry]\n\nfunc Track() {\n\tacct.p = nil\n}\n",
 	})
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1237,7 +1237,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 	}
 
 	processFactCache = sync.Map{}
-	hasher, err := closure.NewAtContextEnv(context.Background(), dir, os.Environ())
+	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1342,7 +1342,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 		if !fingerprint.ObservationProof.Observable {
 			t.Fatalf("fixture not observable: %+v", fingerprint.ObservationProof)
 		}
-		observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("semver test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("semver test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1532,7 +1532,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := runtimeinput.FromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("pinned test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("pinned test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

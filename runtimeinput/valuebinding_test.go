@@ -42,21 +42,21 @@ func manifestReasons(t *testing.T, state State) []string {
 func TestCompletedObservationRequiresBracket(t *testing.T) {
 	moduleDir := bindingModule(t)
 	log := []byte("open data/fixture.txt\n")
-	if _, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker")); err == nil || !strings.Contains(err.Error(), "observation bracket") {
+	if _, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker")); err == nil || !strings.Contains(err.Error(), "observation bracket") {
 		t.Fatalf("completed construction without a bracket = %v, want missing-bracket error", err)
 	}
-	if _, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(Bracket{})); err == nil {
+	if _, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(Bracket{})); err == nil {
 		t.Fatal("completed construction accepted a zero bracket")
 	}
 	foreign := testBracket(t, t.TempDir())
-	if _, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(foreign)); err == nil {
+	if _, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(foreign)); err == nil {
 		t.Fatal("completed construction accepted a bracket captured under a foreign module view")
 	}
 	bracket := testBracket(t, moduleDir)
-	if _, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket), WithBracket(bracket)); err == nil {
+	if _, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket), WithBracket(bracket)); err == nil {
 		t.Fatal("completed construction accepted duplicate brackets")
 	}
-	if _, err := IncompleteEnv(moduleDir, "worker", "interrupted", nil); err != nil {
+	if _, err := Incomplete(moduleDir, "worker", "interrupted", nil); err != nil {
 		t.Fatalf("bracketless incomplete construction = %v, want success", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestRunToIngestWindowMutationSealsObservationUnverifiable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "data", "fixture.txt"), []byte("edited between run and ingest"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	observation, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatalf("moved-bracket observation did not construct: %v", err)
 	}
@@ -86,21 +86,21 @@ func TestRunToIngestWindowMutationSealsObservationUnverifiable(t *testing.T) {
 	if !state.Unverifiable || !strings.Contains(state.Reason, "observation bracket moved: data") {
 		t.Fatalf("window-mutated observation = %+v, want moved-root unverifiable", state)
 	}
-	current, err := CurrentEnv(state.Manifest, moduleDir, nil)
+	current, err := ambientCurrentEnv(state.Manifest, moduleDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !current.Unverifiable {
 		t.Fatal("current check read a moved-bracket manifest as bound")
 	}
-	merged, err := MergeEnv(moduleDir, nil, observation)
+	merged, err := Merge(moduleDir, nil, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !merged.Unverifiable {
 		t.Fatal("merge read a moved-bracket observation as bound")
 	}
-	converted, err := AbsoluteEnv(observation, moduleDir, nil)
+	converted, err := Absolute(observation, moduleDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestSymlinkTargetMutationOutsideRootSealsIdentityUncovered(t *testing.T) {
 	if err := os.WriteFile(target, []byte("mutated after the run"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	observation, err := FromTestLogEnv([]byte("open testdata/link\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open testdata/link\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestOutOfRootSymlinkChainSealsIdentityUncovered(t *testing.T) {
 	if err := os.Symlink(filepath.Join("..", "data", "g.txt"), link); err != nil {
 		t.Fatal(err)
 	}
-	observation, err := FromTestLogEnv([]byte("open other/link\nopen otherdir/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open other/link\nopen otherdir/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestInRootSymlinkChainStaysCoveredAndRetargetMovesBracket(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	bracket := testBracket(t, moduleDir, "data")
-	observation, err := FromTestLogEnv([]byte("open data/link\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open data/link\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestInRootSymlinkChainStaysCoveredAndRetargetMovesBracket(t *testing.T) {
 func TestCoveredObservationBindsAsBefore(t *testing.T) {
 	moduleDir := bindingModule(t)
 	bracket := testBracket(t, moduleDir, "data")
-	observation, err := FromTestLogEnv([]byte("open data/fixture.txt\nopen data/ghost.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open data/fixture.txt\nopen data/ghost.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestOutOfRootReadSealsPerIdentityUncovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir, "data")
-	observation, err := FromTestLogEnv([]byte("open data/fixture.txt\nopen other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open data/fixture.txt\nopen other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,11 +321,11 @@ func TestExcludedIdentityObservedIsUncovered(t *testing.T) {
 	if err := os.Symlink(filepath.Join("vol", "scratch.txt"), spy); err == nil {
 		log += "open data/spy\n"
 	}
-	bracket, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/vol"))
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/vol"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := FromTestLogEnv([]byte(log), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte(log), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestBracketCaptureRefusalSealsObservationUnverifiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	bracket := testBracket(t, moduleDir, "data", "escape")
-	observation, err := FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,14 +381,14 @@ func TestAbsoluteIdentityCoverageRequiresAbsoluteRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := []byte("open " + external + "\n")
-	covered, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data", external)))
+	covered, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data", external)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if covered.Unverifiable {
 		t.Fatalf("absolute identity under its declared absolute root = %+v, want bound", covered.State)
 	}
-	uncovered, err := FromTestLogEnv(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data")))
+	uncovered, err := FromTestLog(log, moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestAbsoluteIdentityCoverageRequiresAbsoluteRoot(t *testing.T) {
 	if err := os.Symlink(external, alias); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	aliased, err := FromTestLogEnv([]byte("open "+alias+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data", external)))
+	aliased, err := FromTestLog([]byte("open "+alias+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "data", external)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestAbsoluteRootThroughSymlinkedPrefixStaysCovered(t *testing.T) {
 	aliased := filepath.Join(base, "alias", "ext.txt")
 	moduleDir := bindingModule(t)
 	bracket := testBracket(t, moduleDir, "data", aliased)
-	observation, err := FromTestLogEnv([]byte("open "+aliased+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open "+aliased+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +467,7 @@ func TestAbsoluteIdentitySubRootChainStaysEnforced(t *testing.T) {
 	// directory), which is irrelevant here: the per-identity chain rule must
 	// refuse independently.
 	bracket := testBracket(t, moduleDir, rootDir, target)
-	observation, err := FromTestLogEnv([]byte("open "+hop1+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("open "+hop1+"\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,18 +493,18 @@ func bindingReasonObservations(t *testing.T, moduleDir string) (moved, uncovered
 	if err := os.WriteFile(filepath.Join(moduleDir, "data", "fixture.txt"), []byte("edited between run and ingest"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-moved"), WithBracket(movedBracket))
+	moved, err := FromTestLog([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-moved"), WithBracket(movedBracket))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(moduleDir, "other.txt"), []byte("out of root"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	uncovered, err = FromTestLogEnv([]byte("open other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-uncovered"), WithBracket(testBracket(t, moduleDir, "data")))
+	uncovered, err = FromTestLog([]byte("open other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-uncovered"), WithBracket(testBracket(t, moduleDir, "data")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound, err = FromTestLogEnv([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-bound"), WithBracket(testBracket(t, moduleDir, "data")))
+	bound, err = FromTestLog([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-bound"), WithBracket(testBracket(t, moduleDir, "data")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,11 +530,11 @@ func bindingReasonObservations(t *testing.T, moduleDir string) (moved, uncovered
 func TestBindingReasonsSurviveMergeUnion(t *testing.T) {
 	moduleDir := bindingModule(t)
 	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
-	merged, err := MergeEnv(moduleDir, nil, moved, uncovered, bound)
+	merged, err := Merge(moduleDir, nil, moved, uncovered, bound)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reversed, err := MergeEnv(moduleDir, nil, bound, uncovered, moved)
+	reversed, err := Merge(moduleDir, nil, bound, uncovered, moved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestBindingReasonsSurviveAbsoluteConversion(t *testing.T) {
 		"moved":     moved,
 		"uncovered": uncovered,
 	} {
-		converted, err := AbsoluteEnv(observation, moduleDir, nil)
+		converted, err := Absolute(observation, moduleDir, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -608,16 +608,16 @@ func TestBindingReasonsSurviveAbsoluteConversion(t *testing.T) {
 func TestDirtyInspectsBindingUnverifiableState(t *testing.T) {
 	moduleDir := bindingModule(t)
 	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
-	merged, err := MergeEnv(moduleDir, nil, moved, uncovered, bound)
+	merged, err := Merge(moduleDir, nil, moved, uncovered, bound)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reproducible := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true, "other.txt": true}}
-	if dirty, err := DirtyEnv(merged, moduleDir, "commit", reproducible, nil); err != nil || dirty {
+	if dirty, err := Dirty(merged, moduleDir, "commit", reproducible, nil); err != nil || dirty {
 		t.Fatalf("reproducible binding-unverifiable state: dirty=%v err=%v, want false, nil", dirty, err)
 	}
 	partial := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true}}
-	if dirty, err := DirtyEnv(merged, moduleDir, "commit", partial, nil); err != nil || !dirty {
+	if dirty, err := Dirty(merged, moduleDir, "commit", partial, nil); err != nil || !dirty {
 		t.Fatalf("non-reproducible binding-unverifiable state: dirty=%v err=%v, want true, nil", dirty, err)
 	}
 }
@@ -632,7 +632,7 @@ func TestDirtyInspectsBindingUnverifiableState(t *testing.T) {
 func TestBracketNeverWeakensDisposition(t *testing.T) {
 	moduleDir := bindingModule(t)
 	bracket := testBracket(t, moduleDir, "data")
-	observation, err := FromTestLogEnv([]byte("stat other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	observation, err := FromTestLog([]byte("stat other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestBracketNeverWeakensDisposition(t *testing.T) {
 		t.Fatalf("out-of-root stat lost its seal under an unrelated bracket: %+v", observation.State)
 	}
 
-	inRoot, err := FromTestLogEnv([]byte("stat data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	inRoot, err := FromTestLog([]byte("stat data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestBracketNeverWeakensDisposition(t *testing.T) {
 	}
 
 	// The root's own identity is admitted exactly like its interior.
-	rootItself, err := FromTestLogEnv([]byte("stat data\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	rootItself, err := FromTestLog([]byte("stat data\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,11 +662,11 @@ func TestBracketNeverWeakensDisposition(t *testing.T) {
 
 	// An excluded subtree under a declared root is unspanned: its stat
 	// keeps the attributing metadata seal.
-	excluded, err := CaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/sub"))
+	excluded, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths("data/sub"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	exObs, err := FromTestLogEnv([]byte("stat data/sub/x.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(excluded))
+	exObs, err := FromTestLog([]byte("stat data/sub/x.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker"), WithBracket(excluded))
 	if err != nil {
 		t.Fatal(err)
 	}

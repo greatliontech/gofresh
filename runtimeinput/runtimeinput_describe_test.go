@@ -12,7 +12,7 @@ import (
 // unverifiable dispositions are enumerable — identities only, never values.
 func TestDescribeDisclosesIdentitySet(t *testing.T) {
 	dir := t.TempDir()
-	obs, err := Incomplete(dir, "package-test-binary:describe", "testlog lacks operation outcome evidence")
+	obs, err := ambientIncomplete(dir, "package-test-binary:describe", "testlog lacks operation outcome evidence")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,12 +43,12 @@ func TestDescribeDisclosesIdentitySet(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "testdata", "fixture.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(dir, []string{"testdata"})
+	bracket, err := ambientCaptureBracket(dir, []string{"testdata"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := []byte("getenv HOME\nstat testdata/fixture.json\n")
-	fromLog, err := FromTestLog(log, dir, dir, WithCompletedProcess("package-test-binary:describe"), WithBracket(bracket))
+	fromLog, err := ambientFromTestLog(log, dir, dir, WithCompletedProcess("package-test-binary:describe"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
 	}

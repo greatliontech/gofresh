@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // ValidateEnv refuses flags whose selected source gofresh cannot represent,
@@ -48,7 +48,7 @@ func ValidateEnvSnapshot(ctx context.Context, dir string, env, explicit []string
 // EffectiveGOFLAGSEnv returns the GOFLAGS selected by a complete environment
 // under the caller's context.
 func EffectiveGOFLAGSEnv(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := gotool.RunInContextEnv(ctx, dir, env, "env", "GOFLAGS")
+	out, err := gotool.Run(ctx, dir, env, "env", "GOFLAGS")
 	if err != nil {
 		return "", fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
 	}

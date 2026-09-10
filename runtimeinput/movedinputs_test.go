@@ -22,11 +22,11 @@ func TestMovedInputsNamesTheMover(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{"MOVED_INPUT_PROBE=alpha", "PATH=/bin"}
-	bracket, err := CaptureBracket(dir, []string{"data"})
+	bracket, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLogEnv([]byte("getenv MOVED_INPUT_PROBE\nopen data/fixture.txt\n"), dir, dir, env,
+	obs, err := FromTestLog([]byte("getenv MOVED_INPUT_PROBE\nopen data/fixture.txt\n"), dir, dir, env,
 		WithCompletedProcess("package-test-binary:moved"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
@@ -36,13 +36,13 @@ func TestMovedInputsNamesTheMover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if moved, err := MovedInputs(st.Manifest, dir, env); err != nil || len(moved) != 0 {
+	if moved, err := ambientMovedInputs(st.Manifest, dir, env); err != nil || len(moved) != 0 {
 		t.Fatalf("unmoved manifest attributed %v (%v)", moved, err)
 	}
 
 	// The environment value moves: exactly that input is named, value unseen.
 	envMoved := []string{"MOVED_INPUT_PROBE=beta", "PATH=/bin"}
-	moved, err := MovedInputs(st.Manifest, dir, envMoved)
+	moved, err := ambientMovedInputs(st.Manifest, dir, envMoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestMovedInputsNamesTheMover(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err = MovedInputs(st.Manifest, dir, env)
+	moved, err = ambientMovedInputs(st.Manifest, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMovedInputsNamesTheMover(t *testing.T) {
 
 	// The combined digest agrees with the attribution: moved inputs exist
 	// exactly when the state digest moved.
-	cur, err := CurrentEnv(st.Manifest, dir, env)
+	cur, err := ambientCurrentEnv(st.Manifest, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +85,11 @@ func TestStateManifestRoundTripsUnmoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{"ROUNDTRIP_PROBE=v", "PATH=/bin"}
-	bracket, err := CaptureBracket(dir, []string{"data"})
+	bracket, err := ambientCaptureBracket(dir, []string{"data"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLogEnv([]byte("getenv ROUNDTRIP_PROBE\nopen data/f.txt\n"), dir, dir, env,
+	obs, err := FromTestLog([]byte("getenv ROUNDTRIP_PROBE\nopen data/f.txt\n"), dir, dir, env,
 		WithCompletedProcess("package-test-binary:roundtrip"), WithBracket(bracket))
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestStateManifestRoundTripsUnmoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur, err := CurrentEnv(st.Manifest, dir, env)
+	cur, err := ambientCurrentEnv(st.Manifest, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestManifestRejectsMalformedEntryDigests(t *testing.T) {
 		}
 	}
 	raw := `{"v":1,"env":[{"n":"A","d":"nothex"}]}`
-	if _, err := Current(base64.RawURLEncoding.EncodeToString([]byte(raw)), t.TempDir()); err == nil {
+	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(raw)), t.TempDir()); err == nil {
 		t.Fatal("malformed entry digest decoded")
 	}
 }
@@ -131,11 +131,11 @@ func TestManifestRejectsMalformedEntryDigests(t *testing.T) {
 // byte-level compaction cannot collapse — refuse decode and encode alike.
 func TestManifestRejectsDuplicateIdentities(t *testing.T) {
 	dupEnv := `{"v":1,"env":[{"n":"A","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"n":"A","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
-	if _, err := Current(base64.RawURLEncoding.EncodeToString([]byte(dupEnv)), t.TempDir()); err == nil {
+	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(dupEnv)), t.TempDir()); err == nil {
 		t.Fatal("duplicate env identity decoded")
 	}
 	dupPath := `{"v":1,"paths":[{"k":"rel","p":"x","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"k":"rel","p":"x","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
-	if _, err := Current(base64.RawURLEncoding.EncodeToString([]byte(dupPath)), t.TempDir()); err == nil {
+	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(dupPath)), t.TempDir()); err == nil {
 		t.Fatal("duplicate path identity decoded")
 	}
 	if _, err := encode(manifest{Version: manifestVersion, Env: []envInput{
@@ -154,7 +154,7 @@ func TestManifestRejectsOlderToolEncodings(t *testing.T) {
 		`{"v":1,"env":["A","B"]}`,
 		`{"v":1,"paths":[{"k":"rel","p":"tracked"}]}`,
 	} {
-		if _, err := Current(base64.RawURLEncoding.EncodeToString([]byte(raw)), t.TempDir()); err == nil {
+		if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(raw)), t.TempDir()); err == nil {
 			t.Fatalf("older-tool encoding decoded: %s", raw)
 		}
 	}

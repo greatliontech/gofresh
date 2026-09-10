@@ -24,7 +24,7 @@ func TestScanPureDirectives(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	const pkg = "github.com/greatliontech/gofresh/internal/puredirective"
-	pred, err := ScanPureDirectives(pkg)
+	pred, err := scanPureDirectives(pkg)
 	if err != nil {
 		t.Fatalf("ScanPureDirectives: %v", err)
 	}
@@ -80,9 +80,9 @@ func TestScanAcceptsUniverseMethodAcrossTestVariants(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pred, err := ScanPureDirectivesIn(dir, "example.com/universe")
+	pred, err := scanPureDirectivesIn(dir, "example.com/universe")
 	if err != nil {
-		t.Fatalf("ScanPureDirectivesIn: %v", err)
+		t.Fatalf("ScanPureDirectives: %v", err)
 	}
 	if !pred(Subject{Package: "example.com/universe", Symbol: "F"}) {
 		t.Errorf("F: pure=false, want true")
@@ -146,7 +146,7 @@ func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
 	if !variant {
 		t.Fatal("fixture no longer yields the recompiled dependency variant r [a.test]; the attribution assertions below would hold vacuously")
 	}
-	scan, err := scanSubjectsInWithBuildFlags(context.Background(), dir, nil, "example.com/m/a", "example.com/m/r")
+	scan, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, os.Environ(), nil, "example.com/m/a", "example.com/m/r")
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}

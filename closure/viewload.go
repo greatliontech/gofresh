@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/processenv"
 	"golang.org/x/tools/go/packages"
 )
@@ -30,17 +30,12 @@ func (v *ViewLoad) Packages() []*packages.Package {
 	return v.pkgs
 }
 
-// LoadViewPackagesEnv performs the single typed load of one observation pass
+// LoadViewPackages performs the single typed load of one observation pass
 // under the caller's complete immutable environment and executable build
 // flags — the same selection discipline as every other load of the view
-// (REQ-closure-analysis).
-func LoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
-	return LoadViewPackagesEnvSnapshot(ctx, dir, env, buildFlags, nil, pkgPaths...)
-}
-
-// LoadViewPackagesEnvSnapshot is LoadViewPackagesEnv validating GOFLAGS from
+// (REQ-closure-analysis). A non-nil snapshot validates GOFLAGS from
 // the pass's one env snapshot when non-nil.
-func LoadViewPackagesEnvSnapshot(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*ViewLoad, error) {
+func LoadViewPackages(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*ViewLoad, error) {
 	// Roots-only syntax: dependency types come from export data. Every
 	// consumer needing dependency-graph syntax names its packages as
 	// patterns (the view path adds mutable-local graph packages;
@@ -49,12 +44,13 @@ func LoadViewPackagesEnvSnapshot(ctx context.Context, dir string, env, buildFlag
 	return loadView(ctx, dir, env, buildFlags, snapshot, false, pkgPaths...)
 }
 
-// LoadViewGraphEnv is LoadViewPackagesEnv with whole-graph syntax: every
-// dependency of the patterns is source-loaded too. Reserved for the shapes a
-// roots-only load cannot express — a test-cycle intermediate recompilation
-// ("r [a.test]") exists only inside a test binary's graph, so its syntax is
-// reachable solely through a dependency-expanded load of the tested package.
-func LoadViewGraphEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
+// LoadViewGraph is LoadViewPackages with whole-graph syntax: every
+// dependency of the patterns is source-loaded too. Reserved for the shapes
+// a roots-only load cannot express — a test-cycle intermediate
+// recompilation ("r [a.test]") exists only inside a test binary's graph, so
+// its syntax is reachable solely through a dependency-expanded load of the
+// tested package.
+func LoadViewGraph(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
 	return loadView(ctx, dir, env, buildFlags, nil, true, pkgPaths...)
 }
 

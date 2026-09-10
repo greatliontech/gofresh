@@ -46,9 +46,9 @@ func hasherUnder(t *testing.T, dir string, env []string, buildFlags []string) *H
 	var h *Hasher
 	var err error
 	if env == nil {
-		h, err = NewAt(dir, buildFlags...)
+		h, err = newAt(dir, buildFlags...)
 	} else {
-		h, err = NewAtContextEnv(context.Background(), dir, env, buildFlags...)
+		h, err = newAtEnv(context.Background(), dir, env, buildFlags...)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +370,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 		{Package: "example.com/batch/a", Symbol: "TestA"},
 		{Package: "example.com/batch/b", Symbol: "B"},
 	}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 		if batched[subject] != independent[subject] {
 			t.Fatalf("batched %v = %+v, independent = %+v", subject, batched[subject], independent[subject])
 		}
-		hIndependent, err := NewAt(dir)
+		hIndependent, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}

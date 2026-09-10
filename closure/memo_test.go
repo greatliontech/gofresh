@@ -48,7 +48,7 @@ func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
 		{Package: "example.com/memo", Symbol: "Missing"},
 	}
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := NewAt(dir)
+	second, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	dir := memoModule(t)
 	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	otherScope, err := NewAt(dir)
+	otherScope, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "memo.go"), append(src, []byte("\nfunc Extra() int { return 9 }\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := NewAt(dir)
+	moved, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "memo_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	testMoved, err := NewAt(dir)
+	testMoved, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	dir := memoModule(t)
 	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 
 	// A pre-armed stale key is discarded at the batch entry, so the batch
 	// derives the real key and hits the entry the first pass stored.
-	second, err := NewAt(dir)
+	second, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 		t.Fatal("the observability batch retained a pre-call key generation")
 	}
 
-	third, err := NewAt(dir)
+	third, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 	}
 	writeFile(t, dir, "slices.go", source.String())
 
-	first, err := NewAt(dir)
+	first, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
 		}
 	}
 
-	second, err := NewAt(dir)
+	second, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := memoModule(t)
 	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}, {Package: "example.com/memo", Symbol: "TestPure"}}
-	cold, err := NewAt(dir)
+	cold, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
 	if proofs, _ := cold.Persisted(); proofs != 1 {
 		t.Fatalf("cold batch persisted %d proof slices, want the one slice it stored", proofs)
 	}
-	warm, err := NewAt(dir)
+	warm, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testin
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := memoModule(t)
-	cold, err := NewAt(dir)
+	cold, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testin
 	if _, err := cold.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "Pure"}}); err != nil {
 		t.Fatal(err)
 	}
-	sibling, err := NewAt(dir)
+	sibling, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

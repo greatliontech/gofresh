@@ -70,7 +70,7 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 	compute := func(body string) (tier2Result, Observability) {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestUnboundedConstraintsStayOpenWorld(t *testing.T) {
 	} {
 		body := "package bounded\n\nconst fixtureConstant = 1\n\nfunc helper(x int) int { return x + fixtureConstant }\n\n" + decl + "\n\nfunc Unrelated() string { return \"quiet\" }\n"
 		dir := writeBoundedFixture(t, body)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -166,7 +166,7 @@ func TestBoundedGenericWithoutInstantiationKeepsOriginFold(t *testing.T) {
 	compute := func(body string) tier2Result {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +200,7 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	dir := writeBoundedFixture(t, boundedBody)
 	sum := Subject{Package: "example.com/bounded", Symbol: "Sum"}
 	unrelated := Subject{Package: "example.com/bounded", Symbol: "Unrelated"}
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	solo, err := NewAt(dir)
+	solo, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestBoundedGenericRootsInstantiationFlow(t *testing.T) {
 	compute := func(body string) tier2Result {
 		t.Helper()
 		dir := writeBoundedFixture(t, body)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -339,7 +339,7 @@ type Tagged int
 func (t Tagged) TagUniq() string { return fns["a"]() }
 `
 	dir := writeBoundedFixture(t, effectBody)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestRecursiveConstraintsTerminateOpen(t *testing.T) {
 	} {
 		body := "package bounded\n\nconst fixtureConstant = 1\n\nfunc helper(x int) int { return x + fixtureConstant }\n\n" + decl + "\n\nfunc Unrelated() string { return \"quiet\" }\n"
 		dir := writeBoundedFixture(t, body)
-		h, err := NewAt(dir)
+		h, err := newAt(dir)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -414,7 +414,7 @@ func UseSum() int { return 3 }
 func Unrelated() string { return "quiet" }
 `
 	dir := writeBoundedFixture(t, body)
-	h, err := NewAt(dir)
+	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
