@@ -1151,7 +1151,7 @@ in their repos.
       payloads, the faces keeping prefix and column policy alone; one
       findings-path resolver, one guidance accessor, one target-source
       preamble, one delta-cut acquisition.
-- [ ] 211. gomutant: the vestigial and façade sweep — ~30 names with no
+- [x] 211. gomutant: the vestigial and façade sweep — ~30 names with no
       caller (the non-Context wrapper pairs production never takes,
       readInput, gitref.output, gitOutput, subjectView.inspect, five
       engine helpers), the exported-but-test-only tree methods
