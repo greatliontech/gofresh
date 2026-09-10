@@ -981,7 +981,7 @@ in their repos.
       two hand-rolled copies of recordstore.Digest (derive.go's group
       digest, telemetry.go's home digest beside its own Root call) read
       the core's; doc deletes at close.
-- [ ] 186. gomutant: the execution window's cost models in one home
+- [x] 186. gomutant: the execution window's cost models in one home
       (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
       home stating the three questions (membership, order, execution),
       their permitted inputs, and the constants beside the invariants that
