@@ -1061,7 +1061,7 @@ in their repos.
 
 ## Band G — gofresh under the emergent shape (chartered by audit 194)
 
-- [ ] 198. gofresh: the spec chunk — contract the code holds and the spec
+- [x] 198. gofresh: the spec chunk — contract the code holds and the spec
       does not: ToolchainSkew's directional cross-major fail-closed
       refusal and the consumers' GOVERSION sampling obligation
       (provenance.go) specified; the shared-substrate sentence names
