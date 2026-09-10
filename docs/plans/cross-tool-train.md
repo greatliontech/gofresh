@@ -1266,7 +1266,7 @@ in their repos.
       publish path; invariants: REQ-policy-cancellation's unit of
       persistence, REQ-evidence-freshness-no-health's serving integrity;
       the last of the parallel pairs 170 collapsed; docs delete at close.
-- [ ] 222. stipulator: the spec chunk — the policy's blanket purity
+- [x] 222. stipulator: the spec chunk — the policy's blanket purity
       assertion (assume_pure, invocation-wide, set on this corpus's own
       three invocations) stated beside REQ-evidence-witness-freshness's
       in-source opt-in; REQ-core-proto-io carves out the intra-
