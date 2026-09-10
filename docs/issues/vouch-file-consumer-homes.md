@@ -1,6 +1,6 @@
 # The consumers' vouch homes fold into the engine's file at their bumps
 
-`Lands: pew's and stipulator's next gofresh bump past v0.99.0 (the
+`Lands: stipulator's next gofresh bump past v0.99.0 (the
 release carrying REQ-vouch-input's file channel); gomutant's arm closed
 at its bump, cross-tool train chunk 163`
 
@@ -9,13 +9,12 @@ The engine now reads the repository's reviewed vouch set itself
 union with the option's set). Until each consumer bumps, three homes
 coexist and the bump of each must hold "one set has one home":
 
-- pew reads its store's `vouches` (REQ-pew-vouch-source, the store root
-  named by `--bench-dir`) through its own copy of the grammar
-  (`cmd/pew/vouchfile.go`, `parseDynamicStateVouches`); at its bump it
-  either points its readers at the engine's file (the module root, not
-  the store root — a spec change on pew's side) or passes its store set
-  through the option with `WithoutRepositoryVouches`, and deletes the
-  duplicated reader.
+- pew's arm CLOSED at its bump to v0.101.3 (train chunk 229): its store's
+  `vouches` stays the reviewed set's one home (REQ-pew-vouch-source),
+  read through the engine's grammar (gofresh.ReadVouchFile /
+  ParseVouchEntry — the duplicated reader is gone) and passed through
+  the option with `WithoutRepositoryVouches`, so the module's own file
+  discharges nothing for pew's engines.
 - gomutant's `--vouch` flags extend the file's set since its bump to
   v0.99.0 (chunk 163; its guidance says so); the fleet-sweep gatherer's
   mirrored flag list can go once the repository file carries the

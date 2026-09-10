@@ -1312,7 +1312,7 @@ in their repos.
 
 ## Band J — pew under the emergent shape (chartered by audit 197)
 
-- [ ] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (pew docs/issues/
+- [x] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (pew docs/issues/
       gofresh-corpus-pin-lag.md, serve-proven-blocked-by-benchmark-loop.md)
       — six releases consumed at once: the harness-pacing audit that
       lifts serve-proven's inertness (today run's default serves only
