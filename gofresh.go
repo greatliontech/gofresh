@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/buildflags"
@@ -42,19 +43,19 @@ const (
 // surface over a package's test-variant compartment, served by
 // View.TestVariantLedger (REQ-closure-test-variant-compartment).
 type (
-	TestVariantLedger            = closure.TestVariantLedger
-	TestVariantDeclaration       = closure.TestVariantDeclaration
-	TestVariantFileHeader        = closure.TestVariantFileHeader
-	TestVariantDelta             = closure.TestVariantDelta
-	TestVariantDeclarationChange = closure.TestVariantDeclarationChange
-	TestVariantHeaderChange      = closure.TestVariantHeaderChange
+	TestVariantLedger            = testvariant.TestVariantLedger
+	TestVariantDeclaration       = testvariant.TestVariantDeclaration
+	TestVariantFileHeader        = testvariant.TestVariantFileHeader
+	TestVariantDelta             = testvariant.TestVariantDelta
+	TestVariantDeclarationChange = testvariant.TestVariantDeclarationChange
+	TestVariantHeaderChange      = testvariant.TestVariantHeaderChange
 )
 
 // DiffTestVariantLedgers classifies the delta between a recorded and a current
 // compartment ledger; TestVariantDelta.Inert carries the one Go-semantics
 // judgment gofresh renders over it (REQ-closure-test-variant-compartment).
 func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
-	return closure.DiffTestVariantLedgers(before, after)
+	return testvariant.DiffTestVariantLedgers(before, after)
 }
 
 // Subject names the symbol whose freshness is tracked — a package import path and a
@@ -436,7 +437,7 @@ type Fingerprint struct {
 	// a consumer validating test-binary evidence can tell "a sibling test
 	// moved" (stale with reason "test variants") from any other drift. A
 	// package with no test files records the stable empty-set identity
-	// (closure.EmptyTestVariantClosure); an empty value identifies a
+	// (testvariant.EmptyTestVariantClosure); an empty value identifies a
 	// recording that predates the partition and fails closed to stale
 	// (REQ-closure-test-variant-compartment).
 	TestVariantClosure   string

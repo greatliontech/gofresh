@@ -64,9 +64,6 @@ import (
 // file's real ones, so no proof the walks refuse is ever granted.
 const effectScanStrategy = "gofresh/effect-scan@21"
 
-// EffectScanStrategy is the persisted effect scan's strategy version.
-func EffectScanStrategy() string { return effectScanStrategy }
-
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend's version, and — when the analysis' build selection is not
 // the audited default — the selection's audit verdict, because the

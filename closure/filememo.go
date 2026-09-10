@@ -5,8 +5,9 @@ import (
 	"os"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/closure/internal/digest"
-	"github.com/greatliontech/gofresh/closure/internal/testvariant"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 )
 
 // The per-file memos serve the two syntactic derivations the closure
@@ -136,7 +137,14 @@ func (h *Hasher) recordFileScan(dir, digest string, scan maximalEffectScan) {
 	h.fileMemo.pendingScans[dir][digest] = effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred}
 }
 
-// Parsed and Record implement testvariant.ParseMemo over the parse memo,
+// The two seams the compartment computation reads through: the Hasher
+// is its Source, variantParseMemo its ParseMemo.
+var (
+	_ compartment.Source    = (*Hasher)(nil)
+	_ compartment.ParseMemo = variantParseMemo{}
+)
+
+// Parsed and Record implement compartment.ParseMemo over the parse memo,
 // keyed by the file's name within its directory and its content digest.
 type variantParseMemo struct {
 	h            *Hasher
@@ -214,9 +222,28 @@ func (h *Hasher) flushFileMemos() {
 	h.fileMemo.pendingCanonical = map[string]map[string]string{}
 }
 
-// ReadFile implements testvariant.Source over the Hasher's once-per-pass
+// ReadFile implements compartment.Source over the Hasher's once-per-pass
 // reads.
 func (h *Hasher) ReadFile(path string) ([]byte, [32]byte, error) {
 	fb, err := h.readFile(path)
 	return fb.content, fb.sum, err
+}
+
+// TestVariantLedger returns the declaration ledger of pkgPath's test-variant
+// compartment, computed from the same file reads as the compartment hash and
+// memoized for the Hasher's lifetime. The returned value is caller-owned.
+func (h *Hasher) TestVariantLedger(pkgPath string) (testvariant.TestVariantLedger, error) {
+	if identity, ok := h.testVariants[pkgPath]; ok {
+		return identity.Ledger.Clone(), nil
+	}
+	// This path discards the contributions it computes — the ledger and
+	// compartment derive from the walk's own file reads, and the content
+	// cache is nil outside a batch call, so every read here is fresh —
+	// so a stale armed memo entry from a prior batch call is unobservable
+	// here; a future consumer of contributions on this path must reset
+	// h.contribs like the batch entries do.
+	if _, _, err := h.maximalContributionsAndFiles(pkgPath); err != nil {
+		return testvariant.TestVariantLedger{}, err
+	}
+	return h.testVariants[pkgPath].Ledger.Clone(), nil
 }

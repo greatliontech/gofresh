@@ -29,7 +29,7 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := h.ComputeMaximalBatch(subjects)
+	before, _, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 	if err := os.WriteFile(path, []byte("package maximal\n\nfunc F() int { return 1 }\nfunc G() int { return 3 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	after, err := h.ComputeMaximalBatch(subjects)
+	after, _, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, sources, err := h.ComputeMaximalBatchWithSources([]Subject{subject})
+	_, sources, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestComputeMaximalBatchConservativelyMarksExternalPackageCode(t *testing.T)
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/external", Symbol: "Pure"}
-	closures, err := h.ComputeMaximalBatch([]Subject{subject})
+	closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestComputeMaximalBatchConservativelyMarksDotImportedExternalCode(t *testin
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/dotexternal", Symbol: "Read"}
-	closures, err := h.ComputeMaximalBatch([]Subject{subject})
+	closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 				t.Fatal(err)
 			}
 			subject := Subject{Package: "example.com/wrapper", Symbol: tc.symbol}
-			closures, err := h.ComputeMaximalBatch([]Subject{subject})
+			closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +298,7 @@ func TestComputeMaximalBatchClassifiesCrossFileTestingAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/wrapper", Symbol: "F"}
-	closures, err := h.ComputeMaximalBatch([]Subject{subject})
+	closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestComputeMaximalBatchClassifiesImportedTestingAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/wrapper", Symbol: "F"}
-	closures, err := h.ComputeMaximalBatch([]Subject{subject})
+	closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestComputeMaximalBatchDoesNotClassifyUnrelatedPackageMethod(t *testing.T) 
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/wrapper", Symbol: "F"}
-	closures, err := h.ComputeMaximalBatch([]Subject{subject})
+	closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestComputeMaximalBatchConservativelyMarksNonGoEdges(t *testing.T) {
 				t.Fatal(err)
 			}
 			subject := Subject{Package: "example.com/edge", Symbol: "F"}
-			closures, err := h.ComputeMaximalBatch([]Subject{subject})
+			closures, _, err := h.ComputeMaximalBatch([]Subject{subject})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -606,7 +606,7 @@ func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.ctx = &cancelAfterContext{Context: context.Background(), remaining: 1}
-	_, err = h.ComputeMaximalBatch([]Subject{{
+	_, _, err = h.ComputeMaximalBatch([]Subject{{
 		Package: "github.com/greatliontech/gofresh/closure/fixtures/direct",
 		Symbol:  "BenchmarkDirect",
 	}})
@@ -633,7 +633,7 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := h.ComputeMaximalBatch([]Subject{subject})
+	before, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := h2.ComputeMaximalBatch([]Subject{subject})
+	after, _, err := h2.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}

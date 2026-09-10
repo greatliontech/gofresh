@@ -23,7 +23,7 @@ func TestScanPureDirectives(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/puredirective"
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/puredirective"
 	pred, err := scanPureDirectives(pkg)
 	if err != nil {
 		t.Fatalf("ScanPureDirectives: %v", err)

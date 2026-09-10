@@ -2207,7 +2207,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sharedHasher.ComputeMaximalBatch(subjects); err != nil {
+	if _, _, err := sharedHasher.ComputeMaximalBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
 	shared, err := sharedHasher.ComputeObservabilityBatch(subjects)

@@ -8,8 +8,9 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/greatliontech/gofresh/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/closure/internal/digest"
-	"github.com/greatliontech/gofresh/closure/internal/testvariant"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 )
 
 // fileMemoModule writes a package whose plain files carry an effect, and
@@ -48,7 +49,7 @@ func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []strin
 	analysisTestHooks.fileParse = func(path string) { parsed = append(parsed, filepath.Base(path)) }
 	analysisTestHooks.variantParse = func(name string) { derived = append(derived, name) }
 	defer func() { analysisTestHooks.fileParse, analysisTestHooks.variantParse = nil, nil }()
-	got, err := h.ComputeMaximalBatch(fileMemoSubjects)
+	got, _, err := h.ComputeMaximalBatch(fileMemoSubjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,18 +261,18 @@ func TestCompartmentParseRoundTripsThroughThePersistedForm(t *testing.T) {
 	names := []string{"a_test.go", "b_test.go", "data.txt"}
 	compiled := map[string]bool{"a_test.go": true, "b_test.go": true}
 	embedded := map[string]bool{"data.txt": true, "b_test.go": true}
-	want, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, nil)
+	want, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	memo := &recordingMemo{entries: map[string][]byte{}}
-	if _, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo); err != nil {
+	if _, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo); err != nil {
 		t.Fatal(err)
 	}
 	if len(memo.entries) != 2 {
 		t.Fatalf("recorded %d derivations, want the two compiled members", len(memo.entries))
 	}
-	got, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo)
+	got, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo)
 	if err != nil {
 		t.Fatal(err)
 	}

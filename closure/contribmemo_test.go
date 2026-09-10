@@ -118,7 +118,7 @@ func TestBatchEntriesDiscardStaleContributionEntries(t *testing.T) {
 	}
 	subject := Subject{Package: "example.com/memo", Symbol: "M"}
 	h.contribs = map[string]depContribution{"example.com/memo": {contribution: "src:example.com/memo=stale"}}
-	batched, err := h.ComputeMaximalBatch([]Subject{subject})
+	batched, _, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}

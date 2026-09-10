@@ -463,28 +463,17 @@ func withBuildCacheRoot(root string) TestLogOption {
 // nothing.
 func withEphemeralTempRoot(root string) TestLogOption {
 	return func(c *testLogConfig) {
-		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
-			c.err = fmt.Errorf("runtimeinputs: ephemeral temp root must be a clean absolute path, got %q", root)
+		if err := cleanAbsoluteRoot("ephemeral temp root", root); err != nil {
+			c.err = err
 			return
 		}
 		c.ephemeralRoots = append(c.ephemeralRoots, root)
 	}
 }
 
-// ValidateTestLogOptions applies the declaration options to a throwaway
-// configuration and reports the first refusal, so a producer can refuse a
-// malformed declaration — a static-input root outside the module, a
-// scratch namespace with a malformed pattern, an empty exclusion —
-// before it spawns the process whose testlog the options would later
-// ingest, instead of discovering it after the run.
-func ValidateTestLogOptions(opts ...TestLogOption) error {
-	_, err := applyTestLogOptions(opts)
-	return err
-}
-
-// applyTestLogOptions is the one application of the declaration options,
-// shared by pre-spawn validation and ingest so the two report the same
-// refusal for the same options: the first malformed declaration refuses.
+// applyTestLogOptions applies the declaration options in order: the
+// first malformed declaration refuses, so a caller sees one refusal
+// naming the earliest fault.
 func applyTestLogOptions(opts []TestLogOption) (testLogConfig, error) {
 	var c testLogConfig
 	for _, opt := range opts {
@@ -496,10 +485,19 @@ func applyTestLogOptions(opts []TestLogOption) (testLogConfig, error) {
 	return c, nil
 }
 
+// cleanAbsoluteRoot is the one admission of a declared absolute root: a
+// non-empty, clean, absolute path.
+func cleanAbsoluteRoot(kind, root string) error {
+	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return fmt.Errorf("runtimeinputs: %s must be a clean absolute path, got %q", kind, root)
+	}
+	return nil
+}
+
 func guardRootOption(root, excludeSub string) TestLogOption {
 	return func(c *testLogConfig) {
-		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
-			c.err = fmt.Errorf("runtimeinputs: guard-covered root must be a clean absolute path, got %q", root)
+		if err := cleanAbsoluteRoot("guard-covered root", root); err != nil {
+			c.err = err
 			return
 		}
 		c.guardRoots = append(c.guardRoots, guardRootDecl{path: root, excludeSub: excludeSub})

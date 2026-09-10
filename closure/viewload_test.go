@@ -33,7 +33,7 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := unshared.ComputeMaximalBatch(subjects)
+	want, _, err := unshared.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 	var privateLoads []string
 	analysisTestHooks.testingTypeOwnLoad = func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) }
 	defer func() { analysisTestHooks.testingTypeOwnLoad = nil }()
-	got, err := shared.ComputeMaximalBatch(subjects)
+	got, _, err := shared.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
 			units = append(units, fmt.Sprintf("%s:%d/%d", pkgPath, index, total))
 		}
 	})
-	got, err := h.ComputeMaximalBatch(subjects)
+	got, _, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}

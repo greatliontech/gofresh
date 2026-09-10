@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/render"
@@ -223,7 +224,7 @@ type observationFacts struct {
 	// testVariantLedgers: per-package compartment ledgers, pure functions
 	// of the same bytes the compartment hashes fold, so the agreement
 	// pair's hash comparison vouches for them.
-	testVariantLedgers map[string]closure.TestVariantLedger
+	testVariantLedgers map[string]testvariant.TestVariantLedger
 }
 
 // wireProgress routes a Hasher's step, unit, and diagnostic events to
@@ -392,7 +393,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if viewTestHooks.maximalBatch != nil {
 		viewTestHooks.maximalBatch()
 	}
-	computed, sources, err := hasher.ComputeMaximalBatchWithSources(requests)
+	computed, sources, err := hasher.ComputeMaximalBatch(requests)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -405,7 +406,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		attestationDischarges:    make(map[Subject]string, len(subjects)),
 		packageProcessDischarges: make(map[Subject]string, len(subjects)),
 		sourceFilesBySubject:     make(map[Subject][]string, len(subjects)),
-		testVariantLedgers:       make(map[string]closure.TestVariantLedger, len(packages)),
+		testVariantLedgers:       make(map[string]testvariant.TestVariantLedger, len(packages)),
 	}
 	for _, pkg := range packages {
 		// Served from the hasher's compartment memo: the ledger was derived
@@ -1101,7 +1102,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	attestationDischarges := make(map[Subject]string, len(unique))
 	packageProcessDischarges := make(map[Subject]string, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
-	ledgers := make(map[string]closure.TestVariantLedger, len(packages))
+	ledgers := make(map[string]testvariant.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
 	for _, subject := range unique {
 		sourceFilesBySubject[subject] = v.facts.sourceFilesBySubject[subject]

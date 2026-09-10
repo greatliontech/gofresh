@@ -69,7 +69,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		batched, batchedSources, err := batchHasher.ComputeMaximalBatchWithSources(subjects)
+		batched, batchedSources, err := batchHasher.ComputeMaximalBatch(subjects)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			independent, independentSources, err := fresh.ComputeMaximalBatchWithSources([]Subject{subject})
+			independent, independentSources, err := fresh.ComputeMaximalBatch([]Subject{subject})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func FuzzMaximalClosureFloor(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		after, err := edited.ComputeMaximalBatch([]Subject{last})
+		after, _, err := edited.ComputeMaximalBatch([]Subject{last})
 		if err != nil {
 			t.Fatal(err)
 		}

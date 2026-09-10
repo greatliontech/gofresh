@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
-	"github.com/greatliontech/gofresh/closure/internal/testvariant"
+	"github.com/greatliontech/gofresh/closure/internal/compartment"
 )
 
 func memoModule(t *testing.T) string {
@@ -228,8 +228,8 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	}
 	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a"})
 	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	third.variantScope = map[string]testvariant.Identity{"example.com/memo": {Hash: "stale-compartment"}}
-	batched, err := third.ComputeMaximalBatch(subjects)
+	third.variantScope = map[string]compartment.Identity{"example.com/memo": {Hash: "stale-compartment"}}
+	batched, _, err := third.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}

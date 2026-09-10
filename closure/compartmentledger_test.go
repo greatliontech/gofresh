@@ -2,6 +2,7 @@ package closure
 
 import (
 	"fmt"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -187,7 +188,7 @@ func TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot(t *
 			if reflect.DeepEqual(la, lb) {
 				t.Fatalf("two configurations, one ledger: %+v", la)
 			}
-			has := func(l TestVariantLedger) bool {
+			has := func(l testvariant.TestVariantLedger) bool {
 				for _, d := range l.Declarations {
 					if d.Name == "TestExtra" {
 						return true
@@ -201,13 +202,13 @@ func TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot(t *
 			// The member is a member under both, its header the whole
 			// content marked embedded either way: embedded data under the
 			// excluding configuration, a dual member under the including one.
-			headerOf := func(l TestVariantLedger) (TestVariantFileHeader, bool) {
+			headerOf := func(l testvariant.TestVariantLedger) (testvariant.TestVariantFileHeader, bool) {
 				for _, h := range l.FileHeaders {
 					if h.File == a.member {
 						return h, true
 					}
 				}
-				return TestVariantFileHeader{}, false
+				return testvariant.TestVariantFileHeader{}, false
 			}
 			hp, okp := headerOf(la)
 			ht, okt := headerOf(lb)

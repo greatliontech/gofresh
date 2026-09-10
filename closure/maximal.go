@@ -25,15 +25,10 @@ import (
 // The package's own test-variant source is partitioned out of the core hash
 // into the Closure's TestVariants compartment
 // (REQ-closure-test-variant-compartment).
-func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, error) {
-	results, _, err := h.ComputeMaximalBatchWithSources(subjects)
-	return results, err
-}
-
-// ComputeMaximalBatchWithSources also returns the exact mutable source paths
-// whose bytes contribute to each subject's maximal closure. Cache-module and
-// standard-library inputs remain represented by their existing guards.
-func (h *Hasher) ComputeMaximalBatchWithSources(subjects []Subject) (map[Subject]Closure, map[Subject][]string, error) {
+// It also returns the exact mutable source paths whose bytes contribute to
+// each subject's maximal closure. Cache-module and standard-library inputs
+// remain represented by their existing guards.
+func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, map[Subject][]string, error) {
 	if err := h.contextErr(); err != nil {
 		return nil, nil, err
 	}

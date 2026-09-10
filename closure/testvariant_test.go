@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,7 +35,7 @@ func computeAt(t *testing.T, dir string, subjects ...Subject) map[Subject]Closur
 func computeUnder(t *testing.T, dir string, env []string, buildFlags []string, subjects ...Subject) map[Subject]Closure {
 	t.Helper()
 	h := hasherUnder(t, dir, env, buildFlags)
-	closures, err := h.ComputeMaximalBatch(subjects)
+	closures, _, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +57,7 @@ func hasherUnder(t *testing.T, dir string, env []string, buildFlags []string) *H
 	return h
 }
 
-func ledgerAt(t *testing.T, dir, pkgPath string) TestVariantLedger {
+func ledgerAt(t *testing.T, dir, pkgPath string) testvariant.TestVariantLedger {
 	t.Helper()
 	ledger, _ := ledgerUnder(t, dir, nil, nil, pkgPath)
 	return ledger
@@ -64,7 +65,7 @@ func ledgerAt(t *testing.T, dir, pkgPath string) TestVariantLedger {
 
 // ledgerUnder is the compartment's ledger and its member files under a
 // listing configuration.
-func ledgerUnder(t *testing.T, dir string, env []string, buildFlags []string, pkgPath string) (TestVariantLedger, []string) {
+func ledgerUnder(t *testing.T, dir string, env []string, buildFlags []string, pkgPath string) (testvariant.TestVariantLedger, []string) {
 	t.Helper()
 	h := hasherUnder(t, dir, env, buildFlags)
 	ledger, err := h.TestVariantLedger(pkgPath)
@@ -189,14 +190,14 @@ func TestNoTestPackageCompartmentIsStableEmptyIdentity(t *testing.T) {
 	})
 	subject := Subject{Package: "example.com/notest", Symbol: "F"}
 	first := computeAt(t, dir, subject)
-	if first[subject].TestVariants != EmptyTestVariantClosure {
-		t.Fatalf("no-test compartment = %q, want the defined empty identity %q", first[subject].TestVariants, EmptyTestVariantClosure)
+	if first[subject].TestVariants != testvariant.EmptyTestVariantClosure {
+		t.Fatalf("no-test compartment = %q, want the defined empty identity %q", first[subject].TestVariants, testvariant.EmptyTestVariantClosure)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package notest\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	second := computeAt(t, dir, subject)
-	if second[subject].TestVariants != EmptyTestVariantClosure {
+	if second[subject].TestVariants != testvariant.EmptyTestVariantClosure {
 		t.Fatalf("no-test compartment drifted to %q after a production edit", second[subject].TestVariants)
 	}
 	ledger := ledgerAt(t, dir, "example.com/notest")
@@ -254,13 +255,13 @@ func TestLedgerNamesTheEditedAndAppendedDeclarations(t *testing.T) {
 	})
 	const pkg = "example.com/ledger"
 	subject := Subject{Package: pkg, Symbol: "F"}
-	entry := func(ledger TestVariantLedger, name string) (TestVariantDeclaration, bool) {
+	entry := func(ledger testvariant.TestVariantLedger, name string) (testvariant.TestVariantDeclaration, bool) {
 		for _, declaration := range ledger.Declarations {
 			if declaration.Name == name {
 				return declaration, true
 			}
 		}
-		return TestVariantDeclaration{}, false
+		return testvariant.TestVariantDeclaration{}, false
 	}
 	before := computeAt(t, dir, subject)
 	beforeLedger := ledgerAt(t, dir, pkg)
@@ -374,7 +375,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	batched, batchedSources, err := h.ComputeMaximalBatchWithSources(subjects)
+	batched, batchedSources, err := h.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +388,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, independentSources, err := hIndependent.ComputeMaximalBatchWithSources([]Subject{subject})
+		_, independentSources, err := hIndependent.ComputeMaximalBatch([]Subject{subject})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -395,7 +396,7 @@ func TestComputeMaximalBatchMatchesIndependentComputeForBothHashes(t *testing.T)
 			t.Fatalf("batched sources for %v = %v, independent = %v", subject, batchedSources[subject], independentSources[subject])
 		}
 	}
-	if batched[subjects[2]].TestVariants != EmptyTestVariantClosure {
+	if batched[subjects[2]].TestVariants != testvariant.EmptyTestVariantClosure {
 		t.Fatalf("no-test package in batch = %q, want empty identity", batched[subjects[2]].TestVariants)
 	}
 	if batched[subjects[0]].TestVariants != batched[subjects[1]].TestVariants {
@@ -529,7 +530,7 @@ func TestEmbeddedGoFixtureIsDataNotSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "testdata/fixture.go"), []byte(files["testdata/fixture.go"]+"\nfunc Extra() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	delta := DiffTestVariantLedgers(before, ledgerAt(t, dir, pkg))
+	delta := testvariant.DiffTestVariantLedgers(before, ledgerAt(t, dir, pkg))
 	if delta.Inert() || len(delta.Added) != 0 {
 		t.Fatalf("embedded .go fixture edit = %+v (inert=%v), want a non-inert header-only movement", delta, delta.Inert())
 	}
@@ -568,7 +569,7 @@ func TestCompiledAndEmbeddedTestFileFailsClosed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "helper_test.go"), []byte(files["helper_test.go"]+"\nfunc extraHelper() int { return 3 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	delta := DiffTestVariantLedgers(before, ledgerAt(t, dir, pkg))
+	delta := testvariant.DiffTestVariantLedgers(before, ledgerAt(t, dir, pkg))
 	if delta.Inert() {
 		t.Fatalf("dual-member edit classified inert: %+v", delta)
 	}
@@ -592,14 +593,14 @@ func TestLedgerDeltaOverRealLedgers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "delta_test.go"), []byte(original+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	appended := DiffTestVariantLedgers(recorded, ledgerAt(t, dir, pkg))
+	appended := testvariant.DiffTestVariantLedgers(recorded, ledgerAt(t, dir, pkg))
 	if !appended.Inert() || len(appended.Added) != 1 || appended.Added[0].Name != "TestSibling" {
 		t.Fatalf("appended sibling delta = %+v (inert=%v), want inert added-only TestSibling", appended, appended.Inert())
 	}
 	if err := os.WriteFile(filepath.Join(dir, "delta_test.go"), []byte("package delta\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F() != 1 {\n\t\tt.Fatal(\"edited\")\n\t}\n}\n\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edited := DiffTestVariantLedgers(recorded, ledgerAt(t, dir, pkg))
+	edited := testvariant.DiffTestVariantLedgers(recorded, ledgerAt(t, dir, pkg))
 	if edited.Inert() || len(edited.Changed) != 1 || edited.Changed[0].After.Name != "TestF" {
 		t.Fatalf("edited body delta = %+v (inert=%v), want non-inert with TestF changed", edited, edited.Inert())
 	}

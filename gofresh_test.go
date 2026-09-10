@@ -720,7 +720,7 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/externaldirective"
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/externaldirective"
 	e, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -800,20 +800,5 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/embed", Symbol: "W.Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("promoted conflicted method capture = %v, want the contradiction refusal", err)
-	}
-}
-
-// The per-file effect scan's strategy moves with every audited-set
-// widening, so a scan persisted under a narrower set refuses instead
-// of serving (REQ-closure-effect-scan-memo); @18 admits the flag package's
-// FlagSet forms at the fold beside ObservationRTA@35; @19 admits sync.Map's
-// memo operations at the fold as the audited memo set; @20 admits
-// reflect's Elem at the fold, whose unresolved selector match a
-// shadowed import alias reaches, beside ObservationRTA@38; @21 admits
-// reflect's descriptor-view surface at the fold as a symbol table,
-// beside ObservationRTA@40.
-func TestEffectScanStrategyVersion(t *testing.T) {
-	if closure.EffectScanStrategy() != "gofresh/effect-scan@21" {
-		t.Fatalf("effect-scan strategy = %q, want @21", closure.EffectScanStrategy())
 	}
 }

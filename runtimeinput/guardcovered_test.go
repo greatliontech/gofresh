@@ -570,8 +570,8 @@ func TestEphemeralTempRootAdmitsOnlyItsOwnIdentity(t *testing.T) {
 		t.Fatal("undeclared temp root recorded nothing")
 	}
 
-	if _, err := ambientFromTestLog([]byte("open x\n"), dir, dir, withEphemeralTempRoot("relative/tmp")); err == nil {
-		t.Fatal("relative ephemeral root accepted")
+	if _, err := ambientFromTestLog([]byte("open x\n"), dir, dir, withEphemeralTempRoot("relative/tmp")); err == nil || !strings.Contains(err.Error(), "ephemeral temp root") {
+		t.Fatalf("relative ephemeral root accepted or misnamed: %v", err)
 	}
 
 	// The resolved-form arm is load-bearing (macOS /tmp -> /private/tmp):

@@ -1643,7 +1643,7 @@ func BenchmarkResultField(b *testing.B) {
 			pacingSubjects = append(pacingSubjects, Subject{Package: "example.com/pacing", Symbol: tc.symbol})
 		}
 	}
-	closures, err := h.ComputeMaximalBatch(pacingSubjects)
+	closures, _, err := h.ComputeMaximalBatch(pacingSubjects)
 	if err != nil {
 		t.Fatal(err)
 	}

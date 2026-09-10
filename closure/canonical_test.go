@@ -260,7 +260,7 @@ func TestEmbeddedMembersContributeBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := h.ComputeMaximalBatch(subjects)
+		got, _, err := h.ComputeMaximalBatch(subjects)
 		if err != nil {
 			t.Fatal(err)
 		}

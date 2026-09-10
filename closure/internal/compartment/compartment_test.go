@@ -1,23 +1,25 @@
-package testvariant
+package compartment
 
 import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/greatliontech/gofresh/closure/testvariant"
 )
 
 // parseLedger builds a one-file ledger straight from source bytes, the same
 // parse the compartment computation performs, so positional-semantics
 // witnesses need no module or go list round-trip.
-func parseLedger(t *testing.T, name, src string) TestVariantLedger {
+func parseLedger(t *testing.T, name, src string) testvariant.TestVariantLedger {
 	t.Helper()
 	declarations, header, err := parseTestVariantFile(name, []byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledger := TestVariantLedger{Declarations: declarations, FileHeaders: []TestVariantFileHeader{header}}
+	ledger := testvariant.TestVariantLedger{Declarations: declarations, FileHeaders: []testvariant.TestVariantFileHeader{header}}
 	sort.Slice(ledger.Declarations, func(i, j int) bool {
-		return lessDeclaration(ledger.Declarations[i], ledger.Declarations[j])
+		return testvariant.LessDeclaration(ledger.Declarations[i], ledger.Declarations[j])
 	})
 	return ledger
 }
@@ -31,7 +33,7 @@ func TestConstInsertionInsideGroupReadsAsChanged(t *testing.T) {
 	recorded := parseLedger(t, "a_test.go", before)
 
 	inserted := parseLedger(t, "a_test.go", "package p\n\nconst (\n\tsizeA = iota\n\tsizeMid\n\tsizeB\n)\n")
-	delta := DiffTestVariantLedgers(recorded, inserted)
+	delta := testvariant.DiffTestVariantLedgers(recorded, inserted)
 	if delta.Inert() {
 		t.Fatalf("mid-group const insertion classified inert: %+v", delta)
 	}
@@ -44,7 +46,7 @@ func TestConstInsertionInsideGroupReadsAsChanged(t *testing.T) {
 	}
 
 	appended := parseLedger(t, "a_test.go", before[:len(before)-2]+"\tsizeEnd\n)\n")
-	tail := DiffTestVariantLedgers(recorded, appended)
+	tail := testvariant.DiffTestVariantLedgers(recorded, appended)
 	if !tail.Inert() || len(tail.Added) != 1 || tail.Added[0].Name != "sizeEnd" || len(tail.Changed) != 0 {
 		t.Fatalf("group-end const append = %+v (inert=%v), want inert added-only sizeEnd", tail, tail.Inert())
 	}
@@ -57,14 +59,14 @@ func TestConstInsertionInsideGroupReadsAsChanged(t *testing.T) {
 func TestInitAndVarReordersReadAsChanged(t *testing.T) {
 	initBefore := parseLedger(t, "a_test.go", "package p\n\nfunc init() { order = append(order, 1) }\n\nfunc init() { order = append(order, 2) }\n")
 	initAfter := parseLedger(t, "a_test.go", "package p\n\nfunc init() { order = append(order, 2) }\n\nfunc init() { order = append(order, 1) }\n")
-	initDelta := DiffTestVariantLedgers(initBefore, initAfter)
+	initDelta := testvariant.DiffTestVariantLedgers(initBefore, initAfter)
 	if initDelta.Inert() || len(initDelta.Changed) == 0 {
 		t.Fatalf("init reorder delta = %+v (inert=%v), want changed declarations", initDelta, initDelta.Inert())
 	}
 
 	varBefore := parseLedger(t, "a_test.go", "package p\n\nvar first = sideEffect(1)\n\nvar second = sideEffect(2)\n")
 	varAfter := parseLedger(t, "a_test.go", "package p\n\nvar second = sideEffect(2)\n\nvar first = sideEffect(1)\n")
-	varDelta := DiffTestVariantLedgers(varBefore, varAfter)
+	varDelta := testvariant.DiffTestVariantLedgers(varBefore, varAfter)
 	if varDelta.Inert() || len(varDelta.Changed) == 0 {
 		t.Fatalf("var reorder delta = %+v (inert=%v), want changed declarations", varDelta, varDelta.Inert())
 	}
@@ -78,37 +80,37 @@ func TestInitAndVarReordersReadAsChanged(t *testing.T) {
 // compartment file's movement always does
 // (REQ-closure-test-variant-compartment).
 func TestLedgerDeltaClassifiesInertness(t *testing.T) {
-	base := TestVariantLedger{
-		Declarations: []TestVariantDeclaration{
+	base := testvariant.TestVariantLedger{
+		Declarations: []testvariant.TestVariantDeclaration{
 			{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "h1"},
 			{File: "a_test.go", Kind: "var", Name: "fixtures", Hash: "h2"},
 		},
-		FileHeaders: []TestVariantFileHeader{
+		FileHeaders: []testvariant.TestVariantFileHeader{
 			{File: "a_test.go", Hash: "header1"},
 			{File: "testdata.json", Hash: "data1", Embedded: true},
 		},
 	}
-	withDeclaration := func(declaration TestVariantDeclaration) TestVariantLedger {
+	withDeclaration := func(declaration testvariant.TestVariantDeclaration) testvariant.TestVariantLedger {
 		after := base.Clone()
 		after.Declarations = append(after.Declarations, declaration)
 		return after
 	}
 	for _, tc := range []struct {
 		name  string
-		after TestVariantLedger
+		after testvariant.TestVariantLedger
 		inert bool
 	}{
-		{"added plain func", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "func", Name: "TestB", Hash: "h3"}), true},
-		{"added const", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "const", Name: "limit", Hash: "h3"}), true},
-		{"added method-free type", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "type", Name: "harness", Hash: "h3"}), true},
-		{"added var", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "var", Name: "state", Hash: "h3"}), false},
-		{"added init", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "init", Name: "init", Hash: "h3"}), false},
-		{"added TestMain", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "func", Name: "TestMain", Hash: "h3"}), false},
-		{"added method", withDeclaration(TestVariantDeclaration{File: "a_test.go", Kind: "method", Name: "run", Receiver: "harness", Hash: "h3"}), false},
+		{"added plain func", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "func", Name: "TestB", Hash: "h3"}), true},
+		{"added const", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "const", Name: "limit", Hash: "h3"}), true},
+		{"added method-free type", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "type", Name: "harness", Hash: "h3"}), true},
+		{"added var", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "var", Name: "state", Hash: "h3"}), false},
+		{"added init", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "init", Name: "init", Hash: "h3"}), false},
+		{"added TestMain", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "func", Name: "TestMain", Hash: "h3"}), false},
+		{"added method", withDeclaration(testvariant.TestVariantDeclaration{File: "a_test.go", Kind: "method", Name: "run", Receiver: "harness", Hash: "h3"}), false},
 		{
 			"changed declaration",
-			TestVariantLedger{
-				Declarations: []TestVariantDeclaration{
+			testvariant.TestVariantLedger{
+				Declarations: []testvariant.TestVariantDeclaration{
 					{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "h1-edited"},
 					{File: "a_test.go", Kind: "var", Name: "fixtures", Hash: "h2"},
 				},
@@ -118,7 +120,7 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 		},
 		{
 			"removed declaration",
-			TestVariantLedger{
+			testvariant.TestVariantLedger{
 				Declarations: base.Declarations[:1],
 				FileHeaders:  base.FileHeaders,
 			},
@@ -126,9 +128,9 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 		},
 		{
 			"go-file header-only change",
-			TestVariantLedger{
+			testvariant.TestVariantLedger{
 				Declarations: base.Declarations,
-				FileHeaders: []TestVariantFileHeader{
+				FileHeaders: []testvariant.TestVariantFileHeader{
 					{File: "a_test.go", Hash: "header1-imports-edited"},
 					{File: "testdata.json", Hash: "data1", Embedded: true},
 				},
@@ -137,9 +139,9 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 		},
 		{
 			"embedded member change",
-			TestVariantLedger{
+			testvariant.TestVariantLedger{
 				Declarations: base.Declarations,
-				FileHeaders: []TestVariantFileHeader{
+				FileHeaders: []testvariant.TestVariantFileHeader{
 					{File: "a_test.go", Hash: "header1"},
 					{File: "testdata.json", Hash: "data1-edited", Embedded: true},
 				},
@@ -148,13 +150,13 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			delta := DiffTestVariantLedgers(base, tc.after)
+			delta := testvariant.DiffTestVariantLedgers(base, tc.after)
 			if delta.Inert() != tc.inert {
 				t.Fatalf("Inert() = %v, want %v (delta %+v)", delta.Inert(), tc.inert, delta)
 			}
 		})
 	}
-	if delta := DiffTestVariantLedgers(base, base.Clone()); !delta.Inert() || len(delta.Added)+len(delta.Changed)+len(delta.Removed)+len(delta.HeaderChanges) != 0 {
+	if delta := testvariant.DiffTestVariantLedgers(base, base.Clone()); !delta.Inert() || len(delta.Added)+len(delta.Changed)+len(delta.Removed)+len(delta.HeaderChanges) != 0 {
 		t.Fatalf("identical ledgers diffed to %+v, want empty inert delta", delta)
 	}
 }
@@ -165,30 +167,30 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 // or removed, and file membership changes surface as header additions and
 // removals (REQ-closure-test-variant-compartment).
 func TestLedgerDeltaIsDeterministicAndClassifiesMembership(t *testing.T) {
-	before := TestVariantLedger{
-		Declarations: []TestVariantDeclaration{
+	before := testvariant.TestVariantLedger{
+		Declarations: []testvariant.TestVariantDeclaration{
 			{File: "a_test.go", Kind: "init", Name: "init", Hash: "i1"},
 			{File: "a_test.go", Kind: "init", Name: "init", Hash: "i2"},
 			{File: "b_test.go", Kind: "func", Name: "TestB", Hash: "b1"},
 		},
-		FileHeaders: []TestVariantFileHeader{
+		FileHeaders: []testvariant.TestVariantFileHeader{
 			{File: "a_test.go", Hash: "ha"},
 			{File: "b_test.go", Hash: "hb"},
 		},
 	}
-	after := TestVariantLedger{
-		Declarations: []TestVariantDeclaration{
+	after := testvariant.TestVariantLedger{
+		Declarations: []testvariant.TestVariantDeclaration{
 			{File: "a_test.go", Kind: "init", Name: "init", Hash: "i1"},
 			{File: "a_test.go", Kind: "init", Name: "init", Hash: "i3"},
 			{File: "c_test.go", Kind: "func", Name: "TestC", Hash: "c1"},
 		},
-		FileHeaders: []TestVariantFileHeader{
+		FileHeaders: []testvariant.TestVariantFileHeader{
 			{File: "a_test.go", Hash: "ha"},
 			{File: "c_test.go", Hash: "hc"},
 		},
 	}
-	first := DiffTestVariantLedgers(before, after)
-	second := DiffTestVariantLedgers(before, after)
+	first := testvariant.DiffTestVariantLedgers(before, after)
+	second := testvariant.DiffTestVariantLedgers(before, after)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("diff not deterministic:\n%+v\n%+v", first, second)
 	}
@@ -212,9 +214,9 @@ func TestLedgerDeltaIsDeterministicAndClassifiesMembership(t *testing.T) {
 
 	// An Embedded flip alone — same file, same hash — is a header change and
 	// fails closed: the member's bytes changed roles, not content.
-	flipped := DiffTestVariantLedgers(
-		TestVariantLedger{FileHeaders: []TestVariantFileHeader{{File: "x_test.go", Hash: "h"}}},
-		TestVariantLedger{FileHeaders: []TestVariantFileHeader{{File: "x_test.go", Hash: "h", Embedded: true}}},
+	flipped := testvariant.DiffTestVariantLedgers(
+		testvariant.TestVariantLedger{FileHeaders: []testvariant.TestVariantFileHeader{{File: "x_test.go", Hash: "h"}}},
+		testvariant.TestVariantLedger{FileHeaders: []testvariant.TestVariantFileHeader{{File: "x_test.go", Hash: "h", Embedded: true}}},
 	)
 	if flipped.Inert() || len(flipped.HeaderChanges) != 1 || !flipped.HeaderChanges[0].Embedded {
 		t.Fatalf("embedded flip delta = %+v (inert=%v), want one non-inert embedded header change", flipped, flipped.Inert())
@@ -231,7 +233,7 @@ func TestDirectiveCommentsDefeatInertness(t *testing.T) {
 	recorded := parseLedger(t, "a_test.go", base)
 
 	debugged := parseLedger(t, "a_test.go", "//go:debug panicnil=1\n\n"+base)
-	delta := DiffTestVariantLedgers(recorded, debugged)
+	delta := testvariant.DiffTestVariantLedgers(recorded, debugged)
 	if delta.Inert() || len(delta.Added) != 1 || delta.Added[0].Kind != "directive" || delta.Added[0].Name != "go:debug" {
 		t.Fatalf("header //go:debug delta = %+v (inert=%v), want a non-inert added directive", delta, delta.Inert())
 	}
@@ -239,7 +241,7 @@ func TestDirectiveCommentsDefeatInertness(t *testing.T) {
 	// A floating directive inside a group span sits in no spec range and no
 	// header remainder — the directive entry is what keeps the delta honest.
 	linked := parseLedger(t, "a_test.go", "package p\n\nvar (\n\tfixtureA = 1\n\t//go:linkname fixtureB other.symbol\n\tfixtureB = 2\n)\n\nfunc TestF(t *T) {}\n")
-	delta = DiffTestVariantLedgers(recorded, linked)
+	delta = testvariant.DiffTestVariantLedgers(recorded, linked)
 	if delta.Inert() {
 		t.Fatalf("floating //go:linkname classified inert: %+v", delta)
 	}
@@ -260,7 +262,7 @@ func TestDirectiveCommentsDefeatInertness(t *testing.T) {
 			t.Fatalf("build constraint ledgered as a directive: %+v", declaration)
 		}
 	}
-	delta = DiffTestVariantLedgers(constrained, reconstrained)
+	delta = testvariant.DiffTestVariantLedgers(constrained, reconstrained)
 	if !delta.Inert() || len(delta.HeaderChanges) != 1 {
 		t.Fatalf("build-constraint text edit = %+v (inert=%v), want a header-only inert delta", delta, delta.Inert())
 	}
@@ -293,7 +295,7 @@ func TestDeclarationReferencesCollectIdentifiersAndSelectors(t *testing.T) {
 		"func TestF(t *T) {\n\tvar local suite\n\t_ = local.run()\n\ts := fmt.Sprint(helperB())\n\t_ = s\n}\n\n" +
 		"var (\n\ttableA = helperA()\n\ttableB = helperB()\n)\n"
 	ledger := parseLedger(t, "a_test.go", src)
-	byName := map[string]TestVariantDeclaration{}
+	byName := map[string]testvariant.TestVariantDeclaration{}
 	for _, declaration := range ledger.Declarations {
 		byName[declaration.Kind+"/"+declaration.Name] = declaration
 	}
@@ -404,7 +406,7 @@ func TestPackageClauseRenameSurfacesAsMembershipChange(t *testing.T) {
 	if got := renamed.Declarations[0].Package; got != "p_test" {
 		t.Fatalf("external clause = %q, want p_test", got)
 	}
-	delta := DiffTestVariantLedgers(recorded, renamed)
+	delta := testvariant.DiffTestVariantLedgers(recorded, renamed)
 	if len(delta.Removed) != 2 || len(delta.Added) != 2 || delta.Inert() {
 		t.Fatalf("clause rename delta = %+v (inert=%v), want every declaration removed and re-added", delta, delta.Inert())
 	}
@@ -419,7 +421,7 @@ func TestClassificationIgnoresReferences(t *testing.T) {
 	for i := range doctored.Declarations {
 		doctored.Declarations[i].References = []string{"unrelated"}
 	}
-	delta := DiffTestVariantLedgers(ledger, doctored)
+	delta := testvariant.DiffTestVariantLedgers(ledger, doctored)
 	if len(delta.Added) != 0 || len(delta.Changed) != 0 || len(delta.Removed) != 0 || len(delta.HeaderChanges) != 0 || !delta.Inert() {
 		t.Fatalf("reference-only difference classified as movement: %+v", delta)
 	}
@@ -440,14 +442,14 @@ func TestDeclarationReferencesAreAPureFunctionOfTheBytes(t *testing.T) {
 		t.Fatalf("parse not deterministic:\n%+v\n%+v", first, second)
 	}
 	shifted := parseLedger(t, "a_test.go", "package p\n\nconst (\n\tkindZ = iota\n\tkindA = iota\n\tkindB = kindA + 1\n)\n\nfunc TestF(t *T) { _ = kindB }\n")
-	pick := func(ledger TestVariantLedger, name string) TestVariantDeclaration {
+	pick := func(ledger testvariant.TestVariantLedger, name string) testvariant.TestVariantDeclaration {
 		for _, declaration := range ledger.Declarations {
 			if declaration.Name == name {
 				return declaration
 			}
 		}
 		t.Fatalf("%s not in ledger", name)
-		return TestVariantDeclaration{}
+		return testvariant.TestVariantDeclaration{}
 	}
 	before, after := pick(first, "kindB"), pick(shifted, "kindB")
 	if len(before.References) == 0 {

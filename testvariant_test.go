@@ -2,14 +2,13 @@ package gofresh
 
 import (
 	"context"
+	"github.com/greatliontech/gofresh/closure/testvariant"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
-
-	"github.com/greatliontech/gofresh/closure"
 )
 
 func writePartitionModule(t *testing.T, files map[string]string) string {
@@ -51,7 +50,7 @@ func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fingerprint.TestVariantClosure == "" || fingerprint.TestVariantClosure == closure.EmptyTestVariantClosure {
+	if fingerprint.TestVariantClosure == "" || fingerprint.TestVariantClosure == testvariant.EmptyTestVariantClosure {
 		t.Fatalf("captured compartment = %q, want a non-empty test-file identity", fingerprint.TestVariantClosure)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
@@ -127,7 +126,7 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fingerprint.TestVariantClosure != closure.EmptyTestVariantClosure {
+	if fingerprint.TestVariantClosure != testvariant.EmptyTestVariantClosure {
 		t.Fatalf("no-test capture compartment = %q, want the defined empty identity", fingerprint.TestVariantClosure)
 	}
 	prePartition := fingerprint

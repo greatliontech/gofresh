@@ -25,8 +25,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/gofresh/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
-	"github.com/greatliontech/gofresh/closure/internal/testvariant"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/processenv"
@@ -45,9 +45,9 @@ type Closure struct {
 	// same name\x00sha256 discipline as the core hash's file folding. The
 	// core Hash excludes those files, so a sibling test edit moves only this
 	// compartment; a package with no test files carries the stable
-	// EmptyTestVariantClosure identity. Unsalted: subjects of one package
-	// share the compartment, which describes the package, not the subject
-	// (REQ-closure-test-variant-compartment).
+	// testvariant.EmptyTestVariantClosure identity. Unsalted: subjects of
+	// one package share the compartment, which describes the package, not
+	// the subject (REQ-closure-test-variant-compartment).
 	TestVariants string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
@@ -106,8 +106,8 @@ type Hasher struct {
 	// and arming discipline as contribs: nil until a batch entry arms
 	// them, reset per call.
 	testBinaryKeys map[string]string
-	variantScope   map[string]testvariant.Identity
-	testVariants   map[string]testvariant.Identity     // test-variant compartments by requested package
+	variantScope   map[string]compartment.Identity
+	testVariants   map[string]compartment.Identity     // test-variant compartments by requested package
 	fileDigests    map[string]string                   // per-file content digests from the closure's own reads, by absolute path
 	contents       map[string]fileBytes                // per-file bytes and digest, read once per batch call (readFile); nil outside one
 	fileMemo       *fileMemos                          // the per-file effect-scan and compartment-parse memos
@@ -323,7 +323,7 @@ func NewAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSn
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
 		selectionResolved: true, selection: selectionDegradationFor(runtime.Version(), buildFlags, goflags, goexperiment),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
-		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]compartment.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),
 	}, nil
 }
@@ -420,7 +420,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
 		}
-		if testvariant.OwnVariantOf(p, pkgPath, compartmentDir) {
+		if compartment.OwnVariantOf(p, pkgPath, compartmentDir) {
 			if compartmentDir == "" {
 				compartmentDir = p.Dir
 			}
@@ -463,7 +463,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	identity, cached := h.variantScope[pkgPath]
 	if !cached {
 		var err error
-		identity, err = testvariant.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath})
+		identity, err = compartment.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -513,7 +513,7 @@ var analysisTestHooks struct {
 func (h *Hasher) resetCallScope() {
 	h.contribs = map[string]depContribution{}
 	h.testBinaryKeys = map[string]string{}
-	h.variantScope = map[string]testvariant.Identity{}
+	h.variantScope = map[string]compartment.Identity{}
 	// The bytes a call reads are that call's tree generation: the cache
 	// is armed here and dropped when the call returns (the batch entries
 	// defer it), so no later entry can fold bytes an earlier call saw.
