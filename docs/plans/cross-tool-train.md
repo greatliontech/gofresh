@@ -1084,7 +1084,7 @@ in their repos.
       IDs so a sub-rule's edit re-consents itself alone and a cite names
       a rule; every cite and binding retargeted through the tool; before
       193 so the fixpoint's clauses have addressable IDs.
-- [ ] 201. gofresh: the API-surface sweep — pre-v1 clean break: the
+- [x] 201. gofresh: the API-surface sweep — pre-v1 clean break: the
       implicit-environment overload families collapse to their explicit-
       environment form (guard.Capture/CaptureContext/CaptureForContext
       and siblings, runtimeinput.Adopt/Incomplete/Absolute/Relative/Dirty,
