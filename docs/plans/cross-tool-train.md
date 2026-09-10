@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, the second re-audit band 234–237 (twelve landed since 194–197; its replan re-sequences everything below), gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 240, 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, the second re-audit band 234–237 (twelve landed since 194–197; its replan re-sequences everything below), gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1027,6 +1027,10 @@ in their repos.
       channel poisoned as shared dynamic state (a subject mutating GODEBUG
       marks every GODEBUG-reading admission in the binary), net/url's
       parsing half then admitted by symbol; doc deletes at close.
+      (234: carries a spec amendment — GODEBUG leaves the measurement
+      guard for the code guard, REQ-guard-runtimeconfig and
+      REQ-fresh-guard-set amended — and a release: every consumer store
+      re-measures once.)
 - [ ] 192. gofresh: dependency closures reached by reference (gofresh
       docs/issues/dependency-nested-closures-outside-the-drain.md) — the
       dependency facts carry a per-function effect summary the drain
@@ -1077,6 +1081,9 @@ in their repos.
       decision discriminates the shared-dynamic-state downgrade on a
       reason-string prefix composed at three sites; the class carries
       it, the reason text follows; doc deletes at close.
+      (234: FOLDS INTO 202 — the class belongs on closure.Closure while
+      the composers live in the root package, the split 202 closes;
+      doing it first is the work done twice.)
 - [ ] 200. gofresh: the mega-requirements decomposed — REQ-closure-
       shared-dynamic-state (one 8,300-word paragraph, 224 cites),
       REQ-closure-observability-analysis, and REQ-closure-test-variant-
@@ -1099,6 +1106,10 @@ in their repos.
       persistent memo classes render their scope four ways and only the
       listing memo carries a record version; AnalysisScope the one
       source, every memo versioned by the one rule; docs delete at close.
+      (234: grown — nine memo classes, two record versions
+      (listingmemo, scanEntryVersion), three per-file memo shapes; the
+      canonical-digest memo serves silently while its eight siblings
+      report — its Served summary is the regression anchor.)
 - [ ] 204. gofresh: auditset's receiver side as one table — the five
       parallel method tables and their predicates one package-keyed
       map behind the one ladder, as symbolTables already is; BoundedToken
@@ -1110,6 +1121,9 @@ in their repos.
       stipulator's does (REQ-guidance-single-source), and the vouch
       grammar's three copies read ParseVouchEntry (rides
       vouch-file-consumer-homes).
+      (234: plumbing only — the embed accessor and the terse-clause
+      projection shared by the three consumers; the terse-clause RULE
+      stays with 184, the user's call.)
 - [ ] 206. gofresh: the test surface — one file-map fixture writer for
       the seven copies, the per-test cache-home settings collapsed onto
       the package TestMains, the shared helpers out of view_test.go, the
@@ -1118,6 +1132,9 @@ in their repos.
       global memo root under one seam (fixture-tier-parallelism's
       precondition); the TestTier2 names renamed for the tiers the spec
       names.
+      (234: grown — eight fixture writers; SetMemoRoot's three
+      forwarding homes fold in; the 65 production tier2* identifiers
+      renamed for the tiers the spec names, beside the test names.)
 
 ## Band H — gomutant under the emergent shape (chartered by audit 195)
 
@@ -1242,7 +1259,7 @@ in their repos.
 
 ## Band R, second run — re-audit at twelve landed chunks (190, 208, 221, 207, 223, 201, 229, 211, 222, 198, 186, 224; chartered at 224's tick, 2026-09-10)
 
-- [ ] 234. gofresh: coherence re-audit — read-only, whole subsystems
+- [x] 234. gofresh: coherence re-audit — read-only, whole subsystems
       against the specs since 194 (the one-environment forms of 201, the
       canonical member form and identity strategy of 190, the vouch
       channels, the audited symbol tables); output a chartered
@@ -1266,6 +1283,43 @@ in their repos.
       load ends its go list and not the loader's descendants: the
       mechanism decision (the engines in the resolver child, or a
       group-isolated loader spawn gofresh offers) and the gap's close.
+- [ ] 239. gofresh: the environment, toolchain, and go-command policy
+      exported (234 C1/A1/A5) — gofresh owns the whole policy and
+      publishes none of it: internal/processenv (Normalize, ForCommand,
+      ForGoPackages, Lookup), canonicalDir, and the `go env GOVERSION`
+      sampler REQ-fresh-toolchain-skew specifies but does not implement.
+      One public home beside gofresh/gotool; the sampler exported; the
+      substrate paragraph names gotool. Consumer arms at their bumps:
+      pew's internal/gotool (a divergent dir policy), stipulator's
+      normalizeEnv copy, and the three provenance samplers delete.
+      Release before the bumps.
+- [ ] 240. gofresh: the spec corrections 234 found (A2 the memo key
+      names "the commit" no memo keys on — REQ-guard-cache and
+      REQ-guard-recompute; A4 ErrViewSealed the fourth typed refusal on
+      the capture seam, pinned by identity beside its siblings; A5 the
+      substrate paragraph's home for gotool). Spec only; re-consented.
+- [ ] 241. gofresh: one typed-load seam (234 C2/A6/A7) — four
+      packages.Load sites with four hand-built configs (viewload.go the
+      designated seam; explain.go, maximal.go, internal/program) merge
+      into loadView's config builder parameterized by mode, so explain
+      re-derives under the load REQ-fresh-coherent-view describes and
+      the GOPACKAGESDRIVER refusal holds at every site; the explain
+      hookset's tree-blind match key (pkgPath.varName across two
+      checkouts of one module in one process) keyed by the view's tree
+      or its guarantee restated to what the guard holds.
+- [ ] 242. gofresh: closure/ an internal package (234 C7) — a public
+      package with zero external importers publishing Hasher and forty
+      methods, AnalysisScope, the memo loaders, the attribution entries
+      as API with no installed base; closure/ → internal/closure with
+      the public vocabulary (closure/testvariant) kept reachable through
+      the root aliases (verify at open that every consumer touch goes
+      through them). BREAKING API; pre-v1 clean break.
+- [ ] 243. gofresh: the vestigial sweep 234 found (C10) — guard's
+      invalidKind (zero references in four repos); ScanPureDirectives
+      exported with no production caller in any repo (the exported face
+      of REQ-purity-directive: adopt or delete, the clause following);
+      Engine.analysisBudget's one unreachable read (the filed
+      analysis-budget issue rides). One commit through the loop.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
@@ -1420,6 +1474,9 @@ in their repos.
       slice-equal). Consumer: pew records pew-slice per arm; the
       noise-floor lineage classifies unreached-declaration commits as
       layout-only neighbors. Sequenced inside 15.
+      (234: after 175 — both derive a subject-scoped hash over the
+      attributed-reachable set; 175 decides whether that identity is
+      semantic and how it composes into IdentityStrategy.)
 - [ ] 97. stipulator: cross-platform resolution views — a selection
       declaring GOOS/GOARCH off the host refuses by name today; the
       charter question is an on-host resolution-only view for

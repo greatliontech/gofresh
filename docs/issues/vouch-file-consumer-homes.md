@@ -1,6 +1,6 @@
 # The consumers' vouch homes fold into the engine's file at their bumps
 
-`Lands: stipulator's next gofresh bump past v0.99.0 (the
+`Lands: stipulator's next gofresh bump past v0.99.0 and gomutant's next bump — its ParseVouchEntry copy at gomutant.go:329-350 stands beside the flag plumbing 163 closed (234 C3) (the
 release carrying REQ-vouch-input's file channel); gomutant's arm closed
 at its bump, cross-tool train chunk 163`
 
