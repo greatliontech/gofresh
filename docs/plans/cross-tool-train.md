@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 194: 190, 201, 198, 200, 192, 191, 199, 204, 203, 205 at the consumers' bumps, 206, then 202 (design, with the user), 193, 175, 102; gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, the second re-audit band 234–237 (twelve landed since 194–197; its replan re-sequences everything below), gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1239,6 +1239,26 @@ in their repos.
       preflight form of run on the MCP face (the CLI's --plan); the
       surface question the visibility ruling decides — never a silent
       wait.
+
+## Band R, second run — re-audit at twelve landed chunks (190, 208, 221, 207, 223, 201, 229, 211, 222, 198, 186, 224; chartered at 224's tick, 2026-09-10)
+
+- [ ] 234. gofresh: coherence re-audit — read-only, whole subsystems
+      against the specs since 194 (the one-environment forms of 201, the
+      canonical member form and identity strategy of 190, the vouch
+      channels, the audited symbol tables); output a chartered
+      consolidation set, recorded disputes, and a re-sequencing of the
+      queued gofresh chunks.
+- [ ] 235. gomutant: coherence re-audit — the harness-classified baseline
+      and load ladder (208), the two faces' parity and the banked
+      summary (207), the collapsed public surface (211), the window cost home (186), the findings
+      document's version paragraph; same output.
+- [ ] 236. stipulator: coherence re-audit — the one witness pipeline
+      (223: tracker, judgment, residue), the verb cores and the one
+      projection (224), the provenance and module-root coordinates (221),
+      the record stores (170), the spec's declared gaps (222); same output.
+- [ ] 237. pew: coherence re-audit — the bump's vouch and closure-strategy
+      handling (229), the verdict path, the store; same output; closes
+      with the cross-repo replan (the lane below it re-sequenced).
 - [ ] 238. stipulator: the parent-hosted engine loads' owned boundary
       (the contradicted gap on REQ-go-owned-processes, declared at 222)
       — the analysis engines the served backend hosts spawn the package
@@ -1282,7 +1302,7 @@ in their repos.
       stated or their omission stated; REQ-go-owned-processes'
       toolchain-query half enumerates the provenance probe. Spec only;
       re-consented.
-- [ ] 224. stipulator: one verb core per verb across both faces — prune
+- [x] 224. stipulator: one verb core per verb across both faces — prune
       written twice end to end with two serving-class predicates
       (ServingClassRequired on the CLI, ServingEvidence on MCP); MCP's
       verifyPipeline seam generalized so each verb's core takes a
