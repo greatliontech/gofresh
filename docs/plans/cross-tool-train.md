@@ -934,6 +934,11 @@ in their repos.
       wordings) renders through guidance.Knob as stipulator's do, the
       §12 table staying pinned to the DefValues; no fleet-format change;
       after 229; doc deletes at close.
+      (237: premise met — guidance.Knob exists at v0.101.3 — and a
+      conformance justification: nine usage strings cite spec sections
+      the document does not (REQ-pew-guidance names that a defect);
+      REORDERS after 205's terse-clause export and pew's bump 253 — pew
+      carries no third spelling of the clause grammar.)
 - [ ] 174. pew: `ab --out` per package and one verdict path (pew
       docs/issues/ab-out-multi-package.md, verdict-path-consolidation.md)
       — one artifact per package under a derived path, its encoding
@@ -946,6 +951,13 @@ in their repos.
       globals a threaded value; one recording-row decode feeds admission,
       the fingerprint, the closed set, and --explain; after 229; two docs
       delete at close.
+      (237: NARROWED — the vouch grammar and reader clause LANDED at
+      229; what remains: one verdict path (checkPackage vs verdictForRecs
+      + inertGrownRecheck — a whole-program view per benchmark on stat's
+      arm, the first unmeasured cost surface once tugboat re-records;
+      checkOne has no production caller) and the vouch resolution as one
+      value through one engine constructor (four globals, four
+      constructors); FIRST among pew's queue after 231.)
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
       clause-structured-whole-claims.md; user ruling 2026-09-07) — a
@@ -1130,6 +1142,10 @@ in their repos.
       (234: plumbing only — the embed accessor and the terse-clause
       projection shared by the three consumers; the terse-clause RULE
       stays with 184, the user's call.)
+      (234/237: the terse-clause projection is a property of the
+      format — guidance.Knob.Clause() exported here; stipulator's
+      KnobClause folds at 250, pew's 173 consumes at 253; 184's RULE
+      stays with the user.)
 - [ ] 206. gofresh: the test surface — one file-map fixture writer for
       the seven copies, the per-test cache-home settings collapsed onto
       the package TestMains, the shared helpers out of view_test.go, the
@@ -1321,7 +1337,7 @@ in their repos.
       (223: tracker, judgment, residue), the verb cores and the one
       projection (224), the provenance and module-root coordinates (221),
       the record stores (170), the spec's declared gaps (222); same output.
-- [ ] 237. pew: coherence re-audit — the bump's vouch and closure-strategy
+- [x] 237. pew: coherence re-audit — the bump's vouch and closure-strategy
       handling (229), the verdict path, the store; same output; closes
       with the cross-repo replan (the lane below it re-sequenced).
 - [ ] 238. stipulator: the parent-hosted engine loads' owned boundary
@@ -1346,6 +1362,9 @@ in their repos.
       (236: gofresh's gotool.Run isolates no process group; the export
       carries a spawn hook (or the boundary's own form) so stipulator's
       REQ-go-owned-processes survives adoption.)
+      (237: also exports the verdict reason vocabulary as constants —
+      pew's §7.9 rule keys on the bare literal "test variants" across
+      the repo boundary.)
 - [ ] 240. gofresh: the spec corrections 234 found (A2 the memo key
       names "the commit" no memo keys on — REQ-guard-cache and
       REQ-guard-recompute; A4 ErrViewSealed the fourth typed refusal on
@@ -1454,6 +1473,30 @@ in their repos.
       the store re-executes ONCE for the three moves; KnobClause
       offered to gofresh's guidance as the terse-clause export pew 173
       will need.
+- [ ] 251. pew: one recording-key registry with per-key marks (237 P1;
+      audit-note-keys-mirror-the-spec folds in) — the record's key set
+      is six lists (RecordingConfigKeys, the toolchain key twice,
+      recordingConfigKeys and its admission twin, IsRecordingShape's
+      mandatory literal, compare's audit names) plus the spec table plus
+      six test builders: 229 added one key and touched all of them. One
+      row per key {spelling, mandatory, omittable, audit, display name}
+      read by the writer, the shape check, the foreign-key check,
+      admission, the ignore set, the audit notes, and one test builder.
+- [ ] 252. pew: the hygiene sweep (231's other half; 237 P4/P7/P8) — one
+      containment predicate and one longest-existing-prefix resolver
+      (pathWithin ≡ withinRoot, five inline Rel+IsLocal containments,
+      resolveExistingPrefix ≡ moduleBenchDir's walk ≡ CommandDir's
+      weaker variant); one test recording builder (six hand-listed
+      config blocks, gc_test's missing a mandatory key); the vestigial
+      six (store List/recordingFromPath, gitblob.State, ExecuteBinary
+      with no caller, Execute's one seam, checkOne once 174 lands); two
+      full store walks in gc; ab's count check twice. After 174 and 251.
+- [ ] 253. pew: the gofresh bump after 239's and 205's releases — the
+      go-tool consumer arm (pew/internal/gotool's six importers and its
+      divergent dir policy onto gofresh's exported policy with 239's
+      boundary hook; the GOVERSION sampler onto gotool), the verdict
+      reason vocabulary consumed as constants, guidance.Knob.Clause
+      consumed (173 follows). The store re-measures once at the bump.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
@@ -1586,6 +1629,13 @@ in their repos.
       engine constructors one; gc's two full store walks one; ab's
       duplicated count check; a fused doc block; the six recording
       builders and two duplicated helpers in the tests one.
+      (237: NARROWED to the conformance half — the one go-command
+      constructor gotool.Command(ctx, dir, env, args...) replacing the
+      five hand-wired bridges (§9's one policy structurally; the
+      provenance probe is the one invocation outside it today) and the
+      context threading REQ-pew-interruption requires at the eleven
+      Background/exec.Command sites (229 threaded ctx into gofresh's
+      forms with a locally minted Background); the sweep is 252.)
 - [ ] 232. pew: the spec chunk — §11's "never by shelling to a git
       binary" and "the only subprocesses are the Go toolchain" against
       ab's seven git invocations (go-git cannot create linked worktrees:
@@ -1597,6 +1647,12 @@ in their repos.
       (pew docs/issues/derived-state-recompute-invariance-witness.md's
       rationale predates stipulator's clause claims) — the first case for
       spec-wide-requirement-forming; re-consented.
+      (237: grown — A6 §5's mandatory field set is a twelve-key literal
+      the table states only by prose: a mandatory/omittable column
+      (251 derives the code from one registry); A9 the strategy-class
+      admission is co-owned with gofresh's verdict ladder — name the
+      engine as the class's origin, pew's rung the pre-comparison
+      projection.)
 
 ## Band E — design chunks (open with the user)
 
