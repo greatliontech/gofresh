@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-fresh-preparation"
 reason: "the clause is a for-all over every refusal class; five example pins anchor each class the observation pass decides before a paid cost while a property witness over generated malformed inputs is pending; the per-subject refusal names every unknown subject of a batch at once, in request order, pinned by example over a three-subject batch"
-content_hash: "80419794a14e6474c9f0d45b43caf91c4ca4875500911ae50980a42a49a47c7b"
-source_hash: "1fdff687348a903b02e6c88134b4670412a89d8b5747baf1ad04baf8a2a34fb8"
+content_hash: "8a898bdddc9f424459f70b4e642d7d62134624c254240ff9888ebb87812b24b0"
+source_hash: "14f8e440871d3251b22b291aea6e65651cdc10d342daf89d924a1d897440f5b9"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

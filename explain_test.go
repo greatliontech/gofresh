@@ -2,7 +2,10 @@ package gofresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -602,5 +605,53 @@ func TestExplainChainBoundsSurfaceDerivation(t *testing.T) {
 	last := chain.Links[len(chain.Links)-1]
 	if last.Kind != "refusal" {
 		t.Fatalf("the innermost refusal did not survive the bound: %+v", last)
+	}
+}
+
+// A chain is the current derivation: explain re-loads at the ask and
+// runs no drift check, so a chain asked after an edit describes the
+// edited tree, with no refusal, even though the verdict it explains was
+// captured before the edit (REQ-explain-passive).
+//
+//gofresh:pure
+func TestExplainStraddlesALaterEdit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	before := "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc gen() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n"
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
+		"reg/reg.go": before,
+	})
+	engine, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Before the edit the registry is a culprit with a chain.
+	if chain, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry"); err != nil || len(chain.Links) == 0 {
+		t.Fatalf("chain before the edit = %+v, %v; want the culprit's chain", chain, err)
+	}
+	// The edit after the verdict: the registry becomes an inert map
+	// literal, so the culprit's chain over the edited tree is empty.
+	after := strings.Replace(before, "var Registry = gen()", "var Registry = map[string]handler{}", 1)
+	if after == before {
+		t.Fatal("fixture edit did not apply")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reg", "reg.go"), []byte(after), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("Validate after the edit = %v, want ErrViewChanged (the edit is real drift)", err)
+	}
+	chain, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry")
+	if err != nil {
+		t.Fatalf("explain after the edit = %v, want a chain over the edited tree with no refusal", err)
+	}
+	if len(chain.Links) != 0 || chain.Arm != "" {
+		t.Fatalf("chain after the edit = %+v, want the edited tree's empty chain, not the captured verdict's", chain)
 	}
 }

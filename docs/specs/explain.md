@@ -57,5 +57,10 @@ link — the innermost refusing expression or the first unresolvable
 edge — is never among the omitted. A truncation is never silent.
 
 **REQ-explain-passive** (behavior): The normal analysis path MUST NOT
-construct chains: explain re-derives on demand against the same view,
-and a run that never asks for a chain performs no chain work.
+construct chains: explain re-derives on demand — re-loading the view's
+own package patterns, test variants included, and re-running the
+analysis with the observation hooks
+armed — so a chain describes the tree as it stands at the ask and may
+straddle an edit made after the verdict it explains (the chain is the
+current derivation, never a stored one); a run that never asks for a
+chain performs no chain work.

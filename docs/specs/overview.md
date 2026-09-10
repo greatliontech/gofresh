@@ -11,9 +11,30 @@ and leaves measuring and storing to the caller.
 Beside that one question, this module is also the fleet's shared
 substrate: infrastructure every consuming tool needs identically
 lives here once — today the tool-resident guidance format
-([guidance.md](guidance.md)) — because the fleet's tools already
-depend on this module, and a second home would mean a second
-implementation.
+([guidance.md](guidance.md)); the fast-tier partition pin — one call
+pinning that a repository's every `testing.Short` gate is a skipping
+statement of a Test or Fuzz body, at its head or after the cheap
+controls it deliberately runs first, a subtest or fuzz body counting
+as a body and any other closure not, never in a helper the full tier
+could not see through, and never in a fixture source, where it would
+change what the full tier analyzes — and that the walk found at least
+one gate, at the root and below it (its contract lives with the
+`shortgates` package); and the language-shape canary corpus — the
+source shapes every tool's frontend must parse and judge, one
+exported home each consumer wraps with its own harness, so the
+canaries' content cannot drift between consumers, though a consumer
+pinned to an older release runs an older corpus (the `shapecorpus`
+package) — because the fleet's tools already depend on this module,
+and a second home would mean a second implementation.
+
+## Documents
+
+- [closure.md](closure.md) — the source closure and its tiers.
+- [guards.md](guards.md) — the guards beside the closure.
+- [runtime-inputs.md](runtime-inputs.md) — observed runtime inputs.
+- [purity.md](purity.md) — purity assertions and vouches.
+- [explain.md](explain.md) — verdict derivation chains.
+- [guidance.md](guidance.md) — the tool-resident guidance format.
 
 ## Vocabulary
 
@@ -257,7 +278,14 @@ validates against the source, build inputs, guards, purity assertions, and every
 closure tier captured after execution. The caller owns execution and excludes source or build-input mutation while
 the view is constructed and the producing build is read; validation detects ordinary
 drift but cannot prove the absence of a change-and-restore interval the caller
-allowed. A failed validation names its drift: the class and, where
+allowed. Beside the caller's context error (REQ-fresh-context), a validation
+has three typed refusals, each matched by identity: a
+subject the view held that the source no longer declares is the unknown-subjects
+value (REQ-fresh-preparation); an observation proof the analysis could not
+re-derive is the analysis-unavailable refusal; and drift is the view-changed
+refusal — the view no longer describes the current source, build, guard, or
+purity state and its results must not be persisted — which names its drift:
+the class and, where
 subject-scoped, the subject, and for source and closure drift the differing
 source identities themselves — membership changes named exactly, content
 drift best-effort from construction-time per-file digests — so a consumer's
@@ -300,7 +328,11 @@ caller could not avoid, and the partial result it interrupts is never a partial
 verdict (REQ-fresh-context): preparation refuses the whole batch before any
 window opens, and a refusal decided per subject — a subject the selected source
 does not declare — names every such subject of the batch at once, each once, in
-the batch's request order, so the caller narrows its batch in one step.
+the batch's request order, so the caller narrows its batch in one step. That
+refusal is one typed value carrying exactly that set, and the same typed value
+names, from any re-observation of a built view — a validation, an observed
+capture, a check window's close — a subject the view held that the source no
+longer declares.
 
 **REQ-fresh-progress** (behavior): An operation MUST report, through the caller's
 progress sink, each unit of work at the moment it begins — an observation pass,
@@ -309,8 +341,14 @@ closure fold, and observability slice — naming the unit and, where the
 operation knows it, its position among the operation's units; once per operation
 and memo class, the distinct packages a persistent memo served in place of a unit;
 and, when an operation returns its caller's context error, what it persisted
-before stopping, so a rerun's served set is known. Progress events are keep-alive
-facts about work, never verdict evidence.
+before stopping, so a rerun's served set is known. A phase that carries a
+diagnostic — an unaudited toolchain selection, an unavailable analysis's
+per-subject provenance, a listing this build cannot model, what a cancelled
+operation persisted — delivers it on the event's own diagnostic field, never on
+the error channel and never on any memoized, hashed surface, so a consumer
+prints the diagnostics alone and a walk-order-dependent payload reaches the
+operator without entering an identity. Progress events are keep-alive facts
+about work, never verdict evidence.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's

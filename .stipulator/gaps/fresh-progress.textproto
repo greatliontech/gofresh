@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-progress"
+reason: "the clause states that a Detail-bearing phase's payload enters no memoized, hashed surface; the code holds it (the memoized reason is a constant, the walk-order-dependent provenance rides the event alone) but no witness pins the memo's stability against the payload"
+content_hash: "4f9a789a3fc10f7428bf95299ebc1d8809a4774620aad372d3a74707bab4a19d"
+source_hash: "95a3b60a20cdd164480b94dff8b79a30b91b576ce0b51215dffefa77507630ae"
+lands { manual { condition: "a memo-stability witness for the diagnostic payload lands with the test-surface chunk (cross-tool train chunk 206)" } }

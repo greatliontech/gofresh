@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-vouch-input"
 reason: "structural requirement wants analyzer/property-class evidence; the bound example witnesses anchor the named shapes - canonical identity parsing, the bare-package refusal arm, and the option-to-engine reduction end-to-end - but no property driver covers the identity grammar"
-content_hash: "d80af64673112ad75170124d686ce2355ae41a43e091ac2ed77a5a3fcfda2379"
-source_hash: "43126fcb94cd6979f1d174eebac380b984fe073c5091443edd8d9b5b12a28441"
+content_hash: "91e3a7ef16ed70fb3d131145e43196c9a191534da3315fe19a749030ad07ad01"
+source_hash: "1921d86d5858ae2eb6472a198c94c2e0b7711771e61682c07faeabf28155fb97"
 lands { manual { condition: "a property-test generator over vouch identity shapes exists" } }

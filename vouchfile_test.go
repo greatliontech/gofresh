@@ -115,6 +115,11 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	if _, err := New(WithDir(dir), WithoutRepositoryVouches()); err != nil {
 		t.Fatalf("declined malformed file: %v, want no read at all", err)
 	}
+	// A caller's set extends the file and never stands in for it: the
+	// malformed file still refuses beside a supplied set.
+	if _, err := New(WithDir(dir), WithDynamicStateVouches(shade)); err == nil || !strings.Contains(err.Error(), "vouches:3") {
+		t.Fatalf("malformed file beside a caller set: %v, want the file's refusal", err)
+	}
 	// A file that cannot be read whole refuses with nothing honored: a
 	// directory at the path, and a line past the scanner's token size
 	// after lines already read.

@@ -43,8 +43,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-explain-passive"
-  content_hash: "701e7b97e03d02f1ea2cc107bda5ff7a9affd7cf7b72d5b67816ce28eab2e274"
-  source_hash: "682cb32a808f6918881b35462b63e3549c46ce96eee3bbcf367c5171a3cb3f2c"
+  content_hash: "e3493fd1ff3cc1efcaea86c270d353f60774dd2eab6609cfdbff2089db06c0ef"
+  source_hash: "eacc2e905fc3a5252cebb3d68a0015a8ef4792f61cae0ee2b4003d9493e39402"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestChainHooksArmOnlyDuringExplain"
   role: BINDING_ROLE_TESTS
@@ -59,4 +59,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestExplainChainBoundsSurfaceDerivation"
   role: BINDING_ROLE_TESTS
   shape_hash: "dfd5c54edee0c629ddf2b7e37eabdc2d307ddfd64fedf4624a2322e5b45b8a2e"
+}
+
+bindings {
+  requirement_id: "REQ-explain-passive"
+  content_hash: "e3493fd1ff3cc1efcaea86c270d353f60774dd2eab6609cfdbff2089db06c0ef"
+  source_hash: "eacc2e905fc3a5252cebb3d68a0015a8ef4792f61cae0ee2b4003d9493e39402"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainStraddlesALaterEdit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bc9a806f626937d89af1db73d60bb4df6a663be1611092fb707f97611337a885"
 }
