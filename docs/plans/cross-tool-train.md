@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 240, 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 195: 208, 207, 211, 186, 209, 212, 187, 188, 219, 214, 213, 216, 210, 217, 218, 220, 233, then 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, the second re-audit band 234–237 (twelve landed since 194–197; its replan re-sequences everything below), gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 240, 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 235: 244, 213, 209, 212, 216, 218, 217, 220, 214, 246 (the bump, after gofresh 239's release; 210 and 205 ride it), 219, 187, 188, 233, then 245 and 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 196: 221, 223, 222, 224, 178, 185, 184, 227, 225, 228, 172, 226, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 197: 229, 174, 230, 173, 231, 232, 177, then 15 and 127 (with the user). The cross-repo lane (197's close, 2026-09-09): soundness first and a producer's release before the consumer bump that reads it — gofresh 190, gomutant 208, stipulator 221, gomutant 207, stipulator 223, gofresh 201, pew 229 (the bump, to 201's release), gomutant 211, stipulator 222, gofresh 198, gomutant 186, stipulator 224, the second re-audit band 234–237 (twelve landed since 194–197; its replan re-sequences everything below), gofresh 200, pew 174, gomutant 209, stipulator 178, pew 230, gofresh 192 — then the per-repo tails round-robin in their recorded orders, each consumer bump riding the next gofresh release (gomutant's carries 205 and 210), the design chunks (202, 215, 175, 97, 15, 127, 176's ruling) opened with the user when reached, 95 last, then 95
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1190,6 +1190,15 @@ in their repos.
       already requires the count); REQ-exec-oracle-run's six contracts
       and REQ-result-stale's three carve-outs split into sibling ids so
       an edit re-consents its own rule; re-consented through the tool.
+      (235: grown — A1 the INV-RESULT-CANDIDATE-CONSERVATION pointer names
+      a deleted test (the two INV ids are the only spec ids with no
+      stipulator binding: bind their witnesses, so a rename can never
+      dangle again); A6 the cancellation boundary stated (which reads
+      poll ctx); A7 the sidelined legacy-entry name `<stem>.legacy-v<n>.json`
+      and the tree-root `vouches` file's module-root reach stated as
+      encodings; the versions 4–9 inline arms judged against the fleet's
+      oldest live document (version 10) — grandfathering for documents
+      none can find is a pre-v1 clean-break verdict.)
 - [ ] 212. gomutant: one splice — driftFindingCounts, extendFindingCounts,
       and spliceFindingCounts share their opening, their scores walk, and
       their tally tail (47 lines identical between two) and differ only
@@ -1205,12 +1214,19 @@ in their repos.
       the root file read once through gofresh's ReadVouchFile and its
       entries through ParseVouchEntry, gomutant's line-for-line
       re-implementation deleted.
+      (235: DISSOLVES INTO 246 — the bump chunk carries the vouch-file
+      arm beside the rest of the gofresh consumer seams.)
 - [ ] 213. gomutant: one seam struct — fifteen mutable package-level
       test seams across run.go, schedule.go, ephemeral.go, and
       freshness.go, two of them duplicates of one engine function each
       (coveredPositions ≡ campaignCoveredPositions, groupBaselineProbe ≡
       phaseBaselineProbe), and the seam fields on Options, in one struct
       in one file.
+      (235: grown and pulled forward — C5: two production sites call
+      engine.TestProbeObservedEnv past both probe seams, one of them the
+      killer-scoped baseline (a verdict-bearing path): a stubbed seam
+      leaves the confirmation unmeasured; sixteen root seams + six face
+      seams + SwapGoVersionSamplerForTest with no non-test caller.)
 - [ ] 214. gomutant: the engine's catalog and spawn fan (gomutant
       docs/issues/engine-run-scoped-oracle-value.md, probe-seam-tuple.md)
       — five variant emitters of one token shape and ~35 family-rank
@@ -1218,21 +1234,34 @@ in their repos.
       inventory test read; eight spawn entries into runMutantBase and
       three into the probe become one request struct; docs delete at
       close.
+      (235: C6's dead engine entries fold in — LoadContext,
+      DeclaredSymbols, TestsOf, PackageOf, PackagePath with zero
+      references; Load, PackageContext, ValidateOracle, SplitRapidPkgs,
+      RunMutant/RunMutantEnv/RunMutantObserved, TestProbe test-only.)
 - [ ] 216. gomutant: one classified evidence check — evidencePrecheck
       with evidencePairsValid (boolean) and inspectContext (classified)
       run the same five checks in different order and strictness; the
       boolean derives from the classified one.
+      (235: refined — evidencePrecheck rides the run's runtimeMemo while
+      inspectContext calls runtimeinput.CurrentEnvContext directly: the
+      inspection path pays outside the memo; the empty-manifest order
+      divergence is unreachable, both fields being required.)
 - [ ] 217. gomutant: record-parse discipline — LoadExemptions and
       LoadEphemeralAttestations read with plain Unmarshal where the
       findings document refuses duplicate keys, trailing data, and nulls
       under the same "a malformed record refuses" clauses; one decoder;
       inlineFindingFields gains the inventory test its sibling has and
       the five tags it omits.
+      (235: narrowed — exemptions.go and ephemeralattest.go fold onto
+      decodeKnownObject; the baseline bank stays lenient by contract.)
 - [ ] 218. gomutant: the store's report path (gomutant docs/issues/
       store-report-path-walk.md) — Store.Layer walks the full manifest
       per record at six sites and keeps the first reason; the two memos
       of one entry (cache, judged) one entry-state record the report path
       consults; doc deletes at close.
+      (235: anchored — Store.Layer/LayerReasons recompute
+      CommittableReasons past the write path's judged memo; two
+      per-symbol memos beside it.)
 - [ ] 219. gomutant: the test surface — one fixture home (the 37 CopyFS
       sites, three fixtureDir declarations, twelve git-fixture builders,
       53 inline example modules), the byte-identical face cache-isolation
@@ -1240,12 +1269,25 @@ in their repos.
       table that pins the faces decide alike (the net that would have
       caught 207's four divergences), with the stated limit that the
       root package's in-package tests keep their unexported reach.
+      (235: grown — 38 CopyFS sites, 145 inline module declarations,
+      34 git inits, ~12 fixture builders, three test-only packages, one
+      seam name on both faces; runs AFTER 244 so the face-scenario table
+      pins the collapsed shape — it is the net that would have caught
+      244's fact divergences.)
 - [ ] 220. gomutant: the named smalls — the ephemeral option tuple onto
       EphemeralRequest; longestBaselineFor reading the bank key through
       its composer; PackageSkip.Dark carrying the whole skip-radius
       predicate; documentlock_other's missing ensureLockIgnore;
       Coverage.Merge's receiver mutation behind a value signature; the
       three edit value types stay (two are wire-pinned).
+      (235: grown — Store.Load reads past ctx (contextio the one
+      cancellation-aware reader, its package doc stating the boundary;
+      21 raw ReadFile/WriteFile sites); C6's dead root and gitref entries
+      (UpdateDocument, Tree.Fresh/FreshFor, Tree.DynamicStateVouches,
+      Load/LoadContext, Export; gitref ChangedSurface/ChangedPaths/Show);
+      C7 the `Context` suffix dropped once no non-Context sibling
+      survives (stipulator retarget for the bindings); C10 the
+      estimate's absent-never-zero rule spelled three times.)
 - [ ] 233. gomutant: MCP campaign observability (from
       mcp-run-observability, 2026-09-09) — a long campaign's caller must
       distinguish progress, a slow phase, completion, and cancellation
@@ -1265,7 +1307,7 @@ in their repos.
       channels, the audited symbol tables); output a chartered
       consolidation set, recorded disputes, and a re-sequencing of the
       queued gofresh chunks.
-- [ ] 235. gomutant: coherence re-audit — the harness-classified baseline
+- [x] 235. gomutant: coherence re-audit — the harness-classified baseline
       and load ladder (208), the two faces' parity and the banked
       summary (207), the collapsed public surface (211), the window cost home (186), the findings
       document's version paragraph; same output.
@@ -1320,6 +1362,45 @@ in their repos.
       of REQ-purity-directive: adopt or delete, the clause following);
       Engine.analysisBudget's one unreachable read (the filed
       analysis-budget issue rides). One commit through the loop.
+- [ ] 244. gomutant: the face-parity residue (235 C2/C3/C4/C12 +
+      A3/A4/A5) — 207 landed one rendering seam and left the run
+      epilogue written twice (the attest snapshot, the shed-dedup key at
+      four sites, the incremental Commit closure, the final merge, the
+      promoted and machine-local counts), the target-source dispatch
+      three times (wholeTree by two expressions; CLI discover on its own
+      git path), the inspection walk and the delta-cut assembly twice,
+      the carry and shed sentences twice as prose where the clause says
+      rows; and three fact divergences: a tokenless MCP run discards the
+      analysis events the clause forbids discarding (an analysis field
+      on runOut), the preparation stages fire in different orders on the
+      two faces (targets_path after the load on MCP run/discover; CLI
+      findings' --vouch after the load; findings' state check vs record
+      read swapped), and the envelope's numbers are unpinned (the
+      surfaces pin reads one section; the unreached roster cut at 20 on
+      the CLI and 50 on MCP — decide whether 20 is contract). One
+      epilogue, one dispatch, one walk in the root package; both faces
+      renderers.
+- [ ] 245. gomutant: runCounted's decomposition (235 C1; design, with
+      the user) — 2,723 lines and thirty nested closures with two named
+      phases and a 200-line epilogue; a campaign value carrying the run's
+      constants with the closures as methods along the natural seams
+      (options/bounds/repository, resolution, views/modes, per-target
+      preparation, the driver, the epilogue); invariants: the
+      deterministic preparation-and-decision order, the window
+      partition's input set, the commit horizon. 212, 213, and 233 each
+      reason about the whole function until it lands.
+- [ ] 246. gomutant: the gofresh bump — five releases behind at v0.99.0
+      (235 C8; 210 dissolves in; 205 rides) — the consumer arms
+      reachable now: ParseDynamicStateVouches deleted for
+      gofresh.ParseVouchEntry, the tree-root vouch file read through the
+      engine (or WithoutRepositoryVouches — the module-root reach
+      decided), treecache's digest through gotool.EnvSnapshot.Identity,
+      the GOVERSION sampler through gotool.Run, the six env composers
+      with four key rules onto one (env-key-composition-one-rule folds
+      in), the nine ad-hoc canonicalization sites; the arms that wait on
+      gofresh 239's release (the env-composition rule, languageSeries,
+      canonicalDir) in the same chunk if 239 has shipped, else a rider.
+      Every consumer store re-measures once at the bump.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
