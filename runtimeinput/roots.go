@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // The classification roots a producing run's reads classify under are
@@ -140,7 +139,7 @@ func tempRootFromEnv(env []string) string {
 	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
 		return ""
 	}
-	if v, ok := processenv.Lookup(env, "TMPDIR"); ok && v != "" {
+	if v, ok := gotool.LookupEnv(env, "TMPDIR"); ok && v != "" {
 		return v
 	}
 	if runtime.GOOS == "android" {

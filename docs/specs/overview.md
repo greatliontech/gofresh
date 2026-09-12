@@ -9,23 +9,30 @@ and never owns the result store: it answers one question — *is this still fres
 and leaves measuring and storing to the caller.
 
 Beside that one question, this module is also the fleet's shared
-substrate: infrastructure every consuming tool needs identically
-lives here once — today the tool-resident guidance format
-([guidance.md](guidance.md)); the fast-tier partition pin — one call
-pinning that a repository's every `testing.Short` gate is a skipping
-statement of a Test or Fuzz body, at its head or after the cheap
-controls it deliberately runs first, a subtest or fuzz body counting
-as a body and any other closure not, never in a helper the full tier
-could not see through, and never in a fixture source, where it would
-change what the full tier analyzes — and that the walk found at least
-one gate, at the root and below it (its contract lives with the
-`shortgates` package); and the language-shape canary corpus — the
-source shapes every tool's frontend must parse and judge, one
-exported home each consumer wraps with its own harness, so the
+substrate: infrastructure every consuming tool needs identically lives
+here once — today the tool-resident guidance format
+([guidance.md](guidance.md)); the go-command policy — one runner for
+every `go` command gofresh spawns itself, under one complete normalized
+environment (deterministic order, duplicate keys refused, `PWD` derived
+from the command's directory, the ordinary loader pinned) that the
+package loader's `go list` children carry — `x/tools` appends its own
+`PWD=<dir>`, the same derivation, and spawns them outside the runner's
+hook; one canonical directory resolution; and the toolchain sample below
+— each a consumer's obligation met once (the `gotool` package); the
+fast-tier partition pin — one call pinning that a repository's every
+`testing.Short` gate is a skipping statement of a Test or Fuzz body, at
+its head or after the cheap controls it deliberately runs first, a
+subtest or fuzz body counting as a body and any other closure not, never
+in a helper the full tier could not see through, and never in a fixture
+source, where it would change what the full tier analyzes — and that the
+walk found at least one gate, at the root and below it (its contract
+lives with the `shortgates` package); and the language-shape canary
+corpus — the source shapes every tool's frontend must parse and judge,
+one exported home each consumer wraps with its own harness, so the
 canaries' content cannot drift between consumers, though a consumer
 pinned to an older release runs an older corpus (the `shapecorpus`
-package) — because the fleet's tools already depend on this module,
-and a second home would mean a second implementation.
+package) — because the fleet's tools already depend on this module, and
+a second home would mean a second implementation.
 
 ## Documents
 
@@ -174,16 +181,19 @@ configuration drift, while a test verdict, which neither can change, is not.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing
-binary's build toolchain and the ambient toolchain of the tree's
-module, sampled by `go env GOVERSION` in the target module's directory
-(never the tool's own working directory: under GOTOOLCHAIN=auto the
-selected toolchain is per module). Within a major the refusal is
-directional — a frontend older than the ambient series refuses, since
-it predates the sources' language, while a newer frontend reads older
-language under the Go 1 compatibility promise; across majors both
-directions refuse; an unidentifiable version on either side refuses.
-This is the guard the closure identity's exclusion of the analyzing
-frontend rests on (REQ-closure-identity-strategy).
+binary's build toolchain and the ambient toolchain of the tree's module,
+sampled by `go env GOVERSION` in the target module's directory (never
+the tool's own working directory: under GOTOOLCHAIN=auto the selected
+toolchain is per module) — the sample gofresh's go-command policy
+performs for every consumer, so no consumer spells the sampling contract
+itself. Enforced by `TestSampleGoVersionRunsInTheModuleDirectory`.
+Within a major the refusal is directional — a frontend older than the
+ambient series refuses, since it predates the sources' language, while a
+newer frontend reads older language under the Go 1 compatibility
+promise; across majors both directions refuse; an unidentifiable version
+on either side refuses. This is the guard the closure identity's
+exclusion of the analyzing frontend rests on
+(REQ-closure-identity-strategy).
 
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/processenv"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // testlogHeader is the first line the testing runtime writes on opening
@@ -176,12 +176,12 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	}
 	// The validated PWD and the PWD the classification later reads come
 	// from the same lookup over the same normalized environment - a
-	// parallel scan could diverge from processenv's key semantics.
+	// parallel scan could diverge from the environment policy's key semantics.
 	normalized, err := normalizeEnvironment(in.Env)
 	if err != nil {
 		return Observation{}, "", err
 	}
-	pwd, _ := processenv.Lookup(normalized, "PWD")
+	pwd, _ := gotool.LookupEnv(normalized, "PWD")
 	if pwd == "" {
 		return incomplete("process environment carries no PWD; cwd-anchored reads cannot classify under the frame")
 	}

@@ -29,7 +29,6 @@ import (
 	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // Closure is the result of analyzing one benchmark (spec REQ-fresh-sound): the hash of its
@@ -241,7 +240,7 @@ func NewBracketAt(ctx context.Context, dir string, env []string, snapshot *gotoo
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
-	normalized, err := processenv.Normalize(env)
+	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
@@ -283,11 +282,11 @@ func NewAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSn
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	normalized, err := processenv.Normalize(env)
+	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	packageEnv, err := processenv.ForGoPackages(normalized)
+	packageEnv, err := gotool.EnvForPackages(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}

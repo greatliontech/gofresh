@@ -1,4 +1,11 @@
-// Package gotool runs the go command line tool, surfacing stderr on failure.
+// Package gotool is the fleet's go-command policy: it runs the go
+// command line tool under one complete normalized environment (env.go),
+// surfacing stderr on failure; samples the toolchain in the target
+// module's directory; and resolves a directory to its one canonical
+// coordinate. The policy covers the go commands gofresh spawns itself;
+// the package loader's `go list` children carry the same environment
+// (x/tools appends its own PWD, the same derivation) and spawn through
+// x/tools, outside the runner's hook.
 package gotool
 
 import (
@@ -6,11 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // Run executes `go <args>` in dir ("" = current directory) with env as
@@ -20,6 +27,23 @@ import (
 // so provenance capture and `go test` must run in the same dir to
 // describe the same toolchain.
 func Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	return Runner{}.Run(ctx, dir, env, args...)
+}
+
+// Runner runs the go command line tool under a caller-owned spawn
+// policy: Prepare, when set, sees the command before it starts, its
+// Dir and Env already set — a consumer that owns its children's
+// process boundary sets the group there and, since CommandContext's
+// default Cancel kills the leader alone, replaces Cancel and WaitDelay
+// so a cancellation sweeps the group (Run without a hook is the plain
+// spawn). The hook reaches the go commands gofresh spawns itself; the
+// package loader's children spawn through x/tools, outside it.
+type Runner struct {
+	Prepare func(*exec.Cmd)
+}
+
+// Run is Run under the runner's spawn policy.
+func (r Runner) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	if env == nil {
 		// A nil environment would let the child inherit the ambient one;
 		// the caller names the environment it runs under (an empty
@@ -31,11 +55,14 @@ func Run(ctx context.Context, dir string, env []string, args ...string) ([]byte,
 	}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
-	commandEnv, err := processenv.ForCommand(env, dir)
+	commandEnv, err := EnvForCommand(env, dir)
 	if err != nil {
 		return nil, fmt.Errorf("go %s: environment: %w", strings.Join(args, " "), err)
 	}
 	cmd.Env = commandEnv
+	if r.Prepare != nil {
+		r.Prepare(cmd)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
@@ -111,4 +138,46 @@ func TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapsho
 		return nil, fmt.Errorf("gotool: parse go env -json: %w", err)
 	}
 	return &EnvSnapshot{JSON: out, values: values}, nil
+}
+
+// SampleGoVersion is the toolchain sample REQ-fresh-toolchain-skew
+// specifies: `go env GOVERSION` run IN THE TARGET MODULE'S DIRECTORY,
+// never the tool's own — under GOTOOLCHAIN=auto the go command re-execs
+// a per-module selected toolchain, so a version sampled elsewhere can
+// agree while the module's toolchain skews. The sample is the string a
+// consumer hands to ToolchainSkew.
+func (r Runner) SampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
+	out, err := r.Run(ctx, dir, env, "env", "GOVERSION")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// SampleGoVersion is Runner{}.SampleGoVersion.
+func SampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
+	return Runner{}.SampleGoVersion(ctx, dir, env)
+}
+
+// CanonicalDir resolves dir to one coordinate: absolute, then every
+// element evaluated in turn, symlinks followed, `..` applied to the
+// resolved prefix — never a lexical clean of the spelling first. The
+// relative form is made absolute by concatenation, not filepath.Abs,
+// whose cleaning would fold `link/..` onto the link's parent where the
+// element-wise walk reaches the target's parent (the Unix kernel's own
+// walk; Windows normalizes `..` lexically before the filesystem sees
+// it, so there the two can name different directories). An engine's
+// root, its evidence root, and every consumer's module directory
+// resolve through it, so two spellings of one directory are one
+// coordinate.
+func CanonicalDir(dir string) (string, error) {
+	raw := dir
+	if !filepath.IsAbs(raw) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		raw = cwd + string(os.PathSeparator) + raw
+	}
+	return filepath.EvalSymlinks(raw)
 }

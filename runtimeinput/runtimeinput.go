@@ -52,8 +52,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
-	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 const manifestVersion = 1
@@ -774,7 +774,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 	// determined by the frame identity the record already pins, and the
 	// read admits recordless; any other posture seals
 	// (REQ-inputs-unbounded).
-	pwdValue, pwdPresent := processenv.Lookup(normalized, "PWD")
+	pwdValue, pwdPresent := gotool.LookupEnv(normalized, "PWD")
 	pwdTruthful := pwdPresent && pwdValue == packageDir
 
 	lines := bytes.Split(log, []byte{'\n'})
@@ -805,7 +805,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				addUnverifiable(&m, unverifiableSeen, "unrepresentable environment name")
 				continue
 			}
-			if processenv.EqualKey(name, "PWD") {
+			if gotool.EqualEnvKey(name, "PWD") {
 				if pwdTruthful {
 					continue
 				}
@@ -1212,7 +1212,7 @@ func Current(ctx context.Context, encoded, moduleDir string, env []string) (Stat
 }
 
 func normalizeEnvironment(env []string) ([]string, error) {
-	normalized, err := processenv.Normalize(env)
+	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
 		return nil, fmt.Errorf("runtimeinputs: %w", err)
 	}
@@ -1237,7 +1237,7 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 // envEntryDigest digests one environment input: presence and value, names
 // only ever disclosed.
 func envEntryDigest(env []string, name string) string {
-	value, ok := processenv.Lookup(env, name)
+	value, ok := gotool.LookupEnv(env, name)
 	valueHash := sha256.Sum256([]byte(value))
 	sum := sha256.Sum256(fmt.Appendf(nil, "%t %x", ok, valueHash))
 	return hex.EncodeToString(sum[:])[:32]

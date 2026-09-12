@@ -24,14 +24,13 @@ import (
 // toolchain property — their language support is exercised by each
 // tool's language-shape canary suite, never inferable here.
 //
-// Sampling contract: ambient MUST be the version of the `go` that
-// will actually serve the run's loads and test executions — sampled
-// IN THE TARGET MODULE'S DIRECTORY (`go env GOVERSION` there), never
-// the tool's own cwd: under GOTOOLCHAIN=auto, cmd/go re-execs a
-// per-module selected toolchain, and a cwd-sampled version can agree
-// while the module's selected toolchain skews — exactly the state
-// this check exists to refuse. (The same dir-relativity rule the
-// guard evidence already binds to.)
+// Sampling contract: ambient is gotool.SampleGoVersion's answer for
+// the target module's directory — the version of the `go` that will
+// actually serve the run's loads and test executions. The sampler
+// owns the directory rule (under GOTOOLCHAIN=auto, cmd/go re-execs a
+// per-module selected toolchain, so a version sampled elsewhere can
+// agree while the module's toolchain skews — exactly the state this
+// check exists to refuse); no caller spells it.
 
 // ToolchainSkew reports the breaking direction of a language-series
 // disagreement between the running binary's build toolchain and the

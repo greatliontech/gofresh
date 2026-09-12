@@ -1,5 +1,4 @@
-// Package processenv validates and queries complete process environments.
-package processenv
+package gotool
 
 import (
 	"fmt"
@@ -9,17 +8,25 @@ import (
 	"strings"
 )
 
-// ForCommand returns env with PWD derived from dir, matching the environment
+// The environment policy: every go invocation gofresh or a consumer
+// makes runs under a complete, normalized environment — the exec.Cmd
+// key=value form, deterministic order, duplicate keys refused rather
+// than resolved by platform behaviour, PWD derived from the command's
+// directory as go/packages derives it, and the ordinary Go loader
+// pinned (no external package driver). One policy, exported here, so a
+// consumer never re-derives it (REQ-fresh-coherent-view).
+
+// EnvForCommand returns env with PWD derived from dir, matching the environment
 // go/packages gives a Go command run under packages.Config.Dir.
-func ForCommand(env []string, dir string) ([]string, error) {
+func EnvForCommand(env []string, dir string) ([]string, error) {
 	if dir == "" {
-		return Normalize(env)
+		return NormalizeEnv(env)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	normalized, err := Normalize(env)
+	normalized, err := NormalizeEnv(env)
 	if err != nil {
 		return nil, err
 	}
@@ -30,13 +37,13 @@ func ForCommand(env []string, dir string) ([]string, error) {
 			command = append(command, entry)
 		}
 	}
-	return Normalize(append(command, "PWD="+abs))
+	return NormalizeEnv(append(command, "PWD="+abs))
 }
 
-// Normalize returns a deterministic owned copy of env. Entries must use the
+// NormalizeEnv returns a deterministic owned copy of env. Entries must use the
 // exec.Cmd key=value form, and duplicate keys are refused rather than resolved
 // by platform-dependent first- or last-entry behavior.
-func Normalize(env []string) ([]string, error) {
+func NormalizeEnv(env []string) ([]string, error) {
 	normalized := make([]string, len(env))
 	seen := make(map[string]bool, len(env))
 	for i, entry := range env {
@@ -72,15 +79,15 @@ func Normalize(env []string) ([]string, error) {
 	return normalized, nil
 }
 
-// ForGoPackages returns a normalized environment that cannot delegate source
+// EnvForPackages returns a normalized environment that cannot delegate source
 // selection to an external package driver. The ordinary Go loader is the source
 // model freshness analysis represents.
-func ForGoPackages(env []string) ([]string, error) {
-	normalized, err := Normalize(env)
+func EnvForPackages(env []string) ([]string, error) {
+	normalized, err := NormalizeEnv(env)
 	if err != nil {
 		return nil, err
 	}
-	if driver, ok := Lookup(normalized, "GOPACKAGESDRIVER"); ok {
+	if driver, ok := LookupEnv(normalized, "GOPACKAGESDRIVER"); ok {
 		if driver != "" && driver != "off" {
 			return nil, fmt.Errorf("GOPACKAGESDRIVER=%q is unsupported because freshness analysis requires Go package loading", driver)
 		}
@@ -92,11 +99,11 @@ func ForGoPackages(env []string) ([]string, error) {
 			pinned = append(pinned, entry)
 		}
 	}
-	return Normalize(append(pinned, "GOPACKAGESDRIVER=off"))
+	return NormalizeEnv(append(pinned, "GOPACKAGESDRIVER=off"))
 }
 
-// Lookup returns key's value from a normalized complete environment.
-func Lookup(env []string, key string) (string, bool) {
+// LookupEnv returns key's value from a normalized complete environment.
+func LookupEnv(env []string, key string) (string, bool) {
 	for _, entry := range env {
 		name, value, ok := split(entry)
 		if ok && equalKey(name, key) {
@@ -106,9 +113,9 @@ func Lookup(env []string, key string) (string, bool) {
 	return "", false
 }
 
-// EqualKey reports whether two environment names identify the same variable on
+// EqualEnvKey reports whether two environment names identify the same variable on
 // the current platform.
-func EqualKey(left, right string) bool { return equalKey(left, right) }
+func EqualEnvKey(left, right string) bool { return equalKey(left, right) }
 
 func split(entry string) (string, string, bool) {
 	equals := strings.IndexByte(entry, '=')

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -1541,7 +1542,7 @@ func TestViewFreezesRelativeModuleDirectory(t *testing.T) {
 	if err := os.Chdir(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := canonicalDir(dir)
+	canonical, err := gotool.CanonicalDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

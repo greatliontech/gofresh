@@ -94,7 +94,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		return nil, errors.New("gofresh: analysis view requires at least one subject")
 	}
 	var err error
-	moduleDir, err = canonicalDir(moduleDir)
+	moduleDir, err = gotool.CanonicalDir(moduleDir)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: resolve guards tree: %w", err)
 	}

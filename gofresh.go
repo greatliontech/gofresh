@@ -25,7 +25,6 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/processenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -435,7 +434,7 @@ type Fingerprint struct {
 	// 32 hex over the package's own test-only files, which the maximal
 	// closure excludes. A sibling test edit moves only this compartment, so
 	// a consumer validating test-binary evidence can tell "a sibling test
-	// moved" (stale with reason "test variants") from any other drift. A
+	// moved" (stale with reason ReasonTestVariants) from any other drift. A
 	// package with no test files records the stable empty-set identity
 	// (testvariant.EmptyTestVariantClosure); an empty value identifies a
 	// recording that predates the partition and fails closed to stale
@@ -528,8 +527,16 @@ func (e *UnknownSubjectsError) Error() string {
 	return fmt.Sprintf("gofresh: subjects %s not found in selected source", strings.Join(names, ", "))
 }
 
+// ReasonTestVariants is the stale reason of a compartment-only move:
+// the subject's own closure unchanged, its package's test variants
+// moved. A consumer keying a rule on it reads the constant, never the
+// spelling.
+const ReasonTestVariants = "test variants"
+
 // Verdict is the freshness answer for one subject's fingerprint. Reason names the
-// first failing guard for Stale, or the unverifiable dependence for Unverifiable.
+// first failing guard for Stale, or the unverifiable dependence for Unverifiable;
+// its spellings are diagnostics, except ReasonTestVariants, the one a consumer
+// keys a rule on.
 type Verdict struct {
 	Status Status
 	Reason string
@@ -947,19 +954,19 @@ func New(opts ...Option) (*Engine, error) {
 	if !e.envSet {
 		e.env = os.Environ()
 	}
-	normalized, err := processenv.Normalize(e.env)
+	normalized, err := gotool.NormalizeEnv(e.env)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: %w", err)
 	}
 	e.env = normalized
-	if _, err := processenv.ForGoPackages(e.env); err != nil {
+	if _, err := gotool.EnvForPackages(e.env); err != nil {
 		return nil, fmt.Errorf("gofresh: %w", err)
 	}
 	if e.producerEnvSet {
 		if len(e.producerEnv) == 0 {
 			return nil, errors.New("gofresh: producer env declared empty; a producer process runs under a complete environment")
 		}
-		normalizedProducer, err := processenv.Normalize(e.producerEnv)
+		normalizedProducer, err := gotool.NormalizeEnv(e.producerEnv)
 		if err != nil {
 			return nil, fmt.Errorf("gofresh: producer env: %w", err)
 		}
@@ -975,7 +982,7 @@ func New(opts ...Option) (*Engine, error) {
 		}
 		e.dir = cwd
 	}
-	root, err := canonicalDir(e.dir)
+	root, err := gotool.CanonicalDir(e.dir)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
 	}
@@ -992,7 +999,7 @@ func New(opts ...Option) (*Engine, error) {
 		WithDynamicStateVouches(reviewed...)(e)
 	}
 	if e.evidenceRoot != "" {
-		evidenceRoot, err := canonicalDir(e.evidenceRoot)
+		evidenceRoot, err := gotool.CanonicalDir(e.evidenceRoot)
 		if err != nil {
 			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
 		}
@@ -1012,35 +1019,6 @@ func New(opts ...Option) (*Engine, error) {
 		return nil, err
 	}
 	return e, nil
-}
-
-func canonicalDir(dir string) (string, error) {
-	raw := dir
-	if !filepath.IsAbs(raw) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		raw = cwd + string(os.PathSeparator) + raw
-	}
-	resolved, err := filepath.EvalSymlinks(raw)
-	if err != nil {
-		return "", err
-	}
-	originalInfo, err := os.Stat(raw)
-	if err != nil {
-		return "", err
-	}
-	resolvedInfo, err := os.Stat(resolved)
-	if err != nil {
-		return "", err
-	}
-	if os.SameFile(originalInfo, resolvedInfo) {
-		return resolved, nil
-	}
-	// Preserve kernel path-walk semantics when lexical cleaning across a symlink
-	// would identify a different directory (for example, link/..).
-	return raw, nil
 }
 
 // Capture records the closure hash and code-result guard values for subject, whose code lives
@@ -1155,7 +1133,7 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 		return Verdict{Stale, "closure"}, true
 	}
 	if rec.MaximalClosure == current.Hash && compartmentStale(rec.TestVariantClosure, current.TestVariants) {
-		return Verdict{Stale, "test variants"}, true
+		return Verdict{Stale, ReasonTestVariants}, true
 	}
 	if rec.MaximalClosure != current.Hash {
 		return Verdict{Stale, "closure"}, true

@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/internal/processenv"
 )
 
 // Guards are the captured guard values for one result. Every field is a digest or
@@ -75,11 +74,11 @@ const (
 // (REQ-guard-buildconfig, REQ-guard-buildconfig-failclosed). None used ⇒
 // pass none.
 func Capture(ctx context.Context, moduleDir string, env, runtimeEnv []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
-	normalized, err := processenv.Normalize(env)
+	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: %w", err)
 	}
-	normalizedRuntime, err := processenv.Normalize(runtimeEnv)
+	normalizedRuntime, err := gotool.NormalizeEnv(runtimeEnv)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: runtime env: %w", err)
 	}
@@ -202,7 +201,7 @@ func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string
 		vals[k] = env[k]
 	}
 	for _, k := range buildConfigOSEnvKeys {
-		vals[k], _ = processenv.Lookup(processEnv, k)
+		vals[k], _ = gotool.LookupEnv(processEnv, k)
 	}
 	keys := make([]string, 0, len(vals))
 	for k := range vals {
@@ -233,7 +232,7 @@ var runtimeConfigEnvKeys = []string{"GOGC", "GODEBUG", "GOMEMLIMIT", "GOMAXPROCS
 func runtimeConfig(env []string) string {
 	var b strings.Builder
 	for _, k := range runtimeConfigEnvKeys {
-		value, _ := processenv.Lookup(env, k)
+		value, _ := gotool.LookupEnv(env, k)
 		fmt.Fprintf(&b, "%s=%s\n", k, value)
 	}
 	return digest(b.String())

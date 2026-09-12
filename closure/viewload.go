@@ -7,7 +7,6 @@ import (
 
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/processenv"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -61,11 +60,11 @@ func loadView(ctx context.Context, dir string, env, buildFlags []string, snapsho
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: view load cancelled: %w", err)
 	}
-	normalized, err := processenv.Normalize(env)
+	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	packageEnv, err := processenv.ForGoPackages(normalized)
+	packageEnv, err := gotool.EnvForPackages(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}

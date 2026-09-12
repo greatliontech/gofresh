@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [loader-spawns-outside-the-runner](loader-spawns-outside-the-runner.md) | the package loader's `go list` children spawn through `x/tools`, outside `gotool.Runner`'s hook: a consumer's process boundary covers the runner's children only | cross-tool train chunk 241 |
 | [per-file-memos-one-shape](per-file-memos-one-shape.md) | the effect-scan, ledger-parse, and canonical-digest memos each spell the load-serve-pend-merge discipline; one generic per-file memo would hold it once | cross-tool train chunk 203 |
 | [walk-dst-selection-for-audit-key](walk-dst-selection-for-audit-key.md) | the two-axis key landed (chunk 126): dst-tagged analyses refuse admissions loudly; the dst-selection WALK remains — walking it lists dst in the selections axis | with the first judged run over a dst-tagged build selection (tugboat DST-leg campaigns, paused with the tool phase) |
 | [binary-roots-single-mask-union](binary-roots-single-mask-union.md) | one all-roots RTA walk instead of per-root batches for the binary inventory | with the next change to the attributed reach's mask assignment |

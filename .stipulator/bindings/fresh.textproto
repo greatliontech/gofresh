@@ -443,8 +443,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-toolchain-skew"
-  content_hash: "45bb0bdbd0971ccaacc3d68563ecedf524f859f234ebf120e6565ffa00e3743e"
-  source_hash: "8dc01b391150e14704cc33cc9ab0c7efd729aa8f3ec5029f02615e40f9fc9abe"
+  content_hash: "27e37e060f755457ddda2d1d4fe036a20e7dc3bdfeb8d9ab0edbd42a3c5a00d9"
+  source_hash: "96636fc7c00362c0f92baaaf44e74629b20f3000c518d23e997e0c13a101a41b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestToolchainSkewComparesLanguageSeries"
   role: BINDING_ROLE_TESTS
@@ -453,8 +453,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-toolchain-skew"
-  content_hash: "45bb0bdbd0971ccaacc3d68563ecedf524f859f234ebf120e6565ffa00e3743e"
-  source_hash: "8dc01b391150e14704cc33cc9ab0c7efd729aa8f3ec5029f02615e40f9fc9abe"
+  content_hash: "27e37e060f755457ddda2d1d4fe036a20e7dc3bdfeb8d9ab0edbd42a3c5a00d9"
+  source_hash: "96636fc7c00362c0f92baaaf44e74629b20f3000c518d23e997e0c13a101a41b"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestToolchainSkewLabelsTheBinarySide"
   role: BINDING_ROLE_TESTS
@@ -479,4 +479,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestToolchainSelectionNoticeAnnouncedAtViewConstruction"
   role: BINDING_ROLE_TESTS
   shape_hash: "15756fb849f60a3ee2bb9a0ca81be153ab754136cf43dedad14116b452277751"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-skew"
+  content_hash: "27e37e060f755457ddda2d1d4fe036a20e7dc3bdfeb8d9ab0edbd42a3c5a00d9"
+  source_hash: "96636fc7c00362c0f92baaaf44e74629b20f3000c518d23e997e0c13a101a41b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestSampleGoVersionRunsInTheModuleDirectory"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "68d08917916141b9ba3d7a1bb4996784b1ed6870a24308a09fcb3db814973ac3"
 }

@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/internal/processenv"
+	"github.com/greatliontech/gofresh/gotool"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -111,7 +111,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 	if len(patterns) == 0 {
 		patterns = []string{pkgPath}
 	}
-	packageEnv, err := processenv.ForGoPackages(env)
+	packageEnv, err := gotool.EnvForPackages(env)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: environment: %w", err)
 	}
