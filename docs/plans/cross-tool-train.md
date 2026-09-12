@@ -1349,7 +1349,7 @@ in their repos.
       group-isolated loader spawn gofresh offers) and the gap's close.
       (236: after 226's clause split — its gap over-excuses four met
       mechanisms until REQ-go-owned-processes is split.)
-- [ ] 239. gofresh: the environment, toolchain, and go-command policy
+- [x] 239. gofresh: the environment, toolchain, and go-command policy
       exported (234 C1/A1/A5) — gofresh owns the whole policy and
       publishes none of it: internal/processenv (Normalize, ForCommand,
       ForGoPackages, Lookup), canonicalDir, and the `go env GOVERSION`
@@ -1368,8 +1368,11 @@ in their repos.
 - [ ] 240. gofresh: the spec corrections 234 found (A2 the memo key
       names "the commit" no memo keys on — REQ-guard-cache and
       REQ-guard-recompute; A4 ErrViewSealed the fourth typed refusal on
-      the capture seam, pinned by identity beside its siblings; A5 the
-      substrate paragraph's home for gotool). Spec only; re-consented.
+      the capture seam, pinned by identity beside its siblings; the
+      go-command policy the substrate paragraph names since 239 stated
+      as a requirement with the gotool pins as its enforcement
+      pointers — today no REQ id, so no binding tracks it). Spec only;
+      re-consented.
 - [ ] 241. gofresh: one typed-load seam (234 C2/A6/A7) — four
       packages.Load sites with four hand-built configs (viewload.go the
       designated seam; explain.go, maximal.go, internal/program) merge
