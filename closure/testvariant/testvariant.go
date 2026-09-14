@@ -1,5 +1,5 @@
 // Package testvariant is the vocabulary of a package's test-variant
-// compartment (REQ-closure-test-variant-compartment): the declaration
+// compartment (REQ-closure-test-variant-ledger): the declaration
 // ledger persisted beside a compartment hash, the delta between two
 // ledgers and its inertness classification, and the empty compartment's
 // identity. The compartment's computation lives with the closure engine.
@@ -15,7 +15,7 @@ import (
 // compartment equal to it stays valid for as long as the package has no test
 // files — and it is never the empty string, so an empty recorded compartment
 // unambiguously identifies a recording that predates the partition
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-identity).
 const EmptyTestVariantClosure = "e3b0c44298fc1c149afbf4c8996fb924"
 
 // TestVariantLedger is the declaration-level read surface over a package's
@@ -23,7 +23,7 @@ const EmptyTestVariantClosure = "e3b0c44298fc1c149afbf4c8996fb924"
 // files and a per-file header identity over each file's non-declaration
 // remainder. It is data for a consumer to persist at capture and diff at check;
 // gofresh renders no judgment about which deltas are benign
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-ledger).
 type TestVariantLedger struct {
 	// Declarations is sorted by (File, Kind, Receiver, Name, Hash).
 	Declarations []TestVariantDeclaration
@@ -94,7 +94,7 @@ type TestVariantDeclaration struct {
 // fixture included — carries Embedded true and a whole-content hash,
 // because its bytes feed unchanged code rather than declare any; a
 // non-Go compiled input is never a member (the variant node repeats the
-// base's SFiles and CFiles) (REQ-closure-test-variant-compartment).
+// base's SFiles and CFiles) (REQ-closure-test-variant-ledger).
 type TestVariantFileHeader struct {
 	File     string // relative to the package directory
 	Hash     string
@@ -106,7 +106,7 @@ type TestVariantFileHeader struct {
 // sorted with the ledger's declaration ordering; HeaderChanges is sorted by
 // file. It is data plus Go semantics: Inert reports whether the delta can
 // change the behavior of any unchanged declaration, and nothing about what a
-// consumer should do with that fact (REQ-closure-test-variant-compartment).
+// consumer should do with that fact (REQ-closure-test-variant-inertness).
 type TestVariantDelta struct {
 	Added   []TestVariantDeclaration
 	Changed []TestVariantDeclarationChange

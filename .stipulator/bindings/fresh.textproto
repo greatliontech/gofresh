@@ -3,8 +3,8 @@
 
 bindings {
   requirement_id: "REQ-fresh-verdict"
-  content_hash: "0c1264dbe7c66d44db44b57d72b3656f5a8cd7cb33ad45b770d6cf23709f8626"
-  source_hash: "94429a7c05747d717e4aeb4d4d945bc359c21e8502e85ee75b5196900f087975"
+  content_hash: "e9040bc5d16aa91cc49aad7046573e5fb609a9d3f271c4fa4f6f30d4026b6496"
+  source_hash: "4f0f6df37b3fdedbec4b6442edf859e8458a37fe7cdf5e3fde57828e56e914cf"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
@@ -83,8 +83,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "55bceda444be4ccbe07d05497901116baaaaf114c0e89b49b8c1cd7ce3745d9a"
-  source_hash: "e45e29b0b0492513857ce34dbda5f15cff5a7b5fc64ecc50b70fbd0515d69065"
+  content_hash: "57f47a06e240982ae728caae8c74174d77117f090aaa345ad8ea1f5f969b4e27"
+  source_hash: "9268b9f427d57f0e0a5f85cee5e29c0542d2cf7c2c77619a9ceb5fb78b62f5a7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestFingerprintDataShape"
   role: BINDING_ROLE_TESTS
@@ -103,8 +103,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "55bceda444be4ccbe07d05497901116baaaaf114c0e89b49b8c1cd7ce3745d9a"
-  source_hash: "e45e29b0b0492513857ce34dbda5f15cff5a7b5fc64ecc50b70fbd0515d69065"
+  content_hash: "57f47a06e240982ae728caae8c74174d77117f090aaa345ad8ea1f5f969b4e27"
+  source_hash: "9268b9f427d57f0e0a5f85cee5e29c0542d2cf7c2c77619a9ceb5fb78b62f5a7"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestFingerprintIsExportedData"
   role: BINDING_ROLE_PROVES
@@ -213,8 +213,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-verdict"
-  content_hash: "0c1264dbe7c66d44db44b57d72b3656f5a8cd7cb33ad45b770d6cf23709f8626"
-  source_hash: "94429a7c05747d717e4aeb4d4d945bc359c21e8502e85ee75b5196900f087975"
+  content_hash: "e9040bc5d16aa91cc49aad7046573e5fb609a9d3f271c4fa4f6f30d4026b6496"
+  source_hash: "4f0f6df37b3fdedbec4b6442edf859e8458a37fe7cdf5e3fde57828e56e914cf"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSiblingTestAdditionStalesAsTestVariants"
   role: BINDING_ROLE_TESTS
@@ -233,8 +233,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-hierarchical-check"
-  content_hash: "2e2a50eb1a252c453987e87f23c8bf3570efa9b4a1e077d91667cdcbdf8b5170"
-  source_hash: "da6c43c8be7e9ca8cf150ba462b5af5c16c9398ac670bd7abb3408a75cecd42d"
+  content_hash: "738e0dc13f51747874c23192b6a4b2d348462ffee0d51ba39cb0f28335a96018"
+  source_hash: "59bfcad619994646b79f3d3fb0a0e1ca8231aef6d554d8d1c08c45271f24e648"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis"
   role: BINDING_ROLE_TESTS
@@ -243,8 +243,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-hierarchical-check"
-  content_hash: "2e2a50eb1a252c453987e87f23c8bf3570efa9b4a1e077d91667cdcbdf8b5170"
-  source_hash: "da6c43c8be7e9ca8cf150ba462b5af5c16c9398ac670bd7abb3408a75cecd42d"
+  content_hash: "738e0dc13f51747874c23192b6a4b2d348462ffee0d51ba39cb0f28335a96018"
+  source_hash: "59bfcad619994646b79f3d3fb0a0e1ca8231aef6d554d8d1c08c45271f24e648"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCompartmentDriftStalesWithoutPreciseAnalysis"
   role: BINDING_ROLE_TESTS
@@ -253,8 +253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-hierarchical-check"
-  content_hash: "2e2a50eb1a252c453987e87f23c8bf3570efa9b4a1e077d91667cdcbdf8b5170"
-  source_hash: "da6c43c8be7e9ca8cf150ba462b5af5c16c9398ac670bd7abb3408a75cecd42d"
+  content_hash: "738e0dc13f51747874c23192b6a4b2d348462ffee0d51ba39cb0f28335a96018"
+  source_hash: "59bfcad619994646b79f3d3fb0a0e1ca8231aef6d554d8d1c08c45271f24e648"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestMixedCoreAndCompartmentDriftStalesOnClosure"
   role: BINDING_ROLE_TESTS
@@ -263,8 +263,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-hierarchical-check"
-  content_hash: "2e2a50eb1a252c453987e87f23c8bf3570efa9b4a1e077d91667cdcbdf8b5170"
-  source_hash: "da6c43c8be7e9ca8cf150ba462b5af5c16c9398ac670bd7abb3408a75cecd42d"
+  content_hash: "738e0dc13f51747874c23192b6a4b2d348462ffee0d51ba39cb0f28335a96018"
+  source_hash: "59bfcad619994646b79f3d3fb0a0e1ca8231aef6d554d8d1c08c45271f24e648"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPrePartitionRecordingFailsClosedAsTestVariants"
   role: BINDING_ROLE_TESTS

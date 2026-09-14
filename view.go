@@ -549,7 +549,7 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 // construction from the same file reads as the compartment hash the
 // fingerprint records, so a caller persists it at capture and diffs it at
 // check against exactly the bytes the verdict compared — never a re-read that
-// could straddle a later edit (REQ-closure-test-variant-compartment,
+// could straddle a later edit (REQ-closure-test-variant-ledger,
 // REQ-fresh-coherent-view). The returned value is caller-owned. A package with
 // no test files yields an empty ledger.
 func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {

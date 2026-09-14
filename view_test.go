@@ -64,7 +64,7 @@ func writeObservedViewModule(t *testing.T) string {
 		// Sibling lives in production source so editing it moves the CORE
 		// closure: a test-file sibling edit would move only the test-variant
 		// compartment and stale as "test variants" instead
-		// (REQ-closure-test-variant-compartment).
+		// (REQ-closure-test-variant-identity).
 		"observed.go":      "package observed\n\nfunc Sibling() int { return 1 }\n",
 		"observed_test.go": "package observed\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n",
 		"fixture":          "one",

@@ -128,7 +128,7 @@ vocabulary and carries no contract beyond accompanying its status — with one
 exception: the reason "test variants" is stable vocabulary a consumer may
 discriminate on, reporting test-variant compartment drift under an unchanged
 core, or a recording that predates the compartment and fails closed
-(REQ-closure-test-variant-compartment).
+(REQ-closure-test-variant-identity).
 
 **REQ-fresh-sound** (invariant): A subject MUST be reported valid only when every
 applicable guard provably holds over a source closure that is a superset of the
@@ -215,7 +215,7 @@ fingerprint is serialized and stored beside its result.
 > check — a package with test files no longer folds them into its recomputed
 > core, so the recorded core cannot match, and a package without test files
 > carries an empty recorded compartment, which fails closed
-> (REQ-closure-test-variant-compartment). This one-time global
+> (REQ-closure-test-variant-identity). This one-time global
 > staleness is accepted: recomputing every pre-partition result is the safe
 > direction, and the alternative — honoring old evidence whose covered set
 > differs from the current computation — would be a false valid waiting to
@@ -224,7 +224,7 @@ fingerprint is serialized and stored beside its result.
 **REQ-fresh-hierarchical-check** (behavior): A check MUST compare the maximal closure
 first. When the maximal hash is unchanged, the test-variant compartment is
 compared next: a drifted or absent recorded compartment is stale with reason
-"test variants" (REQ-closure-test-variant-compartment). When the maximal hash
+"test variants" (REQ-closure-test-variant-identity). When the maximal hash
 changed, the recording is stale. Guards other than the source closure still
 apply normally after source equivalence is established.
 

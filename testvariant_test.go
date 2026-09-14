@@ -31,7 +31,7 @@ const partitionTest = "package partition\n\nimport \"testing\"\n\nfunc TestF(t *
 // A sibling test added to the subject's package stales the recording with the
 // stable discriminating reason "test variants" on both check surfaces: the
 // core is unmoved, only the compartment drifted, and the consumer — not
-// gofresh — decides what that means (REQ-closure-test-variant-compartment).
+// gofresh — decides what that means (REQ-closure-test-variant-identity).
 func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -74,7 +74,7 @@ func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 
 // A subject declared in a test file has its own body in the compartment:
 // editing the recorded test itself moves the compartment, not the core, and
-// the verdict says so (REQ-closure-test-variant-compartment).
+// the verdict says so (REQ-closure-test-variant-identity).
 func TestTestFileSubjectBodyLivesInCompartment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -108,7 +108,7 @@ func TestTestFileSubjectBodyLivesInCompartment(t *testing.T) {
 // A recording that predates the partition carries no compartment: it fails
 // closed to stale even when the core still matches — the one shape where a
 // pre-partition core CAN match is a package with no test files
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-identity).
 func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -163,7 +163,7 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 // Compartment drift is decided from recorded evidence alone: with the core
 // equal, a drifted compartment is stale "test variants" on both check
 // surfaces and no precise analysis runs; with both equal, the verdict is
-// valid, equally without analysis (REQ-closure-test-variant-compartment,
+// valid, equally without analysis (REQ-closure-test-variant-identity,
 // REQ-fresh-hierarchical-check).
 func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	if testing.Short() {
@@ -232,7 +232,7 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 // Core drift takes the ladder's first tier even when the compartment also
 // drifted: strictly more drift never improves a verdict, and the reason names
 // the core ("closure"), the compartment being compared only under an equal
-// core (REQ-closure-test-variant-compartment, REQ-fresh-hierarchical-check).
+// core (REQ-closure-test-variant-identity, REQ-fresh-hierarchical-check).
 func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -287,7 +287,7 @@ func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 // The view serves the compartment ledger from its construction-time snapshot:
 // the same bytes the recorded compartment hash folded, unchanged by later
 // on-disk edits, so capture-time persistence and check-time diffing read
-// coherent data (REQ-closure-test-variant-compartment,
+// coherent data (REQ-closure-test-variant-ledger,
 // REQ-fresh-coherent-view).
 func TestViewServesTestVariantLedgerFromItsSnapshot(t *testing.T) {
 	if testing.Short() {

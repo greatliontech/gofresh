@@ -79,7 +79,7 @@ func ledgerUnder(t *testing.T, dir string, env []string, buildFlags []string, pk
 // TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity: a sibling
 // test added to the package moves only the test-variant compartment, never a
 // subject's core maximal hash (REQ-closure-view-maximal,
-// REQ-closure-test-variant-compartment).
+// REQ-closure-test-variant-hash).
 func TestSiblingTestAdditionMovesCompartmentNotCore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -139,7 +139,7 @@ func TestProductionEditMovesCoreNotCompartment(t *testing.T) {
 // package's init behavior enters the test binary, so its node is a core
 // contribution even though only test files import it. Importing an
 // already-present package moves only the compartment
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-hash).
 func TestNewTestOnlyDependencyMovesCore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -179,7 +179,7 @@ func TestNewTestOnlyDependencyMovesCore(t *testing.T) {
 }
 
 // A package with no test files has the defined constant compartment identity,
-// stable across recomputation (REQ-closure-test-variant-compartment).
+// stable across recomputation (REQ-closure-test-variant-identity).
 func TestNoTestPackageCompartmentIsStableEmptyIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -208,7 +208,7 @@ func TestNoTestPackageCompartmentIsStableEmptyIdentity(t *testing.T) {
 
 // An external test package's files are test-only whole: they enter the
 // compartment and the ledger with their declarations and file header
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-hash).
 func TestExternalTestPackageFilesEnterCompartmentAndLedger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -242,7 +242,7 @@ func TestExternalTestPackageFilesEnterCompartmentAndLedger(t *testing.T) {
 // Editing an existing test function moves the compartment and exactly that
 // declaration's ledger hash; appending a test to an existing file adds a
 // ledger entry without moving the existing ones or the file header
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-ledger).
 func TestLedgerNamesTheEditedAndAppendedDeclarations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -304,7 +304,7 @@ func TestLedgerNamesTheEditedAndAppendedDeclarations(t *testing.T) {
 // The ledger is deterministic data: recomputation yields byte-identical
 // entries, sorted by (File, Kind, Receiver, Name, Hash) with headers sorted by
 // file, whatever order declarations appear in source
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-ledger).
 func TestTestVariantLedgerIsDeterministicallySorted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -446,7 +446,7 @@ func TestDependencyPackageNamedLikeExternalTestKeepsItsCoreContribution(t *testi
 // A package whose core contribution widens to its whole directory (opaque
 // assembly) keeps test files in the core as well — sound, merely
 // undiscriminated — while the same files also sit in the compartment
-// (REQ-closure-test-variant-compartment whole-dir-widening exception).
+// (REQ-closure-test-variant-identity whole-dir-widening exception).
 func TestWidenedCoreKeepsTestFilesUndiscriminated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -490,7 +490,7 @@ func TestWidenedCoreKeepsTestFilesUndiscriminated(t *testing.T) {
 // it is never parsed (even unparseable bytes analyze fine), contributes no
 // declarations, carries an Embedded whole-content header, and its movement
 // defeats inertness like any embedded member's
-// (REQ-closure-test-variant-compartment compiled-vs-embedded split).
+// (REQ-closure-test-variant-ledger compiled-vs-embedded split).
 func TestEmbeddedGoFixtureIsDataNotSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -540,7 +540,7 @@ func TestEmbeddedGoFixtureIsDataNotSource(t *testing.T) {
 // directive names — keeps its parsed declarations but carries the
 // embedded whole-content header: appending an otherwise-inert declaration
 // moves bytes an unchanged test reads as data, so the delta is never inert
-// (REQ-closure-test-variant-compartment dual membership).
+// (REQ-closure-test-variant-inertness dual membership).
 func TestCompiledAndEmbeddedTestFileFailsClosed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -577,7 +577,7 @@ func TestCompiledAndEmbeddedTestFileFailsClosed(t *testing.T) {
 
 // End to end over real ledgers: a sibling test appended to an existing file
 // diffs to an inert added-only delta, and editing that test's body flips the
-// judgment (REQ-closure-test-variant-compartment).
+// judgment (REQ-closure-test-variant-inertness).
 func TestLedgerDeltaOverRealLedgers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

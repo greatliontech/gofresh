@@ -55,13 +55,13 @@ func TestDecide(t *testing.T) {
 		}, Measurement, false, Stale, "test variants"},
 		// A recorded compartment that predates the partition is absence of
 		// proof, never valid — even when the current compartment is also
-		// unevaluable (REQ-closure-test-variant-compartment fail-closed arm).
+		// unevaluable (REQ-closure-test-variant-identity fail-closed arm).
 		{"test variant missing on pre-partition record", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			f.TestVariantClosure = ""
 			c.TestVariants = ""
 		}, Measurement, false, Stale, "test variants"},
 		// Core drift wins over compartment drift: the compartment discriminates
-		// only inside an unchanged core (REQ-closure-test-variant-compartment).
+		// only inside an unchanged core (REQ-closure-test-variant-identity).
 		{"core and compartment both drifted", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			c.Hash = "C2"
 			c.TestVariants = "T2"
@@ -136,7 +136,7 @@ func FuzzDecideSound(f *testing.F) {
 		}
 		// The compartment is evidence like the core: valid requires a
 		// non-empty recorded compartment equal to the current one
-		// (REQ-closure-test-variant-compartment).
+		// (REQ-closure-test-variant-identity).
 		if v.Status == Valid && (rec.TestVariantClosure == "" || rec.TestVariantClosure != cl.TestVariants) {
 			t.Fatalf("sound violated: valid across test-variant compartment drift (rec=%+v cl=%+v)", rec, cl)
 		}

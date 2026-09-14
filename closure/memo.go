@@ -56,7 +56,7 @@ func storeMemo(scope, closureKey string, proofs map[string]Observability) {
 // package's analyzed test binary is built from: the core closure hash
 // joined with the test-variant compartment identity. The compartment
 // rides as its own axis because the partition keeps test-only bytes out
-// of the core contributions (REQ-closure-test-variant-compartment) while
+// of the core contributions (REQ-closure-test-variant-hash) while
 // the analyzed program compiles them all the same — a key equating the
 // test binary with the core alone serves stale proofs after test-only
 // edits (REQ-closure-observability-memo).

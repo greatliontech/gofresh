@@ -84,7 +84,7 @@ func union(a, b map[string]string) map[string]string {
 // of the compartment hash: twins that share every member's bytes and
 // differ in every non-member — the base file's body, an extra base file,
 // an unembedded data file — give equal hashes and equal ledgers, and one
-// member's edit moves the hash (REQ-closure-test-variant-compartment).
+// member's edit moves the hash (REQ-closure-test-variant-hash).
 func TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists generated modules through the toolchain")
@@ -151,7 +151,7 @@ func envWith(key, value string) []string {
 // the same members and bytes give one hash and two ledgers, on the
 // build-selection axis (a tag), the platform axis (GOOS), and the cgo
 // axis (CGO_ENABLED) alike; the reason the entailment is stated per
-// listing configuration (REQ-closure-test-variant-compartment).
+// listing configuration (REQ-closure-test-variant-hash).
 func TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists a module through the toolchain six times")

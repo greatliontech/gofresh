@@ -65,7 +65,7 @@ func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []strin
 // A warm pass parses nothing: every file's effect scan and every
 // compartment member's derivation serve under the file's content digest,
 // and the closures equal an unmemoized fold's
-// (REQ-closure-effect-scan-memo, REQ-closure-test-variant-compartment).
+// (REQ-closure-effect-scan-memo, REQ-closure-test-variant-ledger).
 func TestFileMemosServeEveryParseOnAWarmPass(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the closure fold over it")

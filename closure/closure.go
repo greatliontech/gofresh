@@ -46,7 +46,7 @@ type Closure struct {
 	// compartment; a package with no test files carries the stable
 	// testvariant.EmptyTestVariantClosure identity. Unsalted: subjects of
 	// one package share the compartment, which describes the package, not
-	// the subject (REQ-closure-test-variant-compartment).
+	// the subject (REQ-closure-test-variant-hash).
 	TestVariants string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
@@ -386,7 +386,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	// The subject package's own test-variant nodes leave the core: their
 	// production members ride the base node's contribution, and their
 	// test-only members fold into the test-variant compartment instead
-	// (REQ-closure-test-variant-compartment). Dependency nodes stay in core
+	// (REQ-closure-test-variant-hash). Dependency nodes stay in core
 	// whole, test-recompiled variants of dependencies included, so a test
 	// import pulling a NEW package still moves the core.
 	baseFiles := map[string]bool{}
@@ -412,7 +412,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	// as source. The kinds are not a partition: a compiled test file can
 	// also be embedded by a sibling (//go:embed helper_test.go), and its
 	// bytes then feed unchanged code as data too
-	// (REQ-closure-test-variant-compartment).
+	// (REQ-closure-test-variant-ledger).
 	compiledGo := map[string]bool{}
 	embeddedData := map[string]bool{}
 	for _, p := range pkgs {
@@ -686,7 +686,7 @@ const identityFoldStrategy = "gofresh/closure@1"
 // embedded (a sibling names it in a go:embed directive) is data too,
 // and canonical is false for it — its bytes reach unchanged code as
 // data, so its bytes are its contribution (REQ-closure-canonical-member,
-// REQ-closure-test-variant-compartment).
+// REQ-closure-test-variant-ledger).
 func memberKinds(p listPkg) (compiled, embedded, canonical map[string]bool) {
 	compiled, embedded, canonical = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, set := range [][]string{p.GoFiles, p.CgoFiles} {

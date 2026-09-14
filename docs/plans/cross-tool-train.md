@@ -905,7 +905,7 @@ in their repos.
 - [x] 168. gofresh: the compartment-ledger entailment is an invariant —
       under one listing configuration and identity strategy, equal
       compartment hashes carry equal ledgers, stated in
-      REQ-closure-test-variant-compartment with a seeded property witness
+      REQ-closure-test-variant-hash with a seeded property witness
       over generated compartments and a per-axis anchor.
 - [x] 169. stipulator: one spelling source for remedies and knob prose
       — remedies composed from the registered verb

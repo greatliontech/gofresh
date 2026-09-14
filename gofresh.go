@@ -40,7 +40,7 @@ const (
 
 // TestVariantLedger and its element types are the declaration-level read
 // surface over a package's test-variant compartment, served by
-// View.TestVariantLedger (REQ-closure-test-variant-compartment).
+// View.TestVariantLedger (REQ-closure-test-variant-ledger).
 type (
 	TestVariantLedger            = testvariant.TestVariantLedger
 	TestVariantDeclaration       = testvariant.TestVariantDeclaration
@@ -52,7 +52,7 @@ type (
 
 // DiffTestVariantLedgers classifies the delta between a recorded and a current
 // compartment ledger; TestVariantDelta.Inert carries the one Go-semantics
-// judgment gofresh renders over it (REQ-closure-test-variant-compartment).
+// judgment gofresh renders over it (REQ-closure-test-variant-inertness).
 func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 	return testvariant.DiffTestVariantLedgers(before, after)
 }
@@ -438,7 +438,7 @@ type Fingerprint struct {
 	// package with no test files records the stable empty-set identity
 	// (testvariant.EmptyTestVariantClosure); an empty value identifies a
 	// recording that predates the partition and fails closed to stale
-	// (REQ-closure-test-variant-compartment).
+	// (REQ-closure-test-variant-hash).
 	TestVariantClosure   string
 	ObservationAssertion string
 	ObservationProof     ObservationProof
@@ -1125,7 +1125,7 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 // compartment next, stale with the stable discriminating reason
 // "test variants", never rescued by observation evidence, an
 // empty recorded compartment failing closed
-// (REQ-closure-test-variant-compartment); a drifted core is stale on the
+// (REQ-closure-test-variant-identity); a drifted core is stale on the
 // closure (REQ-fresh-hierarchical-check). Records surviving the ladder
 // proceed to the surface's own guard tiers.
 func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict, bool) {
@@ -1152,7 +1152,7 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 // against the current one. An empty recorded value identifies a recording
 // that predates the partition and fails closed; an empty current value is
 // never a computed compartment, so it can only refuse
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-identity).
 func compartmentStale(recorded, current string) bool {
 	return recorded == "" || recorded != current
 }

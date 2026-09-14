@@ -27,7 +27,7 @@ func parseLedger(t *testing.T, name, src string) testvariant.TestVariantLedger {
 // A const inserted mid-group shifts its iota (and implicit-repetition)
 // siblings, so the ledger reads the shifted siblings as changed and the delta
 // is not inert; appending at the group's end shifts nothing and stays an
-// inert add (REQ-closure-test-variant-compartment positional folding).
+// inert add (REQ-closure-test-variant-ledger positional folding).
 func TestConstInsertionInsideGroupReadsAsChanged(t *testing.T) {
 	const before = "package p\n\nconst (\n\tsizeA = iota\n\tsizeB\n)\n"
 	recorded := parseLedger(t, "a_test.go", before)
@@ -55,7 +55,7 @@ func TestConstInsertionInsideGroupReadsAsChanged(t *testing.T) {
 // Package-level initialization order is source order for var specs and init
 // functions within a file, so a pure reorder — byte-identical declarations —
 // reads as changed and defeats inertness
-// (REQ-closure-test-variant-compartment positional folding).
+// (REQ-closure-test-variant-ledger positional folding).
 func TestInitAndVarReordersReadAsChanged(t *testing.T) {
 	initBefore := parseLedger(t, "a_test.go", "package p\n\nfunc init() { order = append(order, 1) }\n\nfunc init() { order = append(order, 2) }\n")
 	initAfter := parseLedger(t, "a_test.go", "package p\n\nfunc init() { order = append(order, 2) }\n\nfunc init() { order = append(order, 1) }\n")
@@ -78,7 +78,7 @@ func TestInitAndVarReordersReadAsChanged(t *testing.T) {
 // unchanged declarations — and any changed or removed declaration defeats
 // inertness outright. Go-file header-only changes never defeat it; a non-Go
 // compartment file's movement always does
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-inertness).
 func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 	base := testvariant.TestVariantLedger{
 		Declarations: []testvariant.TestVariantDeclaration{
@@ -165,7 +165,7 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 // identical, entries are ledger-sorted, same-identity declarations (several
 // init functions in one file) pair by hash with the surplus classified added
 // or removed, and file membership changes surface as header additions and
-// removals (REQ-closure-test-variant-compartment).
+// removals (REQ-closure-test-variant-inertness).
 func TestLedgerDeltaIsDeterministicAndClassifiesMembership(t *testing.T) {
 	before := testvariant.TestVariantLedger{
 		Declarations: []testvariant.TestVariantDeclaration{
@@ -227,7 +227,7 @@ func TestLedgerDeltaIsDeterministicAndClassifiesMembership(t *testing.T) {
 // they are ledgered as their own "directive" entries wherever they sit and
 // any directive movement defeats inertness; build-constraint text is the one
 // exclusion and stays header-benign
-// (REQ-closure-test-variant-compartment directive entries).
+// (REQ-closure-test-variant-inertness directive entries).
 func TestDirectiveCommentsDefeatInertness(t *testing.T) {
 	const base = "package p\n\nvar (\n\tfixtureA = 1\n\tfixtureB = 2\n)\n\nfunc TestF(t *T) {}\n"
 	recorded := parseLedger(t, "a_test.go", base)
@@ -270,7 +270,7 @@ func TestDirectiveCommentsDefeatInertness(t *testing.T) {
 
 // A declaration's doc comment rides its hash — editing only the doc moves the
 // declaration entry, not the file header
-// (REQ-closure-test-variant-compartment ledger granularity).
+// (REQ-closure-test-variant-ledger ledger granularity).
 func TestDocCommentRidesTheDeclarationHash(t *testing.T) {
 	before := parseLedger(t, "a_test.go", "package p\n\nfunc F() {}\n")
 	after := parseLedger(t, "a_test.go", "package p\n\n// F does nothing yet.\nfunc F() {}\n")
@@ -286,7 +286,7 @@ func TestDocCommentRidesTheDeclarationHash(t *testing.T) {
 // identifier under the declaration — called helpers, selector members,
 // receiver and parameter types, locals — deduplicated and sorted, with the
 // blank identifier dropped and directive entries carrying none
-// (REQ-closure-test-variant-compartment reference surface).
+// (REQ-closure-test-variant-ledger reference surface).
 func TestDeclarationReferencesCollectIdentifiersAndSelectors(t *testing.T) {
 	const src = "package p\n\n" +
 		"//go:generate stub\n" +
@@ -347,7 +347,7 @@ func TestDeclarationReferencesCollectIdentifiersAndSelectors(t *testing.T) {
 // list textually, so its compiled code resolves that list's names without
 // writing them: the governing spec's references fold into the empty-listed
 // sibling, and a later spec with its own list resets the fold
-// (REQ-closure-test-variant-compartment reference surface).
+// (REQ-closure-test-variant-ledger reference surface).
 func TestImplicitConstRepetitionFoldsGoverningReferences(t *testing.T) {
 	const src = "package p\n\nconst (\n\tkindA = otherConst + 1\n\tkindB\n\tkindC = plainConst\n\tkindD\n)\n"
 	ledger := parseLedger(t, "a_test.go", src)
@@ -396,7 +396,7 @@ func TestImplicitConstRepetitionFoldsGoverningReferences(t *testing.T) {
 // untouched. The package clause is part of the diff identity, so the rename
 // surfaces as removed and added declarations, never as an empty (inert)
 // delta hiding behind a licensed header change
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-ledger).
 func TestPackageClauseRenameSurfacesAsMembershipChange(t *testing.T) {
 	recorded := parseLedger(t, "a_test.go", "package p\n\nfunc (T) Error() string { return \"\" }\n\nfunc TestF(t *X) {}\n")
 	renamed := parseLedger(t, "a_test.go", "package p_test\n\nfunc (T) Error() string { return \"\" }\n\nfunc TestF(t *X) {}\n")
@@ -414,7 +414,7 @@ func TestPackageClauseRenameSurfacesAsMembershipChange(t *testing.T) {
 
 // Delta classification never reads the reference surface: two ledgers whose
 // declarations differ only in References diff to an empty, inert delta
-// (REQ-closure-test-variant-compartment — classification is hash-based).
+// (REQ-closure-test-variant-inertness — classification is hash-based).
 func TestClassificationIgnoresReferences(t *testing.T) {
 	ledger := parseLedger(t, "a_test.go", "package p\n\nfunc TestF(t *T) { helper() }\n\nfunc helper() {}\n")
 	doctored := ledger.Clone()
@@ -433,7 +433,7 @@ func TestClassificationIgnoresReferences(t *testing.T) {
 // function of the spec's own bytes when it carries its own expression
 // list, stay identical. The omitted-list fold is the one stated exception,
 // pinned by TestImplicitConstRepetitionFoldsGoverningReferences
-// (REQ-closure-test-variant-compartment reference surface).
+// (REQ-closure-test-variant-ledger reference surface).
 func TestDeclarationReferencesAreAPureFunctionOfTheBytes(t *testing.T) {
 	const src = "package p\n\nconst (\n\tkindA = iota\n\tkindB = kindA + 1\n)\n\nfunc TestF(t *T) { _ = kindB }\n"
 	first := parseLedger(t, "a_test.go", src)

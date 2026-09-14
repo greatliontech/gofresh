@@ -14,7 +14,7 @@ digest, T)`, `flush()` — would hold the discipline once, the three
 memos being three instances with their payload types, and
 `flushFileMemos` one loop. Invariants preserved: a hit is
 byte-equivalent to recomputation (REQ-closure-effect-scan-memo,
-REQ-closure-test-variant-compartment, REQ-closure-canonical-member);
+REQ-closure-test-variant-ledger, REQ-closure-canonical-member);
 a pass's misses merge once per package directory; the persisted-scan
 count.
 

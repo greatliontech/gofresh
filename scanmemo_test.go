@@ -266,7 +266,7 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 		}
 		// The compartment keeps its own byte fold (its header folds
 		// comments outside declarations by design,
-		// REQ-closure-test-variant-compartment), so only the core's
+		// REQ-closure-test-variant-ledger), so only the core's
 		// members are comment-inert.
 		if !tc.inside || strings.HasSuffix(tc.path, "_test.go") {
 			continue

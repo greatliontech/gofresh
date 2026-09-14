@@ -20,7 +20,7 @@ import (
 // — and only the parse is served. Entries batch per package directory:
 // one cache file per (scope, directory) maps digests to derivations, and
 // a pass merges its misses in once per package
-// (REQ-closure-effect-scan-memo, REQ-closure-test-variant-compartment).
+// (REQ-closure-effect-scan-memo, REQ-closure-test-variant-ledger).
 
 // fileScanDirName and variantParseDirName are the two memos' store
 // directories.

@@ -67,7 +67,7 @@ form where REQ-closure-canonical-member affords one, by its bytes otherwise — 
 with the subject identity. The subject package's own test-variant nodes' source
 members are excluded from that core hash: their production members already ride the
 base package's contribution, and their test-only members fold into the test-variant
-compartment instead (REQ-closure-test-variant-compartment). Test-only dependency
+compartment instead (REQ-closure-test-variant-hash). Test-only dependency
 nodes — packages reachable only through test imports — remain core contributions
 whole, dependency nodes recompiled against the test binary included, because a new
 package's initialization enters the test binary's behavior. Subjects in one package
@@ -77,7 +77,7 @@ deliberately safe price for analysis whose time and live memory are bounded
 independently of subject count — but a sibling-test edit now stales them through the
 compartment, where a consumer can recognize it, rather than through the core.
 
-**REQ-closure-test-variant-compartment** (behavior): A fingerprint MUST record,
+**REQ-closure-test-variant-hash** (behavior): A fingerprint MUST record,
 beside the maximal closure, the subject package's test-variant compartment: the
 hash over the package's own test-only files — each own test-variant node's file
 set minus the base package's file set, in-package and external variants folded
@@ -87,15 +87,24 @@ that describes the package. Under one listing configuration — the build
 selection, the platform and cgo environment the listing runs under, and the
 toolchain — and one identity strategy (REQ-closure-identity-strategy, which
 excludes the analyzing frontend by design), equal
-compartment hashes carry equal ledgers: the ledger is a function of the bytes
+compartment hashes carry equal ledgers (the ledger surface is
+REQ-closure-test-variant-ledger): the ledger is a function of the bytes
 the hash folds, of that configuration, and of that strategy alone — a member's
 kind as the toolchain lists it follows its own name and constraints and its
 siblings' embed directives, which the hash folds, under the configuration —
 while the hash is unsalted by any of them, so a ledger is a fact of the hash,
 the configuration, and the strategy together, never of the hash alone.
 Consumer obligation: a consumer keying ledgers per compartment hash keys per
-listing configuration and identity strategy too. A package with no test files
-records the defined
+listing configuration and identity strategy too.
+
+The hash's derivation from the compartment's bytes, and the ledger's
+being a function of the hash under one listing configuration and
+identity strategy, are enforced by
+`TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration`
+and `TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
+
+**REQ-closure-test-variant-identity** (behavior): A package with no test files
+MUST record the defined
 constant empty-set identity, stable for as long as the package has none; the
 empty string is never a computed compartment, so an empty recorded compartment
 identifies a recording that predates the compartment and fails closed to stale
@@ -109,7 +118,9 @@ exactly. A subject declared in a test file has its own body in the
 compartment, so an edited recorded test moves the compartment — that is the
 partition working, not a leak. A package whose core contribution widens to its
 whole directory (non-toolchain assembly, cgo callback blind spots) may keep test files
-in the core as well: sound, merely undiscriminated. A compiled member's
+in the core as well: sound, merely undiscriminated.
+
+**REQ-closure-test-variant-ledger** (behavior): A compiled member's
 ledger derivation — its declarations and header — may be served from a
 persistent memo under the member's name and content digest, scoped by
 a parse-strategy version and the analyzing frontend's version (the
@@ -118,7 +129,7 @@ the analyzed selection's toolchain, which is a guard) and batched per
 package directory, because it is a pure function of those bytes; the compartment hash itself is recomputed
 from the bytes every pass, and the memo follows the observability
 memo's discipline verbatim. The compartment's
-declaration ledger is a read surface over the same bytes the compartment hash
+declaration ledger MUST be a read surface over the same bytes the compartment hash
 folded, derived by syntax-only parsing at the view's observation — never a
 re-read that could straddle a later edit — and served at capture and at check:
 per declaration the file (relative to the package directory), the kind (func,
@@ -178,14 +189,15 @@ The kinds are not a partition: a member both compiled and embedded (a
 sibling test file names it in a go:embed directive) keeps its parsed
 declarations while carrying the embedded whole-content header, so any
 movement in its bytes — which unchanged code reads as data — defeats
-inertness fail-closed.
-The ledger is deterministically sorted. The inertness judgment is rendered
+inertness fail-closed. The ledger is deterministically sorted.
+
+**REQ-closure-test-variant-inertness** (behavior): The inertness judgment is rendered
 modulo position metadata: any header edit shifts unchanged declarations'
 source positions, and a line directive remaps them — positions are
 diagnostics, not behavior, for this judgment. Two ledgers
 diff into a classified delta — added, changed, and removed declarations plus
 per-file header changes, deterministic for any pair — carrying gofresh's one
-Go-semantics judgment: the delta is inert exactly when no declaration changed
+Go-semantics judgment: the delta MUST be judged inert exactly when no declaration changed
 or was removed and every added declaration is one no unchanged declaration can
 observe — a plain function (no receiver, not init, not TestMain), a const, or
 a type, whose accompanying methods would surface as their own added entries.
@@ -210,10 +222,7 @@ name: test-only embedded bytes feed unchanged declarations that read them.
 Inertness is
 Go-semantics data — it claims the delta cannot change the behavior of any
 unchanged declaration and nothing more; what inertness licenses is the
-consumer's policy, never gofresh's. Enforced by
-`TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration`
-and
-`TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
+consumer's policy, never gofresh's.
 
 ## Blind spots
 
@@ -2003,7 +2012,7 @@ whatever its name, a compiled member a directive embeds too (its bytes reach
 unchanged code as data), C, assembly, the rest of a package folded whole for a
 cgo callback or non-toolchain assembly, and a compiled member the scanner
 refuses (text without a form). The test-variant compartment keeps its own
-fold (REQ-closure-test-variant-compartment): its header identity folds
+fold (REQ-closure-test-variant-ledger): its header identity folds
 comments outside declarations by design. The canonical digest is derived from
 the same bytes the effect scan parses and memoized under the member's byte
 digest beside it, so a byte-equal pass pays the read alone. The residual is

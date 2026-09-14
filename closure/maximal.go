@@ -24,7 +24,7 @@ import (
 // analysis cost while preserving the no-false-valid floor (REQ-closure-floor).
 // The package's own test-variant source is partitioned out of the core hash
 // into the Closure's TestVariants compartment
-// (REQ-closure-test-variant-compartment).
+// (REQ-closure-test-variant-hash).
 // It also returns the exact mutable source paths whose bytes contribute to
 // each subject's maximal closure. Cache-module and standard-library inputs
 // remain represented by their existing guards.
