@@ -1649,7 +1649,7 @@ in their repos.
       blob encodings are bounded (chunked, or digests with a sidecar the
       spec sanctions) so the promise holds as stated — the spec is never
       narrowed to the escape hatch.
-- [ ] 231. pew: the hygiene sweep — the vestigial exports (store.List and
+- [x] 231. pew: the hygiene sweep — the vestigial exports (store.List and
       its predicate, recordingFromPath, gitblob.State, run.ExecuteBinary,
       run.Execute's test-only seam); one containment predicate for three
       named and seven inline ones and one longest-existing-prefix
