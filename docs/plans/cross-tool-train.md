@@ -1434,7 +1434,7 @@ in their repos.
       gofresh 239's release (the env-composition rule, languageSeries,
       canonicalDir) in the same chunk if 239 has shipped, else a rider.
       Every consumer store re-measures once at the bump.
-- [ ] 247. stipulator: the correctness chunk 236 found — A1 one
+- [x] 247. stipulator: the correctness chunk 236 found — A1 one
       outside-policy accounting (the selective form counts expected
       witness subjects outside the eligible selection as the clause
       says; the full form counts executed rows that were never expected
