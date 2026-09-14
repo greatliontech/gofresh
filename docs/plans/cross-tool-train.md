@@ -1395,7 +1395,7 @@ in their repos.
       of REQ-purity-directive: adopt or delete, the clause following);
       Engine.analysisBudget's one unreachable read (the filed
       analysis-budget issue rides). One commit through the loop.
-- [ ] 244. gomutant: the face-parity residue (235 C2/C3/C4/C12 +
+- [x] 244. gomutant: the face-parity residue (235 C2/C3/C4/C12 +
       A3/A4/A5) — 207 landed one rendering seam and left the run
       epilogue written twice (the attest snapshot, the shed-dedup key at
       four sites, the incremental Commit closure, the final merge, the
