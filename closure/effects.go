@@ -52,7 +52,7 @@ type maximalEffectScan struct {
 	// always-external import names its package as a preferred-reason
 	// candidate at its rank without contributing a verdict-bearing
 	// effect - an unused import blocks nothing
-	// (REQ-closure-observability-analysis's cause-preference order).
+	// (REQ-closure-observability-cause-order).
 	importCandidates []externalEffect
 	preferred        string
 }
@@ -191,7 +191,7 @@ func classBEffect(pkgPath, name string) (externalEffect, bool) {
 		// bracket records, classified as the external system call it is
 		// rather than left to the unaudited fallback. Reader, the
 		// exported variable, refuses as an unaudited selector at the
-		// file fold (REQ-closure-observability-analysis's entropy class).
+		// file fold (REQ-closure-observability-audited-set).
 		switch name {
 		case "Read", "Text", "Int", "Prime":
 			return symbolExternalEffect(externalEffectNative, pkgPath, name, "reaches crypto/rand."+name+" (entropy)"), true
@@ -377,7 +377,7 @@ func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
 // in-memory sink makes the call Sprint-equivalent value computation,
 // while Print (implicit stdout) and the Scan families carry their
 // channel in the symbol itself
-// (REQ-closure-observability-analysis's writer-sink admission).
+// (REQ-closure-observability-writer-sink).
 func fmtFprintFamily(audited bool, pkgPath, name string) bool {
 	if !audited || pkgPath != "fmt" {
 		return false

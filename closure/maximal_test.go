@@ -218,7 +218,7 @@ func TestComputeMaximalBatchConservativelyMarksStandardWrappers(t *testing.T) {
 			// The receiver escape is the structural finding and ranks
 			// top, so the diagnostic names it over the down-ranked
 			// testing.Elapsed classification the escape also records
-			// (REQ-closure-observability-analysis's cause-preference
+			// (REQ-closure-observability-cause-order
 			// order).
 			name:   "testing receiver in composite",
 			source: "package wrapper\n\nimport \"testing\"\n\nfunc BenchmarkComposite(b *testing.B) { handles := []*testing.B{b}; _ = handles[0].Elapsed() }\n",
@@ -494,8 +494,7 @@ func F() {
 // operation names that operation in the preferred diagnostic — the
 // lexicographic least when several occur — instead of serving the name-free
 // import fallback; the fallback still covers a classified import with
-// no effect-bearing use (REQ-closure-observability-analysis's
-// cause-preference order).
+// no effect-bearing use (REQ-closure-observability-cause-order).
 func TestMaximalUnauditedOperationNamesThePreferredDiagnostic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -564,7 +563,7 @@ func H(l labeled) string { return fmt.Sprint(l.s) }
 // union; an effect-less scan's import fallback names a dependence only
 // when no scan backed a real blocker, so a backed reason is never
 // displaced by a file contributing nothing
-// (REQ-closure-observability-analysis's cause-preference order).
+// (REQ-closure-observability-cause-order).
 func TestMaximalPackageSelectionRanksTheEffectUnion(t *testing.T) {
 	if selected := preferredEffectReason(nil); selected != "" {
 		t.Fatalf("empty union selected %q", selected)
@@ -652,7 +651,7 @@ func TestMaximalHashCoversEmbeddedData(t *testing.T) {
 }
 
 // Property pin for the preferred-diagnostic selection
-// (REQ-closure-observability-analysis's cause-preference order): over
+// (REQ-closure-observability-cause-order): over
 // generated effect sets the selection is total (any reasoned effect
 // yields a non-empty preferred), permutation-invariant, and names a
 // maximal-rank effect, lexicographic-least within the rank. The oracle

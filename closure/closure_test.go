@@ -1691,7 +1691,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// A sibling file's unsafe declarations no longer pre-block a
 		// clean subject at the package scan; a subject carrying an
 		// unsafe-typed value through its own walk still refuses, on the
-		// widen path (REQ-closure-observability-analysis's narrowed
+		// widen path (REQ-closure-observability-dispatch
 		// unsafe class).
 		{fixture: "unsafesibling", subject: "TestCleanRead", observable: true},
 		{fixture: "unsafesibling", subject: "TestReachesUnsafe", reason: "unsafe pointer reachable", absent: "package scan:"},
@@ -1834,8 +1834,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// The subject-determined dispatch admission: a helper-interior
 		// invoke whose operand derives wholly from subject flow and
 		// whose enumerated targets are analyzed content stops widening -
-		// the targets' own effects decide (REQ-closure-observability-
-		// analysis's subject-determined dispatch admission). A load from
+		// the targets' own effects decide (REQ-closure-observability-dispatch). A load from
 		// shared mutable state keeps the refusal.
 		{fixture: "depdispatch", subject: "RunLocalDispatch", observable: true},
 		{fixture: "depdispatch", subject: "RunEffectDispatch", reason: "os.WriteFile"},

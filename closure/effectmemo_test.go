@@ -308,7 +308,7 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 // A package whose files carry only potential-external fallbacks - no
 // effects, no plain always-external candidates - selects the
 // lexicographically least fallback, package-wide
-// (REQ-closure-observability-analysis's cause-preference order).
+// (REQ-closure-observability-cause-order).
 func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

@@ -177,7 +177,7 @@ func Subject() int {
 			// The iterator's yield is a computed call on a parameter the
 			// subject's own range statement binds: the parameter crossing
 			// closes it for every closed-world subject
-			// (REQ-closure-observability-analysis's subject-determined
+			// (REQ-closure-observability-dispatch
 			// operand). The pin keeps the DISPOSITION honest — a release
 			// flipping it in either direction is a red canary.
 			SubjectObservable: true,

@@ -328,7 +328,7 @@ func experimentOf(version string) string {
 // consultation answers through it — a tag-swapped view degrades
 // every stdlib admission to the ordinary fail-closed classification
 // exactly as an unlisted release does
-// (REQ-closure-observability-analysis's exact-version keying clause;
+// (REQ-closure-observability-toolchain-key;
 // the purity tier's audited admissions answer from the same list).
 func AuditedToolchainSelection(buildFlags []string, goflags, goexperiment string) bool {
 	return ToolchainSelectionNotice(buildFlags, goflags, goexperiment) == ""

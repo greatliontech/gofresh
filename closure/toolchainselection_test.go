@@ -14,7 +14,7 @@ import (
 // The selection axis of the toolchain-audit key: build flags
 // canonicalize to a sorted tag-set key, the sanitizer flags implying
 // their tags, and an unclassifiable flag set never admits
-// (REQ-closure-observability-analysis's exact-version keying clause).
+// (REQ-closure-observability-toolchain-key).
 func TestSelectionAuditKeyCanonicalizesBuildFlags(t *testing.T) {
 	cases := []struct {
 		name  string

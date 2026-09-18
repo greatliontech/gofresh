@@ -14,7 +14,7 @@ import (
 // a store of an unclosed value, its address passed, a store through a
 // capturing closure of an unclosed value — keeps the enumeration's
 // targets and the computed-call refusal
-// (REQ-closure-observability-analysis's narrowed dispatch).
+// (REQ-closure-observability-dispatch).
 func TestClosedCellNarrowsComputedCallTargets(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

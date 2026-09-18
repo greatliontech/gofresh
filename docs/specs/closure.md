@@ -291,7 +291,7 @@ whole-graph hash already covers, and an unsafe-mediated mutation of
 it refuses on the channel it uses — a write through an
 unsafe.Pointer-typed value refuses at the subject walk (the scan
 carries that class as a diagnostic only for the observability
-proof, REQ-closure-observability-analysis, and the maximal-tier
+proof, REQ-closure-observability-unsafe, and the maximal-tier
 unverifiable judgment keeps it), while `unsafe.Slice`,
 `unsafe.String`, and the package's other operations keep the
 maximal-tier scan block, their call sites carrying no
@@ -1280,7 +1280,9 @@ included, since an exit anywhere in that flow means the harness
 protocol ended or never ran a measurement — while the package-scan
 backstop scopes its admission to the syntactic `TestMain(*testing.M)`
 declaration, the conservative direction for text the scan cannot
-attribute to flow. Every reachable call and effect is classified to the walk's end; the preferred
+attribute to flow.
+
+**REQ-closure-observability-cause-order** (invariant): Every reachable call and effect MUST be classified to the walk's end; the preferred
 human diagnostic is derived afterward and can never select which facts
 participate: a refusal names the highest-ranked blocking effect under one
 cause-preference order shared with the legacy single-reason projection —
@@ -1304,7 +1306,9 @@ lexicographically on the reason text, so both diagnostics are
 deterministic and causal-first. A complete maximal-tier negative scan
 may reject opaque linkage, native code, process execution, dot imports, unaudited
 standard-library access, or other unclassified external-capable syntax, but can never
-grant the proof on its own. The unsafe reference class is narrowed out
+grant the proof on its own.
+
+**REQ-closure-observability-unsafe** (invariant): The unsafe reference class MUST be narrowed out
 of the scan's blocking set: an in-scope `unsafe.Pointer` reference is
 diagnostic only, because the subject walk prices every attributed
 unsafe-typed value and a subject world the walk cannot close refuses
@@ -1314,8 +1318,10 @@ operator-grammar fixture, a low-level helper file) no longer blocks a
 clean subject's proof; the package's other operations (unsafe.Slice,
 unsafe.String, and kin) keep the scan block, because their call sites
 carry no unsafe-typed value the walk can price and a fabricated slice
-or string is a testlog-invisible read. The audited-pure standard set — packages and named
-operations through which every ambient effect must enter via a flagged
+or string is a testlog-invisible read.
+
+**REQ-closure-observability-audited-set** (invariant): The audited-pure standard set — packages and named
+operations through which every ambient effect MUST enter via a flagged
 constructor or global of an effect-bearing package, adding no
 testlog-invisible input channel of their own and no machine-variant
 results (fmt's Sprint family included: argument methods stay visible to
@@ -1388,8 +1394,7 @@ admission proves — are the entropy class in the one classification table both
 tiers consult, an external system call named as such (an input no guard pins
 and no bracket records, never observable), the exported Reader refusing as an
 unaudited selector at the file fold, flag's CommandLine the one exported
-mutable variable an audited symbol row admits (REQ-closure-observability-analysis's
-registration clause: every channel it carries is a method refused by name, and
+mutable variable an audited symbol row admits (REQ-closure-observability-flag-registration: every channel it carries is a method refused by name, and
 the walk's standard-global arm refuses its subject-time read), and the
 unseeded math/rand sources keeping
 the unaudited fallback at both tiers until their own audit — the fold binding
@@ -1412,10 +1417,11 @@ included: an audited type or constant name — fmt.Stringer, time.Time,
 time.Month, time.Duration, time.Weekday and their constants, time's
 layout constants — declares or denotes and executes nothing, every dispatch through a
 value of such a type classified at its own site, and the pure value
-methods sharing an audited name admitted with it) —
-is deliberately bounded by
-two exclusions that are soundness, not caution: reflect defeats static
-reachability itself, so only its invoke-nothing members are admitted —
+methods sharing an audited name admitted with it). The set is deliberately bounded by two exclusions that
+are soundness, not caution, each stated as its own contract below.
+
+**REQ-closure-observability-reflect-exclusion** (invariant): reflect defeats static
+reachability itself, so only its invoke-nothing members MUST be admitted —
 the runtime-type set; the descriptor-view surface of Type — Kind, Name,
 String, PkgPath, Size, Align, FieldAlign, Bits, NumField, Field,
 FieldByIndex, FieldByName, FieldByNameFunc (its callback resolved by the
@@ -1439,11 +1445,12 @@ while Method and MethodByName (they build callable Values: the
 reflective-dispatch channel, with the Call family and MakeFunc), the Value
 producers, the address results Pointer and UnsafePointer with the two Kind
 constants sharing those names (and the deprecated Ptr), and the hand-out
-Interface and Slice stay refused, each by its name —
-and registration-shaped covert channels — flag registration returns
+Interface and Slice stay refused, each by its name.
+
+**REQ-closure-observability-flag-registration** (invariant): Registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
-are channels the testlog cannot audit. The registration WRITE itself is
+are channels the testlog cannot audit. The registration WRITE itself MUST be
 tier-scoped: standard flag registration through the value and pointer
 families (Bool through Duration and their *Var forms) reached in
 startup or user test-main flow is a process-local registry mutation
@@ -1519,9 +1526,11 @@ parsed-state readers keep their class,
 the default set is never proven (flag.Parse reads os.Args), a set
 stored into a standard variable is never proven (the standard bodies
 load it unscanned), and every other shape keeps the mark-and-poison
-judgment. One admission in the audited set is
+judgment.
+
+**REQ-closure-observability-writer-sink** (invariant): One admission in the audited set is
 operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
-Fprintln) is Sprint-equivalent value computation exactly when the writer
+Fprintln) MUST be Sprint-equivalent value computation exactly when the writer
 operand provably pins every dynamic type it can carry to an audited
 in-memory sink — `*bytes.Buffer` or `*strings.Builder`, whose write appends
 to process memory and acquires nothing ambient — judged by a closed-value
@@ -1538,14 +1547,15 @@ write on the audited type already has), a dynamically reached Fprint keeps it
 regardless of site arguments (they belong to the dynamic signature, not
 fmt's shape), and the maximal scan's package-level Fprint finding, blind to
 operands, narrows to a diagnostic so the writer-sensitive tiers decide.
-Widening the
+
+**REQ-closure-observability-toolchain-key** (invariant): Widening the
 audited set changes proof semantics and rides the strategy-version bump like
 any other proof change. Every toolchain-source admission — the audited-pure
 package set (encoding/base32 a member alongside base64, audited on the same
 terms: single-file value computation, io-interface-only wrappers, exported
 Encoding variables never mutated in-package), the class-B operations, the
 sync/pool/reflect symbols, the atomic transparency, the harness channels,
-and the writer-sink family — is keyed to an exact-version list of audited
+and the writer-sink family — MUST be keyed to an exact-version list of audited
 toolchain releases, experiment and vendor flavors included (both select
 source): the audit is a property of specific standard-library source, no
 other release inherits a proof, and an unlisted release keeps every
@@ -1608,7 +1618,9 @@ exists (an unclassifiable flag set has no listing walk and is never
 admitted), and the notice empty exactly when the selection is admitted,
 so text and verdict can never disagree — and a consuming tool can
 attribute the degradation at the tier where the selection was authored
-(its own policy or configuration record) without re-deriving the key. The audited set carries the testing harness's
+(its own policy or configuration record) without re-deriving the key.
+
+**REQ-closure-observability-harness-logging** (invariant): The audited set MUST carry the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,
 `Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
 `Fail`, and `FailNow`, matched by package and symbol name; the admission is
@@ -1627,8 +1639,10 @@ admitted harness fact instead of descending into harness internals. The
 admission applies to statically and RTA-resolved callees only — an
 unresolvable reference stays refused like any other — and the harness's
 ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
-runtime-configuration reads) keep their own classifications. The audited
-set likewise carries the harness's subtest drivers — exactly `(*T).Run`
+runtime-configuration reads) keep their own classifications.
+
+**REQ-closure-observability-subtest-driver** (invariant): The audited
+set likewise MUST carry the harness's subtest drivers — exactly `(*T).Run`
 and `(*B).Run`, matched by receiver and name: the driver allocates a
 child harness handle, prints run-boundary bytes into the recorded
 output, keeps write-only harness bookkeeping no testing API hands back,
@@ -1652,9 +1666,11 @@ The driver admission applies to static callees only — a driver reached
 as a dynamic target or through a bound value keeps its classification,
 the conservative refusal — and the toolchain's declaration inventory of
 the driver names is walked by an enforcement test so drift refuses
-instead of silently widening. The audited property-testing harness —
+instead of silently widening.
+
+**REQ-closure-observability-property-harness** (invariant): The audited property-testing harness —
 exactly `pgregory.net/rapid` — extends the same discipline to a
-third-party harness package: its bodies are cut from every walk and
+third-party harness package: its bodies MUST be cut from every walk and
 from the package-scan backstop, because everything ambient in them is
 the harness's own protocol (the run configuration it reads and the
 clock it paces by surface in its harness-log summary line on every
@@ -1694,7 +1710,9 @@ keeps the package unverifiable at the closure tier — the audit admits
 observation, never purity: a property run's outcome rides the
 harness's log-surfaced run configuration, not the sources alone, so
 the package scan records an admitted harness fact where it exempts
-the harness's files. An open-world refusal names the dispatch edge
+the harness's files.
+
+**REQ-closure-observability-dispatch** (invariant): An open-world refusal MUST name the dispatch edge
 that widened it — the enclosing function and, for an unresolved
 interface invoke, the receiver interface type and method it
 dispatches, or, for a computed call, the stably-identified value it
@@ -1755,7 +1773,9 @@ records effects; the planted channel is a load from shared mutable
 state, while a test-main's own calls and constructions keep their
 per-effect classification. Initializer flow keeps attributed-effect recording alone:
 nothing is plantable before tests run, so an initializer's unattributed
-dispatch is not the demonstrated channel and stays unwidened. The admitted observation set includes the guard-pinned
+dispatch is not the demonstrated channel and stays unwidened.
+
+**REQ-closure-observability-guard-pinned** (invariant): The admitted observation set MUST include the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
 surfaces — whose value the toolchain guard already fixes, together with read-position
 uses of paths derived from it through constant-component joins: reads under the

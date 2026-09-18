@@ -96,8 +96,7 @@ var poolMethods = map[string][]string{
 // into the package's own state: descriptors are sealed and never
 // written after construction. Audited on go1.27.0-dst.14; reflect
 // lies in no listed release's walked delta, so the one audit holds
-// under every listed selection (REQ-closure-observability-analysis's
-// audited-set boundary).
+// under every listed selection (REQ-closure-observability-audited-set).
 var reflectSymbols = map[string]bool{
 	// the runtime-type set
 	"Type": true, "TypeOf": true, "DeepEqual": true, "Elem": true,

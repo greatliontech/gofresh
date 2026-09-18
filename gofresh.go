@@ -348,7 +348,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // audited-release list (closure/toolchainaudit.go: an unlisted release
 // keeps fail-closed classifications), and admits encoding/base32 into
 // the source-only audited set on base64's terms
-// (REQ-closure-observability-analysis's exact-version keying clause).
+// (REQ-closure-observability-toolchain-key).
 // @28 admits math/big whole into the source-only audited set on its
 // own audit — software arbitrary-precision arithmetic, bit-identical
 // across the CPU-selected kernels, its only state invisible

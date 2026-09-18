@@ -17,7 +17,7 @@ import (
 // fold binding math/rand/v2's declared name as a secondary beside its
 // last element, never shadowing a primary; and two imports binding one
 // identifier — what the language forbids — refuse the file fail-closed
-// (REQ-closure-observability-analysis's entropy class).
+// (REQ-closure-observability-audited-set).
 func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 	for _, name := range []string{"Read", "Text", "Int", "Prime"} {
 		effect, ok := classBEffect("crypto/rand", name)

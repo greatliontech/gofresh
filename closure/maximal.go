@@ -270,7 +270,7 @@ func preferEffectReason(candidate, current externalEffect) bool {
 // preferEffectReason; empty when no effect carries a reason. An
 // effect-backed reason names a real blocker, so a caller with any
 // backed reason never consults an import fallback
-// (REQ-closure-observability-analysis's cause-preference order).
+// (REQ-closure-observability-cause-order).
 func preferredEffectReason(effects []externalEffect) string {
 	var best externalEffect
 	found := false
@@ -961,7 +961,7 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 			// The audited targets are claims about runtime/syscall
 			// source; an unlisted release keeps the opaque-linkage
 			// floor for every directive-bearing file
-			// (REQ-closure-observability-analysis's exact-version
+			// (REQ-closure-observability-toolchain-key
 			// keying clause).
 			return false
 		}

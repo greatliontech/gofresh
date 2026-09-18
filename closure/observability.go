@@ -285,8 +285,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// projection: the parameter crossing's callers come from the former
 	// and its dynamically-targeted refusal from the latter, so a callee
 	// an initializer or a dynamic dispatch also reaches never closes on
-	// the subject's sites alone (REQ-closure-observability-analysis's
-	// subject-determined operand). Narrowing the targets too would
+	// the subject's sites alone (REQ-closure-observability-dispatch). Narrowing the targets too would
 	// silently admit that callee.
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
@@ -334,7 +333,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		}
 		// The refusal names the highest-ranked blocking effect under the
 		// shared cause-preference order, exactly as the subject arm does
-		// (REQ-closure-observability-analysis's diagnostic clause).
+		// (REQ-closure-observability-cause-order).
 		var blocking *externalEffect
 		blockingRank := 0
 		for i := range testMainResult.effects {
@@ -387,7 +386,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// shared cause-preference order; the projection is already sorted
 	// under the total order, so the first max-rank hit is deterministic —
 	// among rank-equals the projection order decides, kind first
-	// (REQ-closure-observability-analysis's diagnostic clause).
+	// (REQ-closure-observability-cause-order).
 	var blocking *externalEffect
 	blockingRank := 0
 	for i := range subjectResult.effects {

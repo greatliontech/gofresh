@@ -12,7 +12,7 @@ import (
 // while an unlisted release, an unlisted experiment, and a flavor the
 // tables never saw keep missing under both spellings, and only an
 // experiment-set tail folds (a vendor flavor spelled "-X:…" is not an
-// experiment set) (REQ-closure-observability-analysis's exact-version
+// experiment set) (REQ-closure-observability-toolchain-key
 // keying clause).
 func TestToolchainKeyFoldsTheHyphenatedExperimentSpelling(t *testing.T) {
 	for _, spelling := range []string{"go1.27.0 X:nodwarf5", "go1.27.0-X:nodwarf5"} {

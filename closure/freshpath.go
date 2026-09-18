@@ -24,8 +24,7 @@ func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCom
 	// (WithBuildFlags is the producing go command's flags). Under an
 	// unwalked selection those bodies are unaudited source: no
 	// observation admission fires, and every effect keeps its ordinary
-	// fail-closed refusal (REQ-closure-observability-analysis's
-	// two-axis keying clause). The verdict arrives explicitly — it is
+	// fail-closed refusal (REQ-closure-observability-toolchain-key). The verdict arrives explicitly — it is
 	// a property of the analysis, never of the optional fresh-param
 	// value, whose nil keeps meaning exactly "parameter crossing
 	// refused" as the crossing helpers state.
@@ -1050,7 +1049,7 @@ func locallyClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 // refuses: analysis is subject-scoped but the process heap is shared,
 // so a sibling subject's runtime flow can plant an implementation the
 // subject's attributed enumeration cannot see
-// (REQ-closure-observability-analysis's subject-determined dispatch
+// (REQ-closure-observability-dispatch
 // admission).
 func subjectClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	return closedDynamicValue(value, seen, map[ssa.Value]bool{}, fp)
@@ -1279,7 +1278,7 @@ func cellReferrersClosed(cell *ssa.Alloc, alias ssa.Value, seen, done map[ssa.Va
 // result) or any open shape yields no set, and the enumeration's own
 // targets stand. The set bounds the operand exactly: every function
 // value that can reach the load or the parameter is one of the leaves
-// (REQ-closure-observability-analysis's narrowed dispatch).
+// (REQ-closure-observability-dispatch).
 func closedDynamicTargets(value ssa.Value, fp *freshParamAnalysis) (map[*ssa.Function]bool, bool) {
 	if !subjectClosedDynamicValue(value, make(map[ssa.Value]bool), fp) {
 		return nil, false
@@ -1386,8 +1385,7 @@ func collectCellStores(cell *ssa.Alloc, alias ssa.Value, targets map[*ssa.Functi
 // narrowedTargets returns a computed call's targets narrowed to the
 // functions its operand can hold, within the enumeration's own set;
 // an invoke, a static call, or an operand yielding no set keeps the
-// enumeration's targets whole (REQ-closure-observability-analysis's
-// narrowed dispatch).
+// enumeration's targets whole (REQ-closure-observability-dispatch).
 func narrowedTargets(site ssa.CallInstruction, targets map[*ssa.Function]bool, fp *freshParamAnalysis) map[*ssa.Function]bool {
 	c := site.Common()
 	if c == nil || c.IsInvoke() || c.StaticCallee() != nil || len(targets) == 0 {
@@ -1481,7 +1479,7 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 // pins every dynamic type it can carry to an audited in-memory sink —
 // *bytes.Buffer or *strings.Builder — so the formatted bytes never leave
 // process memory and the call is Sprint-equivalent value computation
-// (REQ-closure-observability-analysis's writer-sink admission). The
+// (REQ-closure-observability-writer-sink). The
 // concrete type at each pinning MakeInterface decides alone: which
 // buffer instance receives the bytes never changes which Write runs, and
 // mutation of shared memory is the shared-dynamic-state rules' domain,

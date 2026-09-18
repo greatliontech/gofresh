@@ -40,7 +40,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		// hold where the closed-value walk names the functions: a
 		// recursive local closure's call reaches its own closure, not
 		// every closure of its signature in the mask
-		// (REQ-closure-observability-analysis's narrowed dispatch).
+		// (REQ-closure-observability-dispatch).
 		targets = narrowedTargets(site, targets, a.fresh)
 		if len(targets) == 0 {
 			continue
@@ -756,7 +756,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// set stays mask-wide, which is exactly what lets a callee's
 	// parameter cross to the subject's own call sites without an
 	// initializer's or a dynamic dispatch's argument leaking in
-	// (REQ-closure-observability-analysis's subject-determined operand).
+	// (REQ-closure-observability-dispatch).
 	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
 	// A computed call whose operand's functions the collector names,
 	// every one of them analyzed content of an indexed non-standard
@@ -764,7 +764,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	// RTA attribution, since its targets are exactly those bodies and
 	// the scan of the operand's values has queued each of them — the
 	// drained initializer frame's recursive closure resolves here
-	// (REQ-closure-observability-analysis's narrowed dispatch).
+	// (REQ-closure-observability-dispatch).
 	heldKnown := false
 	if !c.IsInvoke() && c.StaticCallee() == nil && !(fromRTA && a.rtaResolved[site]) {
 		if held, ok := closedDynamicTargets(c.Value, a.fresh); ok {
@@ -827,7 +827,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		// The callback is subject flow reached through the harness's own
 		// dispatch and classified at its own sites; the driver itself is
 		// an admitted harness fact, never descended into
-		// (REQ-closure-observability-analysis's subtest-driver channel).
+		// (REQ-closure-observability-subtest-driver).
 		a.recordExternalEffect(harnessSubtestDriverEffect())
 		return
 	}
@@ -1332,8 +1332,7 @@ func (a *tier2Analyzer) requestWiden(reason string) {
 // single-reason projection's selection through the one shared
 // comparator - rank strata, lexicographic ties - so the projection can
 // never drift from the maximal instance's order
-// (the one-site-classifier collapse; REQ-closure-observability-
-// analysis's cause-preference order).
+// (the one-site-classifier collapse; REQ-closure-observability-cause-order).
 func (a *tier2Analyzer) recordExternalEffect(effect externalEffect) {
 	a.collectExternalEffect(effect)
 	if !a.unverifiable || preferEffectReason(effect, a.selected) {
@@ -1577,7 +1576,7 @@ func idxForFunctionIn(idxByTypes map[*types.Package]*pkgIndex, fn *ssa.Function)
 // - it carries no source position, so an unrelated edit never thrashes
 // the memoized reason - and stable under the lexicographic-least widen
 // selection, which then names a concrete opening edge instead of the
-// bare shape (REQ-closure-observability-analysis's diagnostic clause).
+// bare shape (REQ-closure-observability-dispatch).
 func invokeEdgeName(c *ssa.CallCommon, caller *ssa.Function) string {
 	return caller.String() + " dispatches " +
 		types.TypeString(c.Value.Type(), nil) + "." + c.Method.Name()
@@ -1590,7 +1589,7 @@ func invokeEdgeName(c *ssa.CallCommon, caller *ssa.Function) string {
 // computed shapes are exactly these) - so the refusal points past the
 // enclosing function to the value dispatched. A register-only operand
 // adds nothing and the suffix stays empty
-// (REQ-closure-observability-analysis's diagnostic clause).
+// (REQ-closure-observability-dispatch).
 func computedEdgeSuffix(c *ssa.CallCommon) string {
 	switch v := c.Value.(type) {
 	case *ssa.Parameter:

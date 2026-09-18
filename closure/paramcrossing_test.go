@@ -16,7 +16,7 @@ import (
 // non-variadic twin closes), a capturing callee, a callee that is also
 // a dynamic target anywhere in the mask, a subject-frame site passing a
 // value the walk cannot close
-// (REQ-closure-observability-analysis's subject-determined operand).
+// (REQ-closure-observability-dispatch).
 func TestCalleeParameterClosesThroughAttributedSites(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

@@ -10,7 +10,7 @@ import (
 // half of the exact-version keying: on an unlisted release the audited
 // synchronization, pooling, and immutable-type admissions all keep
 // their fail-closed classifications
-// (REQ-closure-observability-analysis's exact-version keying clause).
+// (REQ-closure-observability-toolchain-key).
 func TestUnauditedToolchainDropsPurityAdmissions(t *testing.T) {
 	syncPkg := types.NewPackage("sync", "sync")
 	method := func(recvType string, name string) *types.Func {

@@ -21,7 +21,7 @@ import (
 // computation prove observable, while the two soundness exclusions -
 // flag registration (covert Parse-time channel) and reflect (defeats
 // reachability) - stay blocked
-// (REQ-closure-observability-analysis's audited-set boundary).
+// (REQ-closure-observability-audited-set).
 func TestAuditedPureWideningAndExclusions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -145,7 +145,7 @@ func TestRegistered(t *testing.T) {
 // over their operands, while the ambient channels beside them - the
 // clock read, the Location globals, reflective value dispatch - keep
 // their classifications
-// (REQ-closure-observability-analysis's audited-set boundary).
+// (REQ-closure-observability-audited-set).
 func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -910,7 +910,7 @@ func TestDeref(t *testing.T) {
 
 // The admission sets are exactly the audited names: constructors and
 // execution-free references in, every ambient or reflective neighbor
-// out (REQ-closure-observability-analysis's audited-set boundary).
+// out (REQ-closure-observability-audited-set).
 func TestAuditedPureStandardBounds(t *testing.T) {
 	// math/big is a member of the audited-pure package set, admitted
 	// whole there and not operation by operation here.
@@ -1004,7 +1004,7 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 // The harness failure/logging channel is exactly the output-only method
 // list; the harness's ambient-input and mutation surfaces and its
 // structural operations stay outside it
-// (REQ-closure-observability-analysis's audited-set boundary).
+// (REQ-closure-observability-audited-set).
 func TestAuditedHarnessLoggingBounds(t *testing.T) {
 	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {
 		if !auditedHarnessLogging(true, "testing", name) {
@@ -1363,7 +1363,7 @@ func (t *T) Run(name string, f func(*T)) bool { return true }
 // operation reaching its GODEBUG settings refuses naming itself;
 // path/filepath's lexical operations are admitted by symbol while its
 // filesystem reaches and its error variables refuse naming themselves
-// (REQ-closure-observability-analysis's audited-set boundary).
+// (REQ-closure-observability-audited-set).
 func TestNetURLAndFilepathAdmissions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
