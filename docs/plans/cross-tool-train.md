@@ -1102,7 +1102,7 @@ in their repos.
       (234: FOLDS INTO 202 — the class belongs on closure.Closure while
       the composers live in the root package, the split 202 closes;
       doing it first is the work done twice.)
-- [ ] 200. gofresh: the mega-requirements decomposed — REQ-closure-
+- [x] 200. gofresh: the mega-requirements decomposed — REQ-closure-
       shared-dynamic-state (one 8,300-word paragraph, 224 cites),
       REQ-closure-observability-analysis, and REQ-closure-test-variant-
       compartment (four separable contracts) split into per-sub-contract
