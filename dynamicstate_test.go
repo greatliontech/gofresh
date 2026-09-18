@@ -1077,7 +1077,7 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 // and its cell is reached only through an address conversion the
 // escape rules mark, so it keeps the fail-closed judgment — the
 // transparency never crosses a definition boundary
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-atomic).
 func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -1167,7 +1167,7 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 // a user-defined generic Pointer carrying an unsafe cell keeps the
 // fail-closed trigger whatever its type argument — the audit is of the
 // toolchain's source, and no name-shaped sibling inherits it
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-atomic).
 func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -1684,7 +1684,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 // A cross-carrier storage link crosses mutation marks symmetrically: a
 // mutation recorded against an aliasing key refuses the linked origin
 // key too - one backing under every name it carries
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

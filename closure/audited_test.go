@@ -1004,7 +1004,7 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 // The harness failure/logging channel is exactly the output-only method
 // list; the harness's ambient-input and mutation surfaces and its
 // structural operations stay outside it
-// (REQ-closure-observability-audited-set).
+// (REQ-closure-observability-harness-logging).
 func TestAuditedHarnessLoggingBounds(t *testing.T) {
 	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {
 		if !auditedHarnessLogging(true, "testing", name) {
@@ -1082,7 +1082,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 // declaration of an audited name is the harness's shared embedded core or
 // an outcome-only delegate to it. This walks the toolchain's actual
 // declarations, so a drifting toolchain fails here instead of silently
-// widening the admission (REQ-closure-observability-analysis).
+// widening the admission (REQ-closure-observability-harness-logging).
 func TestHarnessLoggingDeclarationInventory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -1142,7 +1142,7 @@ func TestHarnessLoggingDeclarationInventory(t *testing.T) {
 // excludes), Fuzz as a method of F alone (never admitted - reflective
 // dispatch over corpus files), and neither as a package-level function.
 // A drifting toolchain fails here instead of silently widening
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-subtest-driver).
 func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

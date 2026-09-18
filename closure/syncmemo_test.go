@@ -9,8 +9,8 @@ import (
 
 // sync.Map's Load, Store, and LoadOrStore are the audited memo set:
 // process-memory operations a subject may reach observably. Its other
-// operations keep the unaudited-standard refusal — Range walks an
-// order seeded at runtime (REQ-closure-shared-dynamic-state).
+// operations keep the unaudited-standard refusal — Range walks an order
+// seeded at runtime (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestSyncMapMemoOperationsAreAuditedAndRangeIsNot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

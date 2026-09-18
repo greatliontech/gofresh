@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-// A data memo — an unexported by-value sync.Map whose every use is a
-// Load, Store, or LoadOrStore with carrier-free key and value static
-// types — holds no dynamic carrier and marks nothing; an
-// interface-typed key parameter resolves through its direct call
-// sites. Any other use, a carrier stored, an exported or pointer
-// variable keeps the mark (REQ-closure-shared-dynamic-state).
+// A data memo — an unexported by-value sync.Map whose every use is a Load,
+// Store, or LoadOrStore with carrier-free key and value static types — holds
+// no dynamic carrier and marks nothing; an interface-typed key parameter
+// resolves through its direct call sites. Any other use, a carrier stored, an
+// exported or pointer variable keeps the mark
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestDataMemoMarksNothing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")

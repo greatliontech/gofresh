@@ -32,7 +32,7 @@ func TestAuditedPropertyHarnessVersion(t *testing.T) {
 // boundary) - proves observable behind the package audit exactly when
 // every value crossing the harness boundary passes the gate, and
 // widens when one does not
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-property-harness).
 func TestPropertyHarnessAudit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

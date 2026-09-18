@@ -11,7 +11,7 @@ import (
 // registrations mark and poison nothing and its Parse is admitted in
 // the flow that proves it, while every shape the provenance cannot
 // close keeps the mark-and-poison judgment
-// (REQ-closure-observability-analysis's FlagSet provenance rule).
+// (REQ-closure-observability-flag-registration's FlagSet provenance rule).
 func TestClosedFlagSetsAreOrdinaryState(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

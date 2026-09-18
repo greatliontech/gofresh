@@ -19,7 +19,7 @@ func TestVersionListingAdmitsOnlyListedVersions(t *testing.T) {
 }
 
 // The audited sets' exact contents — the goldens a source audit edits
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !slices.Equal(syncNames, []string{"Do", "Lock", "Mutex", "Once", "RLock", "RUnlock", "RWMutex", "TryLock", "TryRLock", "Unlock"}) {
 		t.Fatalf("sync names = %v", syncNames)

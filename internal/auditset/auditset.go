@@ -34,7 +34,7 @@ func (l VersionListing) Listed(key, version string) bool {
 // done flag under a mutex running the caller's own function exactly
 // once, program code judged where it is written; the Once's state
 // cannot change dispatch. Grows only by source audit
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 var syncMethods = map[string][]string{
 	"Mutex":   {"Lock", "Unlock", "TryLock"},
 	"RWMutex": {"Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock"},
@@ -46,13 +46,13 @@ var syncMethods = map[string][]string{
 // the analyzed program alone, admitted at the effect classification
 // tiers; the shared-dynamic-state discharge is the data memo's content
 // judgment, never this set's. Grows only by source audit
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 var memoMethods = map[string][]string{
 	"Map": {"Load", "Store", "LoadOrStore"},
 }
 
 // poolMethods is the audited pooling set: sync.Pool and its Get and
-// Put operations (REQ-closure-shared-dynamic-state).
+// Put operations (REQ-closure-shared-dynamic-state-audited-discharges).
 var poolMethods = map[string][]string{
 	"Pool": {"Get", "Put"},
 }
@@ -96,7 +96,7 @@ var poolMethods = map[string][]string{
 // into the package's own state: descriptors are sealed and never
 // written after construction. Audited on go1.27.0-dst.14; reflect
 // lies in no listed release's walked delta, so the one audit holds
-// under every listed selection (REQ-closure-observability-audited-set).
+// under every listed selection (REQ-closure-observability-reflect-exclusion).
 var reflectSymbols = map[string]bool{
 	// the runtime-type set
 	"Type": true, "TypeOf": true, "DeepEqual": true, "Elem": true,
@@ -122,7 +122,7 @@ var reflectSymbols = map[string]bool{
 // any other kind — whose bare name (*MapIter).Key shares with a read of live map
 // iteration state, so the name admits only where the walk sees the
 // canonical descriptor's own receiver (the unexported rtype).
-// Consulted by the walk tiers alone (REQ-closure-observability-analysis).
+// Consulted by the walk tiers alone (REQ-closure-observability-reflect-exclusion).
 var reflectMethods = map[string][]string{
 	"rtype": {"Key"},
 }
@@ -140,7 +140,7 @@ var reflectImmutableTypes = map[string]bool{"Type": true}
 // arguments' methods stay visible to reachability — and the Stringer
 // name; the Print family is classified output and the Scan family
 // input, so only the pure remainder is here
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 var fmtSymbols = map[string]bool{
 	"Sprint": true, "Sprintf": true, "Sprintln": true, "Errorf": true,
 	"Append": true, "Appendf": true, "Appendln": true, "FormatString": true, "Stringer": true,
@@ -161,7 +161,7 @@ var (
 // channel, no machine-variant results. The exclusion rationale per
 // family lives with the closure tier's consumer (isSourceOnlyStandardPackage).
 // Grows only by source audit, each admission with its own record in
-// the commit that lists it (REQ-closure-observability-analysis).
+// the commit that lists it (REQ-closure-observability-audited-set).
 var purePackages = map[string]bool{
 	"bufio": true, "bytes": true, "cmp": true,
 	"container/heap": true, "container/list": true, "container/ring": true,
@@ -193,7 +193,7 @@ func PurePackage(pkgPath string) bool { return purePackages[pkgPath] }
 // tiers that know the callee. Now, Since, Until, Sleep, Tick,
 // AfterFunc, NewTimer, NewTicker, Parse, ParseInLocation,
 // LoadLocation, and LoadLocationFromTZData never enter. Grows only by source audit
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 var timeSymbols = map[string]bool{
 	// construction and the type/constant names
 	"Date": true, "FixedZone": true, "ParseDuration": true,
@@ -234,7 +234,7 @@ var timeSymbols = map[string]bool{
 // fold in every compiled Go and cgo file of the closure. Audited on
 // go1.27.0-dst.14; time lies in no listed release's walked delta.
 // Consulted by the walk tiers alone — the fold sees no method call
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 var timeMethods = map[string][]string{
 	"Time": {"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"},
 }
@@ -254,7 +254,7 @@ var timeMethods = map[string][]string{
 // unique-interning registry is value-deterministic; its math use is
 // a constant) and a push linkname of setPath (pure over its
 // receiver). No exported variables. Audited on go1.27.0-dst.14;
-// grows only by source audit (REQ-closure-observability-analysis).
+// grows only by source audit (REQ-closure-observability-audited-set).
 var urlSymbols = map[string]bool{
 	"QueryEscape": true, "QueryUnescape": true, "PathEscape": true, "PathUnescape": true,
 	"User": true, "UserPassword": true, "Username": true, "Password": true,
@@ -285,7 +285,7 @@ var urlSymbols = map[string]bool{
 // refused by name. The admission is by bare name at every tier, so the
 // ErrorHandling name also admits the (*FlagSet).ErrorHandling accessor
 // — a field written only at construction and by Init, which refuses.
-// Audited on go1.27.0-dst.14 (REQ-closure-observability-analysis).
+// Audited on go1.27.0-dst.14 (REQ-closure-observability-audited-set).
 var flagSymbols = map[string]bool{
 	"NewFlagSet": true, "CommandLine": true,
 	"FlagSet": true, "Flag": true, "Value": true, "Getter": true, "ErrorHandling": true,
@@ -335,7 +335,7 @@ func SymbolPackages() []string {
 // exported error variables (ErrBadPattern, SkipDir, SkipAll) refuse as
 // standard globals whatever this table says. No admitted name is
 // shared with an ambient declaration. Audited on go1.27.0-dst.14;
-// grows only by source audit (REQ-closure-observability-analysis).
+// grows only by source audit (REQ-closure-observability-audited-set).
 var filepathSymbols = map[string]bool{
 	"Clean": true, "IsLocal": true, "Localize": true, "ToSlash": true, "FromSlash": true,
 	"SplitList": true, "Split": true, "Join": true, "Ext": true, "IsAbs": true, "Rel": true,

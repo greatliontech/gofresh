@@ -995,7 +995,7 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 // which acquire no process-external state (the function Do runs is
 // the caller's own, judged where written). sync exports no top-level functions by these
 // names, so the method names are unambiguous. Grows only by source
-// audit (REQ-closure-shared-dynamic-state).
+// audit (REQ-closure-shared-dynamic-state-audited-discharges).
 func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "sync" && auditset.SyncName(name)
 }
@@ -1012,7 +1012,7 @@ func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
 // (WithSingleSubjectExecution) — not here. The values passed and
 // produced keep their own classifications. sync exports no top-level
 // functions by these names, so the method names are unambiguous. Grows
-// only by source audit (REQ-closure-shared-dynamic-state).
+// only by source audit (REQ-closure-shared-dynamic-state-audited-discharges).
 func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "sync" && auditset.PoolName(name)
 }
@@ -1024,7 +1024,7 @@ func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
 // values stored and produced keep their own classifications, and the
 // shared-dynamic-state judgment is the data memo's. sync exports no
 // top-level functions by these names. Grows only by source audit
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 func auditedMemoSymbol(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "sync" && auditset.MemoName(name)
 }

@@ -95,13 +95,10 @@ siblings' embed directives, which the hash folds, under the configuration —
 while the hash is unsalted by any of them, so a ledger is a fact of the hash,
 the configuration, and the strategy together, never of the hash alone.
 Consumer obligation: a consumer keying ledgers per compartment hash keys per
-listing configuration and identity strategy too.
-
-The hash's derivation from the compartment's bytes, and the ledger's
-being a function of the hash under one listing configuration and
-identity strategy, are enforced by
+listing configuration and identity strategy too. Enforced by
 `TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration`
-and `TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
+and
+`TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
 
 **REQ-closure-test-variant-identity** (behavior): A package with no test files
 MUST record the defined
@@ -285,7 +282,8 @@ dynamic-state form of REQ-closure-observability-batch-equivalence).
 (The refusal reason's own contract, the discharge channel it names
 included, is REQ-closure-shared-dynamic-state-reason.)
 
-**REQ-closure-shared-dynamic-state-carrier-free** (invariant): A package-level variable whose type carries none of these — a plain
+**REQ-closure-shared-dynamic-state-carrier-free** (invariant): A package-level variable whose type carries none of the carriers
+REQ-closure-shared-dynamic-state names — a plain
 scalar or any other carrier-free type — is deliberately outside this
 net: its direct mutation is per-process-deterministic content the
 whole-graph hash already covers, and an unsafe-mediated mutation of
@@ -300,9 +298,11 @@ unsafe-pointer-typed value the walk can price; the non-Go write
 channels — assembly, `//go:linkname`, cgo — MUST remain scan blockers.
 
 **REQ-closure-shared-dynamic-state-atomic** (invariant): The audited atomic transparency governs every carrier walk of this
-judgment — the trigger above, the openness a parameter, receiver, or
-constraint term confers on its subject (REQ-closure-analysis), and
-the alias-handing read judgment below: each walk MUST see the toolchain's
+judgment — REQ-closure-shared-dynamic-state's trigger, the openness a
+parameter, receiver, or constraint term confers on its subject
+(REQ-closure-analysis), and
+REQ-closure-shared-dynamic-state-mutation-shape's alias-handing read
+judgment: each walk MUST see the toolchain's
 `sync/atomic.Pointer[T]` as `*T`. The ground is a source audit of the
 toolchain's type: its internal unsafe pointer is an implementation
 cell the zero-width `*T` field and the whole method set type-pin to
@@ -349,7 +349,8 @@ object alone, its element references remaining escapes, while a capture
 nested inside the literal marks through its own shape.
 
 **REQ-closure-shared-dynamic-state-receiver-proof** (invariant): A direct method CALL on a statically-typed non-interface
-carrier MUST be judged by the method's own receiver-effect proof instead: the
+carrier MUST be judged by the method's own receiver-effect proof instead of
+REQ-closure-shared-dynamic-state-mutation-shape's mutation-equivalence: the
 declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, with one
 exception, the once-filled memo: a write to a receiver-rooted field or element
@@ -730,7 +731,8 @@ fact identity, so option-on and option-off sessions never serve each
 other's facts.
 
 **REQ-closure-shared-dynamic-state-escape-narrowings** (invariant): One narrowing applies to
-the escape class alone: an
+the escape class alone (the escape marks
+REQ-closure-shared-dynamic-state-mutation-shape defines): an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
 package — is a provably-immutable audited construction (`errors.New`; any
@@ -1293,7 +1295,8 @@ backstop scopes its admission to the syntactic `TestMain(*testing.M)`
 declaration, the conservative direction for text the scan cannot
 attribute to flow.
 
-**REQ-closure-observability-cause-order** (invariant): Every reachable call and effect MUST be classified to the walk's end; the preferred
+**REQ-closure-observability-cause-order** (invariant): Every reachable call and effect MUST be classified to the observability walk's
+(REQ-closure-observability-analysis) end; the preferred
 human diagnostic is derived afterward and can never select which facts
 participate: a refusal names the highest-ranked blocking effect under one
 cause-preference order shared with the legacy single-reason projection —
@@ -1320,7 +1323,8 @@ standard-library access, or other unclassified external-capable syntax, but can 
 grant the proof on its own.
 
 **REQ-closure-observability-unsafe** (invariant): The unsafe reference class MUST be narrowed out
-of the scan's blocking set: an in-scope `unsafe.Pointer` reference is
+of the package-scan backstop's blocking set for the observability proof
+(REQ-closure-observability-analysis): an in-scope `unsafe.Pointer` reference is
 diagnostic only, because the subject walk prices every attributed
 unsafe-typed value and a subject world the walk cannot close refuses
 independently — a subject reaching unsafe-typed state still refuses at
@@ -1429,10 +1433,13 @@ time.Month, time.Duration, time.Weekday and their constants, time's
 layout constants — declares or denotes and executes nothing, every dispatch through a
 value of such a type classified at its own site, and the pure value
 methods sharing an audited name admitted with it). The set is deliberately bounded by two exclusions that
-are soundness, not caution, each stated as its own contract below.
+are soundness, not caution, each stated as its own contract below
+(REQ-closure-observability-reflect-exclusion and
+REQ-closure-observability-flag-registration).
 
 **REQ-closure-observability-reflect-exclusion** (invariant): reflect defeats static
-reachability itself, so only its invoke-nothing members MUST be admitted —
+reachability itself, so only its invoke-nothing members MUST be admitted to
+the audited set (REQ-closure-observability-audited-set) —
 the runtime-type set; the descriptor-view surface of Type — Kind, Name,
 String, PkgPath, Size, Align, FieldAlign, Bits, NumField, Field,
 FieldByIndex, FieldByName, FieldByNameFunc (its callback resolved by the
@@ -1539,9 +1546,10 @@ stored into a standard variable is never proven (the standard bodies
 load it unscanned), and every other shape keeps the mark-and-poison
 judgment.
 
-**REQ-closure-observability-writer-sink** (invariant): One admission in the audited set is
-operand-sensitive: fmt's writer-first print family (Fprint, Fprintf,
-Fprintln) MUST be Sprint-equivalent value computation exactly when the writer
+**REQ-closure-observability-writer-sink** (invariant): One admission in the audited set
+(REQ-closure-observability-audited-set) is operand-sensitive: fmt's
+writer-first print family (Fprint, Fprintf, Fprintln) MUST be
+Sprint-equivalent value computation exactly when the writer
 operand provably pins every dynamic type it can carry to an audited
 in-memory sink — `*bytes.Buffer` or `*strings.Builder`, whose write appends
 to process memory and acquires nothing ambient — judged by a closed-value

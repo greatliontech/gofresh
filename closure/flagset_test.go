@@ -7,13 +7,12 @@ import (
 	"testing"
 )
 
-// The FlagSet forms are admitted beside the registration families: a
-// set an initializer constructs and registers into package-level
-// storage rides the sink judgment through its receiver, and a subject
-// touching none of the storage proves observable; a subject-time read
-// of the default set keeps the standard-global refusal, and the parsed
-// state readers keep their class (REQ-closure-observability-analysis's
-// FlagSet forms).
+// The FlagSet forms are admitted beside the registration families: a set an
+// initializer constructs and registers into package-level storage rides the
+// sink judgment through its receiver, and a subject touching none of the
+// storage proves observable; a subject-time read of the default set keeps the
+// standard-global refusal, and the parsed state readers keep their class
+// (REQ-closure-observability-flag-registration's FlagSet forms).
 func TestFlagSetFormsRideTheRegistrationJudgment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

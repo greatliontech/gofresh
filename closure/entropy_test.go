@@ -119,7 +119,7 @@ func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 // The gate's own deletion is not test-distinguishable while no arm for
 // an unlisted package exists; the table collapse that removes the gate
 // with the hazard is docs/issues/classb-arms-one-table.md
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 func TestClassBPackagesMatchTheArms(t *testing.T) {
 	samples := map[string]string{
 		"fmt": "Println", "os": "Getenv", "syscall": "Mkdir", "golang.org/x/sys/unix": "Mkdir", "testing": "Short",
@@ -153,7 +153,7 @@ func TestClassBPackagesMatchTheArms(t *testing.T) {
 
 // An unnamed import binds the identifier the toolchain's package
 // clause declares for a major-versioned path: the last element past
-// the version (REQ-closure-observability-analysis).
+// the version (REQ-closure-observability-audited-set).
 func TestImplicitImportNameSkipsMajorVersionElements(t *testing.T) {
 	for pkgPath, want := range map[string]string{
 		"math/rand/v2": "rand", "math/rand": "rand", "encoding/json/v2": "json", "fmt": "fmt",
@@ -169,7 +169,7 @@ func TestImplicitImportNameSkipsMajorVersionElements(t *testing.T) {
 // own package names: for every importable standard package the derived
 // identifier is the declared one, so a release adding a path whose
 // declared name the rule cannot derive fails here instead of opening a
-// silent fold hole (REQ-closure-observability-analysis).
+// silent fold hole (REQ-closure-observability-audited-set).
 func TestImplicitImportNameMatchesTheToolchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library")

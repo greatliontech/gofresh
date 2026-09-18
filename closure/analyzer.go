@@ -221,7 +221,7 @@ type tier2Base struct {
 	// itself closes, judged by flagSetProvenance: registrations on such
 	// a set mark and poison nothing, and its Parse and registrations are
 	// admitted in the flow that proves them
-	// (REQ-closure-observability-analysis's FlagSet provenance rule).
+	// (REQ-closure-observability-flag-registration's FlagSet provenance rule).
 	flagProven map[ssa.Value]flagSetKind
 }
 
@@ -898,7 +898,7 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		// the parsed values are the program's own literals, the
 		// storage ordinary state — judged program-wide by
 		// flagSetProvenance, which admits the site only in the flow
-		// that proves the set (REQ-closure-observability-analysis's
+		// that proves the set (REQ-closure-observability-flag-registration's
 		// FlagSet provenance rule).
 		return externalEffect{}, false
 	}

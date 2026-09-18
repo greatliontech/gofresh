@@ -7832,7 +7832,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 // mutable construction breaks the closure (the discharge of the mutation
 // is correct - the ESCAPE must not also discharge), while an audited
 // construction through the same shape keeps it
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 func TestProvenInitFlowStoresAuditedForObjectClosure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -7980,9 +7980,9 @@ func captureCheck(t *testing.T, dir string, subject Subject, opts ...Option) Ver
 }
 
 // The three fail-closed mutation shapes the carrier rules must catch
-// (REQ-closure-shared-dynamic-state): a package-level function-literal
-// mutator, a pointer-receiver method VALUE bind, and read-aliasing of
-// a map-carried hook set.
+// (REQ-closure-shared-dynamic-state-mutation-shape): a package-level
+// function-literal mutator, a pointer-receiver method VALUE bind, and
+// read-aliasing of a map-carried hook set.
 func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -8021,7 +8021,7 @@ func TestSharedDynamicStateFailClosedShapes(t *testing.T) {
 // Writeless reads of alias carriers and object-closed sentinels are not
 // mutation: indexing, iteration, length, and comparison discharge, and
 // an errors.New sentinel stays closed through an escape
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-mutation-shape).
 func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -8823,7 +8823,7 @@ func TestCompositeAddressCapturesFreshObjectOnly(t *testing.T) {
 // read-only over immutable data by the same source audit, so the
 // canonical sentinel uses stay verifiable, while a non-closed variable's
 // method call keeps the fail-closed escape
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 func TestObjectClosedMethodCallDischarges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")

@@ -12,7 +12,7 @@ import (
 // direct call sites. Any store of another shape, an escape of the
 // field's address, a variadic or escaped or exported constructor, or a
 // member promoting the method leaves the dispatch an escape
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-receiver-proof).
 func TestClosedInterfaceFieldDispatchChains(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")

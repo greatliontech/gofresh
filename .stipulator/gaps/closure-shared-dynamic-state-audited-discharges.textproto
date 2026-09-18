@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-shared-dynamic-state-audited-discharges"
+reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
+content_hash: "97fcf5c2ddf2f3c6f7289f76ed68ff62cf82576710b6897c2091415c3c2e22e1"
+source_hash: "f21353a3282b02116c3c10bf6c7b80e1412aff893f3d751b4a03ddf475003c3c"
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

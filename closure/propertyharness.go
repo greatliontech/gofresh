@@ -37,7 +37,7 @@ import (
 // dynamic target keeps the conservative refusal: no gate can judge a
 // dispatched-to boundary. The audit is version-gated: an unlisted
 // harness release keeps the package's ordinary classification
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-property-harness).
 
 // propertyHarnessPath reports whether pkgPath is the property-testing
 // harness package. Exactly pgregory.net/rapid.
@@ -115,7 +115,7 @@ func (a *tier2Analyzer) propertyHarnessAudited(pkgPath string) bool {
 // refuses like any other load. Generator and other harness-owned
 // value types are deliberately NOT handles: they are user-held values
 // whose provenance must be judged wherever they cross
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-property-harness).
 func propertyHarnessHandleType(t types.Type) bool {
 	if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
 		t = ptr.Elem()

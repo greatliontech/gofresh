@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
+reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
+content_hash: "00f09fb838a6e805d3da84282659d16c0b9bb58fe688e366ac7a6d3ad71f8e56"
+source_hash: "1d8589051e62b88beeef9df0fbee814056a462947575e03fdef19817412508d9"
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

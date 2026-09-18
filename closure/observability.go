@@ -689,7 +689,7 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	// the type-graph arm to price (a *byte and a length in, a slice
 	// out), so they keep the scan block - carving them would grant
 	// proofs over testlog-invisible out-of-bounds reads
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-unsafe).
 	if effect.packagePath == "unsafe" && effect.symbol == "Pointer" {
 		return false
 	}
@@ -940,7 +940,7 @@ const (
 // set is never proven — flag.Parse reads os.Args — and neither is a
 // set stored into a standard variable, whose loads the standard
 // bodies make. Every unknown shape fails closed: the set keeps the
-// mark-and-poison judgment (REQ-closure-observability-analysis's
+// mark-and-poison judgment (REQ-closure-observability-flag-registration's
 // FlagSet provenance rule).
 func (b *tier2Base) flagSetProvenance(userPaths map[string]bool) map[ssa.Value]flagSetKind {
 	if b.flagProven != nil {

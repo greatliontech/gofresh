@@ -1960,7 +1960,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// audited selector at the fold, the storage is marked, and the
 		// subject reading none of it proves observable — the
 		// deliberate flip of the former unaudited-symbol pin
-		// (REQ-closure-observability-analysis's FlagSet forms).
+		// (REQ-closure-observability-flag-registration's FlagSet forms).
 		{fixture: "flagregmethod", subject: "TestProd", observable: true},
 		// An init escaping the registered storage's address (q =
 		// &quiet) refuses at the escape site: the alias would carry
