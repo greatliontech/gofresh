@@ -1238,7 +1238,7 @@ in their repos.
       re-implementation deleted.
       (235: DISSOLVES INTO 246 — the bump chunk carries the vouch-file
       arm beside the rest of the gofresh consumer seams.)
-- [ ] 213. gomutant: one seam struct — fifteen mutable package-level
+- [x] 213. gomutant: one seam struct — fifteen mutable package-level
       test seams across run.go, schedule.go, ephemeral.go, and
       freshness.go, two of them duplicates of one engine function each
       (coveredPositions ≡ campaignCoveredPositions, groupBaselineProbe ≡
