@@ -9,7 +9,7 @@ import (
 // The closure tiers' symbol predicates read the audited sets by name
 // exactly as the purity tier reads them by receiver and method: one
 // table each, so the two spellings cannot drift apart
-// (REQ-closure-shared-dynamic-state's source-audit discipline).
+// (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do"} {
 		if !auditedSyncSymbol(true, "sync", name) || !auditset.SyncName(name) {

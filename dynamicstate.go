@@ -1467,7 +1467,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		}
 	}
 	// Site inventory for the reachability re-judgments
-	// (REQ-closure-shared-dynamic-state's reachability scopings): every
+	// (REQ-closure-shared-dynamic-state-reachability): every
 	// mark present BEFORE the attributed promotion carries no function
 	// attribution — fact-immediate marks from top-level literal
 	// contexts, init-flow refusals, deferral failures, malformed arms —

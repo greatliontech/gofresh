@@ -759,7 +759,7 @@ func recordDynamicGlobalMutations(audited bool, p *packages.Package, mutated map
 // named function instead of marking immediately: composition
 // discharges it when the whole graph proves the function reachable
 // only from init flow, and promotes it otherwise
-// (REQ-closure-shared-dynamic-state's cross-package init-only class).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 type attributedUse struct {
 	fn, key string
 	escape  bool
@@ -3693,7 +3693,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 	// insFree marks fnName\x00idx parameters whose argument-storage
 	// insertions all judge environment-free (possibly conditionally,
 	// via insDeps edges); absence is poison, fail-closed
-	// (REQ-closure-shared-dynamic-state's callees-join-their-populations
+	// (REQ-closure-shared-dynamic-state-escape-narrowings
 	// clause).
 	insFree := map[string]bool{}
 	insDeps := map[string]map[string]bool{}
@@ -4222,8 +4222,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 							}
 							// Every argument is classified by the write
 							// path its value hands the callee
-							// (REQ-closure-shared-dynamic-state's
-							// callees-join-their-populations clause). A
+							// (REQ-closure-shared-dynamic-state-escape-narrowings). A
 							// tracked chain-rooted argument whose value
 							// hands out mutable reach defers to the
 							// callee's per-parameter insertion fact — the
@@ -5050,8 +5049,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 				delete(localFree, k)
 			}
 			// Per-parameter argument-storage insertion facts
-			// (REQ-closure-shared-dynamic-state's
-			// callees-join-their-populations clause): a parameter's
+			// (REQ-closure-shared-dynamic-state-escape-narrowings): a parameter's
 			// component judges by what the body stores into it. A
 			// capture-broken component's insertions are unknowable —
 			// poison, absent. A stored bare unrebroken parameter is the
@@ -8383,8 +8381,8 @@ func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
 // execute, and a value cannot be handed out, unless the encloser ran);
 // a literal or value reference in init flow or method bodies stays
 // "prog", poisoned everywhere — its creation site the regions cannot
-// bound (REQ-closure-shared-dynamic-state's cross-package init-only
-// class and init-reach dual). Keys are pkgPath NUL name; edges are
+// bound (REQ-closure-shared-dynamic-state-escape-narrowings and
+// init-reach dual). Keys are pkgPath NUL name; edges are
 // joined caller NUL callee at composition via the fact schema.
 func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {

@@ -1,8 +1,8 @@
 # proto-file: proto/stipulator/v1/records.proto
 # proto-message: stipulator.v1.Gap
 
-requirement_id: "REQ-closure-shared-dynamic-state"
+requirement_id: "REQ-closure-shared-dynamic-state-mutation-shape"
 reason: "invariant needs a property witness over the mutation-shape / assertion-separation grammar; example pins anchor the named shapes"
-content_hash: "4081b82f6a82f63ca34446597aa83770a826f39e780b10abc4c6c7f1bf78a048"
-source_hash: "d77302413d97c0ad65b6820e2092cf527dfc731c34b4372f2fae7501df77b9d6"
+content_hash: "ab4fbb755540d46dfff23aba76d1db45673124cf09e5e5786fb5f3bda51eb4e8"
+source_hash: "6405b0584747486a05c8039264700c20a4a8044af829da346a0e0935d6a2f434"
 lands { manual { condition: "a property-test generator over dynamic-global mutation shapes exists" } }

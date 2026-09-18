@@ -13,7 +13,7 @@ import (
 // carrier field inside the Do — keeps the mark. A dispatch of an
 // unexported interface method chains into every in-package declaration
 // of that name; an exported method's dispatch chains through the
-// receiver's closed interface field (REQ-closure-shared-dynamic-state).
+// receiver's closed interface field (REQ-closure-shared-dynamic-state-receiver-proof).
 func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")

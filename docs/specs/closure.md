@@ -284,7 +284,8 @@ yields for each exactly the judgment its solitary view yields (the
 dynamic-state form of REQ-closure-observability-batch-equivalence).
 (The refusal reason's own contract, the discharge channel it names
 included, is REQ-closure-shared-dynamic-state-reason.)
-A package-level variable whose type carries none of these — a plain
+
+**REQ-closure-shared-dynamic-state-carrier-free** (invariant): A package-level variable whose type carries none of these — a plain
 scalar or any other carrier-free type — is deliberately outside this
 net: its direct mutation is per-process-deterministic content the
 whole-graph hash already covers, and an unsafe-mediated mutation of
@@ -296,11 +297,12 @@ unverifiable judgment keeps it), while `unsafe.Slice`,
 `unsafe.String`, and the package's other operations keep the
 maximal-tier scan block, their call sites carrying no
 unsafe-pointer-typed value the walk can price; the non-Go write
-channels — assembly, `//go:linkname`, cgo — remain scan blockers.
-The audited atomic transparency governs every carrier walk of this
+channels — assembly, `//go:linkname`, cgo — MUST remain scan blockers.
+
+**REQ-closure-shared-dynamic-state-atomic** (invariant): The audited atomic transparency governs every carrier walk of this
 judgment — the trigger above, the openness a parameter, receiver, or
 constraint term confers on its subject (REQ-closure-analysis), and
-the alias-handing read judgment below: each walk sees the toolchain's
+the alias-handing read judgment below: each walk MUST see the toolchain's
 `sync/atomic.Pointer[T]` as `*T`. The ground is a source audit of the
 toolchain's type: its internal unsafe pointer is an implementation
 cell the zero-width `*T` field and the whole method set type-pin to
@@ -312,7 +314,8 @@ already mark, so it keeps the fail-closed judgment; and a
 dynamic-carrying `*T` still triggers everywhere. One rule at every
 tier, riding the toolchain guard — no attestation, no evidence
 record.
-Mutation is judged
+
+**REQ-closure-shared-dynamic-state-mutation-shape** (invariant): Mutation MUST be judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
 array, or tuple of by-value carriers) is mutated exactly by a write, an address
 capture, or a pointer-receiver method use outside `init` flow anywhere in the
@@ -343,8 +346,10 @@ type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. An address capture reaches the variable's own cell or a
 chain into it; taking the address of a composite literal captures the fresh
 object alone, its element references remaining escapes, while a capture
-nested inside the literal marks through its own shape. A direct method CALL on a statically-typed non-interface
-carrier is judged by the method's own receiver-effect proof instead: the
+nested inside the literal marks through its own shape.
+
+**REQ-closure-shared-dynamic-state-receiver-proof** (invariant): A direct method CALL on a statically-typed non-interface
+carrier MUST be judged by the method's own receiver-effect proof instead: the
 declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, with one
 exception, the once-filled memo: a write to a receiver-rooted field or element
@@ -394,7 +399,9 @@ each hand out no mutable reach or are audited-immutable (reflect.Type,
 runtime-canonical and never written after construction; reflect.TypeOf, its
 pure constructor, admitted with it at the effect classification tiers); a call to any unproven,
 unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
-the fail-closed mark. The audited synchronization set — sync.Mutex and
+the fail-closed mark.
+
+**REQ-closure-shared-dynamic-state-audited-discharges** (invariant): The audited synchronization set — sync.Mutex and
 sync.RWMutex with their lock operations, and sync.Once's Do (a done flag
 under a mutex running the caller's own function once, program code judged
 where it is written), receiver-neutral and never
@@ -472,7 +479,7 @@ attested and unattested sessions never serve each other's facts, and a
 load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
 auditable and never silent (REQ-vouch-recorded in
-[purity.md](purity.md)). The set grows only by source audit. The
+[purity.md](purity.md)). The set MUST grow only by source audit. The
 audited mapping set — `golang.org/x/sys/unix`'s package-level `mapper`
 bookkeeping, written by the mapping calls (`Mmap`, `Munmap`, and their
 variants) — is admitted in any execution model, on the deepened
@@ -594,8 +601,10 @@ the analyzed program alone, admitted unconditionally exactly as the
 pooling set's Get and Put are, the values stored and produced keeping
 their own pricing, and a file that merely declares a sync.Map recording no
 effect at the file fold — while the map's other operations keep the
-unaudited fallback at the walks. Under the caller-attested single-subject-process
-execution model the shared-dynamic-state judgment additionally scopes per subject: the
+unaudited fallback at the walks.
+
+**REQ-closure-shared-dynamic-state-reachability** (invariant): Under the caller-attested single-subject-process
+execution model the shared-dynamic-state judgment MUST additionally scope per subject: the
 hazard is a prior subject's execution in the same process, and under
 the attestation there is none — the only code that executes is the
 subject's own rooted flow: the subject flow and, where the subject
@@ -718,7 +727,9 @@ downgrade), canonically and never silently, attestation-borne exactly
 as the per-subject scoping's (REQ-vouch-recorded in
 [purity.md](purity.md)); the attestation is part of the persisted
 fact identity, so option-on and option-off sessions never serve each
-other's facts. One narrowing applies to
+other's facts.
+
+**REQ-closure-shared-dynamic-state-escape-narrowings** (invariant): One narrowing applies to
 the escape class alone: an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
@@ -756,8 +767,8 @@ immutable data by the same source audit (`errorString` and the fmt wrap
 errors' `Error` and `Unwrap`, the runtime type descriptors' view methods), a
 constant-boxed referent dispatches value-receiver copies that cannot reach
 the box, and a nil referent panics before writing. The
-audited-construction set grows only by source audit. An escape never
-discharges by init flow — the alias outlives initialization. Proven
+audited-construction set grows only by source audit. An escape MUST NOT
+discharge by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
 rules; `init` bodies and qualified helpers are scanned exactly for
 alias-creating bindings — an init-flow local bound from a carrier by
@@ -1165,7 +1176,7 @@ bounding element whose every term is free of dynamic reach under the same
 carrier rule ordinary parameters answer to (interface, function, and
 unsafe reach open; a channel opens exactly when its element does; the
 toolchain's `sync/atomic.Pointer[T]` reads as `*T` under the audited
-atomic transparency, REQ-closure-shared-dynamic-state);
+atomic transparency, REQ-closure-shared-dynamic-state-atomic);
 `any` and `comparable` bound nothing — closes
 the caller's choice, anything else keeps the subject open-world,
 where observability refuses exactly as for any
@@ -1842,7 +1853,7 @@ new versioning obligation.
 **REQ-closure-dynamic-state-memo** (behavior): Per-package shared-dynamic-state
 facts — the dynamic-capable package-level variables a package declares, the
 variable identities its code mutates after initialization
-(REQ-closure-shared-dynamic-state), and its method-directive declarations — MAY
+(REQ-closure-shared-dynamic-state-mutation-shape), and its method-directive declarations — MAY
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
 (the fact-strategy version, the analyzing frontend's version, and the code guards — toolchain and build

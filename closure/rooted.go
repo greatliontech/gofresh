@@ -56,7 +56,7 @@ func rootedFunctionKey(fn *ssa.Function) string {
 // subject symbol or an open-world widening (a root able to receive
 // unknown dynamic values) leaves Complete false, and an incomplete
 // inventory grants nothing — fail-closed
-// (REQ-closure-shared-dynamic-state's reachability scoping).
+// (REQ-closure-shared-dynamic-state-reachability).
 type RootedFunctions struct {
 	Fns      map[string]bool
 	Complete bool
@@ -190,7 +190,7 @@ func harnessRootName(name string) bool {
 // package whose binary declares no harness roots is vacuously
 // complete with an empty inventory — nothing executes past
 // initialization in its test process
-// (REQ-closure-shared-dynamic-state's reachability scopings).
+// (REQ-closure-shared-dynamic-state-reachability).
 func (h *Hasher) ComputeBinaryRootedFunctions(pkgPaths []string) (map[string]RootedFunctions, error) {
 	results := make(map[string]RootedFunctions, len(pkgPaths))
 	seen := map[string]bool{}

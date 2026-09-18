@@ -3552,7 +3552,7 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 // initializers - its own package's and a sibling's - proves init-only
 // across the graph, and the registry mutation inside it is startup
 // flow; one program-code caller anywhere poisons the proof
-// (REQ-closure-shared-dynamic-state's cross-package init-only class).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -8724,7 +8724,7 @@ func TestAuditedTypeOfConstructionBounds(t *testing.T) {
 // objects, so the canonical wrapped-sentinel idiom stays object-closed
 // when every argument is a constant, a nested audited construction, or
 // a sibling object-closed variable — whatever the declaration order
-// (REQ-closure-shared-dynamic-state).
+// (REQ-closure-shared-dynamic-state-escape-narrowings).
 func TestAuditedErrorfConstructionKeepsObjectClosed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
@@ -10011,7 +10011,7 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 }
 
 // The unattested execution model's binary-scoped reachability judgment
-// (REQ-closure-shared-dynamic-state): sibling subjects in a shared
+// (REQ-closure-shared-dynamic-state-reachability): sibling subjects in a shared
 // process are themselves harness roots of the analyzed test binary, so
 // a culprit no harness root's post-init flow reaches is
 // init-determined for every subject of the binary — no attestation
@@ -10300,7 +10300,7 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 // A sibling narrowing shares the union's facts — the package-process
 // discharges included: a consumer that captures from the union and
 // attaches through the sibling must see identical fingerprints
-// (REQ-closure-shared-dynamic-state's recording arm).
+// (REQ-closure-shared-dynamic-state-reachability).
 func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

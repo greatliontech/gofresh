@@ -11,7 +11,7 @@ import (
 // evidence's sorted form, and none after it — the survivor names the
 // downgrade. Seven carriers in key order: five discharged, the sixth
 // mutated in the subject's own rooted flow, the seventh dischargeable
-// but past the survivor (REQ-closure-shared-dynamic-state,
+// but past the survivor (REQ-closure-shared-dynamic-state-reachability,
 // REQ-vouch-recorded).
 func TestCulpritDischargeRecordsTheSortedPrefix(t *testing.T) {
 	if testing.Short() {
