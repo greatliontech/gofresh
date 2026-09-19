@@ -1132,7 +1132,7 @@ in their repos.
       parallel method tables and their predicates one package-keyed
       map behind the one ladder, as symbolTables already is; BoundedToken
       rehomed out of the audited-set package.
-- [ ] 205. gofresh + consumers: one guidance plumbing — an exported
+- [x] 205. gofresh + consumers: one guidance plumbing — an exported
       embed-accessor shape and a Progress diagnostic sink in gofresh; at
       each consumer's next bump the three identical accessors read it,
       gomutant's and pew's knob prose renders from the document as
