@@ -56,7 +56,9 @@ healthy verdict into a timeout.
   verdict weekly where the warm witness store lives).
 - **pew store freshness** — whole-store `pew status` per store under
   the store's standing vouch set (pew reads it from the `vouches`
-  file at the store's root, one `IMPORT-PATH:VARIABLE` per line;
+  file at the store's root through the engine's own vouch grammar,
+  one `IMPORT-PATH:VARIABLE` per line, and declines the module's own
+  file for its engines — REQ-vouch-input's channel, one set one home;
   `--vouch` flags only extend that set, so a store whose file is
   reviewed needs no mirrored flag list — tugboat's set moves into
   its store's file when that session resumes, and the gatherer's
