@@ -93,9 +93,14 @@ its own, the knob verbatim — a knob the verb documents on the other
 surface only, an unknown knob, and an unknown verb are refused by name;
 and the help rendering is the long rendering without its knobs: block —
 for a surface that renders its own knob list (a CLI's flag help), where
-the block would print every knob twice in two wordings. A requested
-surface or name the document does not carry is an error, never an empty
-rendering.
+the block would print every knob twice in two wordings; and the terse
+rendering of a knob the knob projection answered is its first clause —
+the prose up to the first semicolon outside parentheses, surrounding
+whitespace and a trailing period trimmed, the whole prose where no
+such semicolon exists — for a surface rendering one line per knob,
+which surface renders the clause and which the whole prose being the
+consuming tool's contract. A requested surface or name the document
+does not carry is an error, never an empty rendering.
 
 **REQ-guidance-coverage** (behavior): The package MUST provide the
 per-surface coverage judgment a consuming tool's drift binding
@@ -129,6 +134,9 @@ keeps them enumerated by the document. The drift guard is structural —
 name coverage plus served-bytes identity, the consuming repo's binding
 comparing each served knob string with the projection; prose accuracy
 against the consuming repo's own spec is review's to hold, not a
-mechanical judgment. Enforced in each consuming repo by its guidance
-requirement and binding; in this repo the format and projections are
-enforced by the package's own tests.
+mechanical judgment. The package provides the embedded form the tool
+reads: its source parsed once, every face answering the one parse, and
+a malformed document refused loudly at construction, naming the tool.
+Enforced in each consuming repo by its guidance requirement and
+binding; in this repo the format and projections are enforced by the
+package's own tests.

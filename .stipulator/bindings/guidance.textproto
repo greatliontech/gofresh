@@ -23,8 +23,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guidance-render"
-  content_hash: "a2708f9af1ee76792d0db3be2b8e32f832ca9d8574c8108fbd7f77479c253bf1"
-  source_hash: "ff907131e7df9df3785377117226cba46a426076a0e3ed8892f83e43f1fb4fcd"
+  content_hash: "9df1a89a8bc3de9565800cf0871f88d1e213b5cd653c7767ae0447149953b3ae"
+  source_hash: "ab13c1b1e27f2927f4c9b2663df398e5c0f0b57a8f749c1a7dab90c055dac28d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseAndRenderProjections"
   role: BINDING_ROLE_TESTS
@@ -33,8 +33,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guidance-render"
-  content_hash: "a2708f9af1ee76792d0db3be2b8e32f832ca9d8574c8108fbd7f77479c253bf1"
-  source_hash: "ff907131e7df9df3785377117226cba46a426076a0e3ed8892f83e43f1fb4fcd"
+  content_hash: "9df1a89a8bc3de9565800cf0871f88d1e213b5cd653c7767ae0447149953b3ae"
+  source_hash: "ab13c1b1e27f2927f4c9b2663df398e5c0f0b57a8f749c1a7dab90c055dac28d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestParseReconstructsGeneratedDocuments"
   role: BINDING_ROLE_TESTS
@@ -93,10 +93,30 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guidance-render"
-  content_hash: "a2708f9af1ee76792d0db3be2b8e32f832ca9d8574c8108fbd7f77479c253bf1"
-  source_hash: "ff907131e7df9df3785377117226cba46a426076a0e3ed8892f83e43f1fb4fcd"
+  content_hash: "9df1a89a8bc3de9565800cf0871f88d1e213b5cd653c7767ae0447149953b3ae"
+  source_hash: "ab13c1b1e27f2927f4c9b2663df398e5c0f0b57a8f749c1a7dab90c055dac28d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guidance.TestKnobIsAddressedPerSurfaceWithItsTextVerbatim"
   role: BINDING_ROLE_TESTS
   shape_hash: "3b4803d5a317d9d28b0f39508788a743d0c17e0cfd1325e93f616fb1da75e6a1"
+}
+
+bindings {
+  requirement_id: "REQ-guidance-render"
+  content_hash: "9df1a89a8bc3de9565800cf0871f88d1e213b5cd653c7767ae0447149953b3ae"
+  source_hash: "ab13c1b1e27f2927f4c9b2663df398e5c0f0b57a8f749c1a7dab90c055dac28d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guidance.TestKnobClauseIsTheFirstClauseOutsideParentheses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e1cd14b033aac73ebdae3f70c560c0dd977bbb034fb04b095fe589cd42dd61a8"
+}
+
+bindings {
+  requirement_id: "REQ-guidance-single-source"
+  content_hash: "670cff45487100faaf6608e264434949155e82b9811fc59b1bd88dea5da83367"
+  source_hash: "7026657ad8bb2a30d13e35d0a5c2c620c54e24b5c799c3fce08a9b2016534f16"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guidance.TestEmbeddedParsesOnceAndFailsLoudly"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "39bb227535d39f79aa88996fcb97a8bb0a8e5b822311a60db18a23f6450d7f51"
 }

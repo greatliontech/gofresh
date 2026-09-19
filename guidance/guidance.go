@@ -6,13 +6,15 @@
 // rendering synthesizes no prose, and the per-surface coverage
 // judgment is the hook a consuming repo's drift binding enforces.
 // The per-surface name index is built at parse time and collisions
-// refuse there, so a shadowed section is unrepresentable.
+// refuse there, so a shadowed section is unrepresentable. Embedded is
+// the once-parsed form a tool's faces read at construction.
 package guidance
 
 import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Document is one tool's parsed guidance source.
@@ -656,4 +658,75 @@ func (d *Document) Coverage(surface string, registered map[string][]string) ([]s
 		}
 	}
 	return defects, nil
+}
+
+// Clause is the knob's terse rendering: its prose up to the first
+// semicolon outside parentheses — a semicolon inside a parenthesis
+// separates that parenthesis's alternatives, not the clauses —
+// surrounding whitespace and a trailing period trimmed, the whole
+// prose where no such semicolon exists. A surface rendering one line
+// per knob (a served schema description, a flag usage) takes it for a
+// knob the knob projection answered; which surface renders the clause
+// and which the whole prose is the consuming tool's contract
+// (REQ-guidance-render).
+func (k Knob) Clause() string {
+	depth := 0
+	for i, r := range k.Text {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ';':
+			if depth == 0 {
+				return trimClause(k.Text[:i])
+			}
+		}
+	}
+	return trimClause(k.Text)
+}
+
+// trimClause trims a clause's surrounding whitespace and its trailing
+// period, whitespace between the two included.
+func trimClause(s string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "."))
+}
+
+// Embedded is a tool's embedded guidance source parsed once for every
+// surface to project from: the tool's repository is absent where its
+// binary runs, so the document travels in the binary and every face
+// reads the one parse at initialization; a malformed document refuses
+// loudly at construction, naming the tool (REQ-guidance-single-source).
+type Embedded struct {
+	tool string
+	src  []byte
+	once sync.Once
+	doc  *Document
+	err  error
+}
+
+// Embed wraps a tool's embedded guidance source; tool names the tool
+// in the refusal Must raises.
+func Embed(tool string, src []byte) *Embedded {
+	return &Embedded{tool: tool, src: src}
+}
+
+// Document parses the source once and answers the same document and
+// error on every call.
+func (e *Embedded) Document() (*Document, error) {
+	e.once.Do(func() { e.doc, e.err = Parse(e.src) })
+	return e.doc, e.err
+}
+
+// Must is the document a face reads at construction: a malformed
+// embedded document is a build defect the consuming tool's parse pin
+// surfaces, so construction fails loudly rather than serving nothing.
+func (e *Embedded) Must() *Document {
+	doc, err := e.Document()
+	if err != nil {
+		panic(e.tool + ": embedded guidance document malformed: " + err.Error())
+	}
+	return doc
 }

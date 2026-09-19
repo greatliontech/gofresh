@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -693,6 +694,44 @@ type Progress struct {
 // operation that emitted the event.
 func WithProgress(f func(Progress)) Option {
 	return func(e *Engine) { e.progress = f }
+}
+
+// Diagnostic renders a diagnostic-bearing event's one line — the phase,
+// the package where the event names one, and the detail, a multi-line
+// detail (a module file's parse errors are joined by newlines) folded
+// onto the line with "; " — and reports false for a keep-alive event,
+// which carries no message. A consumer printing diagnostics prints this
+// rendering, so every tool's log spells an engine diagnostic one way
+// (REQ-fresh-progress).
+func (p Progress) Diagnostic() (string, bool) {
+	if p.Detail == "" {
+		return "", false
+	}
+	detail := strings.Join(strings.Split(strings.TrimRight(strings.ReplaceAll(p.Detail, "\r\n", "\n"), "\n"), "\n"), "; ")
+	if p.Package == "" {
+		return p.Phase + " — " + detail, true
+	}
+	return p.Phase + " " + p.Package + " — " + detail, true
+}
+
+// DiagnosticsTo is the progress sink that writes each diagnostic-bearing
+// event's rendering to w as one "gofresh: "-prefixed line and writes
+// nothing for a keep-alive event: a consumer's log channel for the
+// engine's diagnostics (REQ-fresh-progress). Writes through this sink
+// are serialized, so w need not be safe for the concurrent invocation
+// WithProgress's callback contract allows — consumers sharing one
+// writer share one sink, built beside the writer, not per engine. A
+// consumer that also acts on keep-alives composes its own callback,
+// taking the keep-alive branch from Diagnostic's false.
+func DiagnosticsTo(w io.Writer) func(Progress) {
+	var mu sync.Mutex
+	return func(p Progress) {
+		if line, ok := p.Diagnostic(); ok {
+			mu.Lock()
+			defer mu.Unlock()
+			fmt.Fprintf(w, "gofresh: %s\n", line)
+		}
+	}
 }
 
 // WithAnalysisBudget bounds each precise-analysis phase — observability

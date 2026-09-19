@@ -344,21 +344,25 @@ names, from any re-observation of a built view — a validation, an observed
 capture, a check window's close — a subject the view held that the source no
 longer declares.
 
-**REQ-fresh-progress** (behavior): An operation MUST report, through the caller's
-progress sink, each unit of work at the moment it begins — an observation pass,
-a runtime-input observation, a package's listing, typed load, program load,
-closure fold, and observability slice — naming the unit and, where the
-operation knows it, its position among the operation's units; once per operation
-and memo class, the distinct packages a persistent memo served in place of a unit;
-and, when an operation returns its caller's context error, what it persisted
-before stopping, so a rerun's served set is known. A phase that carries a
-diagnostic — an unaudited toolchain selection, an unavailable analysis's
-per-subject provenance, a listing this build cannot model, what a cancelled
-operation persisted — delivers it on the event's own diagnostic field, never on
-the error channel and never on any memoized, hashed surface, so a consumer
-prints the diagnostics alone and a walk-order-dependent payload reaches the
-operator without entering an identity. Progress events are keep-alive facts
-about work, never verdict evidence.
+**REQ-fresh-progress** (behavior): An operation MUST report, through the
+caller's progress sink, each unit of work at the moment it begins — an
+observation pass, a runtime-input observation, a package's listing, typed load,
+program load, closure fold, and observability slice — naming the unit and, where
+the operation knows it, its position among the operation's units; once per
+operation and memo class, the distinct packages a persistent memo served in
+place of a unit; and, when an operation returns its caller's context error, what
+it persisted before stopping, so a rerun's served set is known. A phase that
+carries a diagnostic — an unaudited toolchain selection, an unavailable
+analysis's per-subject provenance, a listing this build cannot model, what a
+cancelled operation persisted — delivers it on the event's own diagnostic field,
+never on the error channel and never on any memoized, hashed surface, so a
+consumer prints the diagnostics alone and a walk-order-dependent payload reaches
+the operator without entering an identity. The event renders its own diagnostic
+line — the phase, the package where the event names one, and the detail, a
+multi-line one folded onto the single line — and a consumer printing diagnostics
+prints that rendering, the sink it installs serializing its writes, so every
+tool's log spells an engine diagnostic one way. Progress events are keep-alive
+facts about work, never verdict evidence.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's

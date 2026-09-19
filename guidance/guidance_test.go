@@ -627,3 +627,57 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 		}
 	}
 }
+
+// TestKnobClauseIsTheFirstClauseOutsideParentheses pins the terse
+// rendering: the prose up to the first semicolon at parenthesis depth
+// zero, a semicolon inside a parenthesis never cutting, whitespace and
+// one trailing period trimmed, and the whole prose where no clause
+// boundary exists.
+func TestKnobClauseIsTheFirstClauseOutsideParentheses(t *testing.T) {
+	for _, c := range []struct{ text, want string }{
+		{"candidates per symbol; 0 is exhaustive.", "candidates per symbol"},
+		{"the ref (a tag; a sha; HEAD~1) to diff; absent means the tree.", "the ref (a tag; a sha; HEAD~1) to diff"},
+		{"  spaced clause ; the rest", "spaced clause"},
+		{"one clause with no boundary.", "one clause with no boundary"},
+		{"unbalanced ) then; cut", "unbalanced ) then"},
+		{"open (never closed; so no cut.", "open (never closed; so no cut"},
+		{"  no boundary here  ", "no boundary here"},
+		{"a clause.; the rest", "a clause"},
+		{"foo . ; bar", "foo"},
+		{"", ""},
+	} {
+		if got := (Knob{Text: c.text}).Clause(); got != c.want {
+			t.Errorf("Clause(%q) = %q, want %q", c.text, got, c.want)
+		}
+	}
+}
+
+// TestEmbeddedParsesOnceAndFailsLoudly pins the embedded form: the
+// source parses once (every Document call answers the one parse), and
+// Must names the tool in the refusal of a malformed document.
+func TestEmbeddedParsesOnceAndFailsLoudly(t *testing.T) {
+	e := Embed("sometool", []byte(sample))
+	first, err := e.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := e.Document(); err != nil || again != first {
+		t.Fatalf("second Document = %p, %v; want the one parse %p", again, err, first)
+	}
+	if e.Must() != first {
+		t.Fatal("Must answered a document other than the one parse")
+	}
+	bad := Embed("sometool", []byte("no title here"))
+	if _, err := bad.Document(); err == nil {
+		t.Fatal("a malformed source parsed")
+	}
+	defer func() {
+		r := recover()
+		msg, _ := r.(string)
+		if !strings.HasPrefix(msg, "sometool: embedded guidance document malformed: ") {
+			t.Fatalf("Must's refusal = %v; want the tool-named panic", r)
+		}
+	}()
+	bad.Must()
+	t.Fatal("Must returned on a malformed document")
+}
