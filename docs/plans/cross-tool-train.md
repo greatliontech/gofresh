@@ -1590,7 +1590,7 @@ in their repos.
       gap each; split so a gap excuses only its own); the module-mode
       view triple lands here (A5: derive keys module mode, the resolution
       view does not); C8 the classifier's one pass; C9 the split.)
-- [ ] 227. stipulator: the vestigial sweep — three build-tagged
+- [x] 227. stipulator: the vestigial sweep — three build-tagged
       atomicReplace declarations with no call site (the Windows arm
       dragging kernel32), the legacy .stipulator/cache removal on every
       load with no writer, Backend.members write-only, testEvent's two
