@@ -360,9 +360,9 @@ consumer prints the diagnostics alone and a walk-order-dependent payload reaches
 the operator without entering an identity. The event renders its own diagnostic
 line — the phase, the package where the event names one, and the detail, a
 multi-line one folded onto the single line — and a consumer printing diagnostics
-prints that rendering, the sink it installs serializing its writes, so every
-tool's log spells an engine diagnostic one way. Progress events are keep-alive
-facts about work, never verdict evidence.
+without a rendering of its own prints that rendering, the sink it installs
+serializing its writes, so every tool's log spells an engine diagnostic one way.
+Progress events are keep-alive facts about work, never verdict evidence.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's
