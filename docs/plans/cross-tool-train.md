@@ -1422,7 +1422,7 @@ in their repos.
       deterministic preparation-and-decision order, the window
       partition's input set, the commit horizon. 212, 213, and 233 each
       reason about the whole function until it lands.
-- [ ] 246. gomutant: the gofresh bump — five releases behind at v0.99.0
+- [x] 246. gomutant: the gofresh bump — five releases behind at v0.99.0
       (235 C8; 210 dissolves in; 205 rides) — the consumer arms
       reachable now: ParseDynamicStateVouches deleted for
       gofresh.ParseVouchEntry, the tree-root vouch file read through the
