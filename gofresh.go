@@ -700,9 +700,9 @@ func WithProgress(f func(Progress)) Option {
 // the package where the event names one, and the detail, a multi-line
 // detail (a module file's parse errors are joined by newlines) folded
 // onto the line with "; " — and reports false for a keep-alive event,
-// which carries no message. A consumer printing diagnostics prints this
-// rendering, so every tool's log spells an engine diagnostic one way
-// (REQ-fresh-progress).
+// which carries no message. A consumer printing diagnostics without a
+// rendering of its own prints this one, so such tools' logs spell an
+// engine diagnostic one way (REQ-fresh-progress).
 func (p Progress) Diagnostic() (string, bool) {
 	if p.Detail == "" {
 		return "", false
