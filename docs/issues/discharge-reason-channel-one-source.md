@@ -16,4 +16,4 @@ the channel clause spelled once, and a reason naming an unhonored
 channel unrepresentable. (The culprit walk itself is one function,
 `dischargeCulprits`, since the discharge-walk fold.)
 
-Lands: cross-tool train chunk 199
+Lands: cross-tool train chunk 202 (199 folded into it at audit 234; the reason composers are 202's)

@@ -10,6 +10,5 @@ holds the pass. One form per entry on the context axis — ctx first,
 the internal Background sites deleted — is the same collapse one
 release later; every consumer's call gains a ctx at its bump.
 
-Lands: the chunk-open gate's audit count reaching twelve (the re-audit
-band's gofresh chunk carries the next API-surface sweep), or sooner a
-consumer's cancellation report naming one of these entries.
+Lands: cross-tool train chunk 243 (the public-surface sweep — the API-surface chunk
+the earlier condition named; slotted at audit 261).
