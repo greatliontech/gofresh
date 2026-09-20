@@ -13,8 +13,10 @@ package guidance
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Document is one tool's parsed guidance source.
@@ -560,6 +562,11 @@ func (d *Document) Long(surface, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return longOf(v, surface), nil
+}
+
+// longOf is the long rendering of a resolved verb on a surface.
+func longOf(v *Verb, surface string) string {
 	var b strings.Builder
 	b.WriteString(v.Does)
 	b.WriteString("\n\nknobs:")
@@ -575,7 +582,7 @@ func (d *Document) Long(surface, name string) (string, error) {
 	b.WriteString(v.When)
 	b.WriteString("\n\nexample:\n")
 	b.WriteString(v.Example)
-	return b.String(), nil
+	return b.String()
 }
 
 // Help is the long rendering without its knobs: block — for a
@@ -587,13 +594,18 @@ func (d *Document) Help(surface, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return helpOf(v), nil
+}
+
+// helpOf is the knobless long rendering of a resolved verb.
+func helpOf(v *Verb) string {
 	var b strings.Builder
 	b.WriteString(v.Does)
 	b.WriteString("\n\nwhen: ")
 	b.WriteString(v.When)
 	b.WriteString("\n\nexample:\n")
 	b.WriteString(v.Example)
-	return b.String(), nil
+	return b.String()
 }
 
 // Orientation is the decision map's body, verbatim
@@ -602,15 +614,29 @@ func (d *Document) Orientation() string {
 	return d.DecisionMap
 }
 
+// Registered is one registered verb on a surface: its served
+// parameter or flag names, each mapped to whether its default is
+// non-zero on the CLI — the flags a flag library prints a default for,
+// so the coverage judgment holds the one default form the usage
+// rendering strips to exactly the knobs where a second spelling would
+// print twice (REQ-guidance-render). One map, so a default fact can
+// name only a registered knob; the value is read on the CLI surface
+// alone and ignored on the MCP, so one registration per verb serves
+// both faces.
+type Registered map[string]bool
+
 // Coverage judges the document against one surface's registered
-// verbs — surface spellings mapped to served parameter or flag
-// names — and reports every divergence in both directions, in a
-// deterministic order: registered verbs sorted, knob defects in
-// registered-then-document order, unregistered sections last in
-// document order (REQ-guidance-coverage). An unknown surface is the
-// caller's error, distinct from the defect list; an empty defect
-// list is the drift binding's pass condition.
-func (d *Document) Coverage(surface string, registered map[string][]string) ([]string, error) {
+// verbs — surface spellings mapped to their registrations — and
+// reports every divergence in both directions, in a deterministic
+// order: registered verbs sorted; per verb the registered knobs
+// undocumented, sorted by name, then the documented knobs in document
+// order, each contributing its not-registered row and, on the CLI for
+// a knob registered with a non-zero default, its default-spelling row
+// (REQ-guidance-render); unregistered sections last in document order
+// (REQ-guidance-coverage). An unknown surface is the caller's error,
+// distinct from the defect list; an empty defect list is the drift
+// binding's pass condition.
+func (d *Document) Coverage(surface string, registered map[string]Registered) ([]string, error) {
 	if !knownSurface(surface) {
 		return nil, fmt.Errorf("guidance: unknown surface %q", surface)
 	}
@@ -633,21 +659,28 @@ func (d *Document) Coverage(surface string, registered map[string][]string) ([]s
 		for _, kn := range knobsOn(v, surface) {
 			documented[kn.spelling] = true
 		}
-		registeredSet := map[string]bool{}
-		params := append([]string(nil), registered[verb]...)
+		nonZero := registered[verb]
+		params := make([]string, 0, len(nonZero))
+		for p := range nonZero {
+			params = append(params, p)
+		}
 		sort.Strings(params)
 		for _, p := range params {
-			if registeredSet[p] {
-				continue
-			}
-			registeredSet[p] = true
 			if !documented[p] {
 				defects = append(defects, fmt.Sprintf("verb %q: registered knob %q undocumented", verb, p))
 			}
 		}
 		for _, kn := range knobsOn(v, surface) {
-			if !registeredSet[kn.spelling] {
+			if _, ok := nonZero[kn.spelling]; !ok {
 				defects = append(defects, fmt.Sprintf("verb %q: documented knob %q not registered", verb, kn.spelling))
+			}
+			// The usage grammar strips one default form; a flag library
+			// prints a non-zero default itself, so on such a flag a default
+			// spelled any other way in the first clause prints twice — the
+			// CLI coverage refuses it (REQ-guidance-render). A zero default
+			// prints nothing, and its clause may say what zero means.
+			if surface == "cli" && nonZero[kn.spelling] && spellsDefaultOutsideTheForm(kn.Clause()) {
+				defects = append(defects, fmt.Sprintf("verb %q: knob %q spells a default outside the (default X) form in its first clause", verb, kn.spelling))
 			}
 		}
 	}
@@ -729,4 +762,267 @@ func (e *Embedded) Must() *Document {
 		panic(e.tool + ": embedded guidance document malformed: " + err.Error())
 	}
 	return doc
+}
+
+// refuse is the one refusal every face raises at construction over a
+// document that does not carry what the face registers: the tool
+// named, then the cause — the package's own prefix folded, so the
+// wording is "<tool>: guidance: <cause>" exactly once.
+func (e *Embedded) refuse(err error) {
+	panic(e.tool + ": guidance: " + strings.TrimPrefix(err.Error(), "guidance: "))
+}
+
+// MustKnob is the knob projection at a face's construction: a knob the
+// document does not carry is a build defect the coverage judgment also
+// names, refused loudly rather than served empty.
+func (e *Embedded) MustKnob(surface, verb, name string) Knob {
+	k, err := e.Must().Knob(surface, verb, name)
+	if err != nil {
+		e.refuse(err)
+	}
+	return k
+}
+
+// MustRegistration is Registration at a face's construction: a
+// malformed document refuses as Must does, a verb the document does not
+// carry on the surface as every other refusal.
+func (e *Embedded) MustRegistration(surface, verb string) Registration {
+	e.Must()
+	r, err := e.Registration(surface, verb)
+	if err != nil {
+		e.refuse(err)
+	}
+	return r
+}
+
+// MustDescribeSchema is DescribeSchema at a face's construction: a
+// property the document does not knob refuses loudly. The names the
+// walk visited are returned for the face's coverage judgment.
+func (e *Embedded) MustDescribeSchema(surface, verb string, root SchemaNode) []string {
+	names, err := e.Must().DescribeSchema(surface, verb, root)
+	if err != nil {
+		e.refuse(err)
+	}
+	return names
+}
+
+// Registration is the face-neutral projection a consumer registers a
+// verb from — on the CLI a cobra command's Short, Long, and flag
+// usages; on the MCP a tool's description and its schema's property
+// descriptions — every string the document's, the face holding no
+// grammar of its own (REQ-guidance-render, REQ-guidance-single-source).
+type Registration struct {
+	// Verb is the verb's spelling on the surface.
+	Verb string
+	// Description is the one-line purpose (a command's Short, a tool's
+	// description).
+	Description string
+	// Help is the knobless long rendering — a surface rendering its own
+	// knob list (a CLI's flag help) sets it as the long help.
+	Help string
+	// Long is the whole section — the guidance verb's answer.
+	Long string
+	// Knobs are the verb's knobs on the surface, in document order,
+	// each under its spelling with its clause and, on the CLI, its
+	// usage (the MCP serves the clause; Usage is empty there).
+	Knobs []KnobUsage
+	// ProsePointer names the served path to the knobs' whole prose on
+	// the surface the registration was projected for: on the CLI the
+	// guidance command under the verb's CLI spelling (quoted where it
+	// carries whitespace), on the MCP the guidance tool under the verb's
+	// MCP spelling. Empty on a Document's own projection, which knows
+	// no tool name; Embedded's carries it.
+	ProsePointer string
+}
+
+// KnobUsage is one knob's served forms on a surface.
+type KnobUsage struct {
+	Name   string
+	Clause string
+	Usage  string
+}
+
+// Registration projects the verb's registration on a surface with the
+// prose pointer naming the tool the embedded document belongs to.
+func (e *Embedded) Registration(surface, verb string) (Registration, error) {
+	doc, err := e.Document()
+	if err != nil {
+		return Registration{}, err
+	}
+	r, err := doc.Registration(surface, verb)
+	if err != nil {
+		return Registration{}, err
+	}
+	r.ProsePointer = e.prosePointer(surface, r.Verb)
+	return r, nil
+}
+
+// prosePointer is the pointer's wording per surface over the verb's
+// spelling there.
+func (e *Embedded) prosePointer(surface, spelling string) string {
+	if surface == "mcp" {
+		return "The knobs' whole prose: the guidance tool, verb " + spelling + "."
+	}
+	if strings.IndexFunc(spelling, unicode.IsSpace) >= 0 {
+		spelling = strconv.Quote(spelling)
+	}
+	return "The knobs' whole prose: " + e.tool + " guidance " + spelling + "."
+}
+
+// Registration projects the verb's registration on a surface: the
+// verb's spelling there, the purpose, the knobless help, the whole
+// section, and every knob on the surface with its clause and (on the
+// CLI) its usage; the prose pointer is Embedded's, since it names the
+// tool.
+func (d *Document) Registration(surface, verb string) (Registration, error) {
+	v, err := d.resolve(surface, verb)
+	if err != nil {
+		return Registration{}, err
+	}
+	spelling, _ := on(v.Surfaces, v.Name, surface)
+	r := Registration{Verb: spelling, Description: v.Does, Help: helpOf(v), Long: longOf(v, surface)}
+	for _, kn := range knobsOn(v, surface) {
+		usage := ""
+		if surface == "cli" {
+			usage = kn.Usage()
+		}
+		r.Knobs = append(r.Knobs, KnobUsage{Name: kn.spelling, Clause: kn.Clause(), Usage: usage})
+	}
+	return r, nil
+}
+
+// Usage is the knob's clause in pflag's usage grammar: pflag reads the
+// first back-quoted word of a usage string as the flag's value name (a
+// `attest` span would print a boolean flag as value-taking), so the
+// document's code spans lose their quotes; and cobra appends a flag's
+// non-zero default itself, so the clause's own "(default X)"
+// parenthetical goes — matched by parenthesis depth, so a default
+// naming a call keeps its own parentheses inside — or the default
+// prints twice. The document's rule for a knob whose CLI default is
+// non-zero: spell the default as "(default X)" — the one form this
+// grammar strips — and no other default, in any spelling of the word,
+// in the first clause; the coverage judgment on the CLI surface, told
+// which flags carry a non-zero default, refuses any other spelling
+// there (REQ-guidance-render, REQ-guidance-coverage).
+func (k Knob) Usage() string {
+	return strings.ReplaceAll(strings.TrimSpace(stripDefault(k.Clause())), "`", "")
+}
+
+// stripDefault removes every "(default …)" parenthetical, matched by
+// depth, with the blank before it. A parenthetical that never closes
+// is left as it stands — the clause renders unchanged, its "default"
+// word intact, so on a non-zero-default flag the coverage judgment
+// refuses it rather than a mangled usage being served.
+func stripDefault(clause string) string {
+	for {
+		start := strings.Index(clause, "(default ")
+		if start < 0 {
+			return clause
+		}
+		depth, end := 0, -1
+		for i := start; i < len(clause); i++ {
+			switch clause[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					end = i
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			return clause
+		}
+		before := strings.TrimRight(clause[:start], " \t")
+		clause = before + clause[end+1:]
+	}
+}
+
+// spellsDefaultOutsideTheForm reports a first clause that names a
+// default other than in the "(default X)" form the usage grammar
+// strips — a colon form, a prose default, "defaults to" — in any
+// spelling of the word, since every one would print beside the
+// library's own on a non-zero-default flag.
+func spellsDefaultOutsideTheForm(clause string) bool {
+	return strings.Contains(strings.ToLower(stripDefault(clause)), "default")
+}
+
+// SchemaNode is the shape DescribeSchema walks: a consumer adapts its
+// schema type (an object's property names and nodes, an array's item
+// schema, the description setter) so the package owns the walk without
+// a schema dependency. Every node answer is the two-value form —
+// Property and Items report presence beside the node — so an adapter
+// never wraps a nil schema pointer in the interface (a typed nil
+// behind SchemaNode would pass a nil check and dereference at the
+// walk): a name the schema lists with no node answers false — the
+// adapter's own nil check, never its map's presence alone. The walk
+// is over a finite tree: an adapter resolving references cuts its own
+// cycles.
+type SchemaNode interface {
+	// Properties returns the node's property names in any order.
+	Properties() []string
+	// Property returns the named property's node and whether the schema
+	// carries one.
+	Property(name string) (SchemaNode, bool)
+	// Items returns an array node's item schema and whether it has one.
+	Items() (SchemaNode, bool)
+	// Describe sets the node's description.
+	Describe(text string)
+}
+
+// DescribeSchema is the one schema projection: every property at every
+// depth — a nested object's properties and an array's items alike —
+// takes the verb's knob of its own name on the surface, its
+// description the knob's terse clause; a property the document does
+// not knob is refused by name — the first in the walk's order, each
+// node's names sorted and its properties walked before its items, so
+// the refusal is one whatever the adapter's order — since an agent
+// fills nested fields as it fills top-level ones and each earns its
+// prose; a named property with no node still needs its knob and takes
+// no description; a nil root describes nothing. The names visited, deduplicated and
+// sorted, return for the face's coverage judgment — the one walk both
+// the descriptions and the coverage enumeration derive from
+// (REQ-guidance-render, REQ-guidance-coverage).
+func (d *Document) DescribeSchema(surface, verb string, root SchemaNode) ([]string, error) {
+	visited := map[string]bool{}
+	if err := d.describe(surface, verb, root, visited); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(visited))
+	for name := range visited {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (d *Document) describe(surface, verb string, node SchemaNode, visited map[string]bool) error {
+	if node == nil {
+		return nil
+	}
+	names := append([]string(nil), node.Properties()...)
+	sort.Strings(names)
+	for _, name := range names {
+		k, err := d.Knob(surface, verb, name)
+		if err != nil {
+			return err
+		}
+		visited[name] = true
+		prop, ok := node.Property(name)
+		if !ok {
+			continue
+		}
+		prop.Describe(k.Clause())
+		if err := d.describe(surface, verb, prop, visited); err != nil {
+			return err
+		}
+	}
+	if items, ok := node.Items(); ok {
+		return d.describe(surface, verb, items, visited)
+	}
+	return nil
 }

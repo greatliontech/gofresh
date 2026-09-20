@@ -96,24 +96,59 @@ for a surface that renders its own knob list (a CLI's flag help), where
 the block would print every knob twice in two wordings; and the terse
 rendering of a knob the knob projection answered is its first clause —
 the prose up to the first semicolon outside parentheses, surrounding
-whitespace and a trailing period trimmed, the whole prose where no
-such semicolon exists — for a surface rendering one line per knob,
-which surface renders the clause and which the whole prose being the
-consuming tool's contract. A requested surface or name the document
-does not carry is an error, never an empty rendering.
+whitespace and a trailing period trimmed, the whole prose where no such
+semicolon exists — for a surface rendering one line per knob, which
+surface renders the clause and which the whole prose being the consuming
+tool's contract; the usage rendering of a knob is its terse clause in a
+flag library's usage grammar — code spans lose their back-quotes (a
+back-quoted word reads as the flag's value name) and every "(default X)"
+parenthetical goes, matched by parenthesis depth so a default naming a
+call keeps its own parentheses inside (the library prints a non-zero
+default itself), so a knob whose CLI default is non-zero spells it as
+"(default X)" and no other default, in any spelling of the word, in its
+first clause — the CLI coverage judgment, told which flags carry a
+non-zero default, reports any other spelling there as a defect
+(REQ-guidance-coverage), a parenthetical that never closes rendering
+unchanged and counting as one such spelling; the schema rendering
+describes every property of a served input schema at every depth — a
+nested object's properties and an array's items alike — with the verb's
+knob of the property's own name, its terse clause, refusing by name a
+property the document does not knob (the first in the walk's order —
+each node's names sorted, its properties before its items), a named
+property without a node still requiring its knob and taking no
+description, a nil root describing nothing, and it answers the sorted
+names it visited — the one enumeration a consumer's coverage judgment
+reads, so descriptions and coverage never walk at two depths; and the
+registration rendering of a verb on a surface is its spelling, its
+purpose, its help, its long rendering, every knob on the surface with
+its clause and, on the CLI, its usage (the MCP serves the clause; its
+usage is empty there), and the pointer to the knobs' whole prose in the
+surface's own form — on the CLI the guidance command under the verb's
+CLI spelling, quoted where it carries whitespace ("The knobs' whole
+prose: <tool> guidance <verb>."), on the MCP the guidance tool under the
+verb's MCP spelling ("The knobs' whole prose: the guidance tool, verb
+<verb>.") — the one shape a face registers a command or a tool from. A
+requested surface or name the document does not carry is an error, never
+an empty rendering; a face's construction refuses such a request naming
+the tool once ("<tool>: guidance: <cause>"), and a malformed document
+with the embedded form's own refusal.
 
 **REQ-guidance-coverage** (behavior): The package MUST provide the
-per-surface coverage judgment a consuming tool's drift binding
-enforces: given a surface and the surface's registered verb names
-each with its served parameter or flag names, report as defects —
-in a deterministic order — every registered verb no section names
-on that surface, every registered parameter or flag absent from
-its verb's knobs on that surface, every knob on that surface
-naming no registered parameter or flag, and every section on that
-surface naming no registered verb; a surface the format does not
-define is the caller's error, distinct from the defect list.
-Coverage is exact in both directions per surface; a knob the wire
-does not carry is a document defect, not a tolerated extra.
+per-surface coverage judgment a consuming tool's drift binding enforces:
+given a surface and the surface's registered verb names each with its
+served parameter or flag names, each name carrying whether its CLI
+default is non-zero, report as defects — in a deterministic order —
+every registered verb no section names on that surface, every registered
+parameter or flag absent from its verb's knobs on that surface, every
+knob on that surface naming no registered parameter or flag, and every
+section on that surface naming no registered verb, and — on the CLI
+surface, for the registered flags the caller names as carrying a
+non-zero default — every knob whose first clause spells a default
+outside the "(default X)" form the usage rendering strips
+(REQ-guidance-render); a surface the format does not define is the
+caller's error, distinct from the defect list. Coverage is exact in both
+directions per surface; a knob the wire does not carry is a document
+defect, not a tolerated extra.
 
 ## Consuming contract
 
@@ -127,8 +162,10 @@ knob's own prose owns its per-surface spellings.
 **REQ-guidance-single-source** (invariant): A consuming tool's
 tool-level served prose MUST be read from the parsed document at
 initialization — never a second literal. Per-parameter schema and flag
-usage strings are the document's knob prose rendered — each knob read
-through the parsed document's knob projection, never a second literal —
+usage strings are the document's knob prose rendered by the package's
+own projections — the schema rendering and the usage rendering over
+the registration rendering, never a second literal and never a grammar
+of the consuming tool's own —
 and the coverage judgment, bound per surface in the consuming repo,
 keeps them enumerated by the document. The drift guard is structural —
 name coverage plus served-bytes identity, the consuming repo's binding

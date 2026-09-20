@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-guidance-single-source"
-reason: "gofresh has no MCP or CLI surface; the clause's consumer-side obligation — tool-level prose and knob strings read from the parsed document — is enforced by each consuming repo's guidance requirement and binding (stipulator REQ-mcp-guidance, gomutant REQ-mcp-guidance, pew REQ-pew-guidance — all landed with train chunk 111's legs); the embedded form the clause names is enforced here by the package's own binding"
-content_hash: "670cff45487100faaf6608e264434949155e82b9811fc59b1bd88dea5da83367"
-source_hash: "7026657ad8bb2a30d13e35d0a5c2c620c54e24b5c799c3fce08a9b2016534f16"
+reason: "gofresh has no MCP or CLI surface; the clause's consumer-side obligation — tool-level prose and every knob string rendered by the package's own projections (the usage, schema, and registration renderings) — is enforced by each consuming repo's guidance requirement and binding (stipulator REQ-mcp-guidance, gomutant REQ-mcp-guidance, pew REQ-pew-guidance), each consumer adopting the projections at its next gofresh bump; the embedded form the clause names is enforced here by the package's own binding"
+content_hash: "a1242aeb70ca91bb8c165d337e1a02a97ec9a654aad765c3975fb6e7eecd52c1"
+source_hash: "2a006990a94195bddda0c60be40d92e0de20935011ac6f346c5d10be70346328"
 lands { manual { condition: "gofresh grows an own serving surface (only then can this repo carry its own enforcement)" } }

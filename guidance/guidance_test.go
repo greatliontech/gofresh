@@ -397,58 +397,65 @@ func TestCoverageIsExactPerSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exact := func(surface string, registered map[string][]string) {
+	exact := func(surface string, registered map[string]Registered) {
 		t.Helper()
 		defects, err := doc.Coverage(surface, registered)
 		if err != nil || len(defects) != 0 {
 			t.Fatalf("exact %s surface: defects=%v err=%v", surface, defects, err)
 		}
 	}
-	exact("mcp", map[string][]string{
-		"run":                {"changed", "budget"},
-		"ephemeral":          {"test_pkg", "batch_edits"},
-		"attest_requirement": nil,
-		"read_spec":          nil,
+	exact("mcp", map[string]Registered{
+		"run":                knobs("changed", "budget"),
+		"ephemeral":          knobs("test_pkg", "batch_edits"),
+		"attest_requirement": knobs(),
+		"read_spec":          knobs(),
 	})
-	exact("cli", map[string][]string{
-		"run":                {"budget", "changed"},
-		"ephemeral":          {"test-pkg", "batch"},
-		"attest requirement": nil,
-		"init":               nil,
-		"read_spec":          nil,
+	exact("cli", map[string]Registered{
+		"run":                knobs("budget", "changed"),
+		"ephemeral":          knobs("test-pkg", "batch"),
+		"attest requirement": knobs(),
+		"init":               knobs(),
+		"read_spec":          knobs(),
 	})
 	// Divergences, both directions, exact deterministic order —
-	// six registered verbs so a neutered sort has no lucky escape.
-	got, err := doc.Coverage("mcp", map[string][]string{
-		"run":       {"changed", "jobs", "jobs"},
-		"discover":  nil,
-		"findings":  nil,
-		"explain":   nil,
-		"prune":     nil,
-		"read_spec": nil,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// six registered verbs and three undocumented knobs on one verb so
+	// a neutered sort has no lucky escape; the registration is a map,
+	// so the order is the judgment's own and the call repeats to catch
+	// a map-order leak.
 	want := []string{
 		`registered mcp verb "discover" has no guidance section`,
 		`registered mcp verb "explain" has no guidance section`,
 		`registered mcp verb "findings" has no guidance section`,
 		`registered mcp verb "prune" has no guidance section`,
+		`verb "run": registered knob "aaa" undocumented`,
 		`verb "run": registered knob "jobs" undocumented`,
+		`verb "run": registered knob "zzz" undocumented`,
 		`verb "run": documented knob "budget" not registered`,
 		`guidance section "ephemeral" (as mcp "ephemeral") names no registered verb`,
 		`guidance section "attest_requirement" (as mcp "attest_requirement") names no registered verb`,
 	}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("Coverage order/content:\ngot  %v\nwant %v", got, want)
+	for i := 0; i < 20; i++ {
+		got, err := doc.Coverage("mcp", map[string]Registered{
+			"run":       knobs("changed", "jobs", "zzz", "aaa"),
+			"discover":  knobs(),
+			"findings":  knobs(),
+			"explain":   knobs(),
+			"prune":     knobs(),
+			"read_spec": knobs(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("Coverage order/content:\ngot  %v\nwant %v", got, want)
+		}
 	}
 	// The cli spelling of a knob is a defect when registered on mcp.
-	defects, err := doc.Coverage("mcp", map[string][]string{
-		"run":                {"changed", "budget"},
-		"ephemeral":          {"test-pkg", "batch_edits"},
-		"attest_requirement": nil,
-		"read_spec":          nil,
+	defects, err := doc.Coverage("mcp", map[string]Registered{
+		"run":                knobs("changed", "budget"),
+		"ephemeral":          knobs("test-pkg", "batch_edits"),
+		"attest_requirement": knobs(),
+		"read_spec":          knobs(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -467,16 +474,16 @@ func TestCoverageIsExactPerSurface(t *testing.T) {
 		t.Fatalf("unknown surface: err = %v", err)
 	}
 	// The cli-only section never leaks onto the mcp judgment.
-	defects, err = doc.Coverage("mcp", map[string][]string{
-		"run": {"changed", "budget"}, "ephemeral": {"test_pkg", "batch_edits"},
-		"attest_requirement": nil, "read_spec": nil, "init": nil,
+	defects, err = doc.Coverage("mcp", map[string]Registered{
+		"run": knobs("changed", "budget"), "ephemeral": knobs("test_pkg", "batch_edits"),
+		"attest_requirement": knobs(), "read_spec": knobs(), "init": knobs(),
 	})
 	if err != nil || len(defects) != 1 || !strings.Contains(defects[0], `registered mcp verb "init" has no guidance section`) {
 		t.Fatalf("cli-only verb on mcp: %v err=%v", defects, err)
 	}
 	// Two documented knobs unregistered on one verb report in document
 	// order — the one walk's order, pinned as a whole list.
-	if got, err := doc.Coverage("mcp", map[string][]string{"ephemeral": nil}); err != nil || len(got) < 2 || got[0] != `verb "ephemeral": documented knob "test_pkg" not registered` || got[1] != `verb "ephemeral": documented knob "batch_edits" not registered` {
+	if got, err := doc.Coverage("mcp", map[string]Registered{"ephemeral": knobs()}); err != nil || len(got) < 2 || got[0] != `verb "ephemeral": documented knob "test_pkg" not registered` || got[1] != `verb "ephemeral": documented knob "batch_edits" not registered` {
 		t.Errorf("two documented-side defects = %q, %v; want the registered verb's knobs first, in document order", got, err)
 	}
 }
@@ -576,7 +583,7 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 		if len(doc.Verbs) != len(models) {
 			t.Fatalf("iter %d: verbs = %d, want %d", iter, len(doc.Verbs), len(models))
 		}
-		registered := map[string]map[string][]string{"mcp": {}, "cli": {}}
+		registered := map[string]map[string]Registered{"mcp": {}, "cli": {}}
 		for name, m := range models {
 			effective := m.surfaces
 			if len(effective) == 0 {
@@ -598,7 +605,7 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 						}
 					}
 				}
-				registered[s.Surface][s.Name] = params
+				registered[s.Surface][s.Name] = knobs(params...)
 			}
 			vi := -1
 			for i := range doc.Verbs {
@@ -680,4 +687,13 @@ func TestEmbeddedParsesOnceAndFailsLoudly(t *testing.T) {
 	}()
 	bad.Must()
 	t.Fatal("Must returned on a malformed document")
+}
+
+// knobs is a registration of the named knobs with no non-zero default.
+func knobs(names ...string) Registered {
+	r := Registered{}
+	for _, name := range names {
+		r[name] = false
+	}
+	return r
 }
