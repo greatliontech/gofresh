@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -635,7 +636,11 @@ func TestSymlinkFileToExternalTargetIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !current.Unverifiable || !strings.Contains(current.Reason, "external runtime input target") {
+	resolvedExternal, err := filepath.EvalSymlinks(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.Unverifiable || !strings.Contains(current.Reason, "external runtime input target") || !strings.Contains(current.Reason, `recorded path "pkg/data.txt" resolves to `+strconv.Quote(resolvedExternal)+` outside the tree`) {
 		t.Fatalf("state = %+v, want external target unverifiable", current)
 	}
 }
@@ -1276,8 +1281,11 @@ func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !st.Unverifiable || st.Reason != "non-UTF-8 runtime input path" {
-		t.Fatalf("state = %+v, want non-UTF-8 path unverifiable", st)
+	// The refusal leads with its class and names the observation — the
+	// non-UTF-8 name quoted, so the manifest stays valid UTF-8
+	// (REQ-inputs-refusal-attribution).
+	if !st.Unverifiable || !strings.HasPrefix(st.Reason, `non-UTF-8 runtime input path — open "\xff" in `) {
+		t.Fatalf("state = %+v, want non-UTF-8 path unverifiable, attributed", st)
 	}
 	m, err := decode(st.Manifest)
 	if err != nil {

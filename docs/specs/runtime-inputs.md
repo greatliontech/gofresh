@@ -790,6 +790,42 @@ input, not per-read-fabricated objects — their value-volatility is
 sealed by ordinary classification, and the null-sink admission
 (REQ-inputs-null-sink) depends on `/dev` staying ordinary.
 
+**REQ-inputs-refusal-attribution** (behavior): A classification refusal
+MUST name the observation that produced the refused path. The refusals
+this governs are the test-log classifier's — an external directory, a
+volatile OS object, an unrepresentable, non-UTF-8, or unhashable path,
+at the open, stat, and chdir operations — and the hashing pass's
+resolved-target refusals (a recorded path whose symbolic-link target
+lies outside the tree); the hashing pass's unhashable-object refusals
+already name the path they hashed and have no operation to name. The
+attribution is the harness operation, its logged name, and the working
+directory the name resolved in — the process's own directory, so the
+producing package process is named for every operation, an absolute
+name included, and a `..` traversal reaching the filesystem root names
+the traversal; the directory is the observation's tracked one (lexical
+after a traversal chdir, which the observation treats as unverifiable
+in its own right) — or, for a resolved-target refusal, the recorded
+path and the target it resolved to. Name and directory are quoted, so
+a non-UTF-8 or control-bearing name leaves the reason representable.
+The refusal's class phrase leads unchanged and the attribution follows
+a ` — ` separator as the one well-formed suffix — the operation, its
+quoted name, and its quoted directory, or `recorded path`, its quoted
+spelling, and its quoted target, running to the reason's end; a quoted
+string carries no unescaped quote, so a separator inside a quoted name
+or directory, or inside the refused path of an attributed reason, never
+parses as the suffix — the one residual of the text channel is an
+unattributed reason whose refused path itself ends in the attribution's
+shape (a path deliberately named with a quote), whose clause is then the
+truncated one, recorded and accepted. The library exposes the split as
+`RefusalClause`, the one implementation a consumer
+keying on the clause — an exemption record, a disposition table — reads
+so it keeps matching; and such a consumer refuses a record that names a
+clause with its attribution pasted in, never storing it dead. The
+unverifiable list holds one entry per distinct attributed refusal,
+bounded by the log's operation occurrences. The process's own
+attribution stays REQ-inputs-incomplete's; the field case is a
+parent-directory fsync walk opening `/`.
+
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked
 as a dirty recording, because the recording is not faithful to that commit; the mark

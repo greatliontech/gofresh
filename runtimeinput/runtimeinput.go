@@ -47,6 +47,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -831,6 +832,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
+			reason = attributed(reason, op, name, cwd)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
 				continue
@@ -886,6 +888,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				}
 			}
 			id, reason := classifyPath(moduleDir, p)
+			reason = attributed(reason, op, name, cwd)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
 				continue
@@ -938,6 +941,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				addUnverifiable(&m, unverifiableSeen, "working-directory change")
 			} else {
 				id, reason := classifyPath(moduleDir, p)
+				reason = attributed(reason, op, name, cwd)
 				if reason != "" {
 					addUnverifiable(&m, unverifiableSeen, reason)
 				} else if !cfg.excludes(id) {
@@ -1647,6 +1651,100 @@ func underPath(p, root string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
+// attributionSeparator divides a refusal's clause from its attribution
+// (REQ-inputs-refusal-attribution). A refused path, a logged name, or a
+// working directory may itself contain the separator, so the split is
+// never "the last separator": RefusalClause is the one implementation
+// a consumer reads.
+const attributionSeparator = " — "
+
+// attributionOps is the one vocabulary of harness operations an
+// attribution names — the producer attributes nothing for an operation
+// outside it (the reason stays its own clause, fail-closed), and the
+// per-operation round-trip pin is what holds the parser and the
+// producer's three switch labels together (a switch cannot range).
+var attributionOps = []string{"open", "stat", "chdir"}
+
+// RefusalClause is the clause of a refusal reason — the text a consumer
+// keys on (an exemption record, a disposition table), before the
+// attribution REQ-inputs-refusal-attribution appends. The attribution
+// is the one well-formed suffix: from a separator, an operation and its
+// quoted name and quoted directory, or `recorded path`, its quoted
+// spelling, and its quoted target, running exactly to the reason's end
+// — a quoted string cannot carry an unescaped quote, so no separator
+// inside a quoted name or directory, or inside the refused path of an
+// attributed reason (the fake never runs to the end), parses that way.
+// A reason with no such suffix is its own clause; the one residual of
+// the text channel is an UNATTRIBUTED reason whose refused path itself
+// ends in the attribution's shape — a path deliberately named with a
+// quote — whose clause is then the truncated one (recorded, accepted:
+// REQ-inputs-refusal-attribution).
+func RefusalClause(reason string) string {
+	for i := strings.Index(reason, attributionSeparator); i >= 0; {
+		if attributionWellFormed(reason[i+len(attributionSeparator):]) {
+			return reason[:i]
+		}
+		next := strings.Index(reason[i+1:], attributionSeparator)
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+	return reason
+}
+
+// attributionWellFormed reports whether s is exactly one attribution:
+// `<op> <quoted> in <quoted>` for open, stat, and chdir, or
+// `recorded path <quoted> resolves to <quoted> outside the tree`.
+func attributionWellFormed(s string) bool {
+	for _, op := range attributionOps {
+		if rest, ok := strings.CutPrefix(s, op+" "); ok {
+			return quotedThen(rest, " in ", "")
+		}
+	}
+	if rest, ok := strings.CutPrefix(s, "recorded path "); ok {
+		return quotedThen(rest, " resolves to ", " outside the tree")
+	}
+	return false
+}
+
+// quotedThen reports whether s is a quoted string, then mid, then a
+// quoted string, then exactly tail.
+func quotedThen(s, mid, tail string) bool {
+	first, err := strconv.QuotedPrefix(s)
+	if err != nil {
+		return false
+	}
+	rest, ok := strings.CutPrefix(s[len(first):], mid)
+	if !ok {
+		return false
+	}
+	second, err := strconv.QuotedPrefix(rest)
+	if err != nil {
+		return false
+	}
+	return rest[len(second):] == tail
+}
+
+// attributed names the observation a classification refusal came from
+// (REQ-inputs-refusal-attribution): the harness operation, its logged
+// name, and the working directory the name resolved in — the process's
+// own directory, so the producing package process is named for every
+// operation, absolute names included — both quoted, so a non-UTF-8 or
+// control-bearing name or directory leaves the reason representable
+// and the manifest valid UTF-8; the directory is the observation's
+// tracked one (lexical after a traversal chdir). An empty reason (no
+// refusal) stays empty.
+func attributed(reason, op, name, cwd string) string {
+	if reason == "" {
+		return ""
+	}
+	if !slices.Contains(attributionOps, op) {
+		return reason
+	}
+	return reason + attributionSeparator + op + " " + strconv.Quote(name) + " in " + strconv.Quote(cwd)
+}
+
 func resolvePath(cwd, name string) string {
 	if filepath.IsAbs(name) {
 		return filepath.Clean(name)
@@ -1891,10 +1989,10 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		if external {
 			if info.IsDir() {
 				fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-				return true, "external directory input: " + p, nil
+				return true, "external directory input: " + p + attributionSeparator + "recorded path " + strconv.Quote(id.Path) + " resolves to " + strconv.Quote(target) + " outside the tree", nil
 			}
 			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
-			return true, "external runtime input target: " + p, nil
+			return true, "external runtime input target: " + p + attributionSeparator + "recorded path " + strconv.Quote(id.Path) + " resolves to " + strconv.Quote(target) + " outside the tree", nil
 		}
 	} else if info.IsDir() && !existenceBindsExternalDirs {
 		// An absolute directory bracket root walks its resolved

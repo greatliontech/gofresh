@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -309,7 +310,11 @@ func TestBracketRootRefusedByHashingSemanticsIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if escaped.reason == "" || !strings.Contains(escaped.reason, "external directory input") {
+	resolvedExternal, err := filepath.EvalSymlinks(externalDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if escaped.reason == "" || !strings.Contains(escaped.reason, "external directory input") || !strings.Contains(escaped.reason, `recorded path "escape" resolves to `+strconv.Quote(resolvedExternal)+` outside the tree`) {
 		t.Fatalf("escaping symlink root reason = %q", escaped.reason)
 	}
 	unchanged, reason, err := escaped.revalidate(context.Background(), moduleDir)

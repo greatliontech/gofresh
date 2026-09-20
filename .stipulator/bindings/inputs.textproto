@@ -1460,3 +1460,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "05267e5a6da7cab87b3384198304fa75c6cf9736f050b0498f066946bbecf7ff"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-refusal-attribution"
+  content_hash: "111636795f9a43a924fd9d9c087ac728afa448bca725f88525f651c5cbe2dc74"
+  source_hash: "a75948793581b35bf330e531900a0c98171c2953f231db2ca86ff5c358f89803"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestClassificationRefusalNamesItsObservation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a54879760c538467a580e8ce320ec2fbbf63c2d72cab4c55d324278b489049f6"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-refusal-attribution"
+  content_hash: "111636795f9a43a924fd9d9c087ac728afa448bca725f88525f651c5cbe2dc74"
+  source_hash: "a75948793581b35bf330e531900a0c98171c2953f231db2ca86ff5c358f89803"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRefusalClauseSurvivesSeparatorsInNames"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5451cb725627e8c80f6f88de3e448b4ab59a697f746044f6125aba947db80365"
+}
