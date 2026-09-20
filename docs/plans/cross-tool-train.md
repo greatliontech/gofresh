@@ -972,7 +972,7 @@ in their repos.
       MCP surface itself waits for a driving agent to appear; doc
       retargets at close.
 
-- [ ] 178. stipulator: policy-declared scratch namespaces (the consumer
+- [x] 178. stipulator: policy-declared scratch namespaces (the consumer
       half of the in-module scratch discharge, chunk 100's verdict) — a
       capture group's policy carries `scratch_namespaces` DIR:PATTERN rows
       with REQ-inputs-scratch-namespace's grammar, passed to the engine
@@ -1466,7 +1466,7 @@ in their repos.
       REQ-evidence-freshness-degrade; coverage.Evaluate (349 lines) and
       compile.resolve (331 lines) decomposed likewise. After 226 has
       thinned the package.
-- [ ] 250. stipulator: the gofresh bump — v0.101.0 → current (three
+- [x] 250. stipulator: the gofresh bump — v0.101.0 → current (three
       releases behind, two breaking; v0.101.1's canonical strategy @2
       restales every witness record) — riding gofresh 239's release so
       C16 lands in the same bump: normalizeEnv/setEnv/dropEnv/lookupEnv
