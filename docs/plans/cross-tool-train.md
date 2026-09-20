@@ -1798,7 +1798,7 @@ in their repos.
       binding — one coverage cell answers for twenty contracts and one
       re-consent restales 99 pins. 226's clause-split opening lands here;
       176 measurable after it.
-- [ ] 271. stipulator: the two faces' refusal ladders and projections one
+- [x] 271. stipulator: the two faces' refusal ladders and projections one
       source (263 A2–A5, C3) — verify's record-only hygiene refusal on the
       MCP (today a witnessless summary reads as a clean pass); pin's ids
       form all-or-nothing on both faces (the CLI writes ids 1–2 before
