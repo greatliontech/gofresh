@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 261: 202 is DUE (design, with the user — directly after 200, 199 folded into it; the earlier sentence listed it sixteenth while its parenthetical said directly after 200 — resolved toward the parenthetical) and opens at the user's session; meanwhile the autonomous order runs 259 (the root-input classification), 265 (gotool's second half, a release), 266 (the guidance projections), 274 (the fingerprint record's wire form, a release before the consumer bumps), 240, 241, 260, 203, 204, 206; behind 202 wait 191 (a release; 202 unblocks its poisoning rule), 192, 193 (202's fixpoint), 255 (the reason composers 202 moves), 242 and 243 (the boundary 202 redraws), then 175, 102 (after 175); gomutant's order after audit 262: 257 (the freshness-proof bound — its precondition 246 landed; a field-reported failure, first), 269 (one test-stream walk, correctness), 209, 268 (the decomposition), 267 (the vocabularies and the tail cadence), 258, 212, 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233, the bump behind gofresh 265/266 (its copies delete; the preparation-stage driver refusal carried forward; reasonClause and carriesAttribution generalize to gofresh's RefusalClause split — 259's attribution is BREAKING for its exemption matching until then), then 245 (215 merged in; design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 263: 271 (the faces' ladders — correctness first), 270 (the decomposition), 226, 272 (the bump, when gofresh 265 and 266 have released), 238, 249, 185, 225 and 248 together (172 merged into 225), 228, 184 (after 266), then 176 (with the two clause-scope issues; after 270) and 97 with the user; pew's order after audit 264: 230 (the artifact-format bound — the one MUST violation, first), 174, 252, 275 (the bump, when gofresh 265, 266, and 274 have released), 173 (after 266), 232, 276, 177, then 15 (102 inside it) and 127 with the user; THE CROSS-REPO LANE after the third re-audit band (261–264, closed 2026-09-20; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks opened with the user when reached, 95 last — the correctness heads gofresh 259 → gomutant 257 → stipulator 271 → pew 230; the releases gofresh 265 → 266 → 274, then the bumps gomutant (behind 265/266) → stipulator 272 → pew 275; then the tails round-robin in each repo's recorded order: gomutant 269 → stipulator 270 → pew 174 → gofresh 240 → gomutant 209 → stipulator 226 → pew 252 → gofresh 241 → gomutant 268 → stipulator 238 → pew 173 → gofresh 260 → gomutant 267 → stipulator 249 → pew 232 → gofresh 203 → gomutant 258 → stipulator 185 → pew 276 → gofresh 204 → gomutant 212 → stipulator 225+248 → pew 177 → gofresh 206 → gomutant 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233 → stipulator 228, 184 (after 266); gofresh 202 is DUE and opens with the user, 191 (a release; every consumer re-measures once at it) inside gofresh's post-202 tail 191, 192, 193, 255, 242, 243; the remaining design chunks — gomutant 245, pew 15 (with 102) and 127, gofresh 175, stipulator 176 and 97 — open with the user when the lane reaches them; 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 261: 202 is DUE (design, with the user — directly after 200, 199 folded into it; the earlier sentence listed it sixteenth while its parenthetical said directly after 200 — resolved toward the parenthetical) and opens at the user's session; meanwhile the autonomous order runs 259 (the root-input classification), 265 (gotool's second half, a release), 266 (the guidance projections), 274 (the fingerprint record's wire form, a release before the consumer bumps), 240, 241, 260, 203, 204, 206; behind 202 wait 191 (a release; 202 unblocks its poisoning rule), 192, 193 (202's fixpoint), 255 (the reason composers 202 moves), 242 and 243 (the boundary 202 redraws), then 175, 102 (after 175); gomutant's order after audit 262: 257 (the freshness-proof bound — its precondition 246 landed; a field-reported failure, first), 269 (one test-stream walk, correctness), 209, 268 (the decomposition), 267 (the vocabularies and the tail cadence), 258, 212, 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233, the bump behind gofresh 265/266 (its copies delete; the preparation-stage driver refusal carried forward; reasonClause and carriesAttribution generalize to gofresh's RefusalClause split — 259's attribution is BREAKING for its exemption matching until then), then 245 (215 merged in; design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 263: 271 (the faces' ladders — correctness first), 270 (the decomposition), 226, 272 (the bump, when gofresh 265 and 266 have released), 238, 249, 185, 225 and 248 together (172 merged into 225), 228, 184 (after 266), then 176 (with the two clause-scope issues; after 270) and 97 with the user; pew's order after audit 264: 230 (the artifact-format bound — the one MUST violation, first), 174, 252, 275 (the bump, when gofresh 265, 266, and 274 have released), 173 (after 266), 232, 276, 177, then 15 (102 inside it) and 127 with the user; THE CROSS-REPO LANE after the third re-audit band (261–264, closed 2026-09-20; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks opened with the user when reached, 95 last — the correctness heads gofresh 259 → gomutant 257 → stipulator 271 → pew 230; the releases gofresh 265 → 266 → 274, then the bumps gomutant (behind 265/266) → stipulator 272 → pew 275; then the tails round-robin in each repo's recorded order: gomutant 277 → stipulator 270 → pew 174 → gofresh 240 → gomutant 269 → stipulator 226 → pew 252 → gofresh 241 → gomutant 209 → stipulator 238 → pew 173 → gofresh 260 → gomutant 268 → stipulator 249 → pew 232 → gofresh 203 → gomutant 267 → stipulator 185 → pew 276 → gofresh 204 → gomutant 258 → stipulator 225+248 → pew 177 → gofresh 206 → gomutant 212, 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233 → stipulator 228, 184 (after 266); gofresh 202 is DUE and opens with the user, 191 (a release; every consumer re-measures once at it) inside gofresh's post-202 tail 191, 192, 193, 255, 242, 243; the remaining design chunks — gomutant 245, pew 15 (with 102) and 127, gofresh 175, stipulator 176 and 97 — open with the user when the lane reaches them; 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1630,7 +1630,7 @@ in their repos.
       on the record) and a withdraw form returning the survivor to
       open with the withdrawal reason recorded — the attestation
       history reads forward like the document; both faces. After 254.
-- [ ] 257. gomutant: a delta campaign's freshness proofs bounded by
+- [x] 257. gomutant: a delta campaign's freshness proofs bounded by
       the delta (field report freshness-proofs-stall-on-large-record-
       sets, 2026-09-19: a `run --changed` over a 292-record document
       spends its whole budget in per-target freshness and a "proofs
@@ -1643,7 +1643,7 @@ in their repos.
       (262: the trigger corrected — 253 is pew's bump with no bearing on
       gomutant's proofs; the precondition, 246, has landed: 257 runs FIRST
       in gomutant's order. Its open triages gofresh's
-      analysis-budget-and-static-roots-unadopted: gofresh.WithAnalysisBudget
+      analysis-budget-and-static-roots-unadopted (now static-input-root-unadopted, the budget half adopted here): gofresh.WithAnalysisBudget
       is the ready mechanism nothing calls, and subjectViewSet.observed is
       the unbounded union the report names.)
 - [ ] 258. gomutant: the evidence walk's faults stamp their own clause
@@ -1664,6 +1664,11 @@ in their repos.
       evidence-subject.md): pb's 243 identical subjects with empty manifests
       were that stamp; the attributed reason now names the target-side
       process the stamp copies.)
+      (257: reproduced over pb's archive-only oracle — a non-staged run's
+      scratch residue moved the bracket and the record stamped dirty with
+      no reason, the report's exact shape; stampUnverifiable is now the
+      one evidence-wide stamp the divergence arm and the budget-cut
+      validation share, the per-subject attribution this chunk's.)
 - [ ] 255. gofresh: a downgrade reason names its invoke site — a
       "reaches <sink>" reason composed through an interface invoke
       names the call expression and its operand type in the subject
@@ -1739,6 +1744,11 @@ in their repos.
       the consumers' arms at their next bumps (gomutant's provenance.go
       carries a preparation-stage driver refusal REQ-exec-preparation
       requires before the first load — the bump keeps that arm).
+      (257: also exports the progress event's per-unit classification —
+      Progress.IsUnit() or an exported phase set — so a consumer's
+      stretch vocabulary reads one home; gomutant's
+      analysis-unit-phases-one-home lands at its bump behind this
+      release.)
 - [ ] 266. gofresh: the guidance face projections (261 C5) — a pflag-
       flavoured and a JSON-schema-flavoured projection on Document/Knob
       and one cobra/MCP registration shape, replacing the three consumer
@@ -1840,6 +1850,17 @@ in their repos.
       a bare gofresh.New() rebuilt through buildEngine (production never
       builds an engine without WithoutRepositoryVouches). Bound by
       adjacency, its own commits. After 232.
+- [ ] 277. gomutant: a delta run's preparation scales with the delta
+      (field report delta-run-preparation-pays-the-document, pb's second
+      report at 257's close: over a 308-record document a one-target and
+      a 73-target `--changed` run spend the same first quarter hour — the
+      closure signpost over every prior record four minutes, one
+      target's freshness proof five more, 9.5 GiB peak) — the
+      inspection of prior findings scoped to the run's targets, the
+      records outside the delta read and never judged until a run over
+      them asks (REQ-result-run-posture's pass over the run's records,
+      REQ-exec-preparation's order kept); the signpost's cost priced
+      like the proof passes. Directly after 257 in gomutant's order.
 - [x] 221. stipulator: soundness conformance between the policy record
       and the engine — the repository vouch file is neither declined
       (gofresh's WithoutRepositoryVouches, the "one set, one home" the
