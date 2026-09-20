@@ -1749,7 +1749,7 @@ in their repos.
       stretch vocabulary reads one home; gomutant's
       analysis-unit-phases-one-home lands at its bump behind this
       release.)
-- [ ] 266. gofresh: the guidance face projections (261 C5) — a pflag-
+- [x] 266. gofresh: the guidance face projections (261 C5) — a pflag-
       flavoured and a JSON-schema-flavoured projection on Document/Knob
       and one cobra/MCP registration shape, replacing the three consumer
       triples (same panic wording), the two knobSchema copies that have
