@@ -1816,7 +1816,7 @@ in their repos.
       effective-go-env-sample-outside-gotool close; the policy record's
       stale budget rationale (gofresh v0.85.1, 2026-08-26) re-measured;
       238 unblocks. When 265 and 266 have released.
-- [ ] 274. gofresh: the fingerprint record's published wire form (263 C1)
+- [x] 274. gofresh: the fingerprint record's published wire form (263 C1)
       — stipulator's witnesscache.Fingerprint (17 fields + ToGofresh +
       reverse + a shape-guarding UnmarshalJSON), gomutant's two mirrors,
       pew's field reads each mirror gofresh.Fingerprint, and
