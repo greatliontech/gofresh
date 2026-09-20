@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 261: 202 is DUE (design, with the user — directly after 200, 199 folded into it; the earlier sentence listed it sixteenth while its parenthetical said directly after 200 — resolved toward the parenthetical) and opens at the user's session; meanwhile the autonomous order runs 259 (the root-input classification), 265 (gotool's second half, a release), 266 (the guidance projections), 240, 241, 260, 203, 204, 206; behind 202 wait 191 (a release; 202 unblocks its poisoning rule), 192, 193 (202's fixpoint), 255 (the reason composers 202 moves), 242 and 243 (the boundary 202 redraws), then 175, 102 (after 175); gomutant's order after audit 262: 257 (the freshness-proof bound — its precondition 246 landed; a field-reported failure, first), 269 (one test-stream walk, correctness), 209, 268 (the decomposition), 267 (the vocabularies and the tail cadence), 258, 212, 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233, the bump behind gofresh 265/266 (its copies delete; the preparation-stage driver refusal carried forward), then 245 (215 merged in; design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 236: 247, 227 (225 folded), 226, 250 (the bump, after gofresh 239's release; 178 rides), 249, 185, 228, 248, 184, 172, 238, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); the third re-audit band 261–264 directly after 251 — the twelfth landed chunk since 234–237 — its replan re-sequencing everything below it; every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 261: 202 is DUE (design, with the user — directly after 200, 199 folded into it; the earlier sentence listed it sixteenth while its parenthetical said directly after 200 — resolved toward the parenthetical) and opens at the user's session; meanwhile the autonomous order runs 259 (the root-input classification), 265 (gotool's second half, a release), 266 (the guidance projections), 274 (the fingerprint record's wire form, a release before the consumer bumps), 240, 241, 260, 203, 204, 206; behind 202 wait 191 (a release; 202 unblocks its poisoning rule), 192, 193 (202's fixpoint), 255 (the reason composers 202 moves), 242 and 243 (the boundary 202 redraws), then 175, 102 (after 175); gomutant's order after audit 262: 257 (the freshness-proof bound — its precondition 246 landed; a field-reported failure, first), 269 (one test-stream walk, correctness), 209, 268 (the decomposition), 267 (the vocabularies and the tail cadence), 258, 212, 216, 218, 217, 220, 214, 219, 254, 256, 187, 188, 233, the bump behind gofresh 265/266 (its copies delete; the preparation-stage driver refusal carried forward), then 245 (215 merged in; design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 263: 271 (the faces' ladders — correctness first), 270 (the decomposition), 226, 272 (the bump, when gofresh 265 and 266 have released), 238, 249, 185, 225 and 248 together (172 merged into 225), 228, 184 (after 266), then 176 (with the two clause-scope issues; after 270) and 97 with the user; pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); the third re-audit band 261–264 directly after 251 — the twelfth landed chunk since 234–237 — its replan re-sequencing everything below it; every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -922,10 +922,11 @@ in their repos.
       linked package), so a consumer never mistakes a committed record for
       current reusable evidence; the stored-observation and later-judgment
       reasons name their channels; both faces; doc deletes at close.
-- [ ] 172. stipulator: per-stream color (stipulator docs/issues/
+- [x] 172. stipulator: per-stream color (stipulator docs/issues/
       per-stream-color.md) — style decided once from NO_COLOR/TERM and
       both streams' isatty becomes a per-stream styler; doc deletes at
       close (its test-binary half moved to 228 by audit 196).
+      (263: MERGED into 225 — one rendering layer, one commit shape.)
 - [ ] 173. pew: the flag usage strings rendered from the guidance
       document (pew docs/issues/guidance-knobs-and-verb-table.md) — pew's
       REQ-pew-guidance already names the document the authoritative
@@ -966,6 +967,10 @@ in their repos.
       violation for existing records, `implements` claims stay whole, a
       corpus manifest opt-out keeps a corpus that accepts whole claims
       honest about it; doc deletes at close.
+      (263: merges with supersede-carry-drops-clause-scope and
+      dangling-empty-label-remedy-names-no-clause — one clause-scope
+      semantics decision; measurable only after 270 (zero clause-structured
+      requirements today).)
 - [ ] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
       mcp-surface.md; user ruling 2026-09-07) — the progress channel half
       landed with REQ-pew-progress (every verb's 30 s cadence line); the
@@ -987,6 +992,8 @@ in their repos.
       clause per surface where the faces' spellings differ, the render
       picks its face's, the cross-face prose leaves the parenthesis; the
       two-surfaces ruling applied to knob prose; doc deletes at close.
+      (263: re-aimed — the document half is gofresh's guidance format, 266
+      owns it; stipulator keeps the render's face pick. After 266.)
 - [ ] 185. stipulator: the ledger store as a record kind (stipulator
       docs/issues/ledger-store-as-a-record-kind.md) — recordstore.Name gains
       the one-segment form, the compartment ledger sub-store becomes a
@@ -999,6 +1006,9 @@ in their repos.
       (227 takes those), the naming blocker exact; adds C15: the
       mirrored entry/Record field lists in both stores, where a field
       added to Record and forgotten in entry stops persisting silently.)
+      (263: grows — the composition above recordstore is rewritten per kind
+      (open→Names→Read→decode→append; open→Sweep) in resolutioncache and
+      witnesscache, each record spelled three times — 236's C15, exact.)
 - [x] 186. gomutant: the execution window's cost models in one home
       (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
       home stating the three questions (membership, order, execution),
@@ -1381,6 +1391,8 @@ in their repos.
       group-isolated loader spawn gofresh offers) and the gap's close.
       (236: after 226's clause split — its gap over-excuses four met
       mechanisms until REQ-go-owned-processes is split.)
+      (263: behind 272 — gofresh 265 supplies the group-isolated loader
+      spawn.)
 - [x] 239. gofresh: the environment, toolchain, and go-command policy
       exported (234 C1/A1/A5) — gofresh owns the whole policy and
       publishes none of it: internal/processenv (Normalize, ForCommand,
@@ -1513,6 +1525,10 @@ in their repos.
       names the upward search) → one; A8 evidence.md's version bump
       chain is process record → the version is 8, prior versions fail
       closed; A9 the resolution-cache format names no version value.
+      (263: grows — the reason-tally cap policy merged from 225 (two
+      reductions with caps 5 and 8 and different remainders: one rule, a
+      per-reader bound) and the "not a stipulator repository" message ×4
+      re-deriving manifest absence; 225 and 248 land together.)
 - [ ] 249. stipulator: the monoliths (236 C1/C12) — runWitnesses
       (570 lines, ~40 locals, five closures, seven nested loop stages)
       split by the stages its comments name, preserving
@@ -1520,6 +1536,14 @@ in their repos.
       REQ-evidence-freshness-degrade; coverage.Evaluate (349 lines) and
       compile.resolve (331 lines) decomposed likewise. After 226 has
       thinned the package.
+      (263: grows — check.Run repeats verifyrun's capture → symbols →
+      served-backend ladder and hand-builds the backend map (the one site
+      247.C's BackendSet did not reach) — check-pass-shares-the-verification-
+      ladder lands here (a derivable design, un-parked); five compile-refusal
+      ladders and five id-list validation ladders, corpus membership spelled
+      two ways; process-output-utf8-marshal's executor-diagnostics trigger
+      fired at 223.B3 — lands here. Premise corrected: runWitnesses lives in
+      witnessrun.go, which 226 does not thin.)
 - [x] 250. stipulator: the gofresh bump — v0.101.0 → current (three
       releases behind, two breaking; v0.101.1's canonical strategy @2
       restales every witness record) — riding gofresh 239's release so
@@ -1649,7 +1673,7 @@ in their repos.
 - [x] 262. gomutant: coherence re-audit — the face-parity residue and
       the seams (244, 213), the bump's registry and knob-clause folds
       (246), the exit log and the ledger since 235; same output.
-- [ ] 263. stipulator: coherence re-audit — the correctness chunk (247),
+- [x] 263. stipulator: coherence re-audit — the correctness chunk (247),
       the vestigial sweep (227), the bump with the scratch namespaces
       and the environment policy (250); same output.
 - [ ] 264. pew: coherence re-audit — the conformance half (231), the
@@ -1716,6 +1740,46 @@ in their repos.
       verdict"; invariants: the crash-truncated attribution
       (REQ-core-attributed-kills), the build-fail event's precedence
       (208), the compiler-crash retry. A correctness chunk: after 257.
+- [ ] 270. stipulator: the corpus's mega-requirements decomposed into
+      per-sub-contract ids on gofresh 200's mechanics (263 A1) —
+      REQ-evidence-witness-freshness (one 306-line paragraph, ~20
+      contracts, 99 of 1,051 bindings), REQ-check-verdict,
+      REQ-go-owned-processes, REQ-mcp-progress, REQ-go-policy-complete,
+      REQ-policy-attribution, REQ-check-preparation, REQ-mcp-tools,
+      REQ-evidence-witness-cache-format; the corpus that specifies the
+      clause mechanism declares no payload list and carries no clause
+      binding — one coverage cell answers for twenty contracts and one
+      re-consent restales 99 pins. 226's clause-split opening lands here;
+      176 measurable after it.
+- [ ] 271. stipulator: the two faces' refusal ladders and projections one
+      source (263 A2–A5, C3) — verify's record-only hygiene refusal on the
+      MCP (today a witnessless summary reads as a clean pass); pin's ids
+      form all-or-nothing on both faces (the CLI writes ids 1–2 before
+      id 3 refuses); an id list reducing to nothing refused on the CLI
+      (`check --ids ","` runs the global pass today); the explicit-empty
+      backend one rule; the CLI gap list a projection of GapReport;
+      every MCP remedy through the composers (three hardcoded); the
+      red-row ladder ×3, SuiteHealthy re-implemented, the heading twins,
+      Tally recomputed from wire rows. Correctness first.
+- [ ] 272. stipulator: the bump behind gofresh 265/266 — the gotool
+      copies (command*.go, the hand-built sampler, setEnv/envEntryLess,
+      the nine-key go env read, resolveOrSelf and the raw store keying)
+      and the guidance projections (knobbedTool/knobSchema,
+      renderKnobUsage) delete; go-version-sampler-outside-gotool and
+      effective-go-env-sample-outside-gotool close; the policy record's
+      stale budget rationale (gofresh v0.85.1, 2026-08-26) re-measured;
+      238 unblocks. When 265 and 266 have released.
+- [ ] 274. gofresh: the fingerprint record's published wire form (263 C1)
+      — stipulator's witnesscache.Fingerprint (17 fields + ToGofresh +
+      reverse + a shape-guarding UnmarshalJSON), gomutant's two mirrors,
+      pew's field reads each mirror gofresh.Fingerprint, and
+      stipulator's REQ-evidence-witness-cache-format carries gofresh's
+      key list as its own contract because none is published: gofresh
+      publishes the record form and its validity semantics (an absent
+      strategy reads empty and fails closed; a code fingerprint carrying
+      a machine or runtime guard is refused; unknown fields refuse); the
+      mirrors delete at their bumps, the spec block shrinks to a
+      reference. After 266, before the consumer bumps.
 - [x] 221. stipulator: soundness conformance between the policy record
       and the engine — the repository vouch file is neither declined
       (gofresh's WithoutRepositoryVouches, the "one set, one home" the
@@ -1765,6 +1829,14 @@ in their repos.
       files; refKey is THREE (a local closure in compile.resolve shadows
       the package one with a different case rule); the cap-and-count
       block duplicated across views.)
+      (263: does NOT dissolve — its refKey trio and reason tallies never
+      landed; grows to "one vocabulary, one composer": bucket words in five
+      tables over two types, the keyword's three spellings (MUST_NOT / MUST
+      NOT / must not — two on wire surfaces), enumWord + eleven hand-rolls,
+      four truncate helpers, per-face prose pairs as surface-parameterized
+      composers; 227's six deferred test-only production entries and two
+      true vestiges (resolverClient.stdin write-only, gitfs.absPath an
+      injection seam with no site); 172 merges in.)
 - [ ] 226. stipulator: golang.go split by its three subsystems
       (resolution and shape hashing, witness classification and the
       seeding walk, generated detection) with the classifier's three
@@ -1775,6 +1847,12 @@ in their repos.
       gap each; split so a gap excuses only its own); the module-mode
       view triple lands here (A5: derive keys module mode, the resolution
       view does not); C8 the classifier's one pass; C9 the split.)
+      (263: loses its clause-split opening to 270; grows — workspaceMembers /
+      policyMembers one go.work rule (identical refusal text) with
+      depattribution's third ParseWork reader; path containment hand-rolled
+      six times; the subject key joined inline at 45 sites beside
+      witnesscache.Record.Key; the twin semver comparators; folds
+      go-backend-load-path-pairs and reviewed-row-sets-one-pattern.)
 - [x] 227. stipulator: the vestigial sweep — three build-tagged
       atomicReplace declarations with no call site (the Windows arm
       dragging kernel32), the legacy .stipulator/cache removal on every
@@ -1814,6 +1892,12 @@ in their repos.
       one sync.Once; repoWith, untouchable, compileFiles duplicated.)
 
 ## Band J — pew under the emergent shape (chartered by audit 197)
+      (263: grows — enumeration pins blind to a new member: progress.Word's
+      fallthrough (three of six phases untested), coverage.satisfied /
+      requiredEvidence's fallthrough sampled one cell per kind, the
+      witness-cache key list and the MCP tool names mirrored by hand;
+      premises re-verified: eight go build sites, neutralAmbient four copies
+      diverging on GOWORK=off.)
 
 - [x] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (pew docs/issues/
       gofresh-corpus-pin-lag.md, serve-proven-blocked-by-benchmark-loop.md)
