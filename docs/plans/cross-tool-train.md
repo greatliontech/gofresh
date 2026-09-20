@@ -1722,7 +1722,7 @@ in their repos.
       bump (253), the recording-key registry and the one test builder
       (251); same output; closes with the cross-repo replan (the lane
       re-sequenced from it).
-- [ ] 265. gofresh: gotool's second half — what the three bumps left every
+- [x] 265. gofresh: gotool's second half — what the three bumps left every
       consumer building for itself (261 C1/C2/C3/C4/C6/C7 + A1): a
       containable, streamed go spawn under the policy (a prepared command
       with the derived PWD, one process-group containment and wait-delay
