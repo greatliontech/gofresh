@@ -1991,7 +1991,7 @@ in their repos.
       the store root by REQ-pew-vouch-source, so the engine declines the
       module's file (WithoutRepositoryVouches) and the home stays one —
       and guidance.Knob for 173; both docs delete at close.
-- [ ] 230. pew: the artifact-format bound — G5 and REQ-pew-artifact-format
+- [x] 230. pew: the artifact-format bound — G5 and REQ-pew-artifact-format
       promise every stored .txt parseable by benchfmt and plain benchstat,
       and pew's own writer breaks it: the runtime-inputs and test-variant-
       ledger lines grow past benchfmt's 64 KiB scanner bound, which pew's
