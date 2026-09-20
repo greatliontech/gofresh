@@ -92,7 +92,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	for v := range vouches {
 		analysis.Vouches = append(analysis.Vouches, v)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, analysis, dir, os.Environ(), nil, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,7 +999,7 @@ func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/acct/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/acct/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1027,7 +1027,7 @@ func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/hooks/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/hooks/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1059,7 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/aliased/reg", "example.com/aliased/dyn")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/aliased/reg", "example.com/aliased/dyn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1092,7 +1092,7 @@ func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/wrapped/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/wrapped/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1120,7 +1120,7 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/params/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/params/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,7 +1153,7 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/beside/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/beside/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1182,7 +1182,7 @@ func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, dir, os.Environ(), nil, nil, "example.com/homebrew/reg")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/homebrew/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1241,7 +1241,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), dir, os.Environ(), nil, nil, "example.com/dirhost")
+	scan, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), nil, "example.com/dirhost")
 	if err != nil {
 		t.Fatal(err)
 	}

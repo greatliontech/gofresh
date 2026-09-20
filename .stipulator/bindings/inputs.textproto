@@ -1318,7 +1318,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.resolveRoots"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "b5ff185eb3c777fb1645c0e3305dd66ebaa9df293f3b5fca4ecc5c71504ffaaa"
+  shape_hash: "4ef6f7ff71f7ec4ed15a1668b1ed64ae49a66db9b03e4c0353cf59c14fa3e9f0"
 }
 
 bindings {

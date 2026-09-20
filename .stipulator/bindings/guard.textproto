@@ -188,7 +188,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.Capture"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "95bcb7886afbfa25c40ee7c4fc1471d3ba5bad40a6e3f5d7ae8e0d37b0a25023"
+  shape_hash: "a38746b95587e8fb730e7c2e57d8cb6abeabfeff5be0026ee94b77376ad7054f"
 }
 
 bindings {
@@ -289,4 +289,34 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/guard.TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment"
   role: BINDING_ROLE_TESTS
   shape_hash: "d8dcb244d01d69c7dc337219cf474fd3bdb2ad9de50cd2b8da74e6b7ae8190f4"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "0e1d7a55a2155e21bada01cf225a55b1aeffc6707cd5eb104863c8efbb8a3593"
+  source_hash: "26af7027a7f7b84850e396db41ab1d55c6da0b98f174eeb2ecb0073db75fdbf1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCaptureRefusesANilReaderAndAMalformedEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6c1c39d83c784ed2baf7c269462956010056224d55d69e60e0ea1141bbac138e"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "0e1d7a55a2155e21bada01cf225a55b1aeffc6707cd5eb104863c8efbb8a3593"
+  source_hash: "26af7027a7f7b84850e396db41ab1d55c6da0b98f174eeb2ecb0073db75fdbf1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestPrimedAndProbedCapturesDigestAlike"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0e739d2766a4f92dc2c35bf166c73383bfbe97c65fae743015d5db2aa6e31a47"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "0e1d7a55a2155e21bada01cf225a55b1aeffc6707cd5eb104863c8efbb8a3593"
+  source_hash: "26af7027a7f7b84850e396db41ab1d55c6da0b98f174eeb2ecb0073db75fdbf1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCapturePrimesTheCallersReader"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "caf970cdf628248d870a964c7981909a129ce4c33afbdf115d38e723af96c58c"
 }

@@ -6,10 +6,11 @@
 // reads go's environment once per pass (EnvReader); and resolves a
 // directory to its one canonical coordinate (CanonicalDir, Coordinate).
 // A Runner's containment and hook reach the go commands a consumer
-// spawns through it; gofresh's own spawns run under the plain runner,
-// and the package loader's `go list` children carry the same
-// environment (x/tools appends its own PWD, the same derivation) and
-// spawn through x/tools, outside any hook.
+// spawns through it and, installed on an engine (gofresh.WithGoRunner),
+// every go command that engine spawns itself; the package loader's
+// `go list` children carry the same environment (x/tools appends its
+// own PWD, the same derivation) and spawn through x/tools, outside any
+// hook.
 package gotool
 
 import (
@@ -43,8 +44,8 @@ func Run(ctx context.Context, dir string, env []string, args ...string) ([]byte,
 // own context; Prepare, when set, sees the command after that, its
 // Dir, Env, and boundary already set (a resource policy of the
 // consumer's own). The zero Runner is the plain spawn. A runner reaches
-// the go commands a consumer spawns through it; gofresh's own spawns
-// run under the plain runner.
+// the go commands a consumer spawns through it and, installed on an
+// engine, the engine's own.
 type Runner struct {
 	Containment *Containment
 	Prepare     func(*exec.Cmd)
@@ -223,15 +224,61 @@ type EnvReader struct {
 	Runner   Runner
 	Dir      string
 	Env      []string
-	once     sync.Once
+	mu       sync.Mutex
+	taken    bool
 	snapshot *EnvSnapshot
 	err      error
 }
 
-// Snapshot returns the pass's snapshot, taking it on the first call.
+// NewEnvReader is a pass's reader over the runner, directory, and
+// complete environment every spawn of that pass shares — the one value
+// an analysis entry takes in place of a directory, an environment, and
+// a snapshot.
+func NewEnvReader(r Runner, dir string, env []string) *EnvReader {
+	return &EnvReader{Runner: r, Dir: dir, Env: env}
+}
+
+// PrimedEnvReader is a reader whose snapshot is already taken — a
+// later step of the pass that holds the construction snapshot hands it
+// on, so no step of one pass probes twice. A nil snapshot primes
+// nothing: the reader takes its own on first use, never answering
+// empty values for a snapshot that was never taken.
+func PrimedEnvReader(r Runner, dir string, env []string, snapshot *EnvSnapshot) *EnvReader {
+	reader := NewEnvReader(r, dir, env)
+	if snapshot != nil {
+		reader.snapshot, reader.taken = snapshot, true
+	}
+	return reader
+}
+
+// Snapshot returns the pass's snapshot, taking it on the first call. A
+// snapshot that failed is the reader's answer for its lifetime — the
+// pass fails closed rather than re-probing an environment that refused
+// — except a cancellation, which is the caller's and never memoized.
 func (r *EnvReader) Snapshot(ctx context.Context) (*EnvSnapshot, error) {
-	r.once.Do(func() { r.snapshot, r.err = r.Runner.TakeEnvSnapshot(ctx, r.Dir, r.Env) })
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.taken {
+		return r.snapshot, r.err
+	}
+	snapshot, err := r.Runner.TakeEnvSnapshot(ctx, r.Dir, r.Env)
+	if err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	r.snapshot, r.err, r.taken = snapshot, err, true
 	return r.snapshot, r.err
+}
+
+// Taken returns the snapshot the reader holds, nil until its first
+// successful read — a caller building a sibling reader over the same
+// pass primes it with this, so the pass probes once.
+func (r *EnvReader) Taken() *EnvSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return nil
+	}
+	return r.snapshot
 }
 
 // Value returns one go-env setting from the pass's snapshot.

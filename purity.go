@@ -47,11 +47,13 @@ func ScanPureDirectives(dir string, env, buildFlags []string, pkgPaths ...string
 const sharedDynamicStatePrefix = "package graph shares mutated dynamic state: "
 
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
-	hasher, err := closure.NewAt(ctx, dir, env, nil, buildFlags...)
+	// A directive scan takes no engine: its own pass over the plain
+	// runner.
+	hasher, err := closure.NewAt(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, env), buildFlags...)
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, closure.AnalysisScope{}, dir, env, buildFlags, nil, pkgPaths...)
+	scan, _, err := scanViewSubjects(ctx, hasher, closure.AnalysisScope{}, buildFlags, pkgPaths...)
 	return scan, err
 }
 
@@ -62,7 +64,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
 // factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
 	// The scope is the one source of the attestations and the vouches:
 	// what keys a memo is what the derivation applies.
 	factScope := scope.Facts()
@@ -146,12 +148,12 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		viewTestHooks.typedLoad()
 	}
 	hasher.Unit("typecheck", "", 0, len(patterns))
-	load, err := closure.LoadViewPackages(ctx, dir, env, buildFlags, snapshot, patterns...)
+	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 	if err != nil {
 		return nil, nil, err
 	}
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, dir, env, buildFlags, load, pkgPaths, vouches, singleSubject)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, pkgPaths, vouches, singleSubject)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -745,16 +747,6 @@ func recordDynamicGlobalMutations(audited bool, p *packages.Package, mutated map
 	recordDynamicGlobalUses(audited, p, mutated, map[string]bool{}, initOnlyReachableHelpers(p), nil, nil, nil, nil, nil, nil, nil, nil, false, nil)
 }
 
-// recordDynamicGlobalUses classifies every package-level dynamic-capable
-// variable use in one package's syntax: mutated collects demonstrated
-// mutations (writes, growth/deletion, sends, address captures,
-// pointer-receiver method uses, rebindings), escaped collects
-// alias-carrier values handed to code that may write them (call
-// arguments, stores, returns, bindings, method calls, type
-// assertions). Reads that provably cannot write — indexing, iteration,
-// length/capacity, comparison — mark neither, and initOnly names the
-// init-only-reachable helpers whose bodies are init flow
-// (REQ-closure-shared-dynamic-state).
 // attributedUse carries a mutation or escape recorded inside a plain
 // named function instead of marking immediately: composition
 // discharges it when the whole graph proves the function reachable
@@ -855,6 +847,16 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 	}
 }
 
+// recordDynamicGlobalUses classifies every package-level dynamic-capable
+// variable use in one package's syntax: mutated collects demonstrated
+// mutations (writes, growth/deletion, sends, address captures,
+// pointer-receiver method uses, rebindings), escaped collects
+// alias-carrier values handed to code that may write them (call
+// arguments, stores, returns, bindings, method calls, type
+// assertions). Reads that provably cannot write — indexing, iteration,
+// length/capacity, comparison — mark neither, and initOnly names the
+// init-only-reachable helpers whose bodies are init flow
+// (REQ-closure-shared-dynamic-state).
 // singleSubject is the engine's caller-attested single-subject-process
 // execution model: it arms the audited pooling set's discharge — off,
 // every pool use keeps the fail-closed judgment
@@ -2873,23 +2875,6 @@ func environmentFreeFuncLitJudged(audited bool, p *packages.Package, lit *ast.Fu
 	return sound
 }
 
-// recordEnvCarryingRegistrations records, per dynamic-capable package
-// variable (own or foreign), whether this package's direct code stores a
-// function-carrying value into it that is not provably environment-free.
-// A plain named function or a method expression carries no environment; a
-// function literal is audited by environmentFreeFuncLit; nil carries
-// nothing. Every other function-carrying value shape - a bound method
-// value, a call result, a parameter, an opaque local or foreign variable -
-// is beyond the audit and marks the carrier, fail-closed
-// (REQ-closure-shared-dynamic-state). Stores inside nested literals and go
-// statements are program code whose mutation marks refuse independently,
-// so the audit walks only direct store sites; a store the mutation rules
-// refuse anyway may record here too - the mutation culprit outranks this
-// one at composition. One call shape defers instead of poisoning: a call
-// of a plain named function records the callee against every store
-// target in envCalls, its arguments judged recursively, for composition
-// to resolve against the callee's return-environment-free proof -
-// absence keeping the poison (REQ-closure-shared-dynamic-state).
 // fieldRegMark is one registered-population disposition for a
 // func-signature struct field a carrier can hand out: class 'd' defers the
 // field position to a parameter's leak-free fact, class 'p' poisons it. A
@@ -3151,6 +3136,23 @@ func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, 
 	}
 }
 
+// recordEnvCarryingRegistrations records, per dynamic-capable package
+// variable (own or foreign), whether this package's direct code stores a
+// function-carrying value into it that is not provably environment-free.
+// A plain named function or a method expression carries no environment; a
+// function literal is audited by environmentFreeFuncLit; nil carries
+// nothing. Every other function-carrying value shape - a bound method
+// value, a call result, a parameter, an opaque local or foreign variable -
+// is beyond the audit and marks the carrier, fail-closed
+// (REQ-closure-shared-dynamic-state). Stores inside nested literals and go
+// statements are program code whose mutation marks refuse independently,
+// so the audit walks only direct store sites; a store the mutation rules
+// refuse anyway may record here too - the mutation culprit outranks this
+// one at composition. One call shape defers instead of poisoning: a call
+// of a plain named function records the callee against every store
+// target in envCalls, its arguments judged recursively, for composition
+// to resolve against the callee's return-environment-free proof -
+// absence keeping the poison (REQ-closure-shared-dynamic-state).
 func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarrying map[string]bool, envCalls, fieldDefer, fieldPoison map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil {
 		return

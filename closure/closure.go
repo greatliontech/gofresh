@@ -71,6 +71,9 @@ type Hasher struct {
 	ctx        context.Context
 	env        []string
 	packageEnv []string
+	// runner spawns every go command of the analysis: the engine's
+	// installed runner, so a consumer's boundary reaches the listing.
+	runner gotool.Runner
 	// buildFlags are the producing go command's executable flags. They select
 	// every package and dependency load used to construct this closure.
 	buildFlags []string
@@ -236,25 +239,31 @@ func (h *Hasher) Persisted() (proofs, scans int) {
 // construction must refuse here, before any load can derive memo values
 // under a key whose GOFLAGS digest predates it
 // (REQ-closure-observability-memo's byte-equivalence).
-func NewBracketAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
+func NewBracketAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
 	}
-	normalized, err := gotool.NormalizeEnv(env)
+	if reader == nil {
+		return nil, errors.New("closure: nil environment reader")
+	}
+	normalized, err := gotool.NormalizeEnv(reader.Env)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	// The live probe is the pass's own snapshot: GOFLAGS validates from
-	// it, and the listing memo scopes by it, so a bracket's entries never
-	// persist under an environment the bracket's loads did not run in.
-	live, err := gotool.TakeEnvSnapshot(ctx, dir, normalized)
+	// The live probe is the bracket's own pass: a fresh reader over the
+	// construction reader's runner, directory, and environment — GOFLAGS
+	// validates from it, and the listing memo scopes by it, so a
+	// bracket's entries never persist under an environment the bracket's
+	// loads did not run in.
+	livePass := gotool.NewEnvReader(reader.Runner, reader.Dir, normalized)
+	if err := buildflags.Validate(ctx, livePass, buildFlags); err != nil {
+		return nil, err
+	}
+	live, err := livePass.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, live); err != nil {
-		return nil, err
-	}
-	h, err := NewAt(ctx, dir, env, snapshot, buildFlags...)
+	h, err := NewAt(ctx, reader, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -266,23 +275,27 @@ func NewBracketAt(ctx context.Context, dir string, env []string, snapshot *gotoo
 	return h, nil
 }
 
-// NewAt builds a Hasher analyzing the tree at dir ("" = the current
-// directory) under env as the complete immutable process environment
-// for package loading, Go commands, and source selection, and under
+// NewAt builds a Hasher analyzing the tree at the reader's directory
+// ("" = the current directory) under its environment as the complete
+// immutable process environment for package loading, Go commands, and
+// source selection, every go command through its runner, and under
 // buildFlags as the producing build's executable flags: every package
 // load and go invocation resolves under both, so the analyzed tree and
 // build selection are explicit inputs, never implicit cwd or
-// default-build coupling (REQ-closure-analysis). A non-nil snapshot
-// resolves GOMODCACHE and validates GOFLAGS from the pass's one env
-// snapshot.
-func NewAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags ...string) (*Hasher, error) {
+// default-build coupling (REQ-closure-analysis). GOMODCACHE, GOFLAGS,
+// and GOEXPERIMENT resolve from the reader's one snapshot — the pass's,
+// never a probe of the constructor's own.
+func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (*Hasher, error) {
 	if ctx == nil {
 		return nil, errors.New("closure: nil context")
+	}
+	if reader == nil {
+		return nil, errors.New("closure: nil environment reader")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	normalized, err := gotool.NormalizeEnv(env)
+	normalized, err := gotool.NormalizeEnv(reader.Env)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
@@ -290,41 +303,39 @@ func NewAt(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSn
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.ValidateEnvSnapshot(ctx, dir, normalized, buildFlags, snapshot); err != nil {
+	if err := buildflags.Validate(ctx, reader, buildFlags); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	var mc, goflags, goexperiment string
-	if snapshot != nil {
-		mc, goflags, goexperiment = snapshot.Value("GOMODCACHE"), snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT")
+	// One snapshot covers the module cache and the selection-bearing
+	// values; a resolution failure refuses construction loudly rather
+	// than silently disabling every stdlib admission.
+	snapshot, err := reader.Snapshot(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if snapshot == nil {
-		// One combined read covers the module cache and the
-		// selection-bearing values; a resolution failure refuses
-		// construction loudly rather than silently disabling every
-		// stdlib admission.
-		out, err := gotool.Run(ctx, dir, normalized, "env", "GOMODCACHE", "GOFLAGS", "GOEXPERIMENT")
-		if err != nil {
-			return nil, err
-		}
-		lines := strings.Split(string(out), "\n")
-		if len(lines) < 3 {
-			return nil, fmt.Errorf("closure: go env returned %d values, want 3", len(lines))
-		}
-		mc, goflags, goexperiment = strings.TrimSpace(lines[0]), strings.TrimRight(lines[1], "\r"), strings.TrimRight(lines[2], "\r")
-	}
+	mc, goflags, goexperiment := snapshot.Value("GOMODCACHE"), snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT")
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
+	dir := reader.Dir
 	return &Hasher{
-		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
+		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, runner: reader.Runner, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
 		selectionResolved: true, selection: selectionDegradationFor(runtime.Version(), buildFlags, goflags, goexperiment),
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]compartment.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),
 	}, nil
+}
+
+// PassReader is the reader a later step of this hasher's pass loads
+// under: the hasher's runner, directory, and environment, primed with
+// the snapshot the hasher holds — the construction's, or a bracket's
+// live one — so the step probes nothing the pass already read.
+func (h *Hasher) PassReader() *gotool.EnvReader {
+	return gotool.PrimedEnvReader(h.runner, h.dir, h.env, h.snapshot)
 }
 
 // FileDigest returns the truncated content digest of one absolute source
@@ -1226,7 +1237,7 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	args := []string{"list", "-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)
-	out, err := gotool.Run(h.ctx, h.dir, h.env, args...)
+	out, err := h.runner.Run(h.ctx, h.dir, h.env, args...)
 	if err != nil {
 		return nil, err
 	}

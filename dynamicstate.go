@@ -976,7 +976,7 @@ func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (
 	return pureKey, externalKey
 }
 
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope, dir string, env, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject bool) (*viewDynamicState, error) {
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject bool) (*viewDynamicState, error) {
 	meta, err := hasher.GraphMetadata(viewPackages...)
 	if err != nil {
 		return nil, err
@@ -1037,7 +1037,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if len(testedWithIntermediates) > 0 {
 		sort.Strings(testedWithIntermediates)
 		hasher.Unit("typecheck", "", 0, len(testedWithIntermediates))
-		graphLoad, err := closure.LoadViewGraph(ctx, dir, env, buildFlags, testedWithIntermediates...)
+		graphLoad, err := closure.LoadViewGraph(ctx, hasher.PassReader(), buildFlags, testedWithIntermediates...)
 		if err != nil {
 			return nil, err
 		}
@@ -1121,7 +1121,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			viewTestHooks.dynamicStateMissLoad(patterns)
 		}
 		hasher.Unit("typecheck", "", 0, len(patterns))
-		missLoad, err := closure.LoadViewPackages(ctx, dir, env, buildFlags, nil, patterns...)
+		missLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 		if err != nil {
 			return nil, err
 		}

@@ -74,7 +74,7 @@ func listingEnv(goflags, gowork string) []string {
 // Hasher, and the listing error if any.
 func listFrom(t *testing.T, dir, pkg string, env []string, snapshot *gotool.EnvSnapshot, flags ...string) ([]listPkg, int, *Hasher, error) {
 	t.Helper()
-	h, err := NewAt(context.Background(), dir, env, snapshot, flags...)
+	h, err := NewAt(context.Background(), gotool.PrimedEnvReader(gotool.Runner{}, dir, env, snapshot), flags...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,9 +134,12 @@ func TestListingMemoServesTheListingWithoutASpawn(t *testing.T) {
 	if len(h.fileDigests) == 0 {
 		t.Fatal("verification recorded no file digests for the fold")
 	}
-	// A Hasher without a snapshot has no scope: it spawns.
-	if _, spawns, _ := listOnce(t, dir, env, nil); spawns != 1 {
-		t.Fatalf("snapshot-less listing paid %d spawns, want 1", spawns)
+	// Every Hasher holds its pass's snapshot — a reader takes one when
+	// none is handed on — so a fresh pass over the same environment
+	// serves the listing too: the snapshot-less, unscoped state is
+	// unrepresentable.
+	if _, spawns, _ := listOnce(t, dir, env, nil); spawns != 0 {
+		t.Fatalf("a fresh pass's listing paid %d spawns, want 0 (served under the pass's own snapshot)", spawns)
 	}
 }
 

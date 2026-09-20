@@ -210,7 +210,10 @@ type observationFacts struct {
 	// live before any load (the memo write precedes the closing compare),
 	// and relies on the closing pass's fresh snapshot to refuse any drift
 	// the guards cover.
-	snapshot              *gotool.EnvSnapshot
+	snapshot *gotool.EnvSnapshot
+	// reader is the construction pass's reader, the snapshot's home: the
+	// bracket's constructor reads the construction snapshot through it.
+	reader                *gotool.EnvReader
 	maximal               map[Subject]closure.Closure
 	guards                guard.Guards
 	purity                map[Subject]string
@@ -326,11 +329,12 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// pass-scoped - a later pass takes its own, so environment drift still
 	// meets an observation (REQ-guard-buildconfig; the toolchain guard's
 	// `go version` stays a live probe: it carries the host platform).
-	snapshot, err := gotool.TakeEnvSnapshot(ctx, e.dir, e.env)
+	reader := e.newPassReader()
+	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
 		return observationFacts{}, err
 	}
-	hasher, err = closure.NewAt(ctx, e.dir, e.env, snapshot, e.buildFlags...)
+	hasher, err = closure.NewAt(ctx, reader, e.buildFlags...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -354,7 +358,10 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// reads those keys before execution, so a moved delivered width
 	// stales the evidence instead of hiding behind an analysis-env
 	// stand-in.
-	guards, err := guard.Capture(ctx, observedGuardDir(moduleDir), e.env, e.evidenceEnv(), kind, snapshot, e.guardInputs()...)
+	// The guard reads the pass's one snapshot (primed on a reader over the
+	// guard's directory, where its `go version` runs), never a second
+	// probe of the same pass (REQ-guard-buildconfig).
+	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(e.runner, observedGuardDir(moduleDir), e.env, snapshot), e.evidenceEnv(), kind, e.guardInputs()...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -378,7 +385,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if viewTestHooks.factScope != nil {
 		viewTestHooks.factScope(scope.Facts())
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, scope, e.dir, e.env, e.buildFlags, snapshot, packages...)
+	scan, _, err := scanViewSubjects(ctx, hasher, scope, e.buildFlags, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -406,6 +413,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	}
 	observation := observationFacts{
 		snapshot:                 snapshot,
+		reader:                   reader,
 		maximal:                  make(map[Subject]closure.Closure, len(subjects)),
 		guards:                   guards,
 		purity:                   make(map[Subject]string, len(subjects)),
@@ -1151,6 +1159,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		kind:      v.kind,
 		facts: &observationFacts{
 			snapshot:                 v.facts.snapshot,
+			reader:                   v.facts.reader,
 			maximal:                  maximal,
 			guards:                   v.facts.guards,
 			purity:                   purity,
@@ -1339,9 +1348,6 @@ func analysisUnavailable(reason string) bool {
 	return strings.HasPrefix(reason, analysisUnavailablePrefix)
 }
 
-// differingGuard names the first environment guard whose two construction
-// observations disagreed — the actionable component behind a bare "guards
-// moved".
 // movedIdentitySuffix names the source identities behind a drift
 // refusal, best-effort: membership changes name added and removed
 // paths exactly; content drift names paths whose construction-time
@@ -1386,6 +1392,9 @@ func movedIdentitySuffix(captured, current []string, capturedDigests, currentDig
 	return " (moved: " + render.CappedList(moved) + ")"
 }
 
+// differingGuard names the first environment guard whose two construction
+// observations disagreed — the actionable component behind a bare "guards
+// moved".
 func differingGuard(a, b guard.Guards) string {
 	switch {
 	case a.Toolchain != b.Toolchain:
@@ -1651,7 +1660,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	if viewTestHooks.snapshot != nil {
 		viewTestHooks.snapshot(v.facts.snapshot)
 	}
-	hasher, err = closure.NewBracketAt(ctx, v.engine.dir, v.engine.env, v.facts.snapshot, v.engine.buildFlags...)
+	hasher, err = closure.NewBracketAt(ctx, v.facts.reader, v.engine.buildFlags...)
 	if viewTestHooks.beforeAnalysis != nil {
 		viewTestHooks.beforeAnalysis()
 	}

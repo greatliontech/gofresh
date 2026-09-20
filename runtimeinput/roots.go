@@ -54,12 +54,12 @@ func rootsCacheKey(pkgDir string, env []string) string {
 // declaring nothing when it lies inside, equals, or contains the tree —
 // and the temp root as the run's os.TempDir resolved. A toolchain that
 // cannot answer is an error the caller fails closed on.
-func resolveRoots(ctx context.Context, treeRoot, pkgDir string, env []string) (resolvedRoots, error) {
+func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir string, env []string) (resolvedRoots, error) {
 	key := rootsCacheKey(pkgDir, env)
 	if cached, ok := rootsCache.Load(key); ok {
 		return cached.(resolvedRoots), nil
 	}
-	out, err := gotool.Run(ctx, pkgDir, env, "env", "GOROOT", "GOMODCACHE", "GOCACHE")
+	out, err := runner.Run(ctx, pkgDir, env, "env", "GOROOT", "GOMODCACHE", "GOCACHE")
 	if err != nil {
 		return resolvedRoots{}, err
 	}

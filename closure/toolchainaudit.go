@@ -420,13 +420,12 @@ func toolchainSelectionDegradation(sourceListed bool, version, bakedExperiment s
 // ToolchainSelectionNoticeResolved is the resolving entry of the
 // notice for callers without a Hasher (a consumer attributing the
 // degradation at its own configuration tier): it reads the effective
-// GOFLAGS and GOEXPERIMENT under the caller's environment —
-// snapshot-first when one is supplied, one go env read otherwise — and
-// answers ToolchainSelectionNotice over them. Resolution failure
-// returns its error so the caller fails loudly instead of silently
-// losing the notice.
-func ToolchainSelectionNoticeResolved(ctx context.Context, dir string, env, buildFlags []string, snapshot *gotool.EnvSnapshot) (string, error) {
-	goflags, goexperiment, err := resolveSelectionEnv(ctx, dir, env, snapshot)
+// GOFLAGS and GOEXPERIMENT from the caller's pass reader — its one
+// snapshot — and answers ToolchainSelectionNotice over them. Resolution
+// failure returns its error so the caller fails loudly instead of
+// silently losing the notice.
+func ToolchainSelectionNoticeResolved(ctx context.Context, reader *gotool.EnvReader, buildFlags []string) (string, error) {
+	goflags, goexperiment, err := resolveSelectionEnv(ctx, reader)
 	if err != nil {
 		return "", err
 	}
@@ -481,22 +480,12 @@ func AttributeSelection(reason, axis string) string {
 	return reason + " (judged under an unaudited toolchain selection: " + axis + ")"
 }
 
-// resolveSelectionEnv reads the two selection-bearing go-env values:
-// from the pass's snapshot when the caller holds one, else one
-// combined go env invocation.
-func resolveSelectionEnv(ctx context.Context, dir string, env []string, snapshot *gotool.EnvSnapshot) (goflags, goexperiment string, err error) {
-	if snapshot != nil {
-		return snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT"), nil
-	}
-	out, err := gotool.Run(ctx, dir, env, "env", "GOFLAGS", "GOEXPERIMENT")
+// resolveSelectionEnv reads the two selection-bearing go-env values
+// from the pass's reader — its one snapshot.
+func resolveSelectionEnv(ctx context.Context, reader *gotool.EnvReader) (goflags, goexperiment string, err error) {
+	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	// One line per requested key plus a trailing newline; empty values
-	// are empty lines, so split first and count, never trim first.
-	lines := strings.Split(string(out), "\n")
-	if len(lines) < 2 {
-		return "", "", fmt.Errorf("toolchain selection: go env returned %d values, want 2", len(lines))
-	}
-	return strings.TrimRight(lines[0], "\r"), strings.TrimRight(lines[1], "\r"), nil
+	return snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT"), nil
 }

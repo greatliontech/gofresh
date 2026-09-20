@@ -11,9 +11,10 @@ and leaves measuring and storing to the caller.
 Beside that one question, this module is also the fleet's shared
 substrate: infrastructure every consuming tool needs identically lives
 here once — today the tool-resident guidance format
-([guidance.md](guidance.md)); the go-command policy — one runner for
-every `go` command gofresh spawns itself, under one complete normalized
-environment (deterministic order, duplicate keys refused, `PWD` derived
+([guidance.md](guidance.md)); the go-command policy
+(REQ-fresh-go-command-policy) — one runner for every `go` command
+gofresh spawns itself, the engine's installed one or the plain one,
+under one complete normalized environment (deterministic order, duplicate keys refused, `PWD` derived
 from the command's directory, the ordinary loader pinned; one setter
 keeping that order) that the package loader's `go list` children carry
 — `x/tools` appends its own `PWD=<dir>`, the same derivation, and
@@ -31,8 +32,9 @@ taking the pass's one snapshot on its first key; one canonical
 directory resolution and its degrading coordinate; and the toolchain
 sample below — each a consumer's obligation met once (the `gotool`
 package), a consumer's runner reaching the commands that consumer
-spawns through it, gofresh's own spawns running under the plain
-runner; the
+spawns through it and, installed on an engine by its option, every go
+command that engine spawns itself — the loader's `x/tools` children
+excepted, as stated; the
 fast-tier partition pin — one call pinning that a repository's every
 `testing.Short` gate is a skipping statement of a Test or Fuzz body, at
 its head or after the cheap controls it deliberately runs first, a
@@ -192,6 +194,28 @@ subject.
 guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime
 configuration drift, while a test verdict, which neither can change, is not.
+
+**REQ-fresh-go-command-policy** (behavior): Every `go` command gofresh
+spawns itself MUST run through the go-command policy's runner: under one
+complete normalized environment (deterministic order, duplicate keys
+refused, `PWD` derived from the command's directory, the ordinary loader
+pinned; one setter keeping that order), under the process-boundary rule
+its runner carries where the runner carries one — the plain runner
+carries none; a consumer's runner applies the one rule to every command
+it prepares (the child in its own process group, a cancellation sweeping
+the group, an already-gone group the process-done case, a wait delay
+bounding the reap — a named delay, else the policy's default — and a quit
+grace on a cause the consumer names, the reap then bounded by the grace
+and the delay together) — reading go's environment through one
+pass-scoped reader whose
+one snapshot every same-pass key reads, resolving directories to one
+canonical coordinate with its degrading form; and a runner installed on
+an engine by its option reaches every go command that engine spawns
+itself — the loader's `x/tools` children excepted, which carry the
+policy's environment and spawn outside any hook — while a consumer's
+runner reaches the commands that consumer spawns through it. Enforced by
+`TestEngineSpawnsThroughTheInstalledRunner` and
+`TestEngineSpawnSitesReadARunner`.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing

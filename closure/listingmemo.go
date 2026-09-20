@@ -106,15 +106,11 @@ var listingSourceExts = map[string]bool{
 	".f": true, ".F": true, ".for": true, ".f90": true,
 }
 
-// listingScope is the memo scope: the record version and shape, the env
-// snapshot's identity, the working directory, and the build flags.
-// Empty — the memo inert — when the Hasher was built without a
-// snapshot, or when a flag names a module file outside the recorded
-// input model.
+// listingScope is the memo scope: the record version and shape, the
+// pass snapshot's identity (every Hasher holds its pass's), the working
+// directory, and the build flags. Empty — the memo inert — when a flag
+// names a module file outside the recorded input model.
 func (h *Hasher) listingScope() string {
-	if h.snapshot == nil {
-		return ""
-	}
 	for _, flag := range append(strings.Fields(h.snapshot.Value("GOFLAGS")), h.buildFlags...) {
 		name := strings.TrimLeft(strings.Trim(flag, `"'`), "-")
 		if name == "modfile" || strings.HasPrefix(name, "modfile=") {

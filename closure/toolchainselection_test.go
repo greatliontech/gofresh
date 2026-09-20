@@ -284,7 +284,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	t.Setenv("GOENV", "warm")
 	dir := t.TempDir()
 	env := environmentWith("GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
-	notice, err := ToolchainSelectionNoticeResolved(context.Background(), dir, env, nil, nil)
+	notice, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,11 +295,11 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice, err = ToolchainSelectionNoticeResolved(context.Background(), dir, env, nil, snapshot)
+	notice, err = ToolchainSelectionNoticeResolved(context.Background(), gotool.PrimedEnvReader(gotool.Runner{}, dir, env, snapshot), nil)
 	if err != nil || !strings.Contains(notice, `selection "dup"`) {
 		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
 	}
-	clean, err := ToolchainSelectionNoticeResolved(context.Background(), dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT="), nil, nil)
+	clean, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT=")), nil)
 	if err != nil || clean != "" {
 		t.Fatalf("default selection resolved a notice: %v %q", err, clean)
 	}

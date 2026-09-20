@@ -567,8 +567,11 @@ type Engine struct {
 	// evidenceRoot is the root a subject's runtime-input evidence is
 	// anchored at: relative identities are re-hashed under it. Empty
 	// means the module directory (WithEvidenceRoot).
-	evidenceRoot       string
-	analysisBudget     time.Duration
+	evidenceRoot   string
+	analysisBudget time.Duration
+	// runner spawns every go command the engine runs itself
+	// (WithGoRunner); the zero value is the plain spawn.
+	runner             gotool.Runner
 	progress           func(Progress)
 	deferredCheckClose bool
 	// dynamicStateVouches is the caller's vouch set: canonical
@@ -638,6 +641,25 @@ type Option func(*Engine)
 // describe the same binary (REQ-guard-buildconfig).
 func WithBuildFlags(flags ...string) Option {
 	return func(e *Engine) { e.buildFlags = append([]string(nil), flags...) }
+}
+
+// WithGoRunner installs the runner every go command the engine spawns
+// itself runs through — each pass's environment snapshot, the
+// toolchain guard's `go version`, the closure's package listings — so a
+// consumer's process boundary and hook reach them
+// (REQ-fresh-go-command-policy). The package loader's `go list`
+// children spawn through x/tools, outside any runner; the runtime-input
+// roots probe is a producer's spawn, under the runner the consumer's
+// ProducerIngest names. Without the option the engine spawns plainly.
+func WithGoRunner(r gotool.Runner) Option {
+	return func(e *Engine) { e.runner = r }
+}
+
+// newPassReader mints a pass's environment reader over the engine's
+// runner, directory, and analysis environment: one per pass, its
+// snapshot taken on the pass's first key.
+func (e *Engine) newPassReader() *gotool.EnvReader {
+	return gotool.NewEnvReader(e.runner, e.dir, e.env)
 }
 
 // WithBuildInputs supplies opaque build evidence that cannot itself configure a Go
@@ -1079,7 +1101,7 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	// Engine construction is caller-side setup, not an operation phase; its
 	// one-time flag validation runs to completion.
-	if err := buildflags.ValidateEnv(context.Background(), e.dir, e.env, e.buildFlags); err != nil {
+	if err := buildflags.Validate(context.Background(), e.newPassReader(), e.buildFlags); err != nil {
 		return nil, err
 	}
 	return e, nil

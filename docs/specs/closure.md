@@ -2002,8 +2002,8 @@ toolchain-generated test main is scaffolding outside the model;
 version-pinned modules are immutable under the pin go.sum carries, and
 the standard library rides the toolchain in the snapshot. A hit re-verifies every recorded input
 byte for byte — the served listing IS the listing a spawn would produce
-— and any difference, unreadable input, or unmodellable pass (no
-snapshot, a flag naming a module file outside the model, no main module
+— and any difference, unreadable input, or unmodellable pass (a flag
+naming a module file outside the model, no main module
 containing the working directory, a module or workspace file the build
 cannot parse — reported as a diagnostic) spawns the toolchain; the record's
 own shape is part of its scope, so an entry of another shape is never

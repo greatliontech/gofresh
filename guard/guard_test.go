@@ -33,7 +33,7 @@ func TestCaptureNonEmpty(t *testing.T) {
 func TestCodeCaptureSkipsMeasurementSupport(t *testing.T) {
 	machineCalled := false
 	runtimeCalled := false
-	g, err := captureFor(context.Background(), t.TempDir(), os.Environ(), CodeResult, nil,
+	g, err := captureFor(context.Background(), gotool.NewEnvReader(gotool.Runner{}, t.TempDir(), os.Environ()), CodeResult, nil,
 		func() (MachineFacts, error) {
 			machineCalled = true
 			return MachineFacts{}, errors.New("unsupported")
@@ -56,7 +56,7 @@ func TestCodeCaptureSkipsMeasurementSupport(t *testing.T) {
 
 func TestMeasurementCaptureRequiresMachineSupport(t *testing.T) {
 	want := errors.New("unsupported")
-	_, err := captureFor(context.Background(), t.TempDir(), os.Environ(), Measurement, nil,
+	_, err := captureFor(context.Background(), gotool.NewEnvReader(gotool.Runner{}, t.TempDir(), os.Environ()), Measurement, nil,
 		func() (MachineFacts, error) { return MachineFacts{}, want },
 		func([]string) string { return "runtime" },
 	)
@@ -181,18 +181,18 @@ func TestBuildConfigDigestsBuildInputs(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	dir := t.TempDir()
-	base, err := buildConfigOf(context.Background(), dir, os.Environ(), nil)
+	base, err := buildConfigOfT(t, dir, os.Environ(), nil)
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	withFlags, err := buildConfigOf(context.Background(), dir, os.Environ(), []string{"-tags=integration"})
+	withFlags, err := buildConfigOfT(t, dir, os.Environ(), []string{"-tags=integration"})
 	if err != nil {
 		t.Fatalf("buildConfig (flags): %v", err)
 	}
 	if withFlags == base {
 		t.Error("a caller build input did not move buildconfig")
 	}
-	withPGO, err := buildConfigOf(context.Background(), dir, os.Environ(), []string{"pgo:deadbeef"})
+	withPGO, err := buildConfigOfT(t, dir, os.Environ(), []string{"pgo:deadbeef"})
 	if err != nil {
 		t.Fatalf("buildConfig (pgo): %v", err)
 	}
@@ -223,12 +223,12 @@ func TestBuildConfigSensitive(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	dir := t.TempDir()
-	base, err := buildConfigOf(context.Background(), dir, os.Environ(), nil)
+	base, err := buildConfigOfT(t, dir, os.Environ(), nil)
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
 	t.Setenv("GOFLAGS", "-tags=integration")
-	changed, err := buildConfigOf(context.Background(), dir, os.Environ(), nil)
+	changed, err := buildConfigOfT(t, dir, os.Environ(), nil)
 	if err != nil {
 		t.Fatalf("buildConfig (changed): %v", err)
 	}
@@ -317,10 +317,11 @@ func TestCaptureUsesSuppliedEnvironmentForGuards(t *testing.T) {
 	}
 }
 
-// A snapshot-derived capture is byte-identical to a live-probing one: the
-// snapshot's raw env JSON feeds the same digest, so batching probes can
-// never move a recorded guard (REQ-guard-buildconfig).
-func TestSnapshotCaptureMatchesLiveCapture(t *testing.T) {
+// Two independent probes of one environment digest alike: a capture
+// primed with a snapshot taken earlier equals one whose reader probes
+// for itself, so the pass's batching of probes can never move a
+// recorded guard (REQ-guard-buildconfig).
+func TestPrimedAndProbedCapturesDigestAlike(t *testing.T) {
 	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), "", os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -357,11 +358,11 @@ func TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment(t *testing.T) {
 	}
 	env := setKey(os.Environ(), "GOGC", "100")
 	dir := t.TempDir()
-	base, err := Capture(context.Background(), dir, env, env, Measurement, nil)
+	base, err := Capture(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), env, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeOnly, err := Capture(context.Background(), dir, env, setKey(env, "GOGC", "off"), Measurement, nil)
+	runtimeOnly, err := Capture(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), setKey(env, "GOGC", "off"), Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,11 +372,22 @@ func TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment(t *testing.T) {
 	if runtimeOnly.Toolchain != base.Toolchain || runtimeOnly.BuildConfig != base.BuildConfig {
 		t.Error("a runtime-only change moved an analysis-identity guard")
 	}
-	analysisOnly, err := Capture(context.Background(), dir, setKey(env, "GOGC", "off"), env, Measurement, nil)
+	analysisOnly, err := Capture(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, setKey(env, "GOGC", "off")), env, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if analysisOnly.RuntimeConfig != base.RuntimeConfig {
 		t.Error("an analysis-env GOGC change moved the runtime-config guard, which reads runtimeEnv")
 	}
+}
+
+// buildConfigOfT digests the build config of dir under env as the
+// guard does: the pass's one snapshot, then the digest over its bytes.
+func buildConfigOfT(t *testing.T, dir string, env, buildInputs []string) (string, error) {
+	t.Helper()
+	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
+	if err != nil {
+		return "", err
+	}
+	return buildConfigDigest(snapshot.JSON, env, buildInputs)
 }

@@ -110,6 +110,10 @@ type ScratchNamespace struct {
 type ProducerIngest struct {
 	Identity string
 	Env      []string
+	// Runner spawns the roots probe (`go env` in the package directory):
+	// the consumer's runner, so its boundary reaches the probe; the zero
+	// value is the plain spawn.
+	Runner gotool.Runner
 	// IncompleteReason is the caller's process-health verdict: empty
 	// exactly when the process provably completed and flushed its log.
 	IncompleteReason string
@@ -193,7 +197,7 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	if producerTestHooks.beforeRoots != nil {
 		producerTestHooks.beforeRoots()
 	}
-	roots, err := resolveRoots(ctx, f.Root, f.PkgDir, normalized)
+	roots, err := resolveRoots(ctx, in.Runner, f.Root, f.PkgDir, normalized)
 	if err != nil {
 		if ctx.Err() != nil {
 			// The caller's cancellation, not an environment fault: no

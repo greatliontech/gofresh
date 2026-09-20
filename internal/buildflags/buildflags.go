@@ -10,31 +10,20 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 )
 
-// ValidateEnv refuses flags whose selected source gofresh cannot represent,
-// under env as a complete process environment and the caller's context.
-// Explicit flags and effective GOFLAGS are checked together so analysis never
-// silently falls back to disk source for an overlay-backed build.
-func ValidateEnv(ctx context.Context, dir string, env, explicit []string) error {
-	return ValidateEnvSnapshot(ctx, dir, env, explicit, nil)
-}
-
-// ValidateEnvSnapshot is ValidateEnv reading GOFLAGS from the pass's one
-// env snapshot when non-nil, probing itself otherwise.
-func ValidateEnvSnapshot(ctx context.Context, dir string, env, explicit []string, snapshot *gotool.EnvSnapshot) error {
+// Validate refuses flags whose selected source gofresh cannot represent,
+// the effective GOFLAGS read from the pass's reader — its one snapshot,
+// never a probe of its own. Explicit flags and effective GOFLAGS are
+// checked together so analysis never silently falls back to disk source
+// for an overlay-backed build.
+func Validate(ctx context.Context, reader *gotool.EnvReader, explicit []string) error {
 	for _, flag := range explicit {
 		if isOverlayFlag(flag) {
 			return unsupportedOverlay(flag)
 		}
 	}
-	var goFlags string
-	if snapshot != nil {
-		goFlags = snapshot.Value("GOFLAGS")
-	} else {
-		var err error
-		goFlags, err = EffectiveGOFLAGSEnv(ctx, dir, env)
-		if err != nil {
-			return err
-		}
+	goFlags, err := reader.Value(ctx, "GOFLAGS")
+	if err != nil {
+		return fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
 	}
 	for _, flag := range strings.Fields(goFlags) {
 		flag = strings.Trim(flag, `"'`)
@@ -43,16 +32,6 @@ func ValidateEnvSnapshot(ctx context.Context, dir string, env, explicit []string
 		}
 	}
 	return nil
-}
-
-// EffectiveGOFLAGSEnv returns the GOFLAGS selected by a complete environment
-// under the caller's context.
-func EffectiveGOFLAGSEnv(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := gotool.Run(ctx, dir, env, "env", "GOFLAGS")
-	if err != nil {
-		return "", fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func isOverlayFlag(flag string) bool {
