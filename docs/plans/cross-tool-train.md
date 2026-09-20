@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 240, 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 255, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 235: 244, 213, 209, 212, 216, 218, 217, 220, 214, 246 (the bump, after gofresh 239's release; 210 and 205 ride it), 257 (the freshness-proof bound, directly after the three bumps), 254, 256, 219, 187, 188, 233, then 245 and 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 236: 247, 227 (225 folded), 226, 250 (the bump, after gofresh 239's release; 178 rides), 249, 185, 228, 248, 184, 172, 238, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 259 (the root-input classification, a correctness chunk from a field report at 250's close), 240, 260 (the iterator's yield bound at the range statement), 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 255, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 235: 244, 213, 209, 258 (the evidence-fault reason and explain's CLI face, from field reports at 250's close), 212, 216, 218, 217, 220, 214, 246 (the bump, after gofresh 239's release; 210 and 205 ride it), 257 (the freshness-proof bound, directly after the three bumps), 254, 256, 219, 187, 188, 233, then 245 and 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 236: 247, 227 (225 folded), 226, 250 (the bump, after gofresh 239's release; 178 rides), 249, 185, 228, 248, 184, 172, 238, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1532,12 +1532,46 @@ in their repos.
       persisted per subject and served across runs, memory bounded;
       the report's shape the measure at open and close. Directly after
       the bumps 246/250/253.
+- [ ] 258. gomutant: the evidence walk's faults stamp their own clause
+      (field report evidence-fault-rendered-as-dirty-provenance,
+      2026-09-20: a fault in the evidence walk — an evidence subject with
+      no view, an unreadable runtime-input manifest — stamps the finding
+      dirty on a non-staged run and returns no reason, so the portable
+      line reads the flag as git drift and `findings` stops at that
+      clause; expected: the fault names the subject and the manifest as
+      the staged run already reports it, and "dirty worktree provenance"
+      means git-visible drift alone) and explain's CLI face (field
+      report explain-has-no-cli-face: a read verb with structured input
+      the CLI can take, the same class as findings — both faces, per
+      the two-surfaces doctrine). After 209.
 - [ ] 255. gofresh: a downgrade reason names its invoke site — a
       "reaches <sink>" reason composed through an interface invoke
       names the call expression and its operand type in the subject
       beside the reached sink (REQ-closure-refusal-channels' principle:
       a reason names its channel), so a consumer tells an
       over-approximated interface invoke from a real reach. After 206.
+- [ ] 259. gofresh: the runtime-input classification's origin and the
+      root input (field report root-directory-input-with-empty-manifest,
+      2026-09-20: a pb campaign's records carry `external directory
+      input: /` on every evidence subject with an empty manifest — the
+      classifier handed the literal filesystem root by an origin the
+      record does not name; expected: a runtime input names the
+      observation that produced it — the bracket root, the environment
+      form, the default — and an empty manifest classifies as no input,
+      never as the root; the scoped reproduction at 250's close over
+      pb's validatePath under its scratch namespace did not reach the
+      shape (unverifiable earlier on rapid's shared state) — the measure
+      at open is pb's ExtractZip campaign under its standing vouches).
+      Directly after 200, before 240.
+- [ ] 260. gofresh: the iterator's yield bound at the range statement
+      (field report iterator-calls-and-std-invokes-open-the-closure's
+      first half: a range over `strings.SplitSeq` reaches the analyzer's
+      computed-call widening, where closure.md already names the range
+      statement's binding of the yielded function — a conformance fault
+      of the analyzer against its own clause; the report's invoke half
+      — a std-constructed `hash.Hash` behind an interface operand
+      reported outside RTA — rides invoke-targets-narrowed-by-operand's
+      landing). After 240.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 

@@ -1,6 +1,6 @@
 # A range-over-func iterator call and a standard-library interface dispatch open the subject's closure
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 260 (the iterator half); the invoke half rides invoke-targets-narrowed-by-operand's landing
 
 Field report (greatliontech/pb, gofresh v0.102.0 through gomutant):
 two subjects' observations are refused as "subject reachability is
