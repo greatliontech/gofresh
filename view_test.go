@@ -3240,25 +3240,98 @@ func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
-	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	budgeted, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond))
+	dir := writeViewModule(t, "package view\n\nfunc F() {}\n\nfunc G() {}\n")
+	subjects := []Subject{{Package: "example.com/view", Symbol: "F"}, {Package: "example.com/view", Symbol: "G"}}
+	var mu sync.Mutex
+	var cuts []Progress
+	budgeted, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond), WithProgress(func(p Progress) {
+		if p.Phase == "budget-exhausted" {
+			mu.Lock()
+			defer mu.Unlock()
+			cuts = append(cuts, p)
+		}
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Capture under an exhausted budget still lands a fingerprint carrying an
 	// unavailable proof — never an operation error while the caller's context
-	// is live, and never observable evidence.
-	captureView, err := budgeted.NewView(context.Background(), []Subject{subject}, dir)
+	// is live, and never observable evidence. The reason names the budget:
+	// the record is read long after the pass, and a bare deadline error would
+	// not say whose deadline cut it.
+	captureView, err := budgeted.NewView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := captureView.CaptureObserved(context.Background(), subject)
+	fingerprints, err := captureView.CaptureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
-		t.Fatalf("budget-exhausted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
+	for _, subject := range subjects {
+		fingerprint := fingerprints[subject]
+		if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable: analysis budget 1ns exhausted: ") {
+			t.Fatalf("budget-exhausted capture proof for %s = %+v, want an unavailable disposition naming the budget", subject.Symbol, fingerprint.ObservationProof)
+		}
+	}
+	// A second pass over one subject: the cut is reported for a single
+	// unproven subject too — the count is the fact, not a threshold.
+	single, err := budgeted.NewView(context.Background(), subjects[:1], dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := single.CaptureObserved(context.Background(), subjects[0]); err != nil {
+		t.Fatal(err)
+	}
+	// Each pass reports its cut once, with the count it left unproven —
+	// never one event per subject.
+	mu.Lock()
+	defer mu.Unlock()
+	var details []string
+	for _, cut := range cuts {
+		if cut.Package != "" {
+			t.Fatalf("budget-exhausted event names a package: %+v", cut)
+		}
+		details = append(details, cut.Detail)
+	}
+	want := []string{"analysis budget 1ns exhausted: 2 subjects unproven", "analysis budget 1ns exhausted: 1 subject unproven"}
+	if !slices.Equal(details, want) {
+		t.Fatalf("budget-exhausted events = %q, want %q (one per pass, naming the budget and the count)", details, want)
+	}
+}
+
+// TestValidationReportsUnavailabilityAfterTheClosingCompare pins
+// ErrAnalysisUnavailable's contract: a validation whose proof pass the
+// budget cut still runs its closing runtime-input comparison, so a
+// runtime input moved during the pass is reported as the move, never
+// masked by the unavailability a caller would record as unverifiable
+// evidence.
+func TestValidationReportsUnavailabilityAfterTheClosingCompare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	engine, producer, fixture, fingerprint := attachedProducer(t)
+	if strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("unbudgeted capture proof = %+v, want an analyzed disposition", fingerprint.ObservationProof)
+	}
+	// The validation's own proof pass runs under an exhausted budget —
+	// set on the engine after the capture, the one way to budget the
+	// validation alone (an option budgets every pass of the engine):
+	// with nothing moved, the unavailability is the verdict.
+	engine.analysisBudget = time.Nanosecond
+	if err := producer.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("validation under a cut proof pass = %v, want ErrAnalysisUnavailable", err)
+	}
+	// The fixture moves once the proof pass has begun — after the opening
+	// runtime-input comparison passed, before the closing one runs.
+	viewTestHooks.beforeAnalysis = func() {
+		if err := os.WriteFile(fixture, []byte("moved"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	defer func() { viewTestHooks.beforeAnalysis = nil }()
+	err := producer.Validate(context.Background())
+	if err == nil || errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("validation with a moved runtime input under a cut proof pass = %v, want the move reported, never the unavailability", err)
 	}
 }
 
@@ -3289,26 +3362,41 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	_, producer, _, fingerprint := attachedProducer(t, WithAnalysisBudget(time.Nanosecond))
+	if !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
+		t.Fatalf("budgeted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
+	}
+	// The captured proof is unavailable, so validation re-establishes it by
+	// class regardless of where the fresh budget expires — never a spurious
+	// view-changed error from mismatched error text.
+	if err := producer.Validate(context.Background()); err != nil {
+		t.Fatalf("budgeted validation of an unavailable proof = %v, want success", err)
+	}
+}
+
+// attachedProducer builds a one-subject module with a fixture file, an
+// engine over it with the given options, a producer view with the
+// subject's observed proof captured, and a completed observation of the
+// fixture attached: the shape every producer-validation test starts from.
+func attachedProducer(t *testing.T, opts ...Option) (engine *Engine, producer *View, fixture string, fingerprint Fingerprint) {
+	t.Helper()
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
-	fixture := filepath.Join(dir, "fixture")
+	fixture = filepath.Join(dir, "fixture")
 	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := New(WithDir(dir), WithAnalysisBudget(time.Nanosecond))
+	engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	producer, err = engine.NewView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err = producer.CaptureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
-		t.Fatalf("budgeted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
 	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
@@ -3317,11 +3405,64 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 	if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
 		t.Fatal(err)
 	}
-	// The captured proof is unavailable, so validation re-establishes it by
-	// class regardless of where the fresh budget expires — never a spurious
-	// view-changed error from mismatched error text.
-	if err := producer.Validate(context.Background()); err != nil {
-		t.Fatalf("budgeted validation of an unavailable proof = %v, want success", err)
+	return engine, producer, fixture, fingerprint
+}
+
+// TestLiveBudgetNamesNoBudgetOnAnOwnCauseRefusal pins the discriminator's
+// negative arm through the isolation retry: a batch that fails for its
+// own cause — a test-only dependency that does not compile, so the
+// subject's test-binary program never loads — refuses the subject under a
+// budget that has not expired with no budget in its reason, and the pass
+// reports no exhaustion.
+func TestLiveBudgetNamesNoBudgetOnAnOwnCauseRefusal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "helper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod":           "module example.com/ext\n\ngo 1.26\n",
+		"ext.go":           "package ext\n\nfunc Ok() bool { return true }\n",
+		"ext_test.go":      "package ext_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/ext/helper\"\n)\n\nfunc TestOk(t *testing.T) { helper.H() }\n",
+		"helper/helper.go": "package helper\n\nfunc H() { undefinedSymbol() }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subject := Subject{Package: "example.com/ext", Symbol: "Ok"}
+	var mu sync.Mutex
+	var cuts []Progress
+	engine, err := New(WithDir(dir), WithAnalysisBudget(time.Hour), WithProgress(func(p Progress) {
+		if p.Phase == "budget-exhausted" {
+			mu.Lock()
+			defer mu.Unlock()
+			cuts = append(cuts, p)
+		}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := producer.CaptureObservedBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The closure's own load-failure prefix is the coupling the pin
+	// wants: it is what makes this refusal an own-cause one.
+	reason := batch[subject].ObservationProof.Reason
+	if !strings.HasPrefix(reason, "observation analysis unavailable: closure: load ") || strings.Contains(reason, "analysis budget") {
+		t.Fatalf("own-cause refusal under a live budget = %q; want the load failure without a budget named", reason)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(cuts) != 0 {
+		t.Fatalf("budget-exhausted events under a live budget = %+v, want none", cuts)
 	}
 }
 

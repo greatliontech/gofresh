@@ -326,7 +326,12 @@ context: no observation phase of a cancelled operation continues under a private
 uncancellable context. The context bounds observation work; a producer validation
 attempt still seals its original view against later capture. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
-expressed through a caller-supplied analysis budget, never through cancellation.
+expressed through a caller-supplied analysis budget, never through cancellation:
+a proof refused under an exhausted budget names the budget in its unavailable
+reason, the pass reports the exhaustion once with the count of subjects it left
+unproven, and a validation the budget cut reports the unavailability only after
+every other check of the validation passed, the runtime-input comparison closing
+the proof pass included.
 
 **REQ-fresh-preparation** (invariant): Every refusal an operation can decide from
 inputs it already holds — the package listing, the recorded record's shape, kind,
@@ -353,8 +358,9 @@ operation and memo class, the distinct packages a persistent memo served in
 place of a unit; and, when an operation returns its caller's context error, what
 it persisted before stopping, so a rerun's served set is known. A phase that
 carries a diagnostic — an unaudited toolchain selection, an unavailable
-analysis's per-subject provenance, a listing this build cannot model, what a
-cancelled operation persisted — delivers it on the event's own diagnostic field,
+analysis's per-subject provenance, an exhausted analysis budget with the count
+of subjects it left unproven, a listing this build cannot model, what a cancelled
+operation persisted — delivers it on the event's own diagnostic field,
 never on the error channel and never on any memoized, hashed surface, so a
 consumer prints the diagnostics alone and a walk-order-dependent payload reaches
 the operator without entering an identity. The event renders its own diagnostic

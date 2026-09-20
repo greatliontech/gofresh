@@ -10,8 +10,10 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/closure/testvariant"
@@ -31,8 +33,13 @@ var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
 // ErrAnalysisUnavailable reports that producer validation could not
 // re-establish a captured observation proof because the current analysis was
 // unavailable — an exhausted analysis budget or a failed load — never because
-// the view drifted. The evidence is not persisted; the caller may retry with a
-// larger budget or record the run without observation evidence.
+// the view drifted: it is reported only once every other check of the
+// validation passed, the runtime-input comparison that closes the proof
+// pass included, so a caller holding it knows nothing else moved. The
+// error names the first subject the pass could not re-establish; the
+// pass's own progress diagnostic carries the count. The evidence is not
+// persisted; the caller may retry with a larger budget or record the
+// run's outcomes under unverifiable observation evidence.
 var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailable during validation")
 
 // View is one immutable observation of the source, build, guards, and purity
@@ -277,7 +284,7 @@ func (e *Engine) beginOperation(ctx context.Context) (context.Context, func(*err
 			e.progress(Progress{Phase: "served", Served: class, Index: len(acc.served[class])})
 		}
 		if err != nil && *err != nil && (errors.Is(*err, context.Canceled) || errors.Is(*err, context.DeadlineExceeded)) {
-			e.progress(Progress{Phase: "cancelled", Detail: fmt.Sprintf("%d observability proof slices and %d scans persisted this operation; a rerun serves them", acc.proofs, acc.scans)})
+			e.progress(Progress{Phase: "cancelled", Detail: keptOnCancelDetail(acc.proofs, acc.scans)})
 		}
 	}
 }
@@ -1242,14 +1249,36 @@ func (v *View) validateObserved(ctx context.Context) error {
 		return err
 	}
 	current.mu.RLock()
+	var unavailable error
 	for _, subject := range subjects {
-		if err := compareObservationProof(subject, current.observable[subject], expected[subject]); err != nil {
+		err := compareObservationProof(subject, current.observable[subject], expected[subject])
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrAnalysisUnavailable):
+			// Held, not returned: the closing runtime-input comparison
+			// below still runs, so an unavailable re-establishment is
+			// reported only when nothing else moved — the disposition
+			// under which a caller records the run's outcomes as
+			// unverifiable evidence (ErrAnalysisUnavailable's contract).
+			if unavailable == nil {
+				unavailable = err
+			}
+		default:
+			// The conservative arm, kept by construction rather than
+			// by witness: within one coherent validation the captured
+			// proofs are this view's own over sources the seeded view
+			// just re-observed, so an analyzed proof that changed has
+			// no reachable path — a drift here would be the analysis's
+			// own nondeterminism, refused at once.
 			current.mu.RUnlock()
 			return err
 		}
 	}
 	current.mu.RUnlock()
-	return v.compareAttachedObservations(ctx, attached, subjects)
+	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
+		return err
+	}
+	return unavailable
 }
 
 // compareObservationProof re-establishes one captured observation disposition
@@ -1271,11 +1300,43 @@ func compareObservationProof(subject Subject, observed, captured closure.Observa
 	return nil
 }
 
+// budgetExhausted is the one spelling of an exhausted analysis budget,
+// read by the cut proof's reason and the pass's diagnostic alike.
+func budgetExhausted(budget time.Duration) string {
+	return "analysis budget " + budget.String() + " exhausted"
+}
+
+// countNoun renders a count with its noun, pluralized past one.
+func countNoun(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
+}
+
+// keptOnCancelDetail renders a cancelled operation's kept-on-cancel
+// report: what the passes persisted before the cancellation, so a
+// rerun's served set is known (REQ-fresh-progress).
+func keptOnCancelDetail(proofs, scans int) string {
+	return countNoun(proofs, "observability proof slice") + " and " + countNoun(scans, "scan") + " persisted this operation; a rerun serves them"
+}
+
+// unavailableReason composes an unavailable observability disposition
+// from its cause — the one spelling of the prefix in this package;
+// the closure analysis composes the same prefix at its own refusal
+// sites (closure/observability.go), which analysisUnavailable
+// recognizes alike.
+func unavailableReason(cause string) string {
+	return analysisUnavailablePrefix + ": " + cause
+}
+
+const analysisUnavailablePrefix = "observation analysis unavailable"
+
 // analysisUnavailable reports whether an observability disposition records
 // analysis unavailability rather than an analyzed rejection. The prefix is the
 // one vocabulary both the closure analysis and the isolation fallback emit.
 func analysisUnavailable(reason string) bool {
-	return strings.HasPrefix(reason, "observation analysis unavailable")
+	return strings.HasPrefix(reason, analysisUnavailablePrefix)
 }
 
 // differingGuard names the first environment guard whose two construction
@@ -1615,8 +1676,11 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	// surfaces as analysis failure — degrading to unavailable evidence, never
 	// validity — while the operation, its brackets, and Hasher construction
 	// stay governed by the caller's context alone.
-	if budget := v.engine.analysisBudget; budget > 0 {
-		analysisCtx, cancelBudget := context.WithTimeout(ctx, budget)
+	var analysisCtx context.Context
+	budget := v.engine.analysisBudget
+	if budget > 0 {
+		var cancelBudget context.CancelFunc
+		analysisCtx, cancelBudget = context.WithTimeout(ctx, budget)
 		defer cancelBudget()
 		if err := hasher.BoundAnalysis(analysisCtx); err != nil {
 			return err
@@ -1634,6 +1698,7 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 		// retry; once the analysis budget expires, retries fail at the
 		// subprocess boundary without real work.
 		observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
+		cut := 0
 		for _, request := range observableRequests {
 			isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
 			if isolatedErr != nil {
@@ -1643,11 +1708,26 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 				// The isolated refusal composes here, outside the batch's
 				// attributed return, so it attributes the selection itself
 				// exactly as its in-batch twin does
-				// (REQ-closure-refusal-channels).
-				observableComputed[request] = closure.Observability{Reason: closure.AttributeSelection("observation analysis unavailable: "+isolatedErr.Error(), hasher.SelectionAttribution())}
+				// (REQ-closure-refusal-channels). A refusal under an
+				// expired analysis budget names the budget: the reason
+				// is the record's, read long after the pass, and "context
+				// deadline exceeded" alone would not say whose deadline
+				// (REQ-fresh-context).
+				reason := unavailableReason(isolatedErr.Error())
+				if analysisCtx != nil && analysisCtx.Err() != nil {
+					cut++
+					reason = unavailableReason(budgetExhausted(budget) + ": " + isolatedErr.Error())
+				}
+				observableComputed[request] = closure.Observability{Reason: closure.AttributeSelection(reason, hasher.SelectionAttribution())}
 				continue
 			}
 			maps.Copy(observableComputed, isolated)
+		}
+		if cut > 0 && v.engine.progress != nil {
+			// One diagnostic per pass the budget cut, never one per
+			// subject: the count is the fact, the per-subject reasons
+			// ride the records (REQ-fresh-progress).
+			v.engine.progress(Progress{Phase: "budget-exhausted", Detail: budgetExhausted(budget) + ": " + countNoun(cut, "subject") + " unproven"})
 		}
 	}
 	after, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)

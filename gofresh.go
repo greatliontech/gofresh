@@ -665,13 +665,17 @@ func WithBuildInputs(inputs ...string) Option {
 // the operation persisted and a rerun serves; "toolchain-unaudited" and
 // "analysis-unavailable" carry their diagnostic payload in Detail, as
 // does "listing-unmodelled" (a module file this build cannot parse
-// leaves a package's listing spawned every pass). Package
+// leaves a package's listing spawned every pass) and "budget-exhausted"
+// (once per proof pass the analysis budget cut, Detail naming the
+// budget and the count of subjects it left unproven). Package
 // names the package for the per-package phases; Index and Total give the
 // unit's position when the pass knows it (1-based; zero when unknown).
-// Events are emitted before the step runs and carry no completion
-// signal; they are keep-alive facts about work, never verdict evidence
-// (REQ-fresh-progress); a consumer that prints Detail-bearing events
-// prints only the diagnostics.
+// Events are emitted before the step runs — except the facts about an
+// operation ("served", "cancelled", "budget-exhausted"), reported when
+// they are known — and carry no completion signal; they are keep-alive
+// facts about work, never verdict evidence (REQ-fresh-progress); a
+// consumer that prints Detail-bearing events prints only the
+// diagnostics.
 type Progress struct {
 	Phase   string
 	Package string

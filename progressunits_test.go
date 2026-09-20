@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -132,14 +131,16 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	if _, err := coldView.CaptureObserved(cancelled, b); err == nil {
 		t.Fatal("cancelled capture succeeded")
 	}
-	reported := 0
+	var reported []string
 	for _, e := range events {
-		if e.Phase == "cancelled" && strings.Contains(e.Detail, "persisted this operation") {
-			reported++
+		if e.Phase == "cancelled" {
+			reported = append(reported, e.Detail)
 		}
 	}
-	if reported != 1 {
-		t.Fatalf("kept-on-cancel reports = %d, want exactly one per operation: %+v", reported, events)
+	// Cancelled before its analysis, the pass persisted nothing: the
+	// report says so in the one rendering, counts and nouns in order.
+	if len(reported) != 1 || reported[0] != "0 observability proof slices and 0 scans persisted this operation; a rerun serves them" {
+		t.Fatalf("kept-on-cancel reports = %q, want exactly one per operation with its counts: %+v", reported, events)
 	}
 
 	// A non-context failure reports no cancellation.
@@ -197,5 +198,23 @@ func TestOperationBoundaryReportsOncePerOperation(t *testing.T) {
 	}
 	if served != 1 || reports != 1 {
 		t.Fatalf("outer operation emitted served=%d cancelled=%d, want one each: %+v", served, reports, events)
+	}
+}
+
+// TestKeptOnCancelDetailRendersItsCounts pins the kept-on-cancel
+// report's rendering: each count with its own noun, singular at one,
+// proofs before scans.
+func TestKeptOnCancelDetailRendersItsCounts(t *testing.T) {
+	for _, row := range []struct {
+		proofs, scans int
+		want          string
+	}{
+		{1, 1, "1 observability proof slice and 1 scan persisted this operation; a rerun serves them"},
+		{1, 3, "1 observability proof slice and 3 scans persisted this operation; a rerun serves them"},
+		{0, 0, "0 observability proof slices and 0 scans persisted this operation; a rerun serves them"},
+	} {
+		if got := keptOnCancelDetail(row.proofs, row.scans); got != row.want {
+			t.Errorf("keptOnCancelDetail(%d, %d) = %q, want %q", row.proofs, row.scans, got, row.want)
+		}
 	}
 }
