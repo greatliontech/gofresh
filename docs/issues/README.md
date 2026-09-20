@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [canonical-dir-dot-dot-claim](canonical-dir-dot-dot-claim.md) | CanonicalDir's doc claims dot-dot applies to the resolved prefix; EvalSymlinks folds a link-then-dot-dot onto the link's parent, as a lexical clean does | cross-tool train chunk 259 |
 | [gotool-run-discards-the-answer-a-wait-delay-leaves](gotool-run-discards-the-answer-a-wait-delay-leaves.md) | Runner.Run returns no output beside exec.ErrWaitDelay, so a sampler that salvages a cleanly written answer past a descendant's pipe hold cannot adopt it | cross-tool train chunk 241 |
 | [gotool-snapshot-lacks-the-boundary-hook](gotool-snapshot-lacks-the-boundary-hook.md) | TakeEnvSnapshot is a free function over the bare runner, so a consumer whose go env sample must run inside an owned process boundary cannot adopt it | cross-tool train chunk 241 |
 | [closure-sub-contract-granularity-residue](closure-sub-contract-granularity-residue.md) | three split closure paragraphs still bundle several independently editable rules | cross-tool train chunk 193 |
