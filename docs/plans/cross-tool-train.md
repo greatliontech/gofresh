@@ -1494,7 +1494,7 @@ in their repos.
       six (store List/recordingFromPath, gitblob.State, ExecuteBinary
       with no caller, Execute's one seam, checkOne once 174 lands); two
       full store walks in gc; ab's count check twice. After 174 and 251.
-- [ ] 253. pew: the gofresh bump after 239's and 205's releases — the
+- [x] 253. pew: the gofresh bump after 239's and 205's releases — the
       go-tool consumer arm (pew/internal/gotool's six importers and its
       divergent dir policy onto gofresh's exported policy with 239's
       boundary hook; the GOVERSION sampler onto gotool), the verdict
