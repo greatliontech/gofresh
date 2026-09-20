@@ -175,7 +175,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 259 (the root-input classification, a correctness chunk from a field report at 250's close), 240, 260 (the iterator's yield bound at the range statement), 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 255, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 235: 244, 213, 209, 258 (the evidence-fault reason and explain's CLI face, from field reports at 250's close), 212, 216, 218, 217, 220, 214, 246 (the bump, after gofresh 239's release; 210 and 205 ride it), 257 (the freshness-proof bound, directly after the three bumps), 254, 256, 219, 187, 188, 233, then 245 and 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 236: 247, 227 (225 folded), 226, 250 (the bump, after gofresh 239's release; 178 rides), 249, 185, 228, 248, 184, 172, 238, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 234: 239 (a release before the consumer arms), 200, 259 (the root-input classification, a correctness chunk from a field report at 250's close), 240, 260 (the iterator's yield bound at the range statement), 241, 203, 204, 191 (a release), 192, 205 at the consumers' bumps, 206, 255, 242, 243, then 202 (design, with the user — pulled to directly after 200 in the recorded order, 199 folded into it), 193, 175, 102 (after 175); gomutant's order after audit 235: 244, 213, 209, 258 (the evidence-fault reason and explain's CLI face, from field reports at 250's close), 212, 216, 218, 217, 220, 214, 246 (the bump, after gofresh 239's release; 210 and 205 ride it), 257 (the freshness-proof bound, directly after the three bumps), 254, 256, 219, 187, 188, 233, then 245 and 215 (design, with the user), 95 last when its SDK prerequisite lands; stipulator's order after audit 236: 247, 227 (225 folded), 226, 250 (the bump, after gofresh 239's release; 178 rides), 249, 185, 228, 248, 184, 172, 238, 176 (the user's ruling; one clause-structured requirement and no clause-scoped binding in its own corpus), 97 (a design fork, with the user); pew's order after audit 237: 231, 251, 174, 230, 252, 232, 253 (the bump, after gofresh 239's and 205's releases), 173, 177, then 15 and 127 (with the user); the third re-audit band 261–264 directly after 251 — the twelfth landed chunk since 234–237 — its replan re-sequencing everything below it; every consumer re-measures — after the bumps, one re-measure event), gomutant 217, stipulator 248, pew 173, gofresh 192, gomutant 220, stipulator 184, pew 177, gofresh 206, 255, gomutant 214, stipulator 172, gofresh 242, gomutant 219, stipulator 238, gofresh 243, gomutant 187, 188, 233 — the design chunks opened with the user when reached (gofresh 202 directly after 200 in its own order, 193, 175, 102; gomutant 245, 215; stipulator 176's ruling, 97; pew 15, 127), 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1476,7 +1476,7 @@ in their repos.
       the store re-executes ONCE for the three moves; KnobClause
       offered to gofresh's guidance as the terse-clause export pew 173
       will need.
-- [ ] 251. pew: one recording-key registry with per-key marks (237 P1;
+- [x] 251. pew: one recording-key registry with per-key marks (237 P1;
       audit-note-keys-mirror-the-spec folds in) — the record's key set
       is six lists (RecordingConfigKeys, the toolchain key twice,
       recordingConfigKeys and its admission twin, IsRecordingShape's
@@ -1489,8 +1489,7 @@ in their repos.
       containment predicate and one longest-existing-prefix resolver
       (pathWithin ≡ withinRoot, five inline Rel+IsLocal containments,
       resolveExistingPrefix ≡ moduleBenchDir's walk ≡ CommandDir's
-      weaker variant); one test recording builder (six hand-listed
-      config blocks, gc_test's missing a mandatory key); the vestigial
+      weaker variant); the vestigial
       six (store List/recordingFromPath, gitblob.State, ExecuteBinary
       with no caller, Execute's one seam, checkOne once 174 lands); two
       full store walks in gc; ab's count check twice. After 174 and 251.
@@ -1575,6 +1574,25 @@ in their repos.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
 
+- [ ] 261. gofresh: coherence re-audit (the third re-audit band, fired
+      by the twelfth landed chunk since 234–237: 239, 244, 247, 231,
+      200, 213, 227, 205, 246, 250, 253, 251) — read-only, whole
+      subsystems against the specs since 234: the gotool policy and its
+      three consumer arms (239, 246, 250, 253), the guidance and
+      diagnostics plumbing (205), the closure decomposition (200), the
+      field-report chunks chartered since (254–260); output a chartered
+      consolidation set, recorded disputes, and a re-sequencing of the
+      queued gofresh chunks.
+- [ ] 262. gomutant: coherence re-audit — the face-parity residue and
+      the seams (244, 213), the bump's registry and knob-clause folds
+      (246), the exit log and the ledger since 235; same output.
+- [ ] 263. stipulator: coherence re-audit — the correctness chunk (247),
+      the vestigial sweep (227), the bump with the scratch namespaces
+      and the environment policy (250); same output.
+- [ ] 264. pew: coherence re-audit — the conformance half (231), the
+      bump (253), the recording-key registry and the one test builder
+      (251); same output; closes with the cross-repo replan (the lane
+      re-sequenced from it).
 - [x] 221. stipulator: soundness conformance between the policy record
       and the engine — the repository vouch file is neither declined
       (gofresh's WithoutRepositoryVouches, the "one set, one home" the
