@@ -14,11 +14,25 @@ here once — today the tool-resident guidance format
 ([guidance.md](guidance.md)); the go-command policy — one runner for
 every `go` command gofresh spawns itself, under one complete normalized
 environment (deterministic order, duplicate keys refused, `PWD` derived
-from the command's directory, the ordinary loader pinned) that the
-package loader's `go list` children carry — `x/tools` appends its own
-`PWD=<dir>`, the same derivation, and spawns them outside the runner's
-hook; one canonical directory resolution; and the toolchain sample below
-— each a consumer's obligation met once (the `gotool` package); the
+from the command's directory, the ordinary loader pinned; one setter
+keeping that order) that the package loader's `go list` children carry
+— `x/tools` appends its own `PWD=<dir>`, the same derivation, and
+spawns them outside the runner's hook; one process-boundary rule a
+consumer's runner applies to every command it prepares — the child in
+its own process group, a cancellation sweeping the group, an
+already-gone group the process-done case, a wait delay bounding the
+reap (a named delay, else the policy's default, never unbounded), a
+quit grace on a cause the consumer names, the reap then bounded by the
+grace and the delay together — with the prepared command a consumer
+streams itself and the collected run keeping a cleanly exited process's
+answer beside a descendant's pipe hold and bounding a failed command's
+diagnostics in its refusal; one pass-scoped go-environment reader
+taking the pass's one snapshot on its first key; one canonical
+directory resolution and its degrading coordinate; and the toolchain
+sample below — each a consumer's obligation met once (the `gotool`
+package), a consumer's runner reaching the commands that consumer
+spawns through it, gofresh's own spawns running under the plain
+runner; the
 fast-tier partition pin — one call pinning that a repository's every
 `testing.Short` gate is a skipping statement of a Test or Fuzz body, at
 its head or after the cheap controls it deliberately runs first, a
@@ -186,7 +200,15 @@ sampled by `go env GOVERSION` in the target module's directory (never
 the tool's own working directory: under GOTOOLCHAIN=auto the selected
 toolchain is per module) — the sample gofresh's go-command policy
 performs for every consumer, so no consumer spells the sampling contract
-itself. Enforced by `TestSampleGoVersionRunsInTheModuleDirectory`.
+itself: memoized per directory coordinate and environment for a
+sampler's lifetime, a cancelled sample never memoized, the answer a
+cleanly exited process wrote kept when a descendant holds its pipe past
+the wait delay, and composed with this judgment into the one typed
+provenance refusal every consumer's judged run answers with — an
+unidentifiable ambient toolchain named with the frontend and the cause,
+a breaking skew in this clause's words. Enforced by
+`TestSampleGoVersionRunsInTheModuleDirectory` and
+`TestToolchainProvenanceIsOneRefusal`.
 Within a major the refusal is directional — a frontend older than the
 ambient series refuses, since it predates the sources' language, while a
 newer frontend reads older language under the Go 1 compatibility
@@ -368,7 +390,9 @@ line — the phase, the package where the event names one, and the detail, a
 multi-line one folded onto the single line — and a consumer printing diagnostics
 without a rendering of its own prints that rendering, the sink it installs
 serializing its writes, so every tool's log spells an engine diagnostic one way.
-Progress events are keep-alive facts about work, never verdict evidence.
+The per-unit phase set is exported beside the event, so a consumer's keep-alive
+names a stretch for exactly the units and never spells the set itself. Progress
+events are keep-alive facts about work, never verdict evidence.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's

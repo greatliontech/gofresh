@@ -16,6 +16,27 @@ import (
 // pinned (no external package driver). One policy, exported here, so a
 // consumer never re-derives it (REQ-fresh-coherent-view).
 
+// SetEnv returns env with key set to value: every entry of that key
+// dropped (case-insensitively on Windows, as go resolves keys) and the
+// new entry inserted where NormalizeEnv orders it — over a normalized
+// environment the result stays normalized; the one setter, so a
+// consumer's environment never diverges from the policy's order by
+// appending.
+func SetEnv(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if name, _, ok := split(entry); !ok || !equalKey(name, key) {
+			out = append(out, entry)
+		}
+	}
+	entry := key + "=" + value
+	i := sort.Search(len(out), func(i int) bool { return entryLess(entry, out[i]) })
+	out = append(out, "")
+	copy(out[i+1:], out[i:])
+	out[i] = entry
+	return out
+}
+
 // EnvForCommand returns env with PWD derived from dir, matching the environment
 // go/packages gives a Go command run under packages.Config.Dir.
 func EnvForCommand(env []string, dir string) ([]string, error) {
@@ -64,18 +85,7 @@ func NormalizeEnv(env []string) ([]string, error) {
 		seen[identity] = true
 		normalized[i] = entry
 	}
-	sort.Slice(normalized, func(i, j int) bool {
-		left, _, _ := split(normalized[i])
-		right, _, _ := split(normalized[j])
-		if runtime.GOOS == "windows" {
-			left = strings.ToUpper(left)
-			right = strings.ToUpper(right)
-		}
-		if left == right {
-			return normalized[i] < normalized[j]
-		}
-		return left < right
-	})
+	sort.Slice(normalized, func(i, j int) bool { return entryLess(normalized[i], normalized[j]) })
 	return normalized, nil
 }
 
@@ -116,6 +126,22 @@ func LookupEnv(env []string, key string) (string, bool) {
 // EqualEnvKey reports whether two environment names identify the same variable on
 // the current platform.
 func EqualEnvKey(left, right string) bool { return equalKey(left, right) }
+
+// entryLess is the policy's one order: by key (case-folded on Windows,
+// as go resolves keys), then by the whole entry — NormalizeEnv sorts by
+// it and SetEnv inserts by it.
+func entryLess(a, b string) bool {
+	left, _, _ := split(a)
+	right, _, _ := split(b)
+	if runtime.GOOS == "windows" {
+		left = strings.ToUpper(left)
+		right = strings.ToUpper(right)
+	}
+	if left == right {
+		return a < b
+	}
+	return left < right
+}
 
 func split(entry string) (string, string, bool) {
 	equals := strings.IndexByte(entry, '=')

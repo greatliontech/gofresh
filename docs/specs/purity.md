@@ -112,7 +112,10 @@ mapped to the canonical identity, an absent file the empty set, a malformed line
 refusing the engine naming the file and line (fail-closed: a vouch suppresses an
 unverifiable verdict, so a set that cannot be read whole is never partly honored)
 — and the caller's per-run set, which extends the reviewed set and never removes
-from it; a consumer owning its own reviewed set declines the file and supplies
+from it (a caller reducing many reviewed spellings to that set parses each,
+deduplicates, and sorts the identities, one malformed spelling refusing the
+whole set — the one reduction gofresh exports so no consumer spells it); a
+consumer owning its own reviewed set declines the file and supplies
 the set whole, so one set has one home. The engine judges under the union and
 records it: a file vouch that discharges a culprit rides the subject's evidence
 exactly as a caller's does (REQ-vouch-recorded), so a consumer reading its

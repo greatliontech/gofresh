@@ -5,8 +5,6 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
-| [gotool-run-discards-the-answer-a-wait-delay-leaves](gotool-run-discards-the-answer-a-wait-delay-leaves.md) | Runner.Run returns no output beside exec.ErrWaitDelay, so a sampler that salvages a cleanly written answer past a descendant's pipe hold cannot adopt it | cross-tool train chunk 241 |
-| [gotool-snapshot-lacks-the-boundary-hook](gotool-snapshot-lacks-the-boundary-hook.md) | TakeEnvSnapshot is a free function over the bare runner, so a consumer whose go env sample must run inside an owned process boundary cannot adopt it | cross-tool train chunk 241 |
 | [closure-sub-contract-granularity-residue](closure-sub-contract-granularity-residue.md) | three split closure paragraphs still bundle several independently editable rules | cross-tool train chunk 193 |
 | [loader-spawns-outside-the-runner](loader-spawns-outside-the-runner.md) | the package loader's `go list` children spawn through `x/tools`, outside `gotool.Runner`'s hook: a consumer's process boundary covers the runner's children only | cross-tool train chunk 241 |
 | [per-file-memos-one-shape](per-file-memos-one-shape.md) | the effect-scan, ledger-parse, and canonical-digest memos each spell the load-serve-pend-merge discipline; one generic per-file memo would hold it once | cross-tool train chunk 203 |

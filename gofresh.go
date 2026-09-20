@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -689,6 +690,26 @@ type Progress struct {
 	// riding any memoized, hashed surface
 	// (REQ-closure-observability-memo).
 	Detail string
+}
+
+// unitPhases is the per-unit phase set: the phases reported before a
+// unit of analysis work runs. The other phases are facts about an
+// operation ("served", "cancelled", "budget-exhausted") or diagnostics
+// ("toolchain-unaudited", "analysis-unavailable", "listing-unmodelled"),
+// reported when known and naming no stretch.
+var unitPhases = []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
+
+// UnitPhases returns the per-unit phase set — a consumer's keep-alive
+// names a stretch for exactly these (REQ-fresh-progress) — as its own
+// copy: the set is the contract, never a consumer's to reorder.
+func UnitPhases() []string {
+	return slices.Clone(unitPhases)
+}
+
+// IsUnit reports whether the event opens a unit of analysis work — a
+// member of UnitPhases — as opposed to a fact or a diagnostic.
+func (p Progress) IsUnit() bool {
+	return slices.Contains(unitPhases, p.Phase)
 }
 
 // WithProgress supplies a callback invoked synchronously at the start of each

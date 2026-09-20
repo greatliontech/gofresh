@@ -1,10 +1,13 @@
 package gofresh
 
 import (
+	"context"
 	"fmt"
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"go/version"
 	"strings"
+	"sync"
 )
 
 // Tool provenance: a binary embedding this engine drives an ambient
@@ -90,4 +93,61 @@ func languageSeries(v string) string {
 	v = strings.TrimSpace(v)
 	v, _, _ = strings.Cut(v, " ")
 	return version.Lang(v)
+}
+
+// ToolchainProvenanceError is the one typed refusal a consumer's
+// judged run answers a toolchain-provenance fault with — an
+// unidentifiable ambient toolchain or a language-series skew — the
+// class its abort boundary tests for, wrapping the cause.
+type ToolchainProvenanceError struct{ Err error }
+
+func (e *ToolchainProvenanceError) Error() string { return e.Err.Error() }
+func (e *ToolchainProvenanceError) Unwrap() error { return e.Err }
+
+// ToolchainSampler answers the ambient toolchain's version for a
+// directory under an environment: gotool.Sampler is the memoized
+// sampler a consumer holds for its lifetime; a test injects a
+// SampleFunc.
+type ToolchainSampler interface {
+	Sample(ctx context.Context, dir string, env []string) (string, error)
+}
+
+// SampleFunc is a ToolchainSampler over one function.
+type SampleFunc func(ctx context.Context, dir string, env []string) (string, error)
+
+// Sample calls f.
+func (f SampleFunc) Sample(ctx context.Context, dir string, env []string) (string, error) {
+	return f(ctx, dir, env)
+}
+
+// ToolchainProvenance is the composite every consumer's judged run
+// performs before judging: the memoized sample in the target module's
+// directory under the consumer's runner, then the skew judgment, both
+// refusals typed. A composite is held for the lifetime its samples
+// should share — one memo: the zero value creates its own
+// gotool.Sampler once, on first use, so every Check through one
+// composite pays one sample per coordinate and environment.
+type ToolchainProvenance struct {
+	Sampler ToolchainSampler
+	once    sync.Once
+}
+
+// Check samples the ambient toolchain for dir under env and refuses,
+// typed, an unidentifiable toolchain ("toolchain provenance: binary
+// built with <frontend>, ambient toolchain unidentifiable — refusing to
+// judge: <cause>") or a breaking skew (ToolchainSkew's own words).
+func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []string) error {
+	p.once.Do(func() {
+		if p.Sampler == nil {
+			p.Sampler = &gotool.Sampler{}
+		}
+	})
+	ambient, err := p.Sampler.Sample(ctx, dir, env)
+	if err != nil {
+		return &ToolchainProvenanceError{Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", closure.AnalyzingFrontend(), err)}
+	}
+	if err := ToolchainSkew(ambient); err != nil {
+		return &ToolchainProvenanceError{Err: err}
+	}
+	return nil
 }

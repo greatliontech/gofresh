@@ -79,3 +79,21 @@ func ParseVouchEntry(entry string) (string, error) {
 	}
 	return pkg + "." + name, nil
 }
+
+// ParseVouchEntries maps reviewed spellings to the engine's vouch SET:
+// each entry parsed by ParseVouchEntry, the identities deduplicated and
+// sorted — a repeated entry is one acceptance, and the set an engine
+// receives is one whatever order the entries came in (REQ-vouch-input).
+// A malformed entry refuses the whole set, fail-closed.
+func ParseVouchEntries(entries []string) ([]string, error) {
+	identities := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		identity, err := ParseVouchEntry(entry)
+		if err != nil {
+			return nil, err
+		}
+		identities = append(identities, identity)
+	}
+	slices.Sort(identities)
+	return slices.Compact(identities), nil
+}

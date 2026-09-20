@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-fresh-progress"
 reason: "the clause states that a Detail-bearing phase's payload enters no memoized, hashed surface; the code holds it (the memoized reason is a constant, the walk-order-dependent provenance rides the event alone) but no witness pins the memo's stability against the payload"
-content_hash: "50b8615913fd4064a0c9d86737b85e7e475df73cf81f7ead50fdec6a82058bfd"
-source_hash: "b7b8491390b09e62c5942d159522d318c02e3d81f5a127572da83f20bc30e63e"
+content_hash: "2afb9acec924c4b265ad28bbfd02e7be88e48575b2f2d4aadf8590e404b2d3b5"
+source_hash: "9c34bba2b07a01506b77b2d8cfa1f9dfd5319980cb24dafcce7f84e74643fc7c"
 lands { manual { condition: "a memo-stability witness for the diagnostic payload lands with the test-surface chunk (cross-tool train chunk 206)" } }
