@@ -83,8 +83,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "57f47a06e240982ae728caae8c74174d77117f090aaa345ad8ea1f5f969b4e27"
-  source_hash: "9268b9f427d57f0e0a5f85cee5e29c0542d2cf7c2c77619a9ceb5fb78b62f5a7"
+  content_hash: "cf6a363a77bd2916b9ff4187b1e53e866229a773b913bcb039bb6df755fcd18c"
+  source_hash: "ed0bcddfd7a2fbedb1cbcdc4230248b1c206721b5a9273849fc2a05d05975e65"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestFingerprintDataShape"
   role: BINDING_ROLE_TESTS
@@ -99,16 +99,6 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestPropCommitIdentityAbsent"
   role: BINDING_ROLE_TESTS
   shape_hash: "4c403098a41cefb56eabf26f3914e9ea090aee153fbc7f8bb41c3009237efb6e"
-}
-
-bindings {
-  requirement_id: "REQ-fresh-fingerprint-data"
-  content_hash: "57f47a06e240982ae728caae8c74174d77117f090aaa345ad8ea1f5f969b4e27"
-  source_hash: "9268b9f427d57f0e0a5f85cee5e29c0542d2cf7c2c77619a9ceb5fb78b62f5a7"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh.TestFingerprintIsExportedData"
-  role: BINDING_ROLE_PROVES
-  shape_hash: "4977ce04d0733b90bfb51e0a2e77105983da22da119600399d3dd4484e5e8367"
 }
 
 bindings {
@@ -153,22 +143,12 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-observation-data"
-  content_hash: "05ce1796c1dccdf9146bfef9133545b0ca885dc32f55f473a18de6205acf760d"
-  source_hash: "bb37f845d98c6ba388e8772b8989a2245f6c1c128a8962e64eee2dcd6fee9e83"
+  content_hash: "08f5c26f3d80d3610fe92867f0a219265bda7ea0448ec672f81d97bd722c3606"
+  source_hash: "4cf988756b52a3599343d05c73584b16637c33f1050133fc2de31d3c64d5ba31"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.observedFingerprintLocked"
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "1e52f8ed565d397f679aeae3533c0c86ad3611f54a26256e4f95137909f0dedc"
-}
-
-bindings {
-  requirement_id: "REQ-fresh-observation-data"
-  content_hash: "05ce1796c1dccdf9146bfef9133545b0ca885dc32f55f473a18de6205acf760d"
-  source_hash: "bb37f845d98c6ba388e8772b8989a2245f6c1c128a8962e64eee2dcd6fee9e83"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh.TestFingerprintIsExportedData"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "4977ce04d0733b90bfb51e0a2e77105983da22da119600399d3dd4484e5e8367"
 }
 
 bindings {
@@ -749,4 +729,64 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/gotool.TestEnvReaderNeverMemoizesACancellation"
   role: BINDING_ROLE_TESTS
   shape_hash: "434bb05472ae5e470f9eab082db1b3a29366f575325d32847c7049d2a1cac5c1"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-fingerprint-record"
+  content_hash: "70e99c41162bd6d4ddefc4bae150626724bcf8f36be05cf0d74013341bd094f1"
+  source_hash: "e48016e4ad3ac91a747b7f8f6b98bb0d7e73f24337244ae439b03e74d72c90cc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordIsTheFleetForm"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "32cd8a745d56e39a3fc30ea24f95549beae7dd4918610636257c0409179ed454"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-fingerprint-record"
+  content_hash: "70e99c41162bd6d4ddefc4bae150626724bcf8f36be05cf0d74013341bd094f1"
+  source_hash: "e48016e4ad3ac91a747b7f8f6b98bb0d7e73f24337244ae439b03e74d72c90cc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordRoundTrips"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "421754bfcd39b0623ae9c5d2729d606eecd310b8393c08d86fb5e8c1031090fd"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-fingerprint-record"
+  content_hash: "70e99c41162bd6d4ddefc4bae150626724bcf8f36be05cf0d74013341bd094f1"
+  source_hash: "e48016e4ad3ac91a747b7f8f6b98bb0d7e73f24337244ae439b03e74d72c90cc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "486965307ae140988243591a07177cad72eb54e9aecacc95d1115b5cc0533693"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-fingerprint-record"
+  content_hash: "70e99c41162bd6d4ddefc4bae150626724bcf8f36be05cf0d74013341bd094f1"
+  source_hash: "e48016e4ad3ac91a747b7f8f6b98bb0d7e73f24337244ae439b03e74d72c90cc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintDataShape"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b0ee4c18b9776678542082a70812bc3d1a7859c09b227d8a96a5fe222926ca82"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-observation-data"
+  content_hash: "08f5c26f3d80d3610fe92867f0a219265bda7ea0448ec672f81d97bd722c3606"
+  source_hash: "4cf988756b52a3599343d05c73584b16637c33f1050133fc2de31d3c64d5ba31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintDataShape"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b0ee4c18b9776678542082a70812bc3d1a7859c09b227d8a96a5fe222926ca82"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-observation-data"
+  content_hash: "08f5c26f3d80d3610fe92867f0a219265bda7ea0448ec672f81d97bd722c3606"
+  source_hash: "4cf988756b52a3599343d05c73584b16637c33f1050133fc2de31d3c64d5ba31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordIsTheFleetForm"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "32cd8a745d56e39a3fc30ea24f95549beae7dd4918610636257c0409179ed454"
 }

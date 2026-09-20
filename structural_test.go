@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 )
 
@@ -49,25 +48,6 @@ func TestVariantLedgerTypesAreExportedData(t *testing.T) {
 		structural.FieldOf[string]("Before"),
 		structural.FieldOf[string]("After"),
 		structural.FieldOf[bool]("Embedded"),
-	)
-}
-
-func TestFingerprintIsExportedData(t *testing.T) {
-	structural.ExportedData[Fingerprint](t,
-		structural.FieldOf[string]("MaximalClosure"),
-		structural.FieldOf[string]("TestVariantClosure"),
-		structural.FieldOf[string]("ObservationAssertion"),
-		structural.FieldOf[ObservationProof]("ObservationProof"),
-		structural.FieldOf[guard.Guards]("Guards"),
-		structural.FieldOf[string]("PurityAssertion"),
-		structural.FieldOf[string]("DynamicStateVouches"),
-		structural.FieldOf[string]("SingleSubjectDischarges"),
-		structural.FieldOf[string]("PackageProcessDischarges"),
-		structural.FieldOf[string]("DynamicStateStrategy"),
-		structural.FieldOf[string]("ClosureStrategy"),
-		structural.FieldOf[string]("RuntimeInputs"),
-		structural.FieldOf[string]("RuntimeDigest"),
-		structural.FieldOf[Kind]("ResultKind"),
 	)
 }
 

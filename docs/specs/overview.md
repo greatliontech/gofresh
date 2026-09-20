@@ -178,8 +178,8 @@ strategy/version identity even when source is unchanged.
 **REQ-fresh-observation-data** (invariant): The observation-completeness assertion
 attribution and observability proof strategy/version, subject, disposition, and
 integrity evidence MUST be fingerprint constituents exposed as data beside
-purity, result kind, and guard values. They carry no engine-owned persistence or wire
-format. Empty assertion and proof evidence means the lift was not selected; partial,
+purity, result kind, and guard values, their record form the fingerprint's
+(REQ-fresh-fingerprint-record). Empty assertion and proof evidence means the lift was not selected; partial,
 unknown, or internally inconsistent evidence confers no proof.
 
 **REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
@@ -253,8 +253,46 @@ closure identity's derivation (REQ-closure-identity-strategy in
 [closure.md](closure.md)), the shared-dynamic-state facts' derivation, and
 optional attributable observation-completeness assertion and observability proof
 evidence, attributable purity assertion, runtime-input evidence, and result kind
-as data, carrying no persistence or wire format of its own — the caller owns how a
-fingerprint is serialized and stored beside its result.
+as data, and published in one record form (REQ-fresh-fingerprint-record) — the
+caller stores that form beside its result and pins its own further facts beside
+it (REQ-fresh-caller-pins), never a second encoding of the fingerprint's own.
+
+**REQ-fresh-fingerprint-record** (wire): The fingerprint's record form MUST be
+one JSON object, encoded and decoded by the fingerprint itself: the keys
+`maximalClosure`, `testVariantClosure`, `toolchain`, `buildConfig`, and numeric
+`resultKind` always present, in that relative order; `machine` and
+`runtimeConfig` (the measurement guards), `observationAssertion`,
+`observationProof`, `purityAssertion`, `dynamicStateVouches`,
+`singleSubjectDischarges`, `packageProcessDischarges`, `dynamicStateStrategy`,
+`closureStrategy`, `runtimeInputs`, and `runtimeDigest` each present exactly
+when its value is non-empty, in the order listed between `buildConfig` and
+`resultKind`; the guards flattened to their four keys; the observation proof an
+object of `strategy`, `package`, `symbol`, `observable`, `reason` (present
+exactly when non-empty), and `evidence`, present exactly when the proof is
+non-zero. Decoding an encoded fingerprint yields it exactly, and a record
+decodes only when it is the form's own encoding of what it decodes to up to
+insignificant whitespace — a reordered or empty-valued record is refused, an
+indented one decodes, a parent document being free to indent its nested values —
+so encoding a decoded record yields the record's compact bytes exactly, and a
+consumer derives a record's name from the value's encoding. The form owns its
+escaping: the bytes are the same under any parent encoder's escaping setting. A
+strategy key absent from a record decodes to the empty strategy, which the check
+judges stale (REQ-closure-dynamic-state-memo, REQ-closure-identity-strategy) —
+absence is never filled in. A decoder refuses — naming a well-formed record's
+fault in the record's own vocabulary, never an internal type; malformed JSON is
+the encoding library's refusal — a key the form does not define, a duplicated
+key, an explicit null, trailing data after the object (where the entry point has
+not already refused it), a proof without its observable, a positive proof
+carrying a reason, and every fingerprint the validity ladder refuses — a result
+kind that is neither code-result nor measurement (zero is a recording written
+without one) and a code-result fingerprint carrying a measurement guard
+(REQ-guard-selective-capture); the encoder refuses the ladder's refusals so an
+invalid record is never written, and the ladder is exposed as data for a caller
+assembling a fingerprint another way. A refused record decodes to nothing.
+Observation evidence a decoded proof carries that the check finds inconsistent
+confers no proof (REQ-fresh-observation-data) but is not a decoding refusal — a
+stored record stays readable. Enforced by TestFingerprintRecordIsTheFleetForm,
+TestFingerprintRecordRoundTrips, TestFingerprintRecordRefusals.
 
 > Compatibility posture of the test-variant partition: every recording captured
 > before the compartment existed is stale exactly once against a partitioned

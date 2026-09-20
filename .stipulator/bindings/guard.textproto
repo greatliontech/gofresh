@@ -320,3 +320,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "caf970cdf628248d870a964c7981909a129ce4c33afbdf115d38e723af96c58c"
 }
+
+bindings {
+  requirement_id: "REQ-guard-selective-capture"
+  content_hash: "b86837ce1c6c793517703dd020f9df3402b92a370bb4e1b2c93ce0d021efb430"
+  source_hash: "4bd2d7410a39011cfb9ea103a27821b748ba549111ebd3cc3a4b54104b167e70"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "486965307ae140988243591a07177cad72eb54e9aecacc95d1115b5cc0533693"
+}

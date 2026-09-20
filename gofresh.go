@@ -423,13 +423,16 @@ type ObservationProof struct {
 	Evidence   string
 }
 
-// Fingerprint is the recorded evidence a verdict is computed from (data only, no
-// wire format — REQ-fresh-fingerprint-data): the subject's maximal source-closure
+// Fingerprint is the recorded evidence a verdict is computed from
+// (REQ-fresh-fingerprint-data): the subject's maximal source-closure
 // hash, its package's test-variant compartment hash, optional
-// observability evidence, guard values, attributable
-// observation and purity assertions, result kind, and the caller's runtime-input manifest and digest evidence.
-// The caller serializes and stores it alongside its result, and pins any further
-// domain facts of its own (REQ-fresh-caller-pins).
+// observability evidence, guard values, attributable observation and
+// purity assertions, result kind, and the caller's runtime-input
+// manifest and digest evidence. Its record form is its own JSON
+// encoding (REQ-fresh-fingerprint-record) — the caller stores that
+// beside its result and pins any further domain facts of its own
+// (REQ-fresh-caller-pins). The type stays comparable: a view compares
+// fingerprints by equality.
 type Fingerprint struct {
 	MaximalClosure string
 	// TestVariantClosure is the subject package's test-variant compartment:

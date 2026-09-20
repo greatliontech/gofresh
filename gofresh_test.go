@@ -160,20 +160,46 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 	}
 }
 
+// TestFingerprintDataShape pins the fingerprint as exported data — every
+// constituent an exported field of the stated type, in order — whose
+// only behaviour is its record form: the encoder and the validity
+// ladder on the value, the decoder on the pointer, nothing else
+// (REQ-fresh-fingerprint-data, REQ-fresh-fingerprint-record).
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
-	want := []string{"MaximalClosure", "TestVariantClosure", "ObservationAssertion", "ObservationProof", "Guards", "PurityAssertion", "DynamicStateVouches", "SingleSubjectDischarges", "PackageProcessDischarges", "DynamicStateStrategy", "ClosureStrategy", "RuntimeInputs", "RuntimeDigest", "ResultKind"}
+	want := []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{"MaximalClosure", reflect.TypeFor[string]()}, {"TestVariantClosure", reflect.TypeFor[string]()},
+		{"ObservationAssertion", reflect.TypeFor[string]()}, {"ObservationProof", reflect.TypeFor[ObservationProof]()},
+		{"Guards", reflect.TypeFor[guard.Guards]()}, {"PurityAssertion", reflect.TypeFor[string]()},
+		{"DynamicStateVouches", reflect.TypeFor[string]()}, {"SingleSubjectDischarges", reflect.TypeFor[string]()},
+		{"PackageProcessDischarges", reflect.TypeFor[string]()}, {"DynamicStateStrategy", reflect.TypeFor[string]()},
+		{"ClosureStrategy", reflect.TypeFor[string]()}, {"RuntimeInputs", reflect.TypeFor[string]()},
+		{"RuntimeDigest", reflect.TypeFor[string]()}, {"ResultKind", reflect.TypeFor[Kind]()},
+	}
 	if typeOf.Kind() != reflect.Struct || typeOf.NumField() != len(want) {
 		t.Fatalf("Fingerprint shape = %s with %d fields, want data struct with %d fields", typeOf.Kind(), typeOf.NumField(), len(want))
 	}
-	for i, name := range want {
+	for i, w := range want {
 		field := typeOf.Field(i)
-		if field.Name != name || !field.IsExported() {
-			t.Fatalf("Fingerprint field %d = %s exported=%v, want exported %s", i, field.Name, field.IsExported(), name)
+		if field.Name != w.name || !field.IsExported() || field.Type != w.typ || field.Tag != "" {
+			t.Fatalf("Fingerprint field %d = %s %s exported=%v tag=%q, want exported %s %s untagged", i, field.Name, field.Type, field.IsExported(), field.Tag, w.name, w.typ)
 		}
 	}
-	if typeOf.NumMethod() != 0 || reflect.PointerTo(typeOf).NumMethod() != 0 {
-		t.Fatal("Fingerprint carries behavior rather than data only")
+	methods := func(typ reflect.Type) []string {
+		var names []string
+		for i := 0; i < typ.NumMethod(); i++ {
+			names = append(names, typ.Method(i).Name)
+		}
+		return names
+	}
+	if got := methods(typeOf); !reflect.DeepEqual(got, []string{"MarshalJSON", "Validate"}) {
+		t.Fatalf("Fingerprint value methods = %v, want the record form alone", got)
+	}
+	if got := methods(reflect.PointerTo(typeOf)); !reflect.DeepEqual(got, []string{"MarshalJSON", "UnmarshalJSON", "Validate"}) {
+		t.Fatalf("Fingerprint pointer methods = %v, want the record form alone", got)
 	}
 }
 
