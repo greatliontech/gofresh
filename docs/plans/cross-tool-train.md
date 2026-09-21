@@ -1861,7 +1861,7 @@ in their repos.
       them asks (REQ-result-run-posture's pass over the run's records,
       REQ-exec-preparation's order kept); the signpost's cost priced
       like the proof passes. Directly after 257 in gomutant's order.
-- [ ] 278. gomutant: the bump behind gofresh 265, 266, and 274 (the lane's
+- [x] 278. gomutant: the bump behind gofresh 265, 266, and 274 (the lane's
       "bumps gomutant" step, chartered at 274's close) — the gotool
       copies (the hand-built runner/containment, the sampler and its
       memo, the env snapshot and setter, the vouch entries parser)
@@ -1888,7 +1888,11 @@ in their repos.
       its attribution whole; REQ-inputs-refusal-attribution states
       which readers see which; a release (every consumer's
       machine-local records re-measure once at its bump — declared).
-      Correctness first: directly before 240 in gofresh's order.
+      Correctness first: directly before 240 in gofresh's order. Rides
+      (from gomutant 278's runner fold): ToolchainProvenance.Check
+      returns its sample (provenance-check-drops-the-sample); the
+      snapshot and the roots probe serve the answer Run salvages beside
+      ErrWaitDelay (runner-run-salvage-unread-at-snapshot-and-roots).
 - [x] 221. stipulator: soundness conformance between the policy record
       and the engine — the repository vouch file is neither declined
       (gofresh's WithoutRepositoryVouches, the "one set, one home" the
