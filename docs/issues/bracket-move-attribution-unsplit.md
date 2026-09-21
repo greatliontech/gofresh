@@ -15,7 +15,11 @@ well-formed as `[recently touched: …]`/`[added: …]`/`[removed: …]`
 running to the reason's end), the clause names the moved-bracket
 refusal among the governed ones, and gomutant's copy deletes at its
 next bump. Invariants preserved: a path's own bracketed segment is never
-stripped (only the moved-bracket clause carries the form).
+stripped (only the moved-bracket clause carries the form). gomutant's
+strip cuts at the last `" ["`, so a moved member whose own name carries
+`" ["` garbles the clause on both sides alike (the entry still matches
+its garbled twin); the published split parses the attribution from its
+prefix instead.
 
 Lands: a gofresh change set amending REQ-inputs-refusal-attribution's
 governed set (the split grows the moved-bracket form); gomutant's copy
