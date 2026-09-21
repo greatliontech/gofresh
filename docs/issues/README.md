@@ -7,6 +7,7 @@ when its work lands (git holds history).
 |---|---|---|
 | [containment-windows-job-object](containment-windows-job-object.md) | gotool.Containment's Windows arm is a tree kill; gomutant's oracle keeps its own Job Object containment beside it | user decision |
 | [provenance-check-drops-the-sample](provenance-check-drops-the-sample.md) | ToolchainProvenance.Check returns no sample; a consumer's floor asks the memo again | cross-tool train chunk 279 |
+| [runner-run-salvage-unread-at-snapshot-and-roots](runner-run-salvage-unread-at-snapshot-and-roots.md) | TakeEnvSnapshot and the roots probe discard the answer Run salvages beside ErrWaitDelay | cross-tool train chunk 279 |
 | [closure-sub-contract-granularity-residue](closure-sub-contract-granularity-residue.md) | three split closure paragraphs still bundle several independently editable rules | cross-tool train chunk 193 |
 | [loader-spawns-outside-the-runner](loader-spawns-outside-the-runner.md) | the package loader's `go list` children spawn through `x/tools`, outside `gotool.Runner`'s hook: a consumer's process boundary covers the runner's children only | cross-tool train chunk 241 |
 | [per-file-memos-one-shape](per-file-memos-one-shape.md) | the effect-scan, ledger-parse, and canonical-digest memos each spell the load-serve-pend-merge discipline; one generic per-file memo would hold it once | cross-tool train chunk 203 |
