@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [guidance-lint-zero-default-spelling](guidance-lint-zero-default-spelling.md) | the usage projection drops every `(default X)` form while the CLI lint refuses a spelled default only for a printed one — a derived default on a zero-registered flag vanishes from the served help unjudged | cross-tool train chunk 184 |
 | [prints-default-one-home](prints-default-one-home.md) | the printed-default predicate the guidance CLI lint registers is a type switch copied into stipulator, gomutant, and pew; one fleet home over pflag's two strings | cross-tool train chunk 184 |
 | [containment-over-a-consumer-command](containment-over-a-consumer-command.md) | gotool.Containment is applied by Runner alone, which prepares `go` only; gomutant, stipulator, and pew each carry a hand copy of the boundary for their non-go spawns | cross-tool train chunk 281 |
 | [containment-windows-job-object](containment-windows-job-object.md) | gotool.Containment's Windows arm is a tree kill; gomutant's oracle keeps its own Job Object containment beside it | user decision |
