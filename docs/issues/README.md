@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [prints-default-one-home](prints-default-one-home.md) | the printed-default predicate the guidance CLI lint registers is a type switch copied into stipulator, gomutant, and pew; one fleet home over pflag's two strings | cross-tool train chunk 184 |
 | [containment-windows-job-object](containment-windows-job-object.md) | gotool.Containment's Windows arm is a tree kill; gomutant's oracle keeps its own Job Object containment beside it | user decision |
 | [refused-in-module-path-spelled-absolute](refused-in-module-path-spelled-absolute.md) | an in-module refused path's absolute spelling keeps the runtime-input identity checkout-local; the fork is a module-relative clause (a fleet re-key) or the status quo | user decision |
 | [coverage-lint-default-on-zero-default-flag](coverage-lint-default-on-zero-default-flag.md) | a `(default X)` parenthetical on a zero-default flag is unjudged and its prose is dropped from the served usage | cross-tool train chunk 184 |
