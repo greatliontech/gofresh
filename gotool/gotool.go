@@ -347,14 +347,44 @@ func (s *EnvSnapshot) Value(key string) string {
 // boundary-hook form a consumer whose spec owns every go child takes.
 func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapshot, error) {
 	out, err := r.Run(ctx, dir, env, "env", "-json")
-	if err != nil {
+	if err != nil && !Salvaged(ctx, err) {
 		return nil, err
 	}
+	values, parseErr := ParseEnvDocument(out)
+	if parseErr != nil {
+		// The answer a cleanly exited process wrote beside a descendant's
+		// pipe hold serves when it is a whole document; a torn one refuses
+		// with the hold named.
+		if err != nil {
+			return nil, err
+		}
+		return nil, parseErr
+	}
+	return &EnvSnapshot{JSON: out, values: values}, nil
+}
+
+// ParseEnvDocument parses a `go env -json` answer: a document with at
+// least one key — `null` and an empty object are no environment, and a
+// torn document does not parse.
+func ParseEnvDocument(out []byte) (map[string]string, error) {
 	var values map[string]string
 	if err := json.Unmarshal(out, &values); err != nil {
 		return nil, fmt.Errorf("gotool: parse go env -json: %w", err)
 	}
-	return &EnvSnapshot{JSON: out, values: values}, nil
+	if len(values) == 0 {
+		return nil, errors.New("gotool: parse go env -json: no values")
+	}
+	return values, nil
+}
+
+// Salvaged reports whether err is the wait-delay form Run answers
+// beside a cleanly exited process's complete output — a descendant held
+// the pipe past the delay — under a context that is still live: the
+// one guard every structured reader (the toolchain sample, the
+// environment snapshot, a consumer's roots probe) applies before its own
+// wholeness test of the answer.
+func Salvaged(ctx context.Context, err error) bool {
+	return errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil
 }
 
 // SampleGoVersion is the toolchain sample REQ-fresh-toolchain-skew
@@ -365,7 +395,7 @@ func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (
 // consumer hands to ToolchainSkew.
 func (r Runner) SampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
 	out, err := r.Run(ctx, dir, env, "env", "GOVERSION")
-	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+	if Salvaged(ctx, err) {
 		// The process answered and exited; a descendant held the pipe
 		// past the wait delay. The first line is the sample when it is
 		// a go version — a wrapper's housekeeping is not a failed

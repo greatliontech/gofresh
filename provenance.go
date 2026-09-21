@@ -135,8 +135,11 @@ type ToolchainProvenance struct {
 // Check samples the ambient toolchain for dir under env and refuses,
 // typed, an unidentifiable toolchain ("toolchain provenance: binary
 // built with <frontend>, ambient toolchain unidentifiable — refusing to
-// judge: <cause>") or a breaking skew (ToolchainSkew's own words).
-func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []string) error {
+// judge: <cause>") or a breaking skew (ToolchainSkew's own words); the
+// sample it judged is returned beside a passing verdict, so a consumer
+// whose ladder reads it further (a build-events floor) reads the one
+// sample this check took.
+func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []string) (string, error) {
 	p.once.Do(func() {
 		if p.Sampler == nil {
 			p.Sampler = &gotool.Sampler{}
@@ -144,10 +147,10 @@ func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []strin
 	})
 	ambient, err := p.Sampler.Sample(ctx, dir, env)
 	if err != nil {
-		return &ToolchainProvenanceError{Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", closure.AnalyzingFrontend(), err)}
+		return "", &ToolchainProvenanceError{Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", closure.AnalyzingFrontend(), err)}
 	}
 	if err := ToolchainSkew(ambient); err != nil {
-		return &ToolchainProvenanceError{Err: err}
+		return "", &ToolchainProvenanceError{Err: err}
 	}
-	return nil
+	return ambient, nil
 }

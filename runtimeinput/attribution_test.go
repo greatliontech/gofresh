@@ -1,6 +1,7 @@
 package runtimeinput
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -15,8 +16,11 @@ import (
 // (REQ-inputs-refusal-attribution): the operation, its quoted logged
 // name, and the quoted working directory it resolved in — the process's
 // own directory for every operation, the traversal for a name that
-// reaches the root — after the clause and its separator, so a consumer
-// matching the class keeps matching; a stat of the root is no refusal
+// reaches the root — after the clause and its separator, on the
+// constructed state's attribution (the first refusal's); the manifest
+// carries the clause, one entry per distinct clause, and the state's
+// reason is the clause, so a consumer matching the class keeps
+// matching; a stat of the root is no refusal
 // (REQ-inputs-external-dir-existence).
 func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
@@ -37,14 +41,9 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg := strconv.Quote(packageDir)
-	want := []string{
-		`external directory input: / — open "/" in ` + pkg,
-		`external directory input: / — open ` + strconv.Quote(traversal) + ` in ` + pkg,
-		`external directory input: / — chdir "/" in ` + pkg,
-		"working-directory change",
-	}
+	want := []string{"external directory input: /", "working-directory change"}
 	if volatile {
-		want = append(want, `volatile OS input: /proc/stat — stat "/proc/stat" in `+pkg)
+		want = append(want, "volatile OS input: /proc/stat")
 	}
 	got := append([]string(nil), m.Unverifiable...)
 	sort.Strings(got)
@@ -52,8 +51,20 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unverifiable reasons\n got %q\nwant %q", got, want)
 	}
-	if !state.Unverifiable || !strings.HasPrefix(state.Reason, "external directory input: / — ") {
-		t.Fatalf("the state's reason is not the attributed refusal: %q", state.Reason)
+	if !state.Unverifiable || state.Reason != "external directory input: /" {
+		t.Fatalf("the state's reason is not the clause: %q", state.Reason)
+	}
+	// The first refusal in log order names its observation; the
+	// traversal's own attribution names the traversal (pinned below).
+	if state.Attribution != `external directory input: / — open "/" in `+pkg {
+		t.Fatalf("the state's attribution is not the first refusal's observation: %q", state.Attribution)
+	}
+	traversed, err := FromTestLog([]byte("open "+traversal+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if traversed.Attribution != `external directory input: / — open `+strconv.Quote(traversal)+` in `+pkg {
+		t.Fatalf("the traversal's attribution = %q", traversed.Attribution)
 	}
 	rootBound := false
 	for _, id := range m.Paths {
@@ -87,14 +98,111 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sawQuoted := false
+	// The state names the sorted manifest's first clause — the open
+	// under the refused directory — and its attribution quotes that
+	// directory representably.
+	if !strings.Contains(state.Attribution, `open "../" in "/tmp/\xff"`) {
+		t.Fatalf("the refused directory was not quoted into the attribution: %q", state.Attribution)
+	}
 	for _, reason := range m.Unverifiable {
-		if strings.Contains(reason, `open "../" in "/tmp/\xff"`) {
-			sawQuoted = true
+		if strings.Contains(reason, attributionSeparator) {
+			t.Fatalf("an attribution entered the manifest: %q", reason)
 		}
 	}
-	if !sawQuoted {
-		t.Fatalf("the refused directory was not quoted into the attribution: %q", m.Unverifiable)
+}
+
+// The attribution is outside the inputs' identity
+// (REQ-inputs-refusal-attribution): one testlog measured from two
+// checkouts yields one manifest, one digest, and one reason while the
+// attributions name each checkout's own directory; a state derived from
+// the recorded manifest reproduces the recorded state whole (the
+// attribution lives on the observation, outside the state); a merge and
+// the identity conversions carry the attribution of the reason they
+// name. The attribution attributes the reason the state names — the
+// first clause of the sorted manifest, not the first refusal in log
+// order — and a merge whose reason is one contributor's carries that
+// contributor's.
+func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
+	log := []byte("open /\nstat /\n")
+	var states [2]Observation
+	for i := range states {
+		moduleDir, packageDir := testDirs(t)
+		state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(state.Attribution, ` in `+strconv.Quote(packageDir)) {
+			t.Fatalf("checkout %d: attribution %q does not name its own directory", i, state.Attribution)
+		}
+		states[i] = state
+		derived, err := Current(context.Background(), state.Manifest, moduleDir, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if derived != state.State {
+			t.Fatalf("checkout %d: the derived state = %+v, want the recorded state whole", i, derived)
+		}
+		merged, err := Merge(moduleDir, nil, state, state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if merged.Attribution != state.Attribution || merged.Reason != state.Reason {
+			t.Fatalf("checkout %d: the merge carried %q / %q", i, merged.Attribution, merged.Reason)
+		}
+		absolute, err := Absolute(state, moduleDir, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relative, err := Relative(absolute, moduleDir, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if absolute.Attribution != state.Attribution || relative.Attribution != state.Attribution {
+			t.Fatalf("checkout %d: a conversion dropped the attribution: %q / %q", i, absolute.Attribution, relative.Attribution)
+		}
+	}
+	// Two clauses, log order against sorted order: the state names the
+	// sorted manifest's first clause and the attribution is that clause's.
+	moduleDir, packageDir := testDirs(t)
+	ordered, err := FromTestLog([]byte("open /usr\nopen /\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordered.Reason != "external directory input: /" || ordered.Attribution != `external directory input: / — open "/" in `+strconv.Quote(packageDir) {
+		t.Fatalf("reason %q attributed %q, want the sorted first clause and its own attribution", ordered.Reason, ordered.Attribution)
+	}
+	// A reason with no attributed refusal carries none, whatever other
+	// clause the manifest attributes: the vanished-component traversal
+	// sorts first and is no classification refusal.
+	unattributed, err := FromTestLog([]byte("open gone/../fixture.txt\nopen /\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(unattributed.Reason, "ambiguous parent traversal") || unattributed.Attribution != "" {
+		t.Fatalf("reason %q attributed %q, want the traversal's reason with no attribution", unattributed.Reason, unattributed.Attribution)
+	}
+	// A merge names the union's first clause and carries the attribution
+	// of the contributor whose reason it is, whatever the caller's order.
+	usr, err := FromTestLog([]byte("open /usr\n"), moduleDir, packageDir, nil, WithCompletedProcess("usr"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := FromTestLog([]byte("open /\n"), moduleDir, packageDir, nil, WithCompletedProcess("root"), WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := Merge(moduleDir, nil, usr, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Reason != root.Reason || merged.Attribution != root.Attribution {
+		t.Fatalf("merge = %q attributed %q, want the root contributor's", merged.Reason, merged.Attribution)
+	}
+	if states[0].Manifest != states[1].Manifest || states[0].Digest != states[1].Digest || states[0].Reason != states[1].Reason {
+		t.Fatalf("two checkouts' identities differ:\n%+v\n%+v", states[0].State, states[1].State)
+	}
+	if states[0].Attribution == states[1].Attribution {
+		t.Fatalf("two checkouts' attributions agree: %q", states[0].Attribution)
 	}
 }
 

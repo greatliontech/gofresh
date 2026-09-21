@@ -59,18 +59,36 @@ func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir st
 	if cached, ok := rootsCache.Load(key); ok {
 		return cached.(resolvedRoots), nil
 	}
-	out, err := runner.Run(ctx, pkgDir, env, "env", "GOROOT", "GOMODCACHE", "GOCACHE")
-	if err != nil {
+	// The document form: one answer shape, one wholeness test — a
+	// document that parses to its three keys. The answer a cleanly
+	// exited process wrote beside a descendant's pipe hold serves when
+	// it is that document (a banner glued before it, or a torn tail,
+	// parses as nothing); a torn one refuses with the hold named.
+	out, err := runner.Run(ctx, pkgDir, env, "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE")
+	if err != nil && !gotool.Salvaged(ctx, err) {
 		return resolvedRoots{}, err
 	}
-	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-	if len(lines) != 3 {
-		return resolvedRoots{}, fmt.Errorf("go env returned %d values, want 3", len(lines))
+	values, parseErr := gotool.ParseEnvDocument(out)
+	if parseErr == nil {
+		// Every requested key is answered, an unset one as the empty
+		// value the guard degrades to none; a document missing a key is
+		// no answer to this probe.
+		for _, key := range []string{"GOROOT", "GOMODCACHE", "GOCACHE"} {
+			if _, answered := values[key]; !answered {
+				parseErr = fmt.Errorf("go env -json answered no %s", key)
+			}
+		}
+	}
+	if parseErr != nil {
+		if err != nil {
+			return resolvedRoots{}, err
+		}
+		return resolvedRoots{}, parseErr
 	}
 	roots := resolvedRoots{
-		toolchain:   usableGuardRootOutside(strings.TrimRight(lines[0], "\r"), treeRoot),
-		moduleCache: usableGuardRootOutside(strings.TrimRight(lines[1], "\r"), treeRoot),
-		buildCache:  usableGuardRootOutside(strings.TrimRight(lines[2], "\r"), treeRoot),
+		toolchain:   usableGuardRootOutside(values["GOROOT"], treeRoot),
+		moduleCache: usableGuardRootOutside(values["GOMODCACHE"], treeRoot),
+		buildCache:  usableGuardRootOutside(values["GOCACHE"], treeRoot),
 		temp:        tempRootFromEnv(env),
 	}
 	rootsCache.Store(key, roots)

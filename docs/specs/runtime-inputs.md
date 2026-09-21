@@ -821,10 +821,22 @@ truncated one, recorded and accepted. The library exposes the split as
 keying on the clause — an exemption record, a disposition table — reads
 so it keeps matching; and such a consumer refuses a record that names a
 clause with its attribution pasted in, never storing it dead. The
-unverifiable list holds one entry per distinct attributed refusal,
-bounded by the log's operation occurrences. The process's own
-attribution stays REQ-inputs-incomplete's; the field case is a
-parent-directory fsync walk opening `/`.
+attribution is the observation's diagnostic, fresh per measurement: it
+rides the constructed observation's attribution field — the one
+attributing the refusal the state's reason names, its first in log
+order; a reason with no attributed classification refusal carries none
+— and never the manifest, the digest, or the state's reason, which
+carry the clause (one unverifiable entry per distinct clause), so the
+attribution never moves a measurement's manifest, digest, or reason
+between checkouts of one tree, and a state derived from a recorded
+manifest carries no attribution (the refused path's own spelling stays
+the classifier's: an in-module path refused absolute still names its
+checkout). The hashing pass's resolved-target refusal carries its attribution in
+the reason itself — its target is state, whole in the reason,
+reproduced by every derivation — and never on the observation's
+field. The process's own attribution stays
+REQ-inputs-incomplete's; the field case is a parent-directory fsync
+walk opening `/`.
 
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked

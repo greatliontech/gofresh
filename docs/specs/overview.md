@@ -26,8 +26,10 @@ reap (a named delay, else the policy's default, never unbounded), a
 quit grace on a cause the consumer names, the reap then bounded by the
 grace and the delay together — with the prepared command a consumer
 streams itself and the collected run keeping a cleanly exited process's
-answer beside a descendant's pipe hold and bounding a failed command's
-diagnostics in its refusal; one pass-scoped go-environment reader
+answer beside a descendant's pipe hold — the toolchain sample, the
+environment snapshot, and the runtime-input roots probe serving that
+answer when it is whole — and bounding a failed command's diagnostics
+in its refusal; one pass-scoped go-environment reader
 taking the pass's one snapshot on its first key; one canonical
 directory resolution and its degrading coordinate; and the toolchain
 sample below — each a consumer's obligation met once (the `gotool`
@@ -213,9 +215,19 @@ canonical coordinate with its degrading form; and a runner installed on
 an engine by its option reaches every go command that engine spawns
 itself — the loader's `x/tools` children excepted, which carry the
 policy's environment and spawn outside any hook — while a consumer's
-runner reaches the commands that consumer spawns through it. Enforced by
-`TestEngineSpawnsThroughTheInstalledRunner` and
-`TestEngineSpawnSitesReadARunner`.
+runner reaches the commands that consumer spawns through it; and the
+policy's structured readers — the toolchain sample, the environment
+snapshot, a consumer's runtime-input roots probe — serve the answer a
+cleanly exited process wrote beside a descendant's pipe hold past the
+wait delay when it is whole by the reader's own test (a go version's
+first line; a document that parses to its keys) and the context is
+live — a caller's cancellation is never answered from the hold — and
+refuse a torn answer naming the hold. Enforced by
+`TestEngineSpawnsThroughTheInstalledRunner`,
+`TestEngineSpawnSitesReadARunner`,
+`TestTakeEnvSnapshotServesTheSalvagedAnswer`,
+`TestRootsProbeServesTheSalvagedAnswer`, and
+`TestSalvagedRefusesUnderACancelledContext`.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing

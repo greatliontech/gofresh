@@ -303,3 +303,66 @@ func TestEnvReaderTakesOneSnapshot(t *testing.T) {
 	}
 	_ = strconv.Itoa
 }
+
+// The environment snapshot serves the answer a cleanly exited process
+// wrote beside a descendant's pipe hold when it is a whole document; a
+// torn document refuses with the hold named
+// (REQ-fresh-go-command-policy).
+func TestTakeEnvSnapshotServesTheSalvagedAnswer(t *testing.T) {
+	env := shimGo(t, `echo '{"GOOS":"plan9","GOARCH":"amd64"}'`+"\nsleep 5 &\nexit 0\n")
+	ctx := context.Background()
+	r := Runner{Containment: &Containment{WaitDelay: 200 * time.Millisecond}}
+	snapshot, err := r.TakeEnvSnapshot(ctx, "", env)
+	if err != nil || snapshot.Value("GOOS") != "plan9" {
+		t.Fatalf("snapshot = %v, %v; want the salvaged document", snapshot, err)
+	}
+	for _, torn := range []string{`printf '{"GOOS":'`, "echo null", "echo '{}'"} {
+		env = shimGo(t, torn+"\nsleep 5 &\nexit 0\n")
+		if _, err := r.TakeEnvSnapshot(ctx, "", env); !errors.Is(err, exec.ErrWaitDelay) {
+			t.Fatalf("%s = %v, want the hold named", torn, err)
+		}
+	}
+	// Without a hold the same non-documents refuse on their own terms.
+	env = shimGo(t, "echo null\nexit 0\n")
+	if _, err := r.TakeEnvSnapshot(ctx, "", env); err == nil || !strings.Contains(err.Error(), "no values") {
+		t.Fatalf("null = %v, want no values", err)
+	}
+}
+
+// Salvaged is the one guard the structured readers apply: the wait-delay
+// form of a cleanly exited process under a live context; a context
+// cancelled while the descendant held the pipe salvages nothing — a
+// caller's cancellation is never answered, and never memoized
+// (REQ-fresh-go-command-policy).
+func TestSalvagedRefusesUnderACancelledContext(t *testing.T) {
+	// The shim marks its answer written; the context is cancelled on
+	// that mark, during the hold — deterministic under any load.
+	answered := filepath.Join(t.TempDir(), "answered")
+	t.Setenv("GOFRESH_TEST_ANSWERED", answered)
+	env := shimGo(t, "echo go1.99.0\ntouch \"$GOFRESH_TEST_ANSWERED\"\nsleep 5 &\nexit 0\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			if _, err := os.Stat(answered); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	r := Runner{Containment: &Containment{WaitDelay: 3 * time.Second}}
+	out, err := r.Run(ctx, "", env, "env", "GOVERSION")
+	if !errors.Is(err, exec.ErrWaitDelay) || strings.TrimSpace(string(out)) != "go1.99.0" {
+		t.Fatalf("run = %q, %v; want the answer beside the wait-delay form", out, err)
+	}
+	if Salvaged(ctx, err) {
+		t.Fatal("a cancelled context salvaged the answer")
+	}
+	if Salvaged(context.Background(), err) != true {
+		t.Fatal("a live context did not salvage the wait-delay form")
+	}
+	if _, err := r.SampleGoVersion(ctx, "", env); err == nil {
+		t.Fatal("the sample served under a cancelled context")
+	}
+}

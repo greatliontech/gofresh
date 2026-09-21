@@ -64,7 +64,9 @@ const (
 	pathAbs = "abs"
 )
 
-// State is the current digest of a recorded runtime-input manifest.
+// State is the current digest of a recorded runtime-input manifest:
+// the inputs' state, which a derivation from the recorded manifest
+// under the current tree reproduces, so a consumer compares it whole.
 type State struct {
 	Manifest     string
 	Digest       string
@@ -76,11 +78,22 @@ type State struct {
 // Observation is producer-constructed runtime-input evidence. Its private process
 // provenance distinguishes completion-gated evidence from a State recomputed by a
 // checker, while the embedded State remains the persisted manifest and digest.
+// Attribution is the observation that produced the classification
+// refusal the state's reason names — the operation, its quoted name,
+// and the producing process's own directory — named at construction
+// (the reason's first such refusal in log order), carried by a merge
+// and an identity conversion while the reason is theirs, and outside
+// the state and its seal (REQ-inputs-refusal-attribution): diagnostic
+// detail, fresh per measurement, never part of the inputs' identity a
+// consumer compares; a reason the hashing pass raised, or one with no
+// attributed refusal (a working-directory change), carries none. The
+// field is data — nothing re-derives it, so nothing checks it.
 type Observation struct {
 	State
-	processes []processObservation
-	empty     bool
-	seal      string
+	Attribution string
+	processes   []processObservation
+	empty       bool
+	seal        string
 }
 
 type processObservation struct {
@@ -280,7 +293,17 @@ func convertIdentityKinds(observation Observation, moduleDir string, env []strin
 			view:    conversionProcessView(conversion.name, record.origin),
 		}
 	}
-	return sealObservation(converted, records, observation.empty), nil
+	sealed := sealObservation(converted, records, observation.empty)
+	// The conversion is the same measurement's evidence: its attribution
+	// rides along. It still attributes the reason the converted state
+	// names: an attribution exists only for a manifest clause, the
+	// state's reason is then the sorted manifest's first clause, and the
+	// conversion keeps every clause (promoting the reason itself above
+	// re-adds one of them), so the converted state's reason is the same
+	// clause — no reason guard stands here, unlike Merge's, whose union
+	// can name another contributor's clause.
+	sealed.Attribution = observation.Attribution
+	return sealed, nil
 }
 
 // TestLogOption configures observation construction from a testlog.
@@ -713,6 +736,11 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 	envSeen := map[string]bool{}
 	pathIndex := map[pathID]int{}
 	unverifiableSeen := map[string]bool{}
+	// Each clause's first attributed classification refusal, in log
+	// order: construction-time diagnostic detail, never a manifest entry;
+	// the observation carries the one attributing the reason the state
+	// names (REQ-inputs-refusal-attribution).
+	attributions := map[string]string{}
 	guardRoots := resolveGuardRoots(cfg.guardRoots)
 	// A module tree lying inside a declared ephemeral root does not
 	// surrender its identities: module-relative reads are content-bearing
@@ -832,9 +860,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				continue
 			}
 			id, reason := classifyPath(moduleDir, p)
-			reason = attributed(reason, op, name, cwd)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
+				noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
 				continue
 			}
 			if cfg.excludes(id) {
@@ -888,9 +916,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				}
 			}
 			id, reason := classifyPath(moduleDir, p)
-			reason = attributed(reason, op, name, cwd)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
+				noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
 				continue
 			}
 			if cfg.excludes(id) {
@@ -941,9 +969,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				addUnverifiable(&m, unverifiableSeen, "working-directory change")
 			} else {
 				id, reason := classifyPath(moduleDir, p)
-				reason = attributed(reason, op, name, cwd)
 				if reason != "" {
 					addUnverifiable(&m, unverifiableSeen, reason)
+					noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
 				} else if !cfg.excludes(id) {
 					m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 				}
@@ -1032,7 +1060,12 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 			return Observation{}, err
 		}
 	}
-	return newObservation(st, cfg.process, "complete"), nil
+	observation := newObservation(st, cfg.process, "complete")
+	// The attribution is the one of the reason the state names — the
+	// first clause of the sorted manifest; a reason the hashing pass
+	// raised carries its own attribution, in the reason itself.
+	observation.Attribution = attributions[st.Reason]
+	return observation, nil
 }
 
 func validateProcess(process string) error {
@@ -1058,6 +1091,8 @@ func conversionProcessView(name, origin string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// sealObservation seals the state's identity — the attribution, a
+// construction-time diagnostic, is outside the seal.
 func sealObservation(state State, processes []processObservation, empty bool) Observation {
 	observation := Observation{State: state, processes: append([]processObservation(nil), processes...), empty: empty}
 	h := sha256.New()
@@ -1196,7 +1231,17 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		records = append(records, record)
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].process < records[j].process })
-	return sealObservation(state, records, len(records) == 0), nil
+	sealed := sealObservation(state, records, len(records) == 0)
+	// The merge's attribution is the first contributing observation's
+	// that attributes the reason the merged state names, in the caller's
+	// order — diagnostic detail, outside the seal.
+	for _, observation := range observations {
+		if observation.Attribution != "" && observation.Reason == state.Reason {
+			sealed.Attribution = observation.Attribution
+			break
+		}
+	}
+	return sealed, nil
 }
 
 // Current recomputes the runtime-input digest for an encoded manifest
@@ -2214,6 +2259,13 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 	var sum [32]byte
 	copy(sum[:], h.Sum(nil))
 	return sum, unverifiable, reason, nil
+}
+
+// noteAttribution keeps each clause's first attribution, in log order.
+func noteAttribution(attributions map[string]string, clause, attributed string) {
+	if _, noted := attributions[clause]; !noted {
+		attributions[clause] = attributed
+	}
 }
 
 func addUnverifiable(m *manifest, seen map[string]bool, reason string) {
