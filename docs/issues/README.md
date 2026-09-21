@@ -7,6 +7,8 @@ when its work lands (git holds history).
 |---|---|---|
 | [containment-windows-job-object](containment-windows-job-object.md) | gotool.Containment's Windows arm is a tree kill; gomutant's oracle keeps its own Job Object containment beside it | user decision |
 | [refused-in-module-path-spelled-absolute](refused-in-module-path-spelled-absolute.md) | an in-module refused path's absolute spelling keeps the runtime-input identity checkout-local; the fork is a module-relative clause (a fleet re-key) or the status quo | user decision |
+| [coverage-lint-default-on-zero-default-flag](coverage-lint-default-on-zero-default-flag.md) | a `(default X)` parenthetical on a zero-default flag is unjudged and its prose is dropped from the served usage | cross-tool train chunk 184 |
+| [cli-long-help-rendering-two-homes](cli-long-help-rendering-two-homes.md) | the knobbed verb's long help join (help + pointer) is spelled by each consumer | cross-tool train chunk 184 |
 | [closure-sub-contract-granularity-residue](closure-sub-contract-granularity-residue.md) | three split closure paragraphs still bundle several independently editable rules | cross-tool train chunk 193 |
 | [loader-spawns-outside-the-runner](loader-spawns-outside-the-runner.md) | the package loader's `go list` children spawn through `x/tools`, outside `gotool.Runner`'s hook: a consumer's process boundary covers the runner's children only | cross-tool train chunk 241 |
 | [per-file-memos-one-shape](per-file-memos-one-shape.md) | the effect-scan, ledger-parse, and canonical-digest memos each spell the load-serve-pend-merge discipline; one generic per-file memo would hold it once | cross-tool train chunk 203 |
