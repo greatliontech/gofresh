@@ -1881,7 +1881,7 @@ in their repos.
       delete, a DocumentVersion bump with the version chain's rule; the
       provenance composite reads gofresh.ToolchainProvenance. Every
       record re-validates once. When 265, 266, and 274 have released.
-- [ ] 279. gofresh: the runtime-input digest folds the refusal clause
+- [x] 279. gofresh: the runtime-input digest folds the refusal clause
       (attribution-in-runtime-input-digest, found at gomutant 278's
       reason-clause change set) — the manifest's unverifiable entries
       and the digest carry RefusalClause(reason), the recorded reason
