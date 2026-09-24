@@ -1886,7 +1886,7 @@ in their repos.
       Observation.Attribution (pb's guidance-names-every-oracle-test
       report); the gap on REQ-exec-go-command-runner closed (gofresh 279
       landed the two readers' salvage). After 282 and Band R4.
-- [ ] 282. gomutant: record verbs over both layers (chartered at 277's
+- [x] 282. gomutant: record verbs over both layers (chartered at 277's
       open from pb's field reports, correctness first) — prune reports a
       machine-local record removed and leaves it in the overlay, re-emitting
       the repo document whole; a package retarget writes one record short
