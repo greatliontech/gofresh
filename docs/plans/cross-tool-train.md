@@ -1903,6 +1903,13 @@ in their repos.
       re-digest cost measured with a campaign over the retargeted
       document at the open (whether the 144 re-measure). Directly before
       277 in the lane; the twelfth landed chunk since Band R3.
+- [ ] 283. gomutant: Store.Update returns the layer it routed each
+      record to (gomutant docs/issues/store-update-returns-its-
+      routing.md, filed at 282's banked-line review) — the write's
+      routing the one source the ledger, the tallies and Finish read,
+      the post-write re-classification through the store's predicate
+      retired; the seams of both faces and their tests carry the
+      report. After 282.
 - [x] 278. gomutant: the bump behind gofresh 265, 266, and 274 (the lane's
       "bumps gomutant" step, chartered at 274's close) — the gotool
       copies (the hand-built runner/containment, the sampler and its
