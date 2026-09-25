@@ -1285,7 +1285,7 @@ func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 	// clause — and the observation's attribution names the observation
 	// with the non-UTF-8 name quoted, so the attribution stays valid
 	// UTF-8 (REQ-inputs-refusal-attribution).
-	if !st.Unverifiable || st.Reason != "non-UTF-8 runtime input path" || !strings.HasPrefix(st.Attribution, `non-UTF-8 runtime input path — open "\xff" in `) {
+	if !st.Unverifiable || st.Reason != "non-UTF-8 runtime input path" || !strings.HasPrefix(st.Attribution, `open "\xff" in `) {
 		t.Fatalf("state = %+v, want non-UTF-8 path unverifiable, the clause its reason, the observation attributed", st)
 	}
 	m, err := decode(st.Manifest)

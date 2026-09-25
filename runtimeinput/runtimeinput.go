@@ -80,14 +80,18 @@ type State struct {
 // checker, while the embedded State remains the persisted manifest and digest.
 // Attribution is the observation that produced the classification
 // refusal the state's reason names — the operation, its quoted name,
-// and the producing process's own directory — named at construction
-// (the reason's first such refusal in log order), carried by a merge
-// and an identity conversion while the reason is theirs, and outside
-// the state and its seal (REQ-inputs-refusal-attribution): diagnostic
-// detail, fresh per measurement, never part of the inputs' identity a
-// consumer compares; a reason the hashing pass raised, or one with no
-// attributed refusal (a working-directory change), carries none. The
-// field is data — nothing re-derives it, so nothing checks it.
+// and the producing process's own directory, the attribution alone
+// without the clause or the separator (RefusalAttribution's form) —
+// named at construction (the reason's first such refusal in log
+// order), carried by a merge and an identity conversion while the
+// reason is theirs, and outside the state and its seal
+// (REQ-inputs-refusal-attribution): diagnostic detail, fresh per
+// measurement, never part of the inputs' identity a consumer
+// compares; a reason the hashing pass raised (a resolved-target
+// refusal carries its attribution in the reason itself, state that
+// RefusalAttribution splits), or one with no attributed refusal (a
+// working-directory change), carries none. The field is data —
+// nothing re-derives it, so nothing checks it.
 type Observation struct {
 	State
 	Attribution string
@@ -862,7 +866,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
-				noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
+				noteAttribution(attributions, reason, operationAttribution(op, name, cwd))
 				continue
 			}
 			if cfg.excludes(id) {
@@ -918,7 +922,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 			id, reason := classifyPath(moduleDir, p)
 			if reason != "" {
 				addUnverifiable(&m, unverifiableSeen, reason)
-				noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
+				noteAttribution(attributions, reason, operationAttribution(op, name, cwd))
 				continue
 			}
 			if cfg.excludes(id) {
@@ -971,7 +975,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 				id, reason := classifyPath(moduleDir, p)
 				if reason != "" {
 					addUnverifiable(&m, unverifiableSeen, reason)
-					noteAttribution(attributions, reason, attributed(reason, op, name, cwd))
+					noteAttribution(attributions, reason, operationAttribution(op, name, cwd))
 				} else if !cfg.excludes(id) {
 					m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
 				}
@@ -1704,15 +1708,18 @@ func underPath(p, root string) bool {
 const attributionSeparator = " — "
 
 // attributionOps is the one vocabulary of harness operations an
-// attribution names — the producer attributes nothing for an operation
-// outside it (the reason stays its own clause, fail-closed), and the
+// attribution names — the observation's attribution field carries
+// none for an operation outside it (fail-closed), and the
 // per-operation round-trip pin is what holds the parser and the
-// producer's three switch labels together (a switch cannot range).
+// builder's three labels together (a switch cannot range): a consumer
+// that pastes a field's attribution after a clause's separator meets
+// the split it recognises.
 var attributionOps = []string{"open", "stat", "chdir"}
 
 // RefusalClause is the clause of a refusal reason — the text a consumer
 // keys on (an exemption record, a disposition table), before the
-// attribution REQ-inputs-refusal-attribution appends. The attribution
+// attribution a resolved-target reason carries or a consumer pastes
+// after it (REQ-inputs-refusal-attribution). The attribution
 // is the one well-formed suffix: from a separator, an operation and its
 // quoted name and quoted directory, or `recorded path`, its quoted
 // spelling, and its quoted target, running exactly to the reason's end
@@ -1725,9 +1732,30 @@ var attributionOps = []string{"open", "stat", "chdir"}
 // quote — whose clause is then the truncated one (recorded, accepted:
 // REQ-inputs-refusal-attribution).
 func RefusalClause(reason string) string {
+	clause, _ := splitAttribution(reason)
+	return clause
+}
+
+// RefusalAttribution is the attribution of a refusal reason — the one
+// well-formed suffix after the separator, without it — or "" for a
+// reason carrying none: the complement of RefusalClause over the same
+// split, so a consumer recording the attribution beside the clause
+// reads the one implementation; the text channel's one residual (an
+// unattributed reason whose refused path ends in the attribution's
+// shape) yields that fake tail, as its clause is the truncated one
+// (REQ-inputs-refusal-attribution).
+func RefusalAttribution(reason string) string {
+	_, attribution := splitAttribution(reason)
+	return attribution
+}
+
+// splitAttribution is the one split RefusalClause and
+// RefusalAttribution read: the clause before the first separator whose
+// suffix is exactly one well-formed attribution, and that suffix.
+func splitAttribution(reason string) (clause, attribution string) {
 	for i := strings.Index(reason, attributionSeparator); i >= 0; {
-		if attributionWellFormed(reason[i+len(attributionSeparator):]) {
-			return reason[:i]
+		if suffix := reason[i+len(attributionSeparator):]; attributionWellFormed(suffix) {
+			return reason[:i], suffix
 		}
 		next := strings.Index(reason[i+1:], attributionSeparator)
 		if next < 0 {
@@ -1735,7 +1763,7 @@ func RefusalClause(reason string) string {
 		}
 		i += 1 + next
 	}
-	return reason
+	return reason, ""
 }
 
 // attributionWellFormed reports whether s is exactly one attribution:
@@ -1771,23 +1799,29 @@ func quotedThen(s, mid, tail string) bool {
 	return rest[len(second):] == tail
 }
 
-// attributed names the observation a classification refusal came from
+// operationAttribution is a classification refusal's attribution
 // (REQ-inputs-refusal-attribution): the harness operation, its logged
-// name, and the working directory the name resolved in — the process's
-// own directory, so the producing package process is named for every
-// operation, absolute names included — both quoted, so a non-UTF-8 or
-// control-bearing name or directory leaves the reason representable
-// and the manifest valid UTF-8; the directory is the observation's
-// tracked one (lexical after a traversal chdir). An empty reason (no
-// refusal) stays empty.
-func attributed(reason, op, name, cwd string) string {
-	if reason == "" {
+// name, and the working directory the name resolved in — the
+// process's own directory, so the producing package process is named
+// for every operation, absolute names included — both quoted, so a
+// non-UTF-8 or control-bearing name or directory leaves the
+// attribution valid UTF-8; the directory is the observation's tracked
+// one (lexical after a traversal chdir). An operation outside the
+// vocabulary attributes nothing. The form rides the observation's
+// attribution field alone; the reason keeps its clause.
+func operationAttribution(op, name, cwd string) string {
+	if !slices.Contains(attributionOps, op) {
 		return ""
 	}
-	if !slices.Contains(attributionOps, op) {
-		return reason
-	}
-	return reason + attributionSeparator + op + " " + strconv.Quote(name) + " in " + strconv.Quote(cwd)
+	return op + " " + strconv.Quote(name) + " in " + strconv.Quote(cwd)
+}
+
+// resolvedTargetAttribution is a resolved-target refusal's attribution
+// — the recorded path's quoted spelling and its quoted target — the
+// one shape beside the operation's the split recognises; the hashing
+// pass carries it in the reason itself, as state.
+func resolvedTargetAttribution(spelling, target string) string {
+	return "recorded path " + strconv.Quote(spelling) + " resolves to " + strconv.Quote(target) + " outside the tree"
 }
 
 func resolvePath(cwd, name string) string {
@@ -2034,10 +2068,10 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		if external {
 			if info.IsDir() {
 				fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-				return true, "external directory input: " + p + attributionSeparator + "recorded path " + strconv.Quote(id.Path) + " resolves to " + strconv.Quote(target) + " outside the tree", nil
+				return true, "external directory input: " + p + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 			}
 			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
-			return true, "external runtime input target: " + p + attributionSeparator + "recorded path " + strconv.Quote(id.Path) + " resolves to " + strconv.Quote(target) + " outside the tree", nil
+			return true, "external runtime input target: " + p + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 		}
 	} else if info.IsDir() && !existenceBindsExternalDirs {
 		// An absolute directory bracket root walks its resolved
@@ -2262,9 +2296,9 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 }
 
 // noteAttribution keeps each clause's first attribution, in log order.
-func noteAttribution(attributions map[string]string, clause, attributed string) {
+func noteAttribution(attributions map[string]string, clause, attribution string) {
 	if _, noted := attributions[clause]; !noted {
-		attributions[clause] = attributed
+		attributions[clause] = attribution
 	}
 }
 

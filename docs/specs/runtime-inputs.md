@@ -810,26 +810,35 @@ the traversal; the directory is the observation's tracked one (lexical
 after a traversal chdir, which the observation treats as unverifiable
 in its own right) — or, for a resolved-target refusal, the recorded
 path and the target it resolved to. Name and directory are quoted, so
-a non-UTF-8 or control-bearing name leaves the reason representable.
-The refusal's class phrase leads unchanged and the attribution follows
-a ` — ` separator as the one well-formed suffix — the operation, its
-quoted name, and its quoted directory, or `recorded path`, its quoted
-spelling, and its quoted target, running to the reason's end; a quoted
+a non-UTF-8 or control-bearing name leaves the attribution
+representable. A classification refusal's reason is its class phrase
+alone and its attribution rides the observation's attribution field;
+a resolved-target refusal's attribution follows the reason's class
+phrase after a ` — ` separator, as does an attribution a consumer
+pastes after a clause, and the split recognises the one well-formed
+suffix — the operation, its quoted name, and its quoted directory, or
+`recorded path`, its quoted spelling, and its quoted target, running
+to the reason's end; a quoted
 string carries no unescaped quote, so a separator inside a quoted name
 or directory, or inside the refused path of an attributed reason, never
 parses as the suffix — the one residual of the text channel is an
 unattributed reason whose refused path itself ends in the attribution's
 shape (a path deliberately named with a quote), whose clause is then the
-truncated one, recorded and accepted. The library exposes the split as
-`RefusalClause`, the one implementation a consumer
-keying on the clause — an exemption record, a disposition table — reads
-so it keeps matching; and such a consumer refuses a record that names a
+truncated one and whose attribution the fake tail, recorded and
+accepted. The library exposes the split as `RefusalClause` and its
+complement `RefusalAttribution` (the suffix without its separator,
+empty where no well-formed suffix follows a separator), the one
+implementation a consumer keying on the clause — an exemption record, a
+disposition table — or recording the attribution beside it reads so it
+keeps matching; and such a consumer refuses a record that names a
 clause with its attribution pasted in, never storing it dead. The
 attribution is the observation's diagnostic, fresh per measurement: it
-rides the constructed observation's attribution field — the one
-attributing the refusal the state's reason names, its first in log
-order; a reason with no attributed classification refusal carries none
-— and never the manifest, the digest, or the state's reason, which
+rides the constructed observation's attribution field — the attribution
+alone, in the complement's form, of the refusal the state's reason
+names, its first in log order; a reason with no attributed
+classification refusal carries none, a resolved-target refusal's
+attribution being state in the reason itself, which the complement
+splits — and never the manifest, the digest, or the state's reason, which
 carry the clause (one unverifiable entry per distinct clause), so the
 attribution never moves a measurement's manifest, digest, or reason
 between checkouts of one tree, and a state derived from a recorded

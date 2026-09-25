@@ -56,14 +56,14 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 	}
 	// The first refusal in log order names its observation; the
 	// traversal's own attribution names the traversal (pinned below).
-	if state.Attribution != `external directory input: / — open "/" in `+pkg {
+	if state.Attribution != `open "/" in `+pkg {
 		t.Fatalf("the state's attribution is not the first refusal's observation: %q", state.Attribution)
 	}
 	traversed, err := FromTestLog([]byte("open "+traversal+"\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if traversed.Attribution != `external directory input: / — open `+strconv.Quote(traversal)+` in `+pkg {
+	if traversed.Attribution != `open `+strconv.Quote(traversal)+` in `+pkg {
 		t.Fatalf("the traversal's attribution = %q", traversed.Attribution)
 	}
 	rootBound := false
@@ -168,7 +168,7 @@ func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ordered.Reason != "external directory input: /" || ordered.Attribution != `external directory input: / — open "/" in `+strconv.Quote(packageDir) {
+	if ordered.Reason != "external directory input: /" || ordered.Attribution != `open "/" in `+strconv.Quote(packageDir) {
 		t.Fatalf("reason %q attributed %q, want the sorted first clause and its own attribution", ordered.Reason, ordered.Attribution)
 	}
 	// A reason with no attributed refusal carries none, whatever other
@@ -238,17 +238,56 @@ func TestRefusalClauseSurvivesSeparatorsInNames(t *testing.T) {
 			t.Errorf("RefusalClause(%q) = %q, want %q", c.reason, got, c.clause)
 		}
 	}
-	// The production attribution round-trips through the split for every
-	// operation of the one vocabulary; an operation outside it attributes
-	// nothing (the reason stays its own clause), so a consumer's clause
-	// match never meets an attribution the split cannot parse.
+	// The builder's attribution, pasted after a clause, round-trips
+	// through the split for every operation of the one vocabulary; an
+	// operation outside it attributes nothing (an empty field), so a
+	// consumer's clause match never meets an attribution the split
+	// cannot parse.
 	for _, op := range attributionOps {
-		reason := attributed("volatile OS input: /proc/a"+sep+"b", op, "/proc/a"+sep+"b", "/p"+sep+"kg")
+		attribution := operationAttribution(op, "/proc/a"+sep+"b", "/p"+sep+"kg")
+		reason := "volatile OS input: /proc/a" + sep + "b" + sep + attribution
 		if got := RefusalClause(reason); got != "volatile OS input: /proc/a"+sep+"b" {
 			t.Fatalf("the %s attribution does not round-trip: %q -> %q", op, reason, got)
 		}
+		if got := RefusalAttribution(reason); got != attribution {
+			t.Fatalf("the %s attribution's complement = %q, want %q", op, got, attribution)
+		}
 	}
-	if got := attributed("external directory input: /", "rename", "/", "/pkg"); got != "external directory input: /" {
+	// The resolved-target producer's shape round-trips the same way.
+	resolved := "external runtime input target: /w/pkg/l" + sep + "ink" + sep + resolvedTargetAttribution("pkg/l"+sep+"ink", "/srv"+sep+"x")
+	if RefusalClause(resolved) != "external runtime input target: /w/pkg/l"+sep+"ink" || RefusalAttribution(resolved) != resolvedTargetAttribution("pkg/l"+sep+"ink", "/srv"+sep+"x") {
+		t.Fatalf("the resolved-target attribution does not round-trip: %q -> %q / %q", resolved, RefusalClause(resolved), RefusalAttribution(resolved))
+	}
+	if got := operationAttribution("rename", "/", "/pkg"); got != "" {
 		t.Fatalf("an operation outside the vocabulary was attributed: %q", got)
+	}
+}
+
+// RefusalAttribution is RefusalClause's complement over the one split:
+// the well-formed suffix without its separator, "" where the reason
+// carries none (a malformed tail is no attribution), and the fake
+// tail on the text channel's one residual — an unattributed reason
+// whose refused path ends in the attribution's shape — exactly as its
+// clause is the truncated one (REQ-inputs-refusal-attribution).
+func TestRefusalAttributionIsTheClauseSplitsComplement(t *testing.T) {
+	sep := attributionSeparator
+	for _, c := range []struct{ reason, attribution string }{
+		{`external directory input: /srv` + sep + `open "/srv" in "/w/pkg"`, `open "/srv" in "/w/pkg"`},
+		{`external runtime input target: /w/pkg/link` + sep + `recorded path "pkg/link" resolves to "/srv/x" outside the tree`, `recorded path "pkg/link" resolves to "/srv/x" outside the tree`},
+		{`volatile OS input: /proc/a` + sep + `b`, ""},
+		{`external directory input: /srv`, ""},
+		{`external directory input: /a` + sep + `b` + sep + `stat "/a" in "/w"`, `stat "/a" in "/w"`},
+		{`unhashable runtime input: /x` + sep + `open "a" in "b"`, `open "a" in "b"`},
+	} {
+		clause, attribution := RefusalClause(c.reason), RefusalAttribution(c.reason)
+		if attribution != c.attribution {
+			t.Errorf("RefusalAttribution(%q) = %q, want %q", c.reason, attribution, c.attribution)
+		}
+		if attribution == "" && clause != c.reason {
+			t.Errorf("an unattributed reason %q split its clause to %q", c.reason, clause)
+		}
+		if attribution != "" && clause+sep+attribution != c.reason {
+			t.Errorf("the split of %q does not rejoin: clause %q, attribution %q", c.reason, clause, attribution)
+		}
 	}
 }
