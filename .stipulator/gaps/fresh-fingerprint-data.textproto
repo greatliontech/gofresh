@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-fingerprint-data"
+reason: "the fingerprint record split left this structural clause with an example pin alone (TestFingerprintDataShape); an analyzer proof is pending"
+content_hash: "cf6a363a77bd2916b9ff4187b1e53e866229a773b913bcb039bb6df755fcd18c"
+source_hash: "ed0bcddfd7a2fbedb1cbcdc4230248b1c206721b5a9273849fc2a05d05975e65"
+lands { manual { condition: "an analyzer proof lands for this clause" } }

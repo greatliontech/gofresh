@@ -335,24 +335,57 @@ func TestTakeEnvSnapshotServesTheSalvagedAnswer(t *testing.T) {
 // caller's cancellation is never answered, and never memoized
 // (REQ-fresh-go-command-policy).
 func TestSalvagedRefusesUnderACancelledContext(t *testing.T) {
-	// The shim marks its answer written; the context is cancelled on
-	// that mark, during the hold — deterministic under any load.
+	// The shim writes its own pid beside its answer; the context is
+	// cancelled once that pid is gone — the leader exited and was
+	// reaped, so the runner is inside the hold its descendant keeps —
+	// never on the answer alone, which the shell writes before it
+	// forks the holder and exits: a cancellation landing in that gap
+	// sweeps a live leader and answers nothing, a different case from
+	// the one this test pins, and one a loaded machine reaches.
 	answered := filepath.Join(t.TempDir(), "answered")
 	t.Setenv("GOFRESH_TEST_ANSWERED", answered)
-	env := shimGo(t, "echo go1.99.0\ntouch \"$GOFRESH_TEST_ANSWERED\"\nsleep 5 &\nexit 0\n")
+	env := shimGo(t, "echo go1.99.0\necho $$ > \"$GOFRESH_TEST_ANSWERED\"\nsleep 5 &\nexit 0\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Both waits end with the test or at a deadline, never spinning
+	// past it: a pid reused between the reap and a poll would answer
+	// forever, and the run's own bound then names the miss.
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
 	go func() {
-		for {
-			if _, err := os.Stat(answered); err == nil {
-				cancel()
-				return
+		deadline := time.After(20 * time.Second)
+		wait := func(ready func() bool) bool {
+			for !ready() {
+				select {
+				case <-done:
+					return false
+				case <-deadline:
+					return false
+				default:
+					time.Sleep(5 * time.Millisecond)
+				}
 			}
-			time.Sleep(5 * time.Millisecond)
+			return true
 		}
+		pid := 0
+		if !wait(func() bool {
+			if b, err := os.ReadFile(answered); err == nil {
+				pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+			}
+			return pid != 0
+		}) {
+			return
+		}
+		if !wait(func() bool { return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) }) {
+			return
+		}
+		cancel()
 	}()
 	r := Runner{Containment: &Containment{WaitDelay: 3 * time.Second}}
 	out, err := r.Run(ctx, "", env, "env", "GOVERSION")
+	if ctx.Err() == nil {
+		t.Fatal("the leader was never seen reaped, so the cancellation never landed during the hold")
+	}
 	if !errors.Is(err, exec.ErrWaitDelay) || strings.TrimSpace(string(out)) != "go1.99.0" {
 		t.Fatalf("run = %q, %v; want the answer beside the wait-delay form", out, err)
 	}

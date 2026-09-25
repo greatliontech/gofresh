@@ -252,16 +252,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-guard-buildconfig"
-  content_hash: "0e1d7a55a2155e21bada01cf225a55b1aeffc6707cd5eb104863c8efbb8a3593"
-  source_hash: "26af7027a7f7b84850e396db41ab1d55c6da0b98f174eeb2ecb0073db75fdbf1"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/buildflags.ValidateEnv"
-  role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "f05636dd5be594b49c04db3f8c0f93b9f21908fa74adee33e46c08da730fc258"
-}
-
-bindings {
   requirement_id: "REQ-guard-machine"
   content_hash: "e8703aa4fb99888639025983bcb8ec92e3ff4eec77caa201e99815a82eaa746b"
   source_hash: "c1d834a47cf850389f3827118e2091f5d1009b12cca4046811c625050e71bcf3"
@@ -329,4 +319,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestFingerprintRecordRefusals"
   role: BINDING_ROLE_TESTS
   shape_hash: "486965307ae140988243591a07177cad72eb54e9aecacc95d1115b5cc0533693"
+}
+
+bindings {
+  requirement_id: "REQ-guard-buildconfig"
+  content_hash: "0e1d7a55a2155e21bada01cf225a55b1aeffc6707cd5eb104863c8efbb8a3593"
+  source_hash: "26af7027a7f7b84850e396db41ab1d55c6da0b98f174eeb2ecb0073db75fdbf1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/buildflags.Validate"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "0119477911c679a6cb3c29a61a15617498599fc5340d4ace4f7ec97717520981"
 }
