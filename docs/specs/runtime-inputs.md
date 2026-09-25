@@ -844,12 +844,18 @@ attribution never moves a measurement's manifest, digest, or reason
 between checkouts of one tree, and a state derived from a recorded
 manifest carries no attribution (the refused path's own spelling stays
 the classifier's: an in-module path refused absolute still names its
-checkout). The hashing pass's resolved-target refusal carries its attribution in
-the reason itself — its target is state, whole in the reason,
-reproduced by every derivation — and never on the observation's
-field. The process's own attribution stays
-REQ-inputs-incomplete's; the field case is a parent-directory fsync
-walk opening `/`.
+checkout).
+An identity conversion (REQ-inputs-relative-identities) converts the
+directory the attribution names as it converts the manifest's identities —
+relative to the root the conversion is given (the module directory, or the
+evidence root a producer framed its observations at) in the portable form; a
+directory outside that root unchanged; absolute again in the absolute form —
+so a persisted record names the producing package the same in every
+checkout. The hashing pass's resolved-target refusal carries its attribution
+in the reason itself — its target is state, whole in the reason, reproduced
+by every derivation — and never on the observation's field. The process's
+own attribution stays REQ-inputs-incomplete's; the field case is a
+parent-directory fsync walk opening `/`.
 
 **REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
 Git-representable state is not reproducible from its recorded commit MUST be marked

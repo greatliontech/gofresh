@@ -83,8 +83,10 @@ type State struct {
 // and the producing process's own directory, the attribution alone
 // without the clause or the separator (RefusalAttribution's form) —
 // named at construction (the reason's first such refusal in log
-// order), carried by a merge and an identity conversion while the
-// reason is theirs, and outside the state and its seal
+// order), carried by a merge while the reason is theirs, and by an
+// identity conversion with the directory converted as the identities
+// are (module-relative in the portable form, a directory outside the
+// module unchanged), and outside the state and its seal
 // (REQ-inputs-refusal-attribution): diagnostic detail, fresh per
 // measurement, never part of the inputs' identity a consumer
 // compares; a reason the hashing pass raised (a resolved-target
@@ -187,6 +189,14 @@ func Absolute(observation Observation, moduleDir string, env []string) (Observat
 		convert: func(moduleDir, path string) pathID {
 			return pathID{Kind: pathAbs, Path: path}
 		},
+		attribution: func(moduleDir, attribution string) string {
+			return convertAttributionDir(attribution, func(dir string) string {
+				if filepath.IsAbs(dir) {
+					return dir
+				}
+				return filepath.Clean(filepath.Join(moduleDir, filepath.FromSlash(dir)))
+			})
+		},
 	})
 }
 
@@ -200,10 +210,18 @@ func Relative(observation Observation, moduleDir string, env []string) (Observat
 	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
 		name: "relative",
 		convert: func(moduleDir, path string) pathID {
-			if rel, ok := relUnder(moduleDir, path); ok {
-				return pathID{Kind: pathRel, Path: filepath.ToSlash(rel)}
+			if rel, ok := relativeSpelling(moduleDir, path); ok {
+				return pathID{Kind: pathRel, Path: rel}
 			}
 			return pathID{Kind: pathAbs, Path: path}
+		},
+		attribution: func(moduleDir, attribution string) string {
+			return convertAttributionDir(attribution, func(dir string) string {
+				if rel, ok := relativeSpelling(moduleDir, dir); ok {
+					return rel
+				}
+				return dir
+			})
 		},
 	})
 }
@@ -233,6 +251,66 @@ func upsertPath(paths []pathInput, index map[pathID]int, entry pathInput) []path
 type identityConversion struct {
 	name    string
 	convert func(moduleDir, path string) pathID
+	// attribution converts the directory an operation attribution
+	// names, as convert converts the manifest's identities: the
+	// producing process's directory is an in-tree identity like them.
+	attribution func(moduleDir, attribution string) string
+}
+
+// convertAttributionDir rewrites the directory an operation attribution
+// names through convert, the operation and the quoted name untouched;
+// anything that is not exactly the operation form — a resolved-target
+// attribution, or a string a caller assigned the field that the
+// grammar does not parse — passes through unchanged, never rewritten
+// into a form it was not.
+func convertAttributionDir(attribution string, convert func(dir string) string) string {
+	op, name, dir, ok := parseOperationAttribution(attribution)
+	if !ok {
+		return attribution
+	}
+	return op + " " + name + " in " + strconv.Quote(convert(dir))
+}
+
+// parseOperationAttribution is the one parse of the operation form —
+// `<op> <quoted name> in <quoted directory>`, exactly to the end — the
+// well-formedness check and the directory conversion both read: the
+// operation, the name as quoted, the directory unquoted.
+func parseOperationAttribution(s string) (op, quotedName, dir string, ok bool) {
+	for _, candidate := range attributionOps {
+		rest, found := strings.CutPrefix(s, candidate+" ")
+		if !found {
+			continue
+		}
+		name, err := strconv.QuotedPrefix(rest)
+		if err != nil {
+			return "", "", "", false
+		}
+		rest, found = strings.CutPrefix(rest[len(name):], " in ")
+		if !found {
+			return "", "", "", false
+		}
+		quoted, err := strconv.QuotedPrefix(rest)
+		if err != nil || rest[len(quoted):] != "" {
+			return "", "", "", false
+		}
+		unquoted, err := strconv.Unquote(quoted)
+		if err != nil {
+			return "", "", "", false
+		}
+		return candidate, name, unquoted, true
+	}
+	return "", "", "", false
+}
+
+// relativeSpelling is the portable spelling of a path under the module
+// — slash-separated and module-relative — and false for a path outside
+// it, which keeps its own spelling.
+func relativeSpelling(moduleDir, p string) (string, bool) {
+	rel, ok := relUnder(moduleDir, p)
+	if !ok {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 func convertIdentityKinds(observation Observation, moduleDir string, env []string, conversion identityConversion) (Observation, error) {
@@ -299,14 +377,19 @@ func convertIdentityKinds(observation Observation, moduleDir string, env []strin
 	}
 	sealed := sealObservation(converted, records, observation.empty)
 	// The conversion is the same measurement's evidence: its attribution
-	// rides along. It still attributes the reason the converted state
-	// names: an attribution exists only for a manifest clause, the
-	// state's reason is then the sorted manifest's first clause, and the
-	// conversion keeps every clause (promoting the reason itself above
-	// re-adds one of them), so the converted state's reason is the same
-	// clause — no reason guard stands here, unlike Merge's, whose union
-	// can name another contributor's clause.
-	sealed.Attribution = observation.Attribution
+	// rides along, the directory it names converted as the identities
+	// are (module-relative under the module in the portable form, a
+	// directory outside the module unchanged, absolute again in the
+	// absolute form), so a persisted record names the producing
+	// package the same in every checkout. It still attributes
+	// the reason the converted state names: an attribution exists only
+	// for a manifest clause, the state's reason is then the sorted
+	// manifest's first clause, and the conversion keeps every clause
+	// (promoting the reason itself above re-adds one of them), so the
+	// converted state's reason is the same clause — no reason guard
+	// stands here, unlike Merge's, whose union can name another
+	// contributor's clause.
+	sealed.Attribution = conversion.attribution(moduleDir, observation.Attribution)
 	return sealed, nil
 }
 
@@ -1770,10 +1853,8 @@ func splitAttribution(reason string) (clause, attribution string) {
 // `<op> <quoted> in <quoted>` for open, stat, and chdir, or
 // `recorded path <quoted> resolves to <quoted> outside the tree`.
 func attributionWellFormed(s string) bool {
-	for _, op := range attributionOps {
-		if rest, ok := strings.CutPrefix(s, op+" "); ok {
-			return quotedThen(rest, " in ", "")
-		}
+	if _, _, _, ok := parseOperationAttribution(s); ok {
+		return true
 	}
 	if rest, ok := strings.CutPrefix(s, "recorded path "); ok {
 		return quotedThen(rest, " resolves to ", " outside the tree")

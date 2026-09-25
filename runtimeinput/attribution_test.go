@@ -125,6 +125,7 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 	log := []byte("open /\nstat /\n")
 	var states [2]Observation
+	var portables [2]string
 	for i := range states {
 		moduleDir, packageDir := testDirs(t)
 		state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
@@ -157,9 +158,39 @@ func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if absolute.Attribution != state.Attribution || relative.Attribution != state.Attribution {
-			t.Fatalf("checkout %d: a conversion dropped the attribution: %q / %q", i, absolute.Attribution, relative.Attribution)
+		// A conversion converts the directory the attribution names as
+		// it converts the identities: module-relative in the portable
+		// form, the process's absolute directory again in the absolute
+		// form, the operation and name untouched.
+		relPkg, err := filepath.Rel(moduleDir, packageDir)
+		if err != nil {
+			t.Fatal(err)
 		}
+		portable := strings.TrimSuffix(state.Attribution, strconv.Quote(packageDir)) + strconv.Quote(filepath.ToSlash(relPkg))
+		if absolute.Attribution != state.Attribution || relative.Attribution != portable {
+			t.Fatalf("checkout %d: the conversions carried %q / %q, want %q / %q", i, absolute.Attribution, relative.Attribution, state.Attribution, portable)
+		}
+		if back, err := Absolute(relative, moduleDir, nil); err != nil || back.Attribution != state.Attribution {
+			t.Fatalf("checkout %d: the absolute form of the portable attribution = %q, %v", i, back.Attribution, err)
+		}
+		portables[i] = relative.Attribution
+		// A directory outside the module keeps its own spelling in
+		// both forms: a refusal attributed after a traversal chdir
+		// names the directory it happened in.
+		left, err := FromTestLog([]byte("chdir /usr\nopen /\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if left.Attribution != `open "/" in "/usr"` {
+			t.Fatalf("checkout %d: the traversal's attribution = %q", i, left.Attribution)
+		}
+		if outside, err := Relative(left, moduleDir, nil); err != nil || outside.Attribution != left.Attribution {
+			t.Fatalf("checkout %d: the portable form moved an outside directory: %q, %v", i, outside.Attribution, err)
+		}
+	}
+	// The portable form is the same in every checkout.
+	if portables[0] != portables[1] {
+		t.Fatalf("the portable attributions differ across checkouts: %q / %q", portables[0], portables[1])
 	}
 	// Two clauses, log order against sorted order: the state names the
 	// sorted manifest's first clause and the attribution is that clause's.
@@ -288,6 +319,28 @@ func TestRefusalAttributionIsTheClauseSplitsComplement(t *testing.T) {
 		}
 		if attribution != "" && clause+sep+attribution != c.reason {
 			t.Errorf("the split of %q does not rejoin: clause %q, attribution %q", c.reason, clause, attribution)
+		}
+	}
+}
+
+// The directory conversion rewrites exactly the operation form and
+// passes everything else through — a resolved-target attribution, an
+// operation form with trailing text, a string no grammar parses —
+// never rewriting a value into a form it was not
+// (REQ-inputs-refusal-attribution).
+func TestConvertAttributionDirRewritesOnlyTheOperationForm(t *testing.T) {
+	upper := func(dir string) string { return strings.ToUpper(dir) }
+	for _, c := range []struct{ in, want string }{
+		{`open "/x" in "/w/pkg"`, `open "/x" in "/W/PKG"`},
+		{`stat "a b" in "rel/dir"`, `stat "a b" in "REL/DIR"`},
+		{`open "/x" in "/w/pkg" trailing`, `open "/x" in "/w/pkg" trailing`},
+		{`recorded path "pkg/link" resolves to "/srv/x" outside the tree`, `recorded path "pkg/link" resolves to "/srv/x" outside the tree`},
+		{`rename "/x" in "/w"`, `rename "/x" in "/w"`},
+		{`open /x in "/w"`, `open /x in "/w"`},
+		{"", ""},
+	} {
+		if got := convertAttributionDir(c.in, upper); got != c.want {
+			t.Errorf("convertAttributionDir(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
