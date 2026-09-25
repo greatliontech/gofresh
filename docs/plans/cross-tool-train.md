@@ -1869,9 +1869,8 @@ in their repos.
       a bare gofresh.New() rebuilt through buildEngine (production never
       builds an engine without WithoutRepositoryVouches). Bound by
       adjacency, its own commits. After 232.
-- [ ] 277. gomutant: a delta run's preparation scales with the delta
-      (field report delta-run-preparation-pays-the-document, pb's second
-      report at 257's close: over a 308-record document a one-target and
+- [x] 277. gomutant: a delta run's preparation scales with the delta
+      (pb's second field report at 257's close: over a 308-record document a one-target and
       a 73-target `--changed` run spend the same first quarter hour — the
       closure signpost over every prior record four minutes, one
       target's freshness proof five more, 9.5 GiB peak) — the
@@ -1883,8 +1882,7 @@ in their repos.
       readers — toolchainProvenance adapts ToolchainProvenance.Check's
       (sample, error); the unverifiable read attributed to the subject
       whose observation carried it or named the union's, through
-      Observation.Attribution (pb's guidance-names-every-oracle-test
-      report); the gap on REQ-exec-go-command-runner closed (gofresh 279
+      Observation.Attribution (pb's guidance field report); the gap on REQ-exec-go-command-runner closed (gofresh 279
       landed the two readers' salvage). After 282 and Band R4.
 - [x] 282. gomutant: record verbs over both layers (chartered at 277's
       open from pb's field reports, correctness first) — prune reports a
