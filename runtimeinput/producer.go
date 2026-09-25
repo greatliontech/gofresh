@@ -122,8 +122,9 @@ type ProducerIngest struct {
 	// environment read of it would record per-run noise); it stands in
 	// for the temp root the environment's TMPDIR would otherwise
 	// resolve. Every other classification root — the toolchain, the
-	// module cache, the build cache, and the temp root itself when this
-	// is empty — is resolved from the environment, never declared.
+	// module cache, the build cache, the go command's own temp root
+	// (GOTMPDIR), and the temp root itself when this is empty — is
+	// resolved from the environment, never declared.
 	ScratchRoot string
 	// ExcludedPaths extends the facade-owned ingest exclusions - the
 	// module-root listing "." (the bracket never covers the root's own
@@ -220,12 +221,8 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	if roots.buildCache != "" {
 		opts = append(opts, withBuildCacheRoot(roots.buildCache))
 	}
-	temp := in.ScratchRoot
-	if temp == "" {
-		temp = roots.temp
-	}
-	if temp = usableTempRoot(temp, f.Root); temp != "" {
-		opts = append(opts, withEphemeralTempRoot(temp))
+	for _, root := range roots.ephemeralRoots(in.ScratchRoot, f.Root) {
+		opts = append(opts, withEphemeralTempRoot(root))
 	}
 	for _, namespace := range in.ScratchNamespaces {
 		opts = append(opts, WithScratchNamespace(namespace.Dir, namespace.Pattern))

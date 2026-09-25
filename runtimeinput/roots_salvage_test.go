@@ -14,7 +14,7 @@ import (
 )
 
 // The roots probe serves the answer a cleanly exited process wrote
-// beside a descendant's pipe hold when its three values are present; a
+// beside a descendant's pipe hold when its four values are present; a
 // torn answer refuses with the hold named
 // (REQ-fresh-go-command-policy).
 func TestRootsProbeServesTheSalvagedAnswer(t *testing.T) {

@@ -13,9 +13,9 @@ import (
 
 // The classification roots a producing run's reads classify under are
 // facts of the run's own environment, not declarations: the toolchain
-// reports GOROOT, GOMODCACHE, and GOCACHE for exactly the environment
-// and package directory the process ran in, and the temp root is what
-// the process's os.TempDir resolved. The facade resolves them once per
+// reports GOROOT, GOMODCACHE, GOCACHE, and GOTMPDIR for exactly the
+// environment and package directory the process ran in, and the temp
+// root is what the process's os.TempDir resolved. The facade resolves them once per
 // (package directory, environment) and the caller declares nothing —
 // except a per-run scratch root it minted and keeps out of the recorded
 // environment, which no environment read can reveal
@@ -26,6 +26,34 @@ import (
 // field declares no root of that class.
 type resolvedRoots struct {
 	toolchain, moduleCache, buildCache, temp string
+	// goTemp is the go command's own temp root, GOTMPDIR as the
+	// toolchain answers it (the environment's, else the go env
+	// file's): the directory the testing package mints its per-test
+	// directories under and the command its per-invocation work
+	// trees, both of which fall back to the process temp root only
+	// while the setting is empty. An ephemeral root exactly as the
+	// temp root is.
+	goTemp string
+}
+
+// ephemeralRoots lists the temp roots a run's reads classify under as
+// ephemeral, each under the in-tree degrade: the process temp root —
+// the scratch root a producer minted where it declares one, else
+// what the run's os.TempDir resolved — and the go command's own where
+// it is set and differs.
+func (r resolvedRoots) ephemeralRoots(scratch, treeRoot string) []string {
+	temp := scratch
+	if temp == "" {
+		temp = r.temp
+	}
+	var roots []string
+	if temp = usableTempRoot(temp, treeRoot); temp != "" {
+		roots = append(roots, temp)
+	}
+	if goTemp := usableTempRoot(r.goTemp, treeRoot); goTemp != "" && goTemp != temp {
+		roots = append(roots, goTemp)
+	}
+	return roots
 }
 
 // rootsCache memoizes resolutions per (package directory, environment)
@@ -52,7 +80,8 @@ func rootsCacheKey(pkgDir string, env []string) string {
 // resolveRoots answers the classification roots of a run of pkgDir under
 // env: the three guard roots as the toolchain reports them — each
 // declaring nothing when it lies inside, equals, or contains the tree —
-// and the temp root as the run's os.TempDir resolved. A toolchain that
+// the go command's temp root as it reports that, and the temp root as
+// the run's os.TempDir resolved. A toolchain that
 // cannot answer is an error the caller fails closed on.
 func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir string, env []string) (resolvedRoots, error) {
 	key := rootsCacheKey(pkgDir, env)
@@ -60,11 +89,11 @@ func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir st
 		return cached.(resolvedRoots), nil
 	}
 	// The document form: one answer shape, one wholeness test — a
-	// document that parses to its three keys. The answer a cleanly
+	// document that parses to its four keys. The answer a cleanly
 	// exited process wrote beside a descendant's pipe hold serves when
 	// it is that document (a banner glued before it, or a torn tail,
 	// parses as nothing); a torn one refuses with the hold named.
-	out, err := runner.Run(ctx, pkgDir, env, "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE")
+	out, err := runner.Run(ctx, pkgDir, env, "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE", "GOTMPDIR")
 	if err != nil && !gotool.Salvaged(ctx, err) {
 		return resolvedRoots{}, err
 	}
@@ -72,10 +101,11 @@ func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir st
 	if parseErr == nil {
 		// Every requested key is answered, an unset one as the empty
 		// value the guard degrades to none; a document missing a key is
-		// no answer to this probe.
-		for _, key := range []string{"GOROOT", "GOMODCACHE", "GOCACHE"} {
+		// no answer to this probe, the earliest missing key named.
+		for _, key := range []string{"GOROOT", "GOMODCACHE", "GOCACHE", "GOTMPDIR"} {
 			if _, answered := values[key]; !answered {
 				parseErr = fmt.Errorf("go env -json answered no %s", key)
+				break
 			}
 		}
 	}
@@ -90,6 +120,7 @@ func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir st
 		moduleCache: usableGuardRootOutside(values["GOMODCACHE"], treeRoot),
 		buildCache:  usableGuardRootOutside(values["GOCACHE"], treeRoot),
 		temp:        tempRootFromEnv(env),
+		goTemp:      usableGuardRoot(values["GOTMPDIR"]),
 	}
 	rootsCache.Store(key, roots)
 	return roots, nil

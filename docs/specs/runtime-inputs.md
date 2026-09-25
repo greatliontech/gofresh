@@ -564,14 +564,18 @@ observation set, exactly as covered-tree metadata dependence already is.
 
 **REQ-inputs-ephemeral-root** (behavior): Observation construction from a
 test-harness log MUST classify under the producing environment's ephemeral temp
-root — what the run's own temp-directory resolution named: TMPDIR when set, the
+roots — what the run's own temp-directory resolution named: TMPDIR when set, the
 platform default otherwise, resolved by the producer facade from the process
 environment the ingest carries, or the per-run scratch root a producer minted for
 the process and keeps out of the environment it ingests (an environment read of it
-would record per-run noise), which it declares instead; a root lying inside the
+would record per-run noise), which it declares instead; and the go command's own
+temp root where one is set, GOTMPDIR as `go env` answers it (the environment's,
+else the go env file's), under which the testing package mints its per-test
+directories and the command its per-invocation work trees (the process temp root
+holds both only while the setting is empty); a root lying inside the
 tree, in its given or resolved form, declares nothing (a module-interior ephemeral
 root would admit reads the bracket exists to observe, and its absence only costs
-re-observation) — whose
+re-observation) — each of whose
 OWN identity, in its declared or resolved form, records neither a path
 identity nor a per-path disposition: temp-tree creation machinery stats the
 root to mint fresh per-run subtrees, no state a subject observes flows from

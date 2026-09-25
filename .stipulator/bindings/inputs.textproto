@@ -793,8 +793,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "11aea5c82b2841de461e8cc286ac153480705807c172ceb9607e8d4edf7902f8"
-  source_hash: "d1ec253bd9d2e9da17785b06192c512de9fde2a2f0d0042bfa6e8841152ddefb"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEphemeralTempRootAdmitsOnlyItsOwnIdentity"
   role: BINDING_ROLE_TESTS
@@ -873,8 +873,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "11aea5c82b2841de461e8cc286ac153480705807c172ceb9607e8d4edf7902f8"
-  source_hash: "d1ec253bd9d2e9da17785b06192c512de9fde2a2f0d0042bfa6e8841152ddefb"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEphemeralScratchAbsentAtIngestRecordsNothing"
   role: BINDING_ROLE_TESTS
@@ -1333,8 +1333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "11aea5c82b2841de461e8cc286ac153480705807c172ceb9607e8d4edf7902f8"
-  source_hash: "d1ec253bd9d2e9da17785b06192c512de9fde2a2f0d0042bfa6e8841152ddefb"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.withEphemeralTempRoot"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1343,8 +1343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "11aea5c82b2841de461e8cc286ac153480705807c172ceb9607e8d4edf7902f8"
-  source_hash: "d1ec253bd9d2e9da17785b06192c512de9fde2a2f0d0042bfa6e8841152ddefb"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.tempRootFromEnv"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1353,8 +1353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-ephemeral-root"
-  content_hash: "11aea5c82b2841de461e8cc286ac153480705807c172ceb9607e8d4edf7902f8"
-  source_hash: "d1ec253bd9d2e9da17785b06192c512de9fde2a2f0d0042bfa6e8841152ddefb"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.usableTempRoot"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1489,4 +1489,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAttributionIsOutsideTheInputsIdentity"
   role: BINDING_ROLE_TESTS
   shape_hash: "f70e141e55fc45e0f245385bad2daa97cccf1aee982d2e7b91d399b7f5adc646"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-ephemeral-root"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeDeclaresTheGoCommandsTempRoot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "48f2820c8c16a6970311b035a07d90f5faccda5da62665f3ff1c5f942b1d0bac"
 }

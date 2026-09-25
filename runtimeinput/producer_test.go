@@ -414,3 +414,49 @@ func TestProducerFacadeResolvesTheTempRootFromTheEnvironment(t *testing.T) {
 		t.Fatalf("reason = %q, err %v", reason, err)
 	}
 }
+
+// The go command's own temp root is an ephemeral root exactly as the
+// process temp root is: the root's stat, a testing per-test directory's
+// object and a work-tree object under GOTMPDIR, absent at ingest,
+// record nothing — under the environment's setting and under the go
+// env file's alike, as `go env` answers it — where the root's stat
+// under no such setting is an external input; a GOTMPDIR inside the
+// tree declares nothing (REQ-inputs-ephemeral-root).
+func TestProducerFacadeDeclaresTheGoCommandsTempRoot(t *testing.T) {
+	root, pkgDir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
+	goTemp := t.TempDir()
+	perTest := filepath.Join(goTemp, "TestF123", "001", "data")
+	work := filepath.Join(goTemp, "go-build123", "b001", "_testmain.go")
+	withSetting := producerEnv(pkgDir, "GOTMPDIR="+goTemp)
+	empty := manifestOf(t, frame, withSetting, "")
+	if manifestOf(t, frame, withSetting, "stat "+goTemp+"\nopen "+perTest+"\nopen "+work+"\n") != empty {
+		t.Fatal("a read under the environment's GOTMPDIR was observed")
+	}
+	// The go env file's setting, with none in the environment: the
+	// toolchain answers the file's value and the root is declared.
+	fileTemp := t.TempDir()
+	goEnv := filepath.Join(t.TempDir(), "go.env")
+	if err := os.WriteFile(goEnv, []byte("GOTMPDIR="+fileTemp+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fromFile := producerEnv(pkgDir, "GOENV="+goEnv)
+	if manifestOf(t, frame, fromFile, "stat "+fileTemp+"\n") != manifestOf(t, frame, fromFile, "") {
+		t.Fatal("the root's stat under the go env file's GOTMPDIR was observed")
+	}
+	// The root's own identity is the discriminating read: an absent
+	// deeper object records nothing under any root or none, while the
+	// directory itself is an external input where no setting names it.
+	env := producerEnv(pkgDir)
+	if manifestOf(t, frame, env, "stat "+goTemp+"\n") == manifestOf(t, frame, env, "") {
+		t.Fatal("the root's stat under a GOTMPDIR the environment does not set recorded nothing")
+	}
+	data := filepath.Join(pkgDir, "data.txt")
+	if err := os.WriteFile(data, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inTree := producerEnv(pkgDir, "GOTMPDIR="+root)
+	if manifestOf(t, frame, inTree, "open "+data+"\n") == manifestOf(t, frame, inTree, "") {
+		t.Fatal("a GOTMPDIR at the tree root admitted a read of the tree's own content")
+	}
+}
