@@ -1908,6 +1908,18 @@ in their repos.
       the post-write re-classification through the store's predicate
       retired; the seams of both faces and their tests carry the
       report. After 282.
+- [ ] 284. gomutant: self-campaign oracles gomutant can afford, then
+      chunk 277's close-out campaign (gomutant issue
+      self-campaign-oracles-cost-a-day): the root package's 22-minute,
+      539-test integration binary is every root-package target's derived
+      oracle and its tests read /usr/bin/git outside the bracket, so
+      277's campaign over `--changed 9753a5e` costs a day and commits
+      machine-local records; the chunk decides the layout under which a
+      target's oracle is the tests that exercise it (integration
+      campaigns in their own package or build configuration, or an
+      explicit-oracle targets document), preserving every test and its
+      bindings, then runs the campaign with the derived oracle timeout
+      and `--bracket-path /usr/bin/git`. In the lane directly after 283.
 - [x] 278. gomutant: the bump behind gofresh 265, 266, and 274 (the lane's
       "bumps gomutant" step, chartered at 274's close) — the gotool
       copies (the hand-built runner/containment, the sampler and its
