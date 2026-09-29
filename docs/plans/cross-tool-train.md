@@ -1018,6 +1018,13 @@ in their repos.
       dangling-empty-label-remedy-names-no-clause — one clause-scope
       semantics decision; measurable only after 270 (zero clause-structured
       requirements today).)
+      Audit 287 (2026-09-29): the note 'measurable only after 270
+      (zero clause-structured requirements today)' is FALSE —
+      REQ-evidence-ladder (evidence.md:148) carries a five-item
+      payload list, i.e. five clauses, and coverage.textproto:145
+      holds a whole-requirement tests claim on it
+      (internal/coverage.TestPolicyDefaults) — the exact false-green
+      channel 176 closes; it follows 270 for scale only.
 - [ ] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
       mcp-surface.md; user ruling 2026-09-07) — the progress channel half
       landed with REQ-pew-progress (every verb's 30 s cadence line); the
@@ -1041,6 +1048,8 @@ in their repos.
       two-surfaces ruling applied to knob prose; doc deletes at close.
       (263: re-aimed — the document half is gofresh's guidance format, 266
       owns it; stipulator keeps the render's face pick. After 266.)
+      Audit 287 (2026-09-29): stands — nothing in the render diverged;
+      the document half is gofresh 300's.
 - [ ] 185. stipulator: the ledger store as a record kind (stipulator
       docs/issues/ledger-store-as-a-record-kind.md) — recordstore.Name gains
       the one-segment form, the compartment ledger sub-store becomes a
@@ -1056,6 +1065,17 @@ in their repos.
       (263: grows — the composition above recordstore is rewritten per kind
       (open→Names→Read→decode→append; open→Sweep) in resolutioncache and
       witnesscache, each record spelled three times — 236's C15, exact.)
+      Audit 287 (2026-09-29): grows — the compartment-ledger sub-store
+      hand-rolls recordstore (witnesscache.go:358/:393/:425/:457); the
+      record decode ladder differs per kind and the fail-closed rule
+      is the one that differs (witnesscache.go:337 refuses trailing
+      bytes; resolutioncache.go:120 omits it and derives the
+      content-name check from the decoded record, so appended bytes
+      survive into a served resolution); two hand validFingerprint
+      ladders over one gofresh type; recordstore.fingerprintDigest
+      takes any; undecodable-manifest-records-dropped-silently
+      re-slotted here (a decode-ladder behaviour, not 249's
+      decomposition).
 - [x] 186. gomutant: the execution window's cost models in one home
       (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
       home stating the three questions (membership, order, execution),
@@ -1542,6 +1562,8 @@ in their repos.
       mechanisms until REQ-go-owned-processes is split.)
       (263: behind 272 — gofresh 265 supplies the group-isolated loader
       spawn.)
+      Audit 287 (2026-09-29): behind 270, not 226 — the clause split
+      moved to 270 at the third band; this note replaces 236's.
 - [x] 239. gofresh: the environment, toolchain, and go-command policy
       exported (234 C1/A1/A5) — gofresh owns the whole policy and
       publishes none of it: internal/processenv (Normalize, ForCommand,
@@ -1744,6 +1766,14 @@ in their repos.
       reductions with caps 5 and 8 and different remainders: one rule, a
       per-reader bound) and the "not a stipulator repository" message ×4
       re-deriving manifest absence; 225 and 248 land together.)
+      Audit 287 (2026-09-29): grows — evidence.md:549–565 narrates the
+      version chain (process record in the spec); the cap census is
+      ten across six packages (execute.go:40, envreport.go:48/:55,
+      facts.go:332, mcpserver/compile.go:47, gap.go:148,
+      response.go:69, views/check.go:16/:221/:226) with
+      REQ-mcp-response-contract stating forms and no values; the four
+      'stipulator repository' spellings (corpus/root.go:25,
+      cmd/root.go:170/:207, mcpserver/server.go:133).
 - [ ] 249. stipulator: the monoliths (236 C1/C12) — runWitnesses
       (570 lines, ~40 locals, five closures, seven nested loop stages)
       split by the stages its comments name, preserving
@@ -1762,6 +1792,17 @@ in their repos.
       Rider (2026-09-29 replan): the no-outcome count beside the outside count, and a result-level line when an execution reached no expected witness (247's relayed candidate) — derived from the never-silent rule (a counted remainder, never a dropped one); lands with check.Run's ladder.
       Rider (derived 2026-09-29): the selective form isolates unasserted impure siblings to earn their observation proofs (stipulator docs/issues/impure-siblings-never-earn-a-proof.md) — one solo process per impure subject once, against two re-executions on every later run; the isolation pass already spawns solo processes with owned observations for denied tests, so the mechanism exists and the cost is repaid on the first served run.
       Rider (tugboat field report 2026-09-29, stipulator docs/issues/check-summary-tally-names-one-invocation.md): the summary face's witnessed tally per invocation — one line per invocation stating its eligibility and its served/executed/uncacheable split (the never-silent rule: a leg executed and never accounted for reads as absent); lands with check.Run's ladder.
+      Audit 287 (2026-09-29): grows — premises re-measured:
+      runWitnesses 573 lines, coverage.Evaluate 400 (up from 349 —
+      271.B added to it), compile.resolve 332, check.Run 254, a new
+      sibling prepareWitnessGroups 153; check.go:169 hand-builds the
+      backend map where golang.BackendSet is the one spelling (the
+      site 247.C missed) and the policy backend set is spelled three
+      times (cmd/policy.go:32 a registry in the CLI package,
+      check.go:227, derive.go:475); the per-invocation tally rider
+      gets its clause home (check.go:207–222 sets one scalar over
+      every invocation; neither REQ-check-witness-selection nor
+      REQ-check-verdict states a per-invocation account).
 - [x] 250. stipulator: the gofresh bump — v0.101.0 → current (three
       releases behind, two breaking; v0.101.1's canonical strategy @2
       restales every witness record) — riding gofresh 239's release so
@@ -2054,6 +2095,17 @@ in their repos.
       binding — one coverage cell answers for twenty contracts and one
       re-consent restales 99 pins. 226's clause-split opening lands here;
       176 measurable after it.
+      Audit 287 (2026-09-29): grows and MOVES UP (directly after the
+      bump 290; it gates 176's measurability and 238's gap and bounds
+      293's amendment) — the measured census:
+      REQ-evidence-witness-freshness is one unbroken 306-line
+      paragraph (evidence.md:193–498) carrying ~20 contracts and 99 of
+      1,076 bindings; REQ-go-owned-processes 79 lines / 34 bindings /
+      eight contracts behind one gap;
+      REQ-evidence-witness-cache-format 116/19; REQ-check-verdict
+      49/32; REQ-mcp-progress 43/30; add REQ-policy-cancellation (23),
+      REQ-evidence-resolution-freshness (22), REQ-mcp-views (21),
+      REQ-policy-explicit (19).
 - [x] 271. stipulator: the two faces' refusal ladders and projections one
       source (263 A2–A5, C3) — verify's record-only hygiene refusal on the
       MCP (today a witnessless summary reads as a clean pass); pin's ids
@@ -2245,7 +2297,13 @@ in their repos.
       at 246/278), 301 chartered (writer-side fixture isolation,
       directly after 283), 283 absorbs three triage folds, 268 grows
       to ten requirements, 269's count corrected to seven.
-- [ ] 287. stipulator: the fourth re-audit band's stipulator audit (as 285).
+- [x] 287. stipulator: the fourth re-audit band's stipulator audit (as 285).
+      Dispositioned 2026-09-29: twelve coherence findings, thirteen
+      consolidation candidates, the queue walked — 270 moved up (it
+      gates 176 and 238 and bounds 293), 293's amendment target
+      widened to REQ-coverage-buckets, 176's false note struck, 238
+      behind 270, the register chore (one resolved doc deleted, three
+      retargets).
 - [ ] 288. pew: the fourth re-audit band's pew audit (as 285); closes the
       band with the cross-repo lane re-sequenced.
 - [x] 289. gofresh: the weekly fleet sweep's first measured `stipulator
@@ -2264,6 +2322,22 @@ in their repos.
       copy 281 lets the resolver child delete rides it; the store
       re-executes once (279's declaration). After 281's release.
       Rider (2026-09-29 replan): the two spec-amend candidates from 272.C (the fingerprint member's form stated once in the layout clause; the seventeen-key enumeration replaced by a pointer to gofresh's REQ-fresh-fingerprint-record) — editorial correctness under the standing authority; and the exemption-clause re-key gofresh 292 declares.
+      Audit 287 (2026-09-29): grows — the resolver child's containment
+      carries a dead quit arm (command_unix.go:20–40 fires SIGQUIT
+      only on errEnvelopeExpired, produced on the execution path 272.B
+      moved onto ownedRunner; commandContext's one caller is
+      resolverclient.go:129; its rationale describes a go test binary)
+      with no WaitDelay and an ambient SystemRoot read on Windows —
+      deleted when gofresh 281's containment lands (whichever of
+      225/290 lands first takes the dead arm); the spec-mirror rider
+      confirmed (evidence.md:573–584 enumerates sixteen keys the code
+      no longer has; the reflection-filled key-set golden is the right
+      mirror); vouchIdentity (normalize.go:388) reimplements
+      gofresh.ParseVouchEntry clause for clause — join the pair and
+      call it; gotool.Salvaged inlined at discovery.go:255;
+      Progress.IsUnit/UnitPhases unused while derive.go:980
+      keep-alives on every event; recordstore.fingerprintDigest takes
+      any.
 - [ ] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
       docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
@@ -2304,6 +2378,15 @@ in their repos.
       judged against the declared set, REQ-gate-no-undeclared amended
       to say so). Soundness first: directly before 290; doc deletes at
       close.
+      Audit 287 (2026-09-29): grows — the amendment is
+      REQ-coverage-buckets (evidence.md:899: 'exactly one bucket …
+      broken forces broken, else stale forces stale'), which is what
+      hides the constituent red; REQ-gate-no-undeclared already states
+      'a gap excuses only the violation classes it declares' and
+      coverage.go:760 conforms to it under the one-bucket rule;
+      rowFacts already carries f.stale apart from the bucket and
+      coverage.go:727 looks behind it — a per-row class set beside the
+      reported bucket, no new concept.
 - [ ] 294. gomutant: the external-oracle mode (gomutant docs/issues/
       external-oracle-for-tagged-and-subprocess-targets.md — derived
       2026-09-29: the trigger the 2026-09-07 deferral named, a
@@ -2377,6 +2460,16 @@ in their repos.
       the lookup, and give the seeding family an explain derivation —
       every uncacheable reason class explainable or naming the verb
       that explains it). Directly after 293; doc deletes at close.
+      Audit 287 (2026-09-29): grows — golang.go:922's one message
+      conflates three causes (a view excluding the file; an object
+      with no *ast.FuncDecl to index, :863; a package loaded under a
+      different walkKey, :831) — split the refusal by cause BEFORE
+      fixing the lookup; explain derives one reason class (the
+      dynamic-state culprit) and the seeding/declaration family none —
+      make 'every uncacheable reason class explains or names its verb'
+      structural (the class carries its explain kind);
+      seeding-walk-unreached-routes folds here (its trigger fired at
+      272.F's staticCallees).
 - [ ] 299. stipulator: a policy toolchain pin the environment does not
       satisfy refuses at load (the stipulator field report
       toolchain-pin-unhonored-runs-silently — tugboat, 2026-09-29: the
@@ -2388,6 +2481,11 @@ in their repos.
       both and the remedy; the comparison is stipulator's, the pin's
       consumer — gofresh has no pin concept). Soundness first: heads
       stipulator's order, before 293; doc deletes at close.
+      Audit 287 (2026-09-29): grows — no clause states a pin
+      comparison (REQ-evidence-toolchain-provenance judges skew, never
+      pin-vs-sample) and policy.proto:116's 'Pin-at-load' over-claims
+      enforcement: name the clause written or amended and correct the
+      proto comment in the same chunk.
 - [ ] 300. gofresh: the guidance lint's gofresh half (audit 285 A9 —
       four gofresh guidance issues parked on stipulator 184, whose own
       parenthetical says 266 owns the document half, and 266 landed
@@ -2511,6 +2609,25 @@ in their repos.
       composers; 227's six deferred test-only production entries and two
       true vestiges (resolverClient.stdin write-only, gitfs.absPath an
       injection seam with no site); 172 merges in.)
+      Audit 287 (2026-09-29): grows — refKey three ways with
+      compile.go:487 a local closure shadowing the package function
+      and dropping the case folding (two term references differing
+      only in case are one identity at :540 and two at :487 — under
+      the comment citing REQ-model-layout-independence);
+      truncate-with-ellipsis four ways, three wrong (completions.go:36
+      cuts by bytes — invalid UTF-8; server.go:231; progress.go:45 off
+      by one; envreport.go:70 correct); bucket words two tables
+      (coverage.go:55 vs :805, one contradicting views.go:35's
+      comment; views.go:38 hand-lists what proto.go:126 derives);
+      vestiges verified: progress.WithInterval + progress.Option zero
+      production callers (227's 'seam' verdict re-derived),
+      resolutioncache.StoreDir, gitfs.absPath (a seam nothing
+      substitutes), resolverClient.stdin written never read,
+      profile.Dump ×4 zero references, over-exports
+      (verify.Registration.TopLevel, coverage.Policy.Active,
+      views.Scope.Empty, prune.ResolutionCounts,
+      proptest.Corpus.Partition, profile.LineIndex/NewLineIndex);
+      per-stream-color re-slotted here (172 merged into 225).
 - [ ] 226. stipulator: golang.go split by its three subsystems
       (resolution and shape hashing, witness classification and the
       seeding walk, generated detection) with the classifier's three
@@ -2527,6 +2644,22 @@ in their repos.
       six times; the subject key joined inline at 45 sites beside
       witnesscache.Record.Key; the twin semver comparators; folds
       go-backend-load-path-pairs and reviewed-row-sets-one-pattern.)
+      Audit 287 (2026-09-29): LEADS with the go.work divergence —
+      policyMembers (policy.go:447) refuses a non-host-portable member
+      before the escape test while workspaceMembers (workspace.go:22,
+      the load/witness reader) has no such check, so one go.work is
+      refused at derivation and admitted at verification, and
+      depattribution.go:111 re-parses go.work swallowing both errors
+      (REQ-go-workspace: 'never silently bent'); the third band's
+      'identical refusal text' note was wrong. Grows: path containment
+      EIGHT ways, two wrong (the two strings.Contains(clean, '..')
+      forms at mcpserver/export.go:53 and author/author.go:125 refuse
+      a legitimate ..foo component; golang.go:542's separator-less
+      HasPrefix judges a file under a ..cache directory out of tree;
+      recordapply.go:380's within resolves no symlink); test-variant
+      folding two rules (slice.go:156 by build identity vs seven sites
+      by spelling). Preserve the lexical-then-resolved two-step
+      workspace.go:41+:81 states.
 - [x] 227. stipulator: the vestigial sweep — three build-tagged
       atomicReplace declarations with no call site (the Windows arm
       dragging kernel32), the legacy .stipulator/cache removal on every
@@ -2564,6 +2697,22 @@ in their repos.
       GOCACHE="" in golang's, whose rationale applies to check's
       fixtures) — a fault, not tidiness; seven go-build sites behind
       one sync.Once; repoWith, untouchable, compileFiles duplicated.)
+      Audit 287 (2026-09-29): grows — eight go build …/cmd/stipulator
+      sites in seven test files, none referencing newRootCmd
+      (bind/pin/prune/gap/check/interrupt exercised only out of
+      process — the recorded lesson, unlanded); neutralAmbient four
+      copies, two diverging (GOWORK=off, GOCACHE='');
+      firstClause/repoWith/untouchable/compileFiles duplicated;
+      freshfixture duplicates six fixturemod packages; the
+      policyderive/workspace fixture's go.work names members that do
+      not exist and its golden pins them; vacuous oracles
+      (hygiene_test.go:49's len floor over the surface 271 made the
+      MCP's correctness gate; vocabulary_test.go ranging the
+      production tables; the guidance tests taking want from the
+      rendered document; keysoundness_test.go:205/:255); untested arms
+      (progress.Word zero test references;
+      coverage.satisfied/requiredEvidence never see ANALYZER_PROOF or
+      PROPERTY; gapRowCap, ledgerVersion).
 
 ## Band J — pew under the emergent shape (chartered by audit 197)
       (263: grows — enumeration pins blind to a new member: progress.Word's
