@@ -959,7 +959,7 @@ in their repos.
       both streams' isatty becomes a per-stream styler; doc deletes at
       close (its test-binary half moved to 228 by audit 196).
       (263: MERGED into 225 — one rendering layer, one commit shape.)
-- [ ] 173. pew: the flag usage strings rendered from the guidance
+- [x] 173. pew: the flag usage strings rendered from the guidance
       document (pew docs/issues/guidance-knobs-and-verb-table.md) — pew's
       REQ-pew-guidance already names the document the authoritative
       superset and gofresh's REQ-guidance-render its projection, so every
@@ -978,6 +978,12 @@ in their repos.
       document does not); riders from gomutant 246: no default parentheticals
       in the served clause (cobra prints non-zero defaults per flag type), no
       back-quoted span in a usage string (pflag reads it as the value name).)
+      DISSOLVED at audit 288 (2026-09-29): its payload landed at 275.C
+      (c37a204 — every leaf verb's flag usage is
+      GuidanceKnob(…).Usage(), every Short/Long GuidanceRegistration;
+      the doc it cited was deleted at 275); the residue (§12's purpose
+      column; the root command's hand-written Short outside
+      visitLeafVerbs) is 232's.
 - [ ] 174. pew: `ab --out` per package and one verdict path (pew
       docs/issues/ab-out-multi-package.md, verdict-path-consolidation.md)
       — one artifact per package under a derived path, its encoding
@@ -1006,6 +1012,22 @@ in their repos.
       artifact's four pew- keys through the registry's namespace. The vouch
       GRAMMAR half is 275's; 174 owns the threading.)
       Rider (tugboat field report 2026-09-29, pew docs/issues/strategy-stale-arms-flipped-valid-without-rerecord.md): 46 arms flipped `stale (dynamic-state strategy)` → `valid` between the v0.101.3 and v0.102.0 pew builds with the store untouched — the ladder's strategy handling stated once (audit or validity, per 229's ruling) and the flip explained under both builds; the wrong verdict is a defect fixed here, the false-valid direction voiding stat verdicts.
+      Audit 288 (2026-09-29): the strategy-flip rider REFRAMED — no
+      verdict was wrong: the rung (admission.go:61) and its operands
+      are byte-identical at both builds, gofresh.DynamicStateStrategy
+      is @38 at v0.101.3 and v0.102.0 alike, and the format rung
+      (RecordingFormat 2→3 at 230) sits strictly above it, so a
+      rebuild can only move recordings DOWN into stale (format); a
+      `valid` arm on 09-21 carries pew-format: 3, which only a
+      post-230 pew writes — the store moved (the whole-store
+      re-record) or the sweep misreported; checkable by grep over
+      tugboat's store. The work: the recorded-vs-current operands on
+      the stale line and an explain row for EVERY validity key
+      (explainRecordAgainstCurrent lays out the closure strategy and
+      never the dynamic-state one — a stale (dynamic-state strategy)
+      verdict is unexplainable by pew's own --explain), the rung
+      stated once; admission reads the registry's validity? column
+      (232 adds it). Heads pew's tail after the bump.
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
       clause-structured-whole-claims.md; user ruling 2026-09-07) — a
@@ -1030,6 +1052,9 @@ in their repos.
       landed with REQ-pew-progress (every verb's 30 s cadence line); the
       MCP surface itself waits for a driving agent to appear; doc
       retargets at close.
+      Audit 288 (2026-09-29): stands — --json on status and stat only;
+      §12's 'where one exists' reads as intent; the MCP half's trigger
+      is checkable.
 
 - [x] 178. stipulator: policy-declared scratch namespaces (the consumer
       half of the in-module scratch discharge, chunk 100's verdict) — a
@@ -1847,6 +1872,28 @@ in their repos.
       extra dead generality; RunIn and ReproducibleAtWithin vestigial exports.
       environment-normalized-once stays here but is built over gofresh 265's
       setter (after 275); format-rung-two-readers leaves for 275.)
+      Audit 288 (2026-09-29): grows, after 291 — FIRST the conformance
+      half: ab's seven git stages are bare exec.Command
+      (ab.go:543–701), so REQ-pew-interruption's 'any stage on the
+      verb's path' does not hold there (a Ctrl-C during git worktree
+      add neither ends the verb nor kills the child) — raised from
+      hygiene; then C1 the metric set spelled three (four) times
+      (stat.go:101 knownUnits, compare.go:168/:572/:74) → one registry
+      on 251's pattern (unit, worse direction, rank, gateable; §10.1's
+      sec/op default preserved); C2 one containment predicate, seven
+      spellings plus two longest-existing-prefix resolvers; C3 two
+      module resolvers (gc.go:212 GOMOD vs stat.go:681 go list -m
+      -json — a third subprocess form §11 does not list); C5 the
+      writer census corrected (seven named single-key writers + two
+      inline, all from run.go's two composers; Destinations' 'one
+      derivation' false for its second caller); C6 the vestige list
+      corrected (dead: recordingFromPath, ExecuteBinary,
+      isPewRecording; test-only: store.List, gitblob.State,
+      run.Execute, checkOne with a false doc; dead capability:
+      equalExcept's excluded, RunIn's dir; LIVE contrary to 264:
+      RepositoryState.Root, run.Demux, ReproducibleAtWithin); C7 the
+      audit-note renderers; the CommandDir = gotool.Coordinate copy
+      (286 C1); A6 sourceBenchmarks vs selectedBenchmarks one rule.
 - [x] 253. pew: the gofresh bump after 239's and 205's releases — the
       go-tool consumer arm (pew/internal/gotool's six importers and its
       divergent dir policy onto gofresh's exported policy with 239's
@@ -2199,6 +2246,20 @@ in their repos.
       a bare gofresh.New() rebuilt through buildEngine (production never
       builds an engine without WithoutRepositoryVouches). Bound by
       adjacency, its own commits. After 232.
+      Audit 288 (2026-09-29): grows — premise re-verified after 230
+      (zero Fuzz, zero rapid tree-wide; 230's fixed-seed
+      inverse-property loop on the chunk grammar, chunk_test.go:17, is
+      the pattern the other surfaces follow); the id-citation sweep
+      (eight of 22 requirement ids named by no test —
+      REQ-pew-closure-soundness, -validity-verdict, -derived-state,
+      -sha-independence, -closure-noncall, -mutable-local,
+      -regression-gate, -sample-completeness — several witnessed
+      without the cite); the self-oracle pins
+      (guidance_test.go:62–68/:99–101 against the same memoized
+      document; knobs_test.go:70 derivePin against run.DerivePin); the
+      eight bare-engine pins bypassing buildEngine; the generator
+      VEHICLE stated at open (rapid is not in pew's go.mod — extend
+      the seeded-loop pattern, or a dependency ask).
 - [x] 277. gomutant: a delta run's preparation scales with the delta
       (pb's second field report at 257's close: over a 308-record document a one-target and
       a 73-target `--changed` run spend the same first quarter hour — the
@@ -2304,8 +2365,16 @@ in their repos.
       widened to REQ-coverage-buckets, 176's false note struck, 238
       behind 270, the register chore (one resolved doc deleted, three
       retargets).
-- [ ] 288. pew: the fourth re-audit band's pew audit (as 285); closes the
+- [x] 288. pew: the fourth re-audit band's pew audit (as 285); closes the
       band with the cross-repo lane re-sequenced.
+      Dispositioned 2026-09-29 — BAND R4 CLOSED: seven coherence
+      findings, seven consolidation candidates, the queue walked — 173
+      dissolved (landed at 275.C), 174's rider reframed (the flip is
+      the store's, not a wrong verdict; the explain row per validity
+      key is the work), 291 ahead of 252 with the Quit rider, 232 and
+      252 and 276 grown, 127's scope sharpened. The cross-repo lane is
+      in the order sentence (recorded at 285's tick); the audit count
+      restarts at zero.
 - [x] 289. gofresh: the weekly fleet sweep's first measured `stipulator
       check` over this repo is RED on three requirements —
       REQ-fresh-fingerprint-data, REQ-fresh-observation-data,
@@ -2342,6 +2411,19 @@ in their repos.
       docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
       Rider (2026-09-29 replan): gofresh 292's clause re-key, as at 290.
+      Audit 288 (2026-09-29): moves AHEAD of 252 (252's
+      environment-normalized-once builds over gofresh 265's setter,
+      absent from the v0.105.1 pin; 291 deletes the containment copy
+      252 would re-touch). Riders: (a) gofresh's Containment sends
+      SIGQUIT to the group before SIGKILL, and SIGQUIT to a go test
+      benchmark dumps goroutine stacks into the measured stream that
+      §9 reads as splice evidence — the measurement spawn carries NO
+      Quit arm, as a pinned fact; (b) provenance.go:79 discards the
+      sampled go version that is the recording's toolchain guard
+      value, captured a second time through guard.Capture — record the
+      checked sample; (c) the row projection validates through
+      gofresh's Fingerprint.Validate (285 A14 / 240's projection
+      obligation).
 - [ ] 292. gofresh: an in-module refused path's clause spelled
       module-relative (gofresh
       docs/issues/refused-in-module-path-spelled-absolute.md — derived
@@ -2779,6 +2861,23 @@ in their repos.
       admission is co-owned with gofresh's verdict ladder — name the
       engine as the class's origin, pew's rung the pre-comparison
       projection.)
+      Audit 288 (2026-09-29): grows — three format sentences under one
+      rule (spec.md:630 'Format-2 recordings are checked through the
+      ordinary fingerprint path' false since 230; :183 format-1's
+      canonical incomplete disposition describes a shape no reader
+      interprets; :110 correct); a validity? column in §5's table (the
+      one registry projection not derived — 'validity key' is prose at
+      :98/:102 and the rung a hand-written compare) that 174's
+      admission reads; a format bump announces its re-class (§10.1
+      already separates 'everything stale (format)' from 'nothing
+      recorded'; the same duty across a version bump); §11's
+      subprocess list gains go list -m -json; the declared-benchmarks
+      rule stated once (gc's two enumerations); 264's A4 as one
+      sentence naming ab's disagreement-only rule beside §10.1's
+      non-empty-equal rule (not one predicate); the recorded items
+      stand (§11's git-binary sentence, --explain's stream, the
+      reader-injected pew-format-invalid key, REQ-pew-derived-state's
+      payload list, §§1–12 ids, the purpose column).
 
 ## Band E — design chunks (open with the user)
       (264: grows — states which files a package's benchmarks are (§4's B,
@@ -2828,6 +2927,7 @@ in their repos.
       recording under its provenance; the arm floor derived from the
       lineage's same-closure recordings, the bar named per row); 102
       lands inside this chunk's arc, after gofresh 175.
+      Audit 288 (2026-09-29): stands (after gofresh 175/102).
 - [ ] 102. gofresh: per-subject sliced closures — Fingerprint gains
       SlicedClosure (declaration-level hash over the subject's
       attributed-reachable set; widens to the maximal hash where
@@ -2849,6 +2949,12 @@ in their repos.
       the other two consumers, and pew's single-subject execution gives
       every arm its own completed observation — adopting a proven gate
       is not a fork; doc deletes at close.
+      Audit 288 (2026-09-29): scope sharpened — the exemption at
+      cmd/pew/fingerprint_roundtrip_test.go:43
+      (ObservationAssertion/ObservationProof, the two record fields §5
+      has no rows for, exempted 'recomputed at judge time, never
+      served' — §7.8's retiring sentence): two omittable rows + the
+      format bump + that exemption flipped.
 
 - [ ] 175. gofresh: subject-scoped closure identity (design — derived
       2026-09-29: the identity is the canonical member form over the
