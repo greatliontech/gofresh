@@ -997,6 +997,7 @@ in their repos.
       constructor" prevents — the vouch safety is positional today; the ab
       artifact's four pew- keys through the registry's namespace. The vouch
       GRAMMAR half is 275's; 174 owns the threading.)
+      Rider (tugboat field report 2026-09-29, pew docs/issues/strategy-stale-arms-flipped-valid-without-rerecord.md): 46 arms flipped `stale (dynamic-state strategy)` → `valid` between the v0.101.3 and v0.102.0 pew builds with the store untouched — the ladder's strategy handling stated once (audit or validity, per 229's ruling) and the flip explained under both builds; the wrong verdict is a defect fixed here, the false-valid direction voiding stat verdicts.
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
       clause-structured-whole-claims.md; user ruling 2026-09-07) — a
