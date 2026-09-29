@@ -42,7 +42,7 @@ json-record-readers-one-home) touch neighbouring code with no check
 row of their own, so the rows here are disjoint from every existing
 doc.
 
-Lands: cross-tool train chunk 281 — gofresh's next chunk in the lane
+Lands: cross-tool train chunk 289 — the diagnosis chunk chartered for this report (2026-09-29 replan); directly after 277 in the lane, before the fourth re-audit band
 and a release; the train's standing rule keeps the self-check off the
 chunk loop and re-takes it before a release push, so 281's pre-push
 check is the named point that forces the diagnosis (an earlier gofresh
