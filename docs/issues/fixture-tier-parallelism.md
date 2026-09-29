@@ -10,6 +10,6 @@ global; `ExplainDynamicState` holds a process-global mutex. Landing it
 means a per-test audit of shared state, then measuring the wall under
 the CI core count.
 
-Lands: when the full tier's measured wall crosses half its CI budget
-(15m of the 30m `-timeout`), or with the next change to the closure
-test fixtures' shared state.
+Lands: cross-tool train chunk 206 (audit 285, 2026-09-29: the trigger reads as met
+at the recorded closes — closure 798–812s beside root 390–398s — or is ambiguous;
+206 states the per-package reading or fires it).

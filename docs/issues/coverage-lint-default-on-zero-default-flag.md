@@ -12,5 +12,7 @@ to the call's)` on nil string arrays, found at stipulator 272's projection
 fold; both reworded there). The rule the served string needs: a
 `(default …)` form belongs only on a flag whose registration prints one.
 
-Lands: cross-tool train chunk 184 (the fleet default-spelling rule beside
-the clause rule).
+Lands: cross-tool train chunk 300 (audit 285, 2026-09-29: the guidance lint's
+gofresh half — stipulator 184's own parenthetical says the document half is
+gofresh's; the pflag-typed switch is refused on the dependency boundary and
+lands as a name-keyed table).

@@ -24,5 +24,7 @@ prose instead (pew's shape: "`<module>/benchmarks` unless given").
 Invariants preserved: the lint's fact is still the registration's;
 a non-zero default's form keeps being dropped and printed once.
 
-Lands: cross-tool train chunk 184 (the knob-clause chunk behind 266,
-where the projection's CLI rules are next reworked).
+Lands: cross-tool train chunk 300 (audit 285, 2026-09-29: the guidance lint's
+gofresh half — stipulator 184's own parenthetical says the document half is
+gofresh's; the pflag-typed switch is refused on the dependency boundary and
+lands as a name-keyed table).

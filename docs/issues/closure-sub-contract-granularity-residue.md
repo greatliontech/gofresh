@@ -24,5 +24,7 @@ The split is the same byte-preserving carve at sentence boundaries the
 first decomposition used, one MUST elevated per new paragraph, every
 binding and cite retargeted through the tool.
 
-Lands: cross-tool train chunk 193 (its fixpoint clauses need
-addressable IDs — split these three at its open gate).
+Lands: cross-tool train chunk 193 (its fixpoint clauses need the sub-contracts);
+audit 285 (2026-09-29) adds the FOURTH bundle: the surviving base
+REQ-closure-observability-analysis still contains a benchmark-pacing clause with
+no sub-ID, cited as prose at eight sites.

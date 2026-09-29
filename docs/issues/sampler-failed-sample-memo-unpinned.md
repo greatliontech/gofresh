@@ -10,4 +10,6 @@ own memoized sampler carried that pin (TestMemoizedSamplerSamplesOncePerKey)
 and retired it at its gotool fold (chunk 272) on the premise that
 gofresh's covers it — it does not.
 
-Lands: cross-tool train chunk 206 (gofresh's test-surface chunk).
+Lands: cross-tool train chunk 281 (audit 285, 2026-09-29: a fleet coverage loss,
+not a test-surface item — gotool/gotool.go:171–178 unpinned since stipulator
+retired its pin at 272).

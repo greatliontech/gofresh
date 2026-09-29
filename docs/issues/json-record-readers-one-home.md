@@ -20,4 +20,7 @@ fingerprint compares compacted bytes (nested in a parent document that
 may indent it) — the collapsed reader carries the whitespace rule as a
 caller's choice, never one policy for both.
 
-Lands: 243
+Lands: cross-tool train chunk 243 (audit 285, 2026-09-29, sharpened: the manifest
+decoder has no duplicate-key and no null rule — runtimeinput.go:2583–2602 catches
+them incidentally as 'non-canonical manifest encoding' where the record names the
+key; one reader, one refusal ladder).

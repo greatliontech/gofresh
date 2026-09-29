@@ -19,6 +19,6 @@ keeping the projection whole. The subject walk's scan then resolves
 such an invoke by the operand alone exactly as it resolves a computed
 call.
 
-Lands: with docs/issues/dispatch-admissions-one-predicate.md's
-collapse — the one predicate over site, operand, and targets is where
-both forms meet (the field report is the chunk-125 sweep above).
+Lands: cross-tool train chunk 260 (audit 285, 2026-09-29: the field report
+iterator-calls-and-std-invokes-open-the-closure fired this doc's arm; the
+circular trigger with dispatch-admissions-one-predicate retired).

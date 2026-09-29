@@ -20,5 +20,7 @@ scan-memo's "any change that can move an effect set bumps it";
 REQ-closure-observability-analysis's "widening rides the
 strategy-version bump".
 
-Lands: the next widening of an audited set, or with the next change to
-either strategy version.
+Lands: cross-tool train chunk 203 (audit 285, 2026-09-29: the trigger fired eight
+times unheeded — ObservationRTA @30→@40, effectScanStrategy @19→@21 — and the
+unsound direction is a NARROWING served by a warm memo; 203's one-rule memo
+versioning is exactly the set↔scope coupling).

@@ -17,6 +17,5 @@ one place and the asymmetry is unrepresentable; or, short of that, a
 table-driven pairing test over the shape corpus asserting the collector
 names a set exactly when the walk closes through function-naming shapes.
 
-Lands: with docs/issues/dispatch-admissions-one-predicate.md's collapse
-(the one predicate consumes both answers), or with the next arm added
-to either ladder.
+Lands: with unify-carrier-walks' collapse (audit 285, 2026-09-29: re-slotted off
+the retired circular pair; the invoke-form docs land at 260).

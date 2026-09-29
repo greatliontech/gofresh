@@ -21,6 +21,6 @@ strip cuts at the last `" ["`, so a moved member whose own name carries
 its garbled twin); the published split parses the attribution from its
 prefix instead.
 
-Lands: a gofresh change set amending REQ-inputs-refusal-attribution's
-governed set (the split grows the moved-bracket form); gomutant's copy
-deletes at the bump behind it.
+Lands: cross-tool train chunk 292 (audit 285, 2026-09-29: the change set this
+doc's trigger names verbatim — the governed set amended there; gomutant's second
+strip deletes at the bump behind it).

@@ -21,6 +21,6 @@ the two — the operand's collected functions resolving the site by
 themselves (`heldKnown` in scanCall, `narrowedTargets` at the loops)
 — so three encodings now grant one admission.
 
-Lands: with docs/issues/invoke-targets-narrowed-by-operand.md — the
-invoke form's narrowing is where the computed-call and invoke arms
-must meet in one predicate.
+Lands: cross-tool train chunk 260 (audit 285, 2026-09-29: the field arm fired —
+iterator-calls-and-std-invokes-open-the-closure's invoke half; the circular
+trigger with invoke-targets-narrowed-by-operand retired).

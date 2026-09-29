@@ -11,8 +11,5 @@ would collapse them; the resolver-side duplication was already
 collapsed in-chunk (resolveEnvAudit). Behavior-preserving refactor —
 the walks differ only in their gates and targets.
 
-Lands: with unify-carrier-walks' collapse — the walk-unification band,
-beside it; the discharge-walk sibling landed as dischargeCulprits.
-Redeferred at 106's triage (chunk 106's scope is the carrier and
-dynamic-state pricing plane, not the registration audit) and again at
-98's verdict close.
+Lands: with unify-carrier-walks' collapse — the walk-unification band (audit 285,
+2026-09-29: re-slotted onto it alone).
