@@ -33,4 +33,6 @@ Windows.
 The tradeoff is the fleet's Windows behaviour and gofresh's dependency
 surface against one containment implementation.
 
-Lands: user decision — the fork above.
+Lands: a Windows consumer's field report (derived at the 2026-09-29
+replan: no consumer runs on Windows; the Windows oracle keeps
+gomutant's own job object until one does).

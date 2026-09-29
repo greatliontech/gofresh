@@ -27,4 +27,6 @@ path, which is the object's identity — and is not this residual.
 - Keep the absolute spelling: a moved checkout re-measures such records
   and sheds their attestations, as today.
 
-Lands: user decision — the fork above.
+Lands: cross-tool train chunk 292 (derived at the 2026-09-29 replan:
+checkout independence is the property; the hand-authored clauses
+re-key at the consumers' bumps 290, 291, and gomutant's next).
