@@ -8,5 +8,5 @@ the dirty inspector, it is a capability awaiting its adopter or a clause to
 retire; deleting the option deletes the clause's acceptance, so it does not
 move without the spec.
 
-Lands: user decision — adopt (name the consumer and its call) or retire
-(amend the clause).
+Lands: cross-tool train chunk 243 — retire the option and amend the clause
+(derived 2026-09-29: pre-v1, no caller across the four repos).

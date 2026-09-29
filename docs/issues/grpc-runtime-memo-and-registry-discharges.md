@@ -33,5 +33,7 @@ Lands: the memo class with docs/issues/immutable-after-construction-objects.md
 (the nineteen memos hold carriers — message types, options, Huffman
 nodes — so the data memo that landed does not reach them, and the
 carrier form needs the object-immutability fixpoint); the channelz
-registry, user decision (an attestation-gated subject-own registry
-entry is its own mechanism).
+registry as a rider on the same chunk (cross-tool train chunk 193,
+derived 2026-09-29: a named audited entry under the single-subject
+attestation — the attestation-gated subject-own-registry discipline
+the spec already carries).

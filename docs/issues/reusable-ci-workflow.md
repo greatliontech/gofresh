@@ -11,5 +11,7 @@ greatliontech/.github repo, inputs test-timeout/job-timeout/
 packages) would single-source it; the org already centralizes
 greatliontech/semrel@main, so the convention exists.
 
-Lands: user decision — deferred 2026-09-07 (creating the org-level repo is
-an outward-facing act; the four copies stay until the user schedules it).
+Lands: a fifth copy (a new repo adopting ci.yaml), or a CI-contract change
+that must land in all four copies at once — the checkable condition
+(derived 2026-09-29; the org-level repo is created then, as the change's
+own step). Until then the four copies are maintained in step.

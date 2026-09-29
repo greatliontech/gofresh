@@ -10,5 +10,6 @@ capability awaiting its adopter — gomutant's committed-baseline
 provenance is the plausible one, where a finding's `Dirty` is derived
 today from git directly — or a clause to retire with its code.
 
-Lands: user decision — adopt (gomutant's baseline reads it) or retire the
-clause and the inspector.
+Lands: cross-tool train chunk 243 — retire the clause and the inspector
+(derived 2026-09-29: pre-v1, no installed base, no consumer selects it;
+gomutant's baseline provenance reads git itself).
