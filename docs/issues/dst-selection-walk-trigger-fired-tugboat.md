@@ -34,5 +34,6 @@ dst.10–dst.14, `current` → dst.14). The walk's scope is the existing
 doc's (time/dst_tz.go, testing/dst_hostio.go, sync's dst-and-race
 hook seam, the os fault-injection surface).
 
-Lands: awaiting triage (this report fires the existing doc's
-trigger; the two are one work item).
+Lands: cross-tool train chunk 297 (the dst-selection walk, chartered from this
+report at chunk 289's record; this report fires walk-dst-selection-for-audit-key's
+trigger — the two are one work item and land together).

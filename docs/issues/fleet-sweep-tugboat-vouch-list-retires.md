@@ -31,5 +31,7 @@ audit row carries the six identities with the flag list removed, the
 list retires; if not, the file is not being read and that is a pew
 field report.
 
-Lands: awaiting triage (the script's own condition; the sweep's next
-tugboat run is the check).
+Lands: the sweep's next tugboat run showing the store's `pew-vouches` audit row
+carrying the six identities with the flag list gone — the script's own condition,
+confirmed from this side; the list retires in that run's fix commit (if the row
+does not carry them, the file is not read and that is a pew field report).

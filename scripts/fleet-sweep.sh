@@ -190,6 +190,17 @@ for r in "${FINDINGS_REPOS[@]}"; do
 done
 
 section "stipulator check verdicts"
+# The check's human face renders one coverage row per red requirement as
+# "  <bucket> REQ-…" (stipulator internal/cmd/check.go) and one
+# "violation: REQ-… is red and no gap excuses it" line per unexcused red.
+# The row capture matches the ROW SHAPE, never a spelled bucket vocabulary:
+# the bucket set is stipulator's (coverage.Bucket.Red — uncovered, partial,
+# stale, broken today), and a class this script failed to spell read as
+# "no row" for two weeks running (the 09-21 and 09-28 gofresh/gomutant
+# reds carried no class row).
+CHECK_ROW_RE='^  [a-z]+ +REQ-'
+CHECK_VIOLATION_RE='^ *violation:'
+CHECK_CAPTURE_RE="($CHECK_ROW_RE|$CHECK_VIOLATION_RE)"
 for r in "${STIPULATOR_REPOS[@]}"; do
   [ -d "$GL/$r" ] || { echo "$r: REPO ABSENT"; continue; }
   est="$GL/$r/.stipulator"
@@ -212,17 +223,21 @@ for r in "${STIPULATOR_REPOS[@]}"; do
       ;;
   esac
   if [ -n "${SWEEP_ROWS_DIR:-}" ]; then
-    grep -E '^ *(violation:|stale +REQ|uncovered +REQ)' "$tmp" > "$SWEEP_ROWS_DIR/check-$r.txt" 2>/dev/null || true
+    grep -E "$CHECK_CAPTURE_RE" "$tmp" > "$SWEEP_ROWS_DIR/check-$r.txt" 2>/dev/null || true
   fi
-  total=$(grep -cE '^ *(violation:|stale +REQ|uncovered +REQ)' "$tmp")
-  # head closing the pipe early SIGPIPEs grep under pipefail and its
-  # stderr complaint would land inside the report — cap after the
-  # capture instead.
-  rows=$(grep -E '^ *(violation:|stale +REQ|uncovered +REQ)' "$tmp" 2>/dev/null || true)
+  # Two populations, counted apart: red-requirement rows and the unexcused
+  # violation lines (a red with no gap appears in both).
+  total=$(grep -cE "$CHECK_ROW_RE" "$tmp")
+  violations=$(grep -cE "$CHECK_VIOLATION_RE" "$tmp")
+  # The shown detail and its cap are the red rows alone (the violation
+  # lines are the count above; the rows file keeps both). head closing
+  # the pipe early SIGPIPEs grep under pipefail and its stderr complaint
+  # would land inside the report — cap after the capture instead.
+  rows=$(grep -E "$CHECK_ROW_RE" "$tmp" 2>/dev/null || true)
   detail=$(printf '%s' "$rows" | head -6 | tr '\n' ';')
   shown=$total
   [ "$total" -gt 6 ] && shown="6 of $total"
-  echo "$r: $verdict — showing $shown rows: $detail"
+  echo "$r: $verdict — $violations unexcused; showing $shown red rows: $detail"
   rm -f "$tmp"
 done
 

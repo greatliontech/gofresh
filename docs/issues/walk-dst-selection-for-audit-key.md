@@ -32,7 +32,7 @@ the completed-observation conjunction). Walking it lists "dst" (and
 closure/toolchainaudit.go's selections axis, flipping dst-tagged
 analyses from loud refusal to audited admissions.
 
-Lands: with the first judged run over a dst-tagged build selection
-(tugboat DST-leg campaigns are the first candidate — currently paused
-with the tool phase; until then dst-tagged analyses refuse soundly,
-so no consumer serves unsound admissions).
+Lands: cross-tool train chunk 297 — the trigger fired 2026-09-29 (tugboat's first
+judged run over a dst-tagged selection: the field report
+dst-selection-walk-trigger-fired-tugboat in this index); until it lands
+dst-tagged analyses refuse soundly.
