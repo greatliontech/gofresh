@@ -203,12 +203,17 @@ complete normalized environment (deterministic order, duplicate keys
 refused, `PWD` derived from the command's directory, the ordinary loader
 pinned; one setter keeping that order), under the process-boundary rule
 its runner carries where the runner carries one — the plain runner
-carries none; a consumer's runner applies the one rule to every command
-it prepares (the child in its own process group, a cancellation sweeping
-the group, an already-gone group the process-done case, a wait delay
-bounding the reap — a named delay, else the policy's default — and a quit
-grace on a cause the consumer names, the reap then bounded by the grace
-and the delay together) — reading go's environment through one
+carries none; a consumer's runner applies the one rule (the child in
+its own process group, a cancellation sweeping the group, an
+already-gone group the process-done case, a wait delay bounding the
+reap — a named delay, else the policy's default — and a quit grace on a
+cause the consumer names, the reap then bounded by the grace and the
+delay together) to every command it prepares, the go command and the
+consumer's own program alike (the policy's preparation is exported over
+any program name, the program resolved as the parent's own lookup
+resolves it — a bare name through the parent's PATH, a name carrying a
+path separator against the command's directory — while the derived
+environment governs the child) — reading go's environment through one
 pass-scoped reader whose
 one snapshot every same-pass key reads, resolving directories to one
 canonical coordinate with its degrading form; and a runner installed on
@@ -226,8 +231,10 @@ refuse a torn answer naming the hold. Enforced by
 `TestEngineSpawnsThroughTheInstalledRunner`,
 `TestEngineSpawnSitesReadARunner`,
 `TestTakeEnvSnapshotServesTheSalvagedAnswer`,
-`TestRootsProbeServesTheSalvagedAnswer`, and
-`TestSalvagedRefusesUnderACancelledContext`.
+`TestRootsProbeServesTheSalvagedAnswer`,
+`TestSalvagedRefusesUnderACancelledContext`,
+`TestProgramPreparesAConsumerCommandUnderThePolicy`, and
+`TestProgramQuitsTheConsumersGroupOnTheNamedCause`.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing

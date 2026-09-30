@@ -1,8 +1,9 @@
 // Package gotool is the fleet's go-command policy: it runs the go
 // command line tool under one complete normalized environment (env.go),
 // surfacing stderr on failure; prepares a command a consumer streams
-// itself (Command) under one process-boundary rule (Containment); samples
-// the toolchain in the target module's directory, memoized (Sampler);
+// itself (Command; Program over the consumer's own program) under one
+// process-boundary rule (Containment); samples the toolchain in the
+// target module's directory, memoized (Sampler);
 // reads go's environment once per pass (EnvReader); and resolves a
 // directory to its one canonical coordinate (CanonicalDir, Coordinate).
 // A Runner's containment and hook reach the go commands a consumer
@@ -38,14 +39,15 @@ func Run(ctx context.Context, dir string, env []string, args ...string) ([]byte,
 	return Runner{}.Run(ctx, dir, env, args...)
 }
 
-// Runner runs the go command line tool under a caller-owned spawn
-// policy. Containment, when set, is the one process-boundary rule
-// applied to every command the runner prepares, under that command's
-// own context; Prepare, when set, sees the command after that, its
-// Dir, Env, and boundary already set (a resource policy of the
-// consumer's own). The zero Runner is the plain spawn. A runner reaches
-// the go commands a consumer spawns through it and, installed on an
-// engine, the engine's own.
+// Runner runs the go command line tool — and prepares a consumer's own
+// program the same way (Program) — under a caller-owned spawn policy.
+// Containment, when set, is the one process-boundary rule applied to
+// every command the runner prepares, under that command's own context;
+// Prepare, when set, sees the command after that, its Dir, Env, and
+// boundary already set (a resource policy of the consumer's own). The
+// zero Runner is the plain spawn. A runner reaches the go commands a
+// consumer spawns through it and, installed on an engine, the engine's
+// own.
 type Runner struct {
 	Containment *Containment
 	Prepare     func(*exec.Cmd)
@@ -55,22 +57,48 @@ type Runner struct {
 // Dir set, Env the complete derived environment, Prepare applied. A
 // consumer that streams the child's output to its own sinks, or applies
 // a resource policy of its own once the process exists, runs the
-// returned command itself; Run is the collected form.
+// returned command itself; Run is the collected form. It is Program
+// over the go command.
 func (r Runner) Command(ctx context.Context, dir string, env []string, args ...string) (*exec.Cmd, error) {
+	return r.Program(ctx, dir, env, "go", args...)
+}
+
+// Program prepares the program name with args under the policy without
+// starting it — the same policy Command applies to go: Dir set, Env the
+// complete derived environment (PWD derived from Dir when one is
+// given), the runner's containment when it carries one, Prepare last. It is the
+// consumer-command form of the go-command policy
+// (REQ-fresh-go-command-policy): a consumer's test binary, resolver
+// child, or pinned measurement runs under the one boundary rule
+// instead of a hand copy of it. The program resolves as os/exec
+// resolves it — a bare name through the parent process's own PATH
+// lookup, a name carrying a path separator against Dir; the derived
+// environment governs the child, never the lookup. A consumer that
+// sets SysProcAttr fields after construction merges into the one
+// Program set: the boundary's process group lives there. There is no
+// form of the boundary over a command prepared elsewhere — the sweep's
+// context and the command's must be one, which only construction makes
+// so: a separately passed context reads the wrong cause for Quit, a
+// command built without a context refuses to start, and a started
+// command is past containing.
+func (r Runner) Program(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
+	if name == "" {
+		return nil, errors.New("gotool: empty program name")
+	}
 	if env == nil {
 		// A nil environment would let the child inherit the ambient one;
 		// the caller names the environment it runs under (an empty
 		// non-nil slice is a deliberate empty environment).
-		return nil, errors.New("go: nil environment")
+		return nil, fmt.Errorf("%s: nil environment", name)
 	}
 	if ctx == nil {
-		return nil, errors.New("go: nil context")
+		return nil, fmt.Errorf("%s: nil context", name)
 	}
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	commandEnv, err := EnvForCommand(env, dir)
 	if err != nil {
-		return nil, fmt.Errorf("go %s: environment: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("%s: environment: %w", strings.Join(append([]string{name}, args...), " "), err)
 	}
 	cmd.Env = commandEnv
 	if r.Containment != nil {

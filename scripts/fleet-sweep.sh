@@ -256,19 +256,44 @@ for r in "${PEW_REPOS[@]}"; do
     124) echo "$r: NOT MEASURED: status exceeded 3600s budget" ;;
     3) echo "$r: NOT MEASURED: machine lock refused (quiet wanted)" ;;
     *)
-      counts=$(grep -E '^(valid|stale|unverifiable|unrecorded)' "$report" | awk '{print $1}' | sort | uniq -c | sort -rn | tr '\n' ' ')
-      nonvalid=$(grep -E '^(stale|unverifiable|unrecorded)' "$report" 2>/dev/null || true)
+      # A verdict row is `<class> <import path>…` (pew's %-12s form).
+      # An `error` row is a package store pew could not load — its arms
+      # contribute no verdict rows at all, so the class is counted and
+      # carried as its own non-valid row class (a store that lost
+      # packages to a loader change must never read as a healthy store).
+      # pew status exits zero after its last package whatever the rows
+      # say, so a non-zero exit is a run cut short: with no row at all it
+      # is pew's own refusal (its `pew: …` line), never an empty healthy
+      # store; with rows it is PARTIAL — the rows printed before the
+      # abort, every later package invisible unless pew's own line says
+      # the last unit finished (exit 130 after it) — and the verdict says
+      # so and carries pew's line as the row file's first line.
+      rows=$(grep -E '^(valid|stale|unverifiable|unrecorded|error) +[^ ]' "$report" || true)
+      pewline=$(grep -m1 '^pew:' "$report" || tail -n1 "$report")
+      if [ "$rc" -ne 0 ] && [ -z "$rows" ]; then
+        echo "$r: NOT MEASURED: pew exited $rc: $pewline"
+        rm -f "$report"
+        continue
+      fi
+      partial=""
+      if [ "$rc" -ne 0 ]; then
+        partial=" PARTIAL: pew exited $rc: $pewline;"
+      fi
+      counts=$(printf '%s\n' "$rows" | awk 'NF{print $1}' | sort | uniq -c | sort -rn | tr '\n' ' ')
+      nonvalid=$(printf '%s\n' "$rows" | grep -E '^(stale|unverifiable|unrecorded|error) ' || true)
       if [ -n "${SWEEP_ROWS_DIR:-}" ]; then
         # Same empty representation as the check tee-out: a zero-byte
         # file, never a lone blank line.
-        printf '%s' "$nonvalid" > "$SWEEP_ROWS_DIR/pew-$r.txt"
-        [ -s "$SWEEP_ROWS_DIR/pew-$r.txt" ] && printf '\n' >> "$SWEEP_ROWS_DIR/pew-$r.txt"
+        : > "$SWEEP_ROWS_DIR/pew-$r.txt"
+        [ -n "$partial" ] && printf 'partial      %s\n' "$pewline" >> "$SWEEP_ROWS_DIR/pew-$r.txt"
+        printf '%s' "$nonvalid" >> "$SWEEP_ROWS_DIR/pew-$r.txt"
+        [ -n "$nonvalid" ] && printf '\n' >> "$SWEEP_ROWS_DIR/pew-$r.txt"
       fi
       total=$(printf '%s' "$nonvalid" | grep -c . || true)
       shown=$total
       [ "$total" -gt 15 ] && shown="15 of $total"
-      echo "$r: args: ${pewargs[*]:-none (unlabeled, no vouches)} — verdict counts: $counts (showing $shown non-valid rows)"
-      printf '%s\n' "$nonvalid" | head -15
+      echo "$r: args: ${pewargs[*]:-none (unlabeled, no vouches)} —$partial verdict counts: $counts (showing $shown non-valid rows)"
+      [ -n "$nonvalid" ] && printf '%s\n' "$nonvalid" | head -15
       ;;
   esac
   rm -f "$report"
