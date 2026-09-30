@@ -2916,6 +2916,18 @@ in their repos.
       names the typed class the ENGINE VERDICT reads, not only the
       composers 199 folded in.
 
+      Triage 281.1 (2026-09-30): two tugboat field reports ride here
+      as design inputs —
+      entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable
+      (828 of 1,098 subjects refused for a handshake nonce no witness
+      observes: an admission for entropy consumed but never observed,
+      judged by what the subject can observe of the reach) and
+      in-module-generated-descriptor-writes-have-no-discharge
+      (protoc-gen-go's init-once descriptor writes in an in-module
+      generated package: the vouch is dependency-only and a directive
+      cannot live in generated code — a generated-package admission
+      keyed on the generator's marker, or the vouch extended in-module
+      under an attestation).
 - [ ] 15. pew: profile capture and attribution as recording
       companions (pew docs/issues/profile-capture-attribution.md and
       per-arm-noise-floors.md) — --profile captures per-arm cpu (and

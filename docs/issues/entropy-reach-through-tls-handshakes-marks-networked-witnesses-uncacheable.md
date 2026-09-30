@@ -44,4 +44,5 @@ already admits by audit), or an observability rule at the reach
 input to the outcome). Which is gofresh's to derive; tugboat records
 the count as a serving cost, not a verdict, until then.
 
-Lands: awaiting triage.
+Lands: cross-tool train chunk 202 (the dynamic-state tier's home — a
+design input recorded on its plan entry at 281.1).

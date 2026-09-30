@@ -40,4 +40,5 @@ version-pinned module audits do. Which is gofresh's to derive;
 tugboat carries the ~100 uncacheable rows as a serving cost until
 then and records the attempted vouch in its commit history.
 
-Lands: awaiting triage.
+Lands: cross-tool train chunk 202 (the dynamic-state tier's home — a
+design input recorded on its plan entry at 281.1).
