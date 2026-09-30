@@ -1,6 +1,7 @@
 package gofresh
 
 import (
+	"github.com/greatliontech/gofresh/gotool"
 	"runtime"
 	"strings"
 	"testing"
@@ -30,13 +31,13 @@ func TestToolchainSkewComparesLanguageSeries(t *testing.T) {
 	// without trimming (the suffix swallows it), so the stock shape
 	// is the real anchor.
 	for _, sampled := range []string{"go1.27.0\n", "go1.27.0\r\n", "go1.27.0-dst.10\n"} {
-		if got := languageSeries(sampled); got != "go1.27" {
-			t.Fatalf("languageSeries(%q) = %q, want go1.27 — exec-sampled trailing whitespace must trim", sampled, got)
+		if got := gotool.LanguageSeries(sampled); got != "go1.27" {
+			t.Fatalf("gotool.LanguageSeries(%q) = %q, want go1.27 — exec-sampled trailing whitespace must trim", sampled, got)
 		}
 	}
 	// The current devel shape (cmd/dist emits "go1.NN-devel_<hash> <date>",
 	// deliberately Lang-compatible) identifies through the space cut.
-	if got := languageSeries("go1.28-devel_abc123 Wed Aug 20 10:00:00 2026 +0000"); got != "go1.28" {
+	if got := gotool.LanguageSeries("go1.28-devel_abc123 Wed Aug 20 10:00:00 2026 +0000"); got != "go1.28" {
 		t.Fatalf("devel shape = %q, want go1.28", got)
 	}
 	err := toolchainSkew("go1.26.5-X:nodwarf5", "go1.27.0-dst.10")
@@ -75,14 +76,12 @@ func TestToolchainSkewComparesLanguageSeries(t *testing.T) {
 	}
 }
 
-// languageSeries normalizes real toolchain shapes onto the canonical
-// go/version.Lang and stays fail-closed on garbage Lang rejects.
 // The exported wrapper attributes runtime.Version() to the BINARY
 // side of the message: a swapped labeling would point the operator's
 // rebuild at the wrong toolchain.
 func TestToolchainSkewLabelsTheBinarySide(t *testing.T) {
 	self := runtime.Version()
-	series := languageSeries(self)
+	series := gotool.LanguageSeries(self)
 	// A far-future ambient: the binary's frontend predates it, the
 	// refusing direction.
 	ambient := "go99.1.0"
@@ -95,37 +94,7 @@ func TestToolchainSkewLabelsTheBinarySide(t *testing.T) {
 	if !strings.Contains(err.Error(), "binary built with "+self+" (language "+series+")") {
 		t.Fatalf("skew message %q does not annotate the binary %q with its own series %q", err.Error(), self, series)
 	}
-	if !strings.Contains(err.Error(), "ambient toolchain "+ambient+" (language "+languageSeries(ambient)+")") {
+	if !strings.Contains(err.Error(), "ambient toolchain "+ambient+" (language "+gotool.LanguageSeries(ambient)+")") {
 		t.Fatalf("skew message %q does not annotate the ambient %q with its own series", err.Error(), ambient)
-	}
-}
-
-func TestLanguageSeriesNormalizesRealShapes(t *testing.T) {
-	cases := map[string]string{
-		"go1.27.0":             "go1.27",
-		"go1.27":               "go1.27",
-		"go1.27.0-dst.10":      "go1.27",
-		"go1.26.5-X:nodwarf5":  "go1.26",
-		"go1.27rc1":            "go1.27",
-		"go1.27.0 linux/amd64": "go1.27",
-		"go1.10.4":             "go1.10", // never confused with go1.1
-		"go2.0.1":              "go2.0",
-	}
-	for in, want := range cases {
-		if got := languageSeries(in); got != want {
-			t.Fatalf("languageSeries(%q) = %q, want %q", in, got, want)
-		}
-	}
-	for _, bad := range []string{"", "go", "gox.y", "1.27", "go1.27.0.0-x", "garbage-go1.27.0"} {
-		if got := languageSeries(bad); got != "" {
-			t.Fatalf("languageSeries(%q) = %q, want refusal", bad, got)
-		}
-	}
-	// The canonical grammar is the contract: go/version.Lang reads a
-	// trailing alpha run as pre-release kind ("go1.27garbage" ≡ the
-	// "go1.27rc1" shape), and this helper inherits that judgment
-	// rather than second-guessing the stdlib parser.
-	if got := languageSeries("go1.27garbage"); got != "go1.27" {
-		t.Fatalf("languageSeries(go1.27garbage) = %q, want the canonical grammar's go1.27", got)
 	}
 }

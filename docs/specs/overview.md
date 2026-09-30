@@ -250,8 +250,15 @@ sampled by `go env GOVERSION` in the target module's directory (never
 the tool's own working directory: under GOTOOLCHAIN=auto the selected
 toolchain is per module) — the sample gofresh's go-command policy
 performs for every consumer, so no consumer spells the sampling contract
-itself: memoized per directory coordinate and environment for a
-sampler's lifetime — a failed sample memoized like an answered one, a
+itself — the "goMAJOR.MINOR" series read through the canonical
+go/version grammar over the trimmed value cut at its first space
+(the current development-build spelling reads as its cycle's series;
+the legacy `devel …` spelling, a `go version` line, and whatever that
+grammar refuses answer no series), the one grammar gofresh's series
+judgment reads, exported for every consumer's build-events floor and
+release-tag derivation — memoized per directory coordinate
+and environment for a sampler's lifetime — a failed sample memoized
+like an answered one, a
 cancelled sample never memoized — the answer a
 cleanly exited process wrote kept when a descendant holds its pipe past
 the wait delay, and composed with this judgment into the one typed

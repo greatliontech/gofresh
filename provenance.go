@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/gotool"
 	"go/version"
 	"reflect"
 	"strings"
@@ -53,8 +54,8 @@ func ToolchainSkew(ambient string) error {
 
 // toolchainSkew is the two-sided core, testable on both inputs.
 func toolchainSkew(binary, ambient string) error {
-	bs := languageSeries(binary)
-	as := languageSeries(ambient)
+	bs := gotool.LanguageSeries(binary)
+	as := gotool.LanguageSeries(ambient)
 	if bs == "" || as == "" {
 		return fmt.Errorf("gofresh: toolchain provenance: binary built with %q, ambient toolchain %q: unidentifiable language series — refusing to judge under an unidentifiable frontend", binary, ambient)
 	}
@@ -75,24 +76,6 @@ func toolchainSkew(binary, ambient string) error {
 func majorOf(series string) string {
 	major, _, _ := strings.Cut(strings.TrimPrefix(series, "go"), ".")
 	return major
-}
-
-// languageSeries derives the "goMAJOR.MINOR" language series via the
-// canonical go/version.Lang after one normalization: a trailing
-// platform tuple ("go1.27.0 linux/amd64") cuts at the space. Lang's
-// own grammar already reads vendor flavors ("go1.27.0-dst.10",
-// "go1.26.5-X:nodwarf5") as pre-release suffixes of the series, and
-// anything it rejects yields "" — the canonical parser's judgment is
-// the contract, fail-closed on garbage.
-func languageSeries(v string) string {
-	// TrimSpace first: the prescribed sampling (`go env GOVERSION`
-	// via exec Output) carries a trailing newline, which Lang's
-	// grammar rejects on a STOCK version string while a flavored
-	// one swallows it in the discarded suffix — an asymmetry that
-	// passes flavored dev hosts and bricks stock fleet hosts.
-	v = strings.TrimSpace(v)
-	v, _, _ = strings.Cut(v, " ")
-	return version.Lang(v)
 }
 
 // ToolchainProvenanceError is the one typed refusal a consumer's

@@ -4,8 +4,11 @@
 // itself (Command; Program over the consumer's own program) under one
 // process-boundary rule (Containment); samples the toolchain in the
 // target module's directory, memoized (Sampler);
-// reads go's environment once per pass (EnvReader); and resolves a
-// directory to its one canonical coordinate (CanonicalDir, Coordinate).
+// reads go's environment once per pass (EnvReader); resolves a
+// directory to its one canonical coordinate (CanonicalDir, Coordinate);
+// and reads a toolchain version's language series, pair, and release
+// tags through the canonical grammar (LanguageSeries, ParseGoVersion,
+// ReleaseTags).
 // A Runner's containment and hook reach the go commands a consumer
 // spawns through it and, installed on an engine (gofresh.WithGoRunner),
 // every go command that engine spawns itself; the package loader's
