@@ -84,14 +84,15 @@ import (
 //
 // A widening of the audited-pure package set claims every listed
 // release at once, so it is grounded across them: the math/big
-// admission (observation-rta@28) checked that math/big's non-test
-// source (every .go and .s file, sorted and concatenated) is
-// byte-identical across every listed tree on the host that listed it
-// — the dst.10–dst.15 flavors and stock go1.27.0 and go1.27.1, SHA-256
-// prefix bbe42f2fef9bd0ab — and the nodwarf5 experiment builds are
-// those same sources; math/big carries no race build constraint in any
-// non-test file, so the race-selection record above is unchanged by
-// its admission.
+// admission (observation-rta@28) rests on math/big's non-test source
+// (every .go and .s file, sorted in byte order and concatenated) being
+// byte-identical across every listed tree — a check each later listing
+// re-runs over the trees installed on its host: the dst.10–dst.15
+// flavors on the go1.27.0 base, go1.27.1-dst.12 and -dst.13, and stock
+// go1.27.0 and go1.27.1 all digest to SHA-256 prefix a729b7fa0c12ff78
+// — and the nodwarf5 experiment builds are those same sources;
+// math/big carries no race build constraint in any non-test file, so
+// the race-selection record above is unchanged by its admission.
 var auditedToolchainSelections = map[string]map[string]bool{
 	// Stock go1.27.0 (the CI matrix's toolchain), audited by the
 	// go1.26.0→go1.27.0 delta walk.
@@ -186,6 +187,38 @@ var auditedToolchainSelections = map[string]map[string]bool{
 	// selection stays unlisted as before. No audited symbol's body
 	// changed.
 	"go1.27.0-dst.15": {"": true, "race": true},
+	// godst on the go1.27.1 base (the series renumbered from its
+	// rebase): go1.27.1-dst.12's non-test delta over go1.27.0-dst.15
+	// (the two installed trees diffed whole, 2026-09-30) is exactly the
+	// recorded stock go1.27.0→go1.27.1 delta above — the same seventeen
+	// entries plus a debug/elf testdata object — beside test-only edits
+	// under the dst-only testing/simulation package; and its delta over
+	// the stock go1.27.1 tree (from the dl tool) is dst.15's own patch
+	// set over go1.27.0, hunk for hunk: every patched non-test file is
+	// byte-identical to dst.15's except the two files in both sets —
+	// the version stamp (internal/buildcfg/zbootstrap.go) and
+	// cmd/compile/internal/ssagen/ssa.go, the identical dst hunk beside
+	// the point release's own change, compiler code off the audited
+	// surface — and testing/simulation's test-only edits aside. The
+	// default selection compiles the same dead hooks; the audited
+	// surface is therefore go1.27.1's walked surface under dst.15's
+	// hooks, and the dst selection stays unlisted as before. No audited
+	// file changed beyond the go1.27.1 walk's three.
+	"go1.27.1-dst.12": {"": true, "race": true},
+	// go1.27.1-dst.13's delta over go1.27.1-dst.12 (the two installed
+	// trees diffed whole, 2026-09-30): the type checker's cycle
+	// detection (go/types/cycles.go and its types2 mirror) reads a
+	// Named type's right-hand side only once its unpacked state says the
+	// value is there — a data-race guard over the analysis frontend: a
+	// declared type's unpack sets state bits alone, an instance's
+	// guarded read is stock's race-free value, and an imported type
+	// answers complete either way (stock's bare nil and the loaded
+	// underlying type both do; an underlying type is never Named), the
+	// load merely earlier — so no valid source answers differently —
+	// plus its race test in both packages, testing/simulation's dst-only
+	// tests, and the version stamp. No audited set claims over go/types;
+	// the audited surface is byte-identical to dst.12's.
+	"go1.27.1-dst.13": {"": true, "race": true},
 }
 
 // auditedToolchainSource reports whether the running toolchain's
