@@ -1234,10 +1234,10 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 		return pkgs, nil
 	}
 	h.emitProgress("list", pkgPath)
-	args := []string{"list", "-json", "-deps", "-test"}
+	args := []string{"-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)
-	out, err := h.runner.Run(h.ctx, h.dir, h.env, args...)
+	out, err := h.runner.List(h.ctx, h.dir, h.env, args...)
 	if err != nil {
 		return nil, err
 	}

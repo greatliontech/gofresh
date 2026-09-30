@@ -141,6 +141,34 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 	return stdout.Bytes(), nil
 }
 
+// ErrListingRefused is List's refusal of the wait-delay form: the
+// listing's output was not drained within the wait delay, and a listing
+// has no wholeness test. It is its own sentinel, never exec.ErrWaitDelay,
+// so Salvaged is false for a refused listing and no reader serves it.
+var ErrListingRefused = errors.New("the listing was not drained within the wait delay (a descendant's hold or a stalled copier); a listing has no wholeness test and is refused")
+
+// List runs `go list <args>` under the policy and returns its stdout,
+// refusing the wait-delay form Run would serve. At the delay's expiry
+// exec closes the parent's read end and drops whatever the copier had
+// not yet read — unobserved in practice, since the copier drains a
+// pipe as fast as the process fills it, but nothing forbids a stalled
+// copier leaving a cleanly exited process's tail behind, and a
+// descendant sharing the pipe could write into it — and a listing has
+// no wholeness test to tell either apart from a clean answer (a cut at
+// a line or object boundary reads as a shorter, well-formed set; a
+// consumer's "names at least the package itself" is fail-open on a
+// missing dependency). So where Run serves the form and the structured
+// readers judge it by their own test, List refuses it defensively with
+// ErrListingRefused, the exec error's text carried
+// (REQ-fresh-go-command-policy). Every other failure is Run's.
+func (r Runner) List(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	out, err := r.Run(ctx, dir, env, append([]string{"list"}, args...)...)
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil, fmt.Errorf("go list %s: %w: %v", strings.Join(args, " "), ErrListingRefused, err)
+	}
+	return out, err
+}
+
 // stderrBound is the most of a failed command's stderr a refusal
 // carries: half from its head, half from its tail, the elision counted.
 const stderrBound = 32 << 10
@@ -406,11 +434,13 @@ func ParseEnvDocument(out []byte) (map[string]string, error) {
 }
 
 // Salvaged reports whether err is the wait-delay form Run answers
-// beside a cleanly exited process's complete output — a descendant held
-// the pipe past the delay — under a context that is still live: the
-// one guard every structured reader (the toolchain sample, the
-// environment snapshot, a consumer's roots probe) applies before its own
-// wholeness test of the answer.
+// beside a cleanly exited process's output — what the copier had
+// drained when the delay expired, whole only by the reader's own test;
+// a descendant's hold or a stalled copier kept the pipe from EOF —
+// under a context that is still live: the one guard every structured
+// reader (the toolchain sample, the environment snapshot, a consumer's
+// roots probe) applies before its own wholeness test of the answer.
+// List's refusal is not this form: it carries ErrListingRefused.
 func Salvaged(ctx context.Context, err error) bool {
 	return errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil
 }

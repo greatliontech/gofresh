@@ -223,18 +223,23 @@ policy's environment and spawn outside any hook — while a consumer's
 runner reaches the commands that consumer spawns through it; and the
 policy's structured readers — the toolchain sample, the environment
 snapshot, a consumer's runtime-input roots probe — serve the answer a
-cleanly exited process wrote beside a descendant's pipe hold past the
-wait delay when it is whole by the reader's own test (a go version's
-first line; a document that parses to its keys) and the context is
-live — a caller's cancellation is never answered from the hold — and
-refuse a torn answer naming the hold. Enforced by
+cleanly exited process wrote when the wait delay expired before its
+pipe reached EOF (a descendant's hold or a stalled copier) if it is
+whole by the reader's own test (a go version's first line; a document
+that parses to its keys) and the context is live — a caller's
+cancellation is never answered from that form — and refuse a torn
+answer naming the form; gofresh's own package listing (the runner's
+List), which has no wholeness test, refuses that form outright with a
+refusal distinguishable from a served salvage. Enforced by
 `TestEngineSpawnsThroughTheInstalledRunner`,
 `TestEngineSpawnSitesReadARunner`,
 `TestTakeEnvSnapshotServesTheSalvagedAnswer`,
 `TestRootsProbeServesTheSalvagedAnswer`,
 `TestSalvagedRefusesUnderACancelledContext`,
-`TestProgramPreparesAConsumerCommandUnderThePolicy`, and
-`TestProgramQuitsTheConsumersGroupOnTheNamedCause`.
+`TestProgramPreparesAConsumerCommandUnderThePolicy`,
+`TestProgramQuitsTheConsumersGroupOnTheNamedCause`,
+`TestListRefusesTheSalvagedAnswer`, and
+`TestListingRefusesTheSalvagedAnswer`.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing
