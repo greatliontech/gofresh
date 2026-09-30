@@ -2292,7 +2292,7 @@ in their repos.
       re-digest cost measured with a campaign over the retargeted
       document at the open (whether the 144 re-measure). Directly before
       277 in the lane; the twelfth landed chunk since Band R3.
-- [ ] 283. gomutant: Store.Update returns the layer it routed each
+- [x] 283. gomutant: Store.Update returns the layer it routed each
       record to (gomutant
       docs/issues/store-update-returns-its-routing.md, filed at 282's
       banked-line review) — the write's
