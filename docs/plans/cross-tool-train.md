@@ -2589,7 +2589,7 @@ in their repos.
       SchemaNode→jsonschema adapter stays in the consumers (it needs
       the SDK type — refused for gofresh). A release before 290/291,
       where the four docs close and the consumers' guards read it.
-- [ ] 301. gomutant: writer-side fixture isolation (audit 286 A12 —
+- [x] 301. gomutant: writer-side fixture isolation (audit 286 A12 —
       internal/engine/run_test.go:552 and :584 create
       .unstable-input-fixture / .stable-input-fixture inside the
       tracked internal/engine/testdata/fixturemod/lib that 170
