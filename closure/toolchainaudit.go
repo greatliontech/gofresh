@@ -44,8 +44,8 @@ import (
 // implementation packages an audited package delegates its bodies to
 // (encoding/json's encoding/json/v2 and jsontext under go1.27's
 // baseline jsonv2) — platform-split files
-// included, exactly as the dst.12–dst.14 records below name their
-// plan9/illumos/windows deltas — so a GOOS/GOARCH selection of an
+// included, exactly as the dst.14 record below names its
+// plan9/illumos/windows delta — so a GOOS/GOARCH selection of an
 // audited package selects among walked files and needs no key axis;
 // the memo scopes carry the platform through the build
 // configuration.
@@ -87,7 +87,7 @@ import (
 // admission (observation-rta@28) checked that math/big's non-test
 // source (every .go and .s file, sorted and concatenated) is
 // byte-identical across every listed tree on the host that listed it
-// — the dst.10–dst.14 flavors and stock go1.27.0 and go1.27.1, SHA-256
+// — the dst.10–dst.15 flavors and stock go1.27.0 and go1.27.1, SHA-256
 // prefix bbe42f2fef9bd0ab — and the nodwarf5 experiment builds are
 // those same sources; math/big carries no race build constraint in any
 // non-test file, so the race-selection record above is unchanged by
@@ -174,6 +174,18 @@ var auditedToolchainSelections = map[string]map[string]bool{
 	// intersection as dst.13; no audited symbol's body otherwise
 	// changed.
 	"go1.27.0-dst.14": {"": true, "race": true},
+	// dst.15's delta over dst.14 (the two installed trees diffed
+	// whole, 2026-09-30): three files of os's dst fault seam —
+	// dst_fs.go (`//go:build dst`), dst_flock_linux.go and
+	// dst_mmap_linux.go (`dst && linux`) — where a BSD flock's release
+	// now defers to the last shared mapping taken through the closed
+	// description, plus that seam's test and the version stamp
+	// (internal/buildcfg/zbootstrap.go). Every changed source file is
+	// dst-tagged: the default selection compiles none of it, so its
+	// audited surface is byte-identical to dst.14's and the dst
+	// selection stays unlisted as before. No audited symbol's body
+	// changed.
+	"go1.27.0-dst.15": {"": true, "race": true},
 }
 
 // auditedToolchainSource reports whether the running toolchain's

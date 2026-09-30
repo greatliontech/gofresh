@@ -29,10 +29,15 @@ lands — the dst legs are its DST tier, the half of the corpus the
 policy exists for.
 
 Selections to list, per the existing doc: `dst` and `dst,race` for
-`go1.27.0-dst.14` (the installed flavor; ~/.local/godst carries
-dst.10–dst.14, `current` → dst.14). The walk's scope is the existing
+the flavor installed when the chunk opens — the table is keyed per
+release, so a listing under one flavor helps no host on another
+(`go1.27.0-dst.15` as of 2026-09-30; ~/.local/godst carries
+dst.10–dst.15, `current` → dst.15). The walk's scope is the existing
 doc's (time/dst_tz.go, testing/dst_hostio.go, sync's dst-and-race
-hook seam, the os fault-injection surface).
+hook seam, the os fault-injection surface — dst.15's delta over
+dst.14, a flock's release deferred to the last shared mapping in
+os/dst_fs.go, dst_flock_linux.go and dst_mmap_linux.go, lies inside
+it).
 
 Lands: cross-tool train chunk 297 (the dst-selection walk, chartered from this
 report at chunk 289's record; this report fires walk-dst-selection-for-audit-key's
