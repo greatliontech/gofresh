@@ -34,7 +34,7 @@ func TestRootsProbeServesTheSalvagedAnswer(t *testing.T) {
 	}
 	runner := gotool.Runner{Containment: &gotool.Containment{WaitDelay: 200 * time.Millisecond}}
 	pkgDir := t.TempDir()
-	roots, err := resolveRoots(context.Background(), runner, pkgDir, pkgDir, env)
+	roots, err := resolveRoots(context.Background(), nil, runner, pkgDir, pkgDir, env)
 	if err != nil || roots.toolchain == "" {
 		t.Fatalf("roots = %+v, %v; want the salvaged answer", roots, err)
 	}
@@ -47,7 +47,7 @@ func TestRootsProbeServesTheSalvagedAnswer(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(shim, "go"), []byte(wrapper), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := resolveRoots(context.Background(), runner, pkgDir, t.TempDir(), env); !errors.Is(err, exec.ErrWaitDelay) {
+		if _, err := resolveRoots(context.Background(), nil, runner, pkgDir, t.TempDir(), env); !errors.Is(err, exec.ErrWaitDelay) {
 			t.Fatalf("wrapper %q = %v, want the hold named", wrapper, err)
 		}
 	}
@@ -55,7 +55,7 @@ func TestRootsProbeServesTheSalvagedAnswer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(shim, "go"), []byte(partial), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveRoots(context.Background(), runner, pkgDir, t.TempDir(), env); err == nil || !strings.Contains(err.Error(), "no GOCACHE") {
+	if _, err := resolveRoots(context.Background(), nil, runner, pkgDir, t.TempDir(), env); err == nil || !strings.Contains(err.Error(), "no GOCACHE") {
 		t.Fatalf("a document missing a key = %v, want the key named", err)
 	}
 }

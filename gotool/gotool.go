@@ -275,9 +275,13 @@ func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string,
 // EnvReader reads go's environment for one pass: the first key takes
 // the pass's one `go env -json` snapshot under the runner, every later
 // key reads it — no per-key probe, no snapshot-or-probe ladder. A
-// reader is pass-scoped exactly as the snapshot is, and a snapshot that
-// failed is the reader's answer for its whole lifetime: the pass fails
-// closed rather than re-probing an environment that refused.
+// reader is pass-scoped exactly as the snapshot is — except a consumer
+// that holds one reader across the observations of one judged run
+// under its own hold-still obligation over the settings the reader's
+// keys read (a runtime-input ingest's roots memo), which is that
+// obligation's span, not a pass's — and a snapshot that failed is the
+// reader's answer for its whole lifetime: the pass fails closed rather
+// than re-probing an environment that refused.
 type EnvReader struct {
 	Runner   Runner
 	Dir      string
@@ -353,7 +357,10 @@ func (r *EnvReader) Value(ctx context.Context, key string) (string, error) {
 // validation, GOMODCACHE resolution - derives from it instead of probing
 // again, so one pass pays one env exec. The snapshot is pass-scoped for
 // record-producing passes: sharing it across such passes would let a
-// mid-run environment change escape a later pass's observation. A
+// mid-run environment change escape a later pass's observation —
+// unless the sharer holds those settings still for the whole span by
+// its own stated obligation (a runtime-input ingest's roots memo over
+// one judged run). A
 // precise-analysis bracket may reuse its view's construction snapshot for
 // GOMODCACHE resolution only, revalidating GOFLAGS live, because the
 // bracket's closing pass takes a fresh snapshot whose guard comparison
@@ -390,6 +397,17 @@ func (s *EnvSnapshot) Identity() string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// Lookup reports key's value and whether the document carries the key
+// at all — an unset setting answers "" and true, a key the document
+// never names answers false.
+func (s *EnvSnapshot) Lookup(key string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	value, ok := s.values[key]
+	return value, ok
 }
 
 // Value returns one parsed go-env setting ("" when absent).
@@ -440,8 +458,9 @@ func ParseEnvDocument(out []byte) (map[string]string, error) {
 // drained when the delay expired, whole only by the reader's own test;
 // a descendant's hold or a stalled copier kept the pipe from EOF —
 // under a context that is still live: the one guard every structured
-// reader (the toolchain sample, the environment snapshot, a consumer's
-// roots probe) applies before its own wholeness test of the answer.
+// reader (the toolchain sample, the environment snapshot — from whose
+// keys a consumer's runtime-input ingest reads its roots) applies
+// before its own wholeness test of the answer.
 // List's refusal is not this form: it carries ErrListingRefused.
 func Salvaged(ctx context.Context, err error) bool {
 	return errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil

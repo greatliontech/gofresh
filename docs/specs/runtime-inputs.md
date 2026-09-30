@@ -103,7 +103,9 @@ undisclosed.
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
 while merge, dirty inspection, or a current check observes inputs — the
-classification roots' resolution inputs and their process-lifetime memo included, as
+classification roots' resolution inputs and their consumer-held memo included (one
+judged run — the consumer's one verb invocation, a long-lived server's per-request
+operation — never a process, as the toolchain sampler's), as
 REQ-inputs-guard-covered states. Merge revalidates
 every completed child state against its one merge-time view before unioning their
 identities, rejecting children finalized under values that no longer agree; Gofresh
@@ -522,8 +524,8 @@ silently vacates observation for everything beneath a root the run never used �
 the resolution's own inputs (the toolchain the environment's PATH names, its
 configuration file, the module and workspace files that select a toolchain) together
 with the roots' link topology ride the same hold-still span
-REQ-inputs-observation-coherence already places on the caller, the process-lifetime
-memo of a resolution included — guards pin covered content, never the shape of the
+REQ-inputs-observation-coherence already places on the caller, the consumer-held
+memo of a resolution (one judged run) included — guards pin covered content, never the shape of the
 path that reached it.
 
 **REQ-inputs-static-inputs** (behavior): Observation construction from a
@@ -680,9 +682,12 @@ unrelated tooling) beside the caller's tool-bookkeeping exclusions,
 requires the process environment's PWD to name the frame's package
 directory (producers spawn in the package directory; a
 parent-inherited PWD silently misclassifies every cwd-anchored read),
-resolves the classification roots from the process environment (one
-toolchain query per package directory and environment, memoized for
-the process) and the caller's scratch-root declaration, assembles the
+resolves the classification roots from the process environment (the
+four roots among the keys of one environment snapshot per
+package-directory coordinate and normalized environment, memoized
+through the roots memo the consumer holds for one judged run — never a
+process — every run paying its own when it holds none) and the
+caller's scratch-root declaration, assembles the
 completed-process, bracket, exclusion, classification-root, and
 scratch-namespace options, and ingests the process environment
 verbatim (a rebuilt environment loses fidelity the classification

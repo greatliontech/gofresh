@@ -86,20 +86,49 @@ func TestUsableTempRoot(t *testing.T) {
 	}
 }
 
-// The resolution memo's key is the package directory and the whole
-// environment less PWD: two package directories never share an entry,
-// any other setting moves it, and PWD alone does not.
-func TestRootsCacheKeyCoversTheEnvironment(t *testing.T) {
-	base := []string{"PATH=/bin", "HOME=/h", "PWD=/repo/a"}
-	if rootsCacheKey("/repo/a", base) == rootsCacheKey("/repo/b", base) {
+// The roots memo's key is the package directory's coordinate and the
+// normalized environment less PWD: two package directories never share
+// an entry, one directory spelled uncleaned or through a symlink and one
+// environment in two orders share theirs, any other setting moves it,
+// PWD alone does not, and a malformed environment is refused.
+func TestRootsKeyCoversTheCoordinateAndEnvironment(t *testing.T) {
+	key := func(dir string, env []string) string {
+		t.Helper()
+		k, err := rootsKey(dir, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"PATH=/bin", "HOME=/h", "PWD=" + dir}
+	if key(dir, base) == key(filepath.Join(dir, "x"), base) {
 		t.Fatal("two package directories share a key")
 	}
-	if rootsCacheKey("/repo/a", base) != rootsCacheKey("/repo/a", []string{"PATH=/bin", "HOME=/h", "PWD=/other"}) {
+	for _, spelling := range []string{dir + "/x/..", link} {
+		if key(spelling, base) != key(dir, base) {
+			t.Fatalf("%s spelled a second key for one directory", spelling)
+		}
+	}
+	if key(dir, []string{"PWD=" + dir, "HOME=/h", "PATH=/bin"}) != key(dir, base) {
+		t.Fatal("the environment's order moved the key")
+	}
+	if key(dir, base) != key(dir, []string{"PATH=/bin", "HOME=/h", "PWD=/other"}) {
 		t.Fatal("PWD alone moved the key")
 	}
 	for _, extra := range []string{"GOWORK=/w/go.work", "XDG_CONFIG_HOME=/c", "GOTOOLCHAIN=local", "ZZZ=1"} {
-		if rootsCacheKey("/repo/a", base) == rootsCacheKey("/repo/a", append(append([]string(nil), base...), extra)) {
+		if key(dir, base) == key(dir, append(append([]string(nil), base...), extra)) {
 			t.Fatalf("%s did not move the key", extra)
 		}
+	}
+	if _, err := rootsKey(dir, []string{"A=1", "A=2"}); err == nil {
+		t.Fatal("a duplicated key was admitted")
 	}
 }

@@ -26,9 +26,10 @@ reap (a named delay, else the policy's default, never unbounded), a
 quit grace on a cause the consumer names, the reap then bounded by the
 grace and the delay together — with the prepared command a consumer
 streams itself and the collected run keeping a cleanly exited process's
-answer beside a descendant's pipe hold — the toolchain sample, the
-environment snapshot, and the runtime-input roots probe serving that
-answer when it is whole — and bounding a failed command's diagnostics
+answer beside a descendant's pipe hold — the toolchain sample and the
+environment snapshot (from whose keys a runtime-input ingest reads its
+classification roots) serving that answer when it is whole — and
+bounding a failed command's diagnostics
 in its refusal; one pass-scoped go-environment reader
 taking the pass's one snapshot on its first key; one canonical
 directory resolution and its degrading coordinate; and the toolchain
@@ -221,8 +222,9 @@ an engine by its option reaches every go command that engine spawns
 itself — the loader's `x/tools` children excepted, which carry the
 policy's environment and spawn outside any hook — while a consumer's
 runner reaches the commands that consumer spawns through it; and the
-policy's structured readers — the toolchain sample, the environment
-snapshot, a consumer's runtime-input roots probe — serve the answer a
+policy's structured readers — the toolchain sample and the environment
+snapshot, from whose keys a consumer's runtime-input ingest reads its
+four classification roots, each required present — serve the answer a
 cleanly exited process wrote when the wait delay expired before its
 pipe reached EOF (a descendant's hold or a stalled copier) if it is
 whole by the reader's own test (a go version's first line; a document

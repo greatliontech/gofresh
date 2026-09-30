@@ -56,74 +56,108 @@ func (r resolvedRoots) ephemeralRoots(scratch, treeRoot string) []string {
 	return roots
 }
 
-// rootsCache memoizes resolutions per (package directory, environment)
-// for the process's lifetime: a producer ingests many runs under one
-// environment. The key is the whole environment less PWD — which the
-// facade has already required to name the package directory — so no
-// setting the toolchain consults can be left out of it; a producer that
-// injects a per-run value into the environment it ingests pays one
-// toolchain query per run and one entry per value.
-var rootsCache sync.Map
+// Roots memoizes a producer's classification-root snapshots for one
+// judged run — the consumer's one verb invocation, a long-lived
+// server's per-request operation, never a process, the bound its
+// toolchain Sampler carries (REQ-inputs-observation-coherence: the
+// caller holds the resolution's inputs still for exactly that span) —
+// keyed by the package directory's coordinate and the normalized
+// environment less PWD, which the facade has already required to name
+// the directory, so no setting the toolchain consults is left out and
+// no spelling of one directory or ordering of one environment pays
+// twice: one `go env -json` per key, a pass reader held across the
+// run's observations as the memo (sanctioned by the reader's own doc
+// under this obligation). A snapshot that failed is the memo's answer
+// for the run: a cause among the resolution inputs the obligation
+// lists (the toolchain PATH names, its configuration, the
+// toolchain-selecting module files) is held still, so re-asking would
+// answer the same, and any other cause — a transient spawn failure, a
+// full temp root — is remembered the same way, costing coverage (an
+// incomplete observation), never a wrong serve. A cancellation is
+// never memoized.
+// Concurrent ingests on one key wait on the first's spawn under the
+// reader's lock; a waiter's own cancellation is answered when that
+// spawn returns. A producer that injects a per-run value into the
+// environment it ingests pays one query per run and one entry per
+// value. A nil Roots resolves unmemoized: every run pays its query.
+type Roots struct {
+	mu      sync.Mutex
+	readers map[string]*gotool.EnvReader
+}
 
-func rootsCacheKey(pkgDir string, env []string) string {
+// rootsKey is the memo key: the directory's coordinate and the
+// normalized environment less PWD.
+func rootsKey(pkgDir string, env []string) (string, error) {
+	normalized, err := gotool.NormalizeEnv(env)
+	if err != nil {
+		return "", err
+	}
 	var key strings.Builder
-	key.WriteString(pkgDir)
-	for _, entry := range env {
-		if name, _, _ := strings.Cut(entry, "="); name == "PWD" {
+	key.WriteString(gotool.Coordinate(pkgDir))
+	for _, entry := range normalized {
+		if name, _, _ := strings.Cut(entry, "="); gotool.EqualEnvKey(name, "PWD") {
 			continue
 		}
 		key.WriteString("\x00" + entry)
 	}
-	return key.String()
+	return key.String(), nil
+}
+
+// reader answers the memoized pass reader for pkgDir under env,
+// creating it on the first ask; a nil memo answers a fresh reader.
+func (r *Roots) reader(runner gotool.Runner, pkgDir string, env []string) (*gotool.EnvReader, error) {
+	if r == nil {
+		return gotool.NewEnvReader(runner, pkgDir, env), nil
+	}
+	key, err := rootsKey(pkgDir, env)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reader, ok := r.readers[key]; ok {
+		return reader, nil
+	}
+	if r.readers == nil {
+		r.readers = map[string]*gotool.EnvReader{}
+	}
+	reader := gotool.NewEnvReader(runner, pkgDir, env)
+	r.readers[key] = reader
+	return reader, nil
 }
 
 // resolveRoots answers the classification roots of a run of pkgDir under
 // env: the three guard roots as the toolchain reports them — each
 // declaring nothing when it lies inside, equals, or contains the tree —
 // the go command's temp root as it reports that, and the temp root as
-// the run's os.TempDir resolved. A toolchain that
+// the run's os.TempDir resolved — read from the memo's pass reader for
+// (pkgDir, env), whose one `go env -json` snapshot is the probe: the
+// answer a cleanly exited process wrote beside a pipe hold serves when
+// it is a whole document (the reader's own test), a torn one refuses
+// with the hold named, and a document that never names one of the four
+// roots is no answer, the earliest missing key named. A toolchain that
 // cannot answer is an error the caller fails closed on.
-func resolveRoots(ctx context.Context, runner gotool.Runner, treeRoot, pkgDir string, env []string) (resolvedRoots, error) {
-	key := rootsCacheKey(pkgDir, env)
-	if cached, ok := rootsCache.Load(key); ok {
-		return cached.(resolvedRoots), nil
-	}
-	// The document form: one answer shape, one wholeness test — a
-	// document that parses to its four keys. The answer a cleanly
-	// exited process wrote beside a descendant's pipe hold serves when
-	// it is that document (a banner glued before it, or a torn tail,
-	// parses as nothing); a torn one refuses with the hold named.
-	out, err := runner.Run(ctx, pkgDir, env, "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE", "GOTMPDIR")
-	if err != nil && !gotool.Salvaged(ctx, err) {
+func resolveRoots(ctx context.Context, memo *Roots, runner gotool.Runner, treeRoot, pkgDir string, env []string) (resolvedRoots, error) {
+	reader, err := memo.reader(runner, pkgDir, env)
+	if err != nil {
 		return resolvedRoots{}, err
 	}
-	values, parseErr := gotool.ParseEnvDocument(out)
-	if parseErr == nil {
-		// Every requested key is answered, an unset one as the empty
-		// value the guard degrades to none; a document missing a key is
-		// no answer to this probe, the earliest missing key named.
-		for _, key := range []string{"GOROOT", "GOMODCACHE", "GOCACHE", "GOTMPDIR"} {
-			if _, answered := values[key]; !answered {
-				parseErr = fmt.Errorf("go env -json answered no %s", key)
-				break
-			}
+	snapshot, err := reader.Snapshot(ctx)
+	if err != nil {
+		return resolvedRoots{}, err
+	}
+	for _, key := range []string{"GOROOT", "GOMODCACHE", "GOCACHE", "GOTMPDIR"} {
+		if _, answered := snapshot.Lookup(key); !answered {
+			return resolvedRoots{}, fmt.Errorf("go env -json answered no %s", key)
 		}
 	}
-	if parseErr != nil {
-		if err != nil {
-			return resolvedRoots{}, err
-		}
-		return resolvedRoots{}, parseErr
-	}
-	roots := resolvedRoots{
-		toolchain:   usableGuardRootOutside(values["GOROOT"], treeRoot),
-		moduleCache: usableGuardRootOutside(values["GOMODCACHE"], treeRoot),
-		buildCache:  usableGuardRootOutside(values["GOCACHE"], treeRoot),
+	return resolvedRoots{
+		toolchain:   usableGuardRootOutside(snapshot.Value("GOROOT"), treeRoot),
+		moduleCache: usableGuardRootOutside(snapshot.Value("GOMODCACHE"), treeRoot),
+		buildCache:  usableGuardRootOutside(snapshot.Value("GOCACHE"), treeRoot),
 		temp:        tempRootFromEnv(env),
-		goTemp:      usableGuardRoot(values["GOTMPDIR"]),
-	}
-	rootsCache.Store(key, roots)
-	return roots, nil
+		goTemp:      usableGuardRoot(snapshot.Value("GOTMPDIR")),
+	}, nil
 }
 
 // usableGuardRootOutside additionally degrades a guard root that lies
