@@ -647,8 +647,8 @@ func WithBuildFlags(flags ...string) Option {
 }
 
 // WithGoRunner installs the runner every go command the engine spawns
-// itself runs through — each pass's environment snapshot, the
-// toolchain guard's `go version`, the closure's package listings — so a
+// itself runs through — each pass's environment snapshot (both code
+// guards read it), the closure's package listings — so a
 // consumer's process boundary and hook reach them
 // (REQ-fresh-go-command-policy). The package loader's `go list`
 // children spawn through x/tools, outside any runner; the runtime-input

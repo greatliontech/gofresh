@@ -1570,3 +1570,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "64a3369675b1b342f6e91e0017fe56addf5417846b4a4e1334876445c4034a33"
 }
+
+bindings {
+  requirement_id: "REQ-closure-scan-memo"
+  content_hash: "9bd643a75226b7140b7e37f0caf291c9de75d9d923a3e3fb9d898e47dffc69ad"
+  source_hash: "b877770849cdae4c9dd17de2efbe49ac5cc2dc9f111c3e40d3535aa6fcc3d79e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestViewObservationPassPerformsOneTypedLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ee25413fc388cc4949ad81c50ccf948a0522c88d8189050db59655d253dd1a56"
+}

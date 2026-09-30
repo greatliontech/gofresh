@@ -19,9 +19,10 @@ import (
 )
 
 // An installed runner reaches every go command the engine spawns
-// itself: an observation over a module pays its snapshot, its toolchain
-// probe, and its listings through the runner's hook — and none outside
-// it, which the source walk below pins for the sites.
+// itself: an observation over a module pays its snapshots and its
+// listings through the runner's hook — no separate toolchain probe,
+// since the toolchain guard reads the snapshot (REQ-guard-toolchain) —
+// and none outside it, which the source walk below pins for the sites.
 func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/m\n\ngo 1.22\n"), 0o644); err != nil {
@@ -65,10 +66,13 @@ func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 			snapshots++
 		}
 	}
-	for _, want := range []string{"env -json", "version", "list"} {
+	for _, want := range []string{"env -json", "list"} {
 		if !seen[want] {
 			t.Errorf("the runner never saw `go %s` on the pass; spawns seen: %v", want, args)
 		}
+	}
+	if seen["version"] {
+		t.Errorf("the pass paid a `go version` probe beside its snapshot: %v", args)
 	}
 	// One snapshot serves each pass: the closure's construction, the
 	// guard's digest, and the flag validation read the construction

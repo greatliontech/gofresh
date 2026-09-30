@@ -165,7 +165,7 @@ func emittedPhases(root string) (map[string]bool, error) {
 func TestToolchainProvenanceIsOneRefusal(t *testing.T) {
 	ctx := context.Background()
 	cause := errors.New("go: exec: not found")
-	_, err := (&ToolchainProvenance{Sampler: SampleFunc(func(context.Context, string, []string) (string, error) { return "", cause })}).Check(ctx, ".", nil)
+	_, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return "", cause })).Check(ctx, ".", nil)
 	var pe *ToolchainProvenanceError
 	if !errors.As(err, &pe) || !errors.Is(err, cause) {
 		t.Fatalf("unidentifiable: err = %v (typed %v)", err, errors.As(err, &pe))
@@ -174,26 +174,39 @@ func TestToolchainProvenanceIsOneRefusal(t *testing.T) {
 	if err.Error() != want {
 		t.Fatalf("prose = %q, want %q", err.Error(), want)
 	}
-	sampled, err := (&ToolchainProvenance{Sampler: SampleFunc(func(context.Context, string, []string) (string, error) { return "go0.1", nil })}).Check(ctx, ".", nil)
+	sampled, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return "go0.1", nil })).Check(ctx, ".", nil)
 	if !errors.As(err, &pe) || err.Error() != ToolchainSkew("go0.1").Error() || sampled != "" {
 		t.Fatalf("skew: err = %v (sample %q), want ToolchainSkew's own words, typed, no sample", err, sampled)
 	}
 	// A passing verdict returns the one sample it judged.
-	if sampled, err := (&ToolchainProvenance{Sampler: SampleFunc(func(context.Context, string, []string) (string, error) { return runtime.Version(), nil })}).Check(ctx, ".", nil); err != nil || sampled != runtime.Version() {
+	if sampled, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return runtime.Version(), nil })).Check(ctx, ".", nil); err != nil || sampled != runtime.Version() {
 		t.Fatalf("an agreeing sample: %q, %v; want the sample beside a pass", sampled, err)
 	}
-	// The zero value is one memo: two checks through one composite
-	// share one sampler, created once.
-	zero := &ToolchainProvenance{}
-	_, _ = zero.Check(ctx, ".", []string{"PATH=/nonexistent"})
-	first := zero.Sampler
-	_, _ = zero.Check(ctx, ".", []string{"PATH=/nonexistent"})
-	if first == nil || zero.Sampler != first {
-		t.Fatalf("the zero composite did not hold one sampler across checks: %p then %p", first, zero.Sampler)
+	// A composite without a sampler is a construction fault, never a
+	// provenance one: the constructor refuses a nil interface and a
+	// typed nil alike with ErrNoSampler (untyped), and a zero value —
+	// built without the constructor — answers the same from Check,
+	// minting no sampler of its own.
+	for name, sampler := range map[string]ToolchainSampler{"nil interface": nil, "typed nil pointer": (*gotool.Sampler)(nil), "nil SampleFunc": SampleFunc(nil)} {
+		if p, err := NewToolchainProvenance(sampler); !errors.Is(err, ErrNoSampler) || errors.As(err, &pe) || p != nil {
+			t.Fatalf("%s: %v, %v; want ErrNoSampler untyped and no composite", name, p, err)
+		}
 	}
-	if _, ok := first.(*gotool.Sampler); !ok {
-		t.Fatalf("the zero composite's sampler is %T, want the memoized gotool.Sampler", first)
+	var zero ToolchainProvenance
+	if sampled, err := zero.Check(ctx, ".", nil); !errors.Is(err, ErrNoSampler) || errors.As(err, &pe) || sampled != "" || zero.sampler != nil {
+		t.Fatalf("a zero composite: %q, %v (sampler now %v)", sampled, err, zero.sampler)
 	}
+}
+
+// mustProvenance is the composite over sampler, its construction
+// asserted.
+func mustProvenance(t *testing.T, sampler ToolchainSampler) *ToolchainProvenance {
+	t.Helper()
+	p, err := NewToolchainProvenance(sampler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // The vouch set rule: parse-many, deduplicated, sorted; one malformed

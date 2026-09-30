@@ -2,12 +2,12 @@ package gofresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/gotool"
 	"go/version"
+	"reflect"
 	"strings"
-	"sync"
 )
 
 // Tool provenance: a binary embedding this engine drives an ambient
@@ -98,7 +98,9 @@ func languageSeries(v string) string {
 // ToolchainProvenanceError is the one typed refusal a consumer's
 // judged run answers a toolchain-provenance fault with — an
 // unidentifiable ambient toolchain or a language-series skew — the
-// class its abort boundary tests for, wrapping the cause.
+// class its abort boundary tests for, wrapping the cause. A composite
+// built without a sampler is a construction fault (ErrNoSampler),
+// never this class.
 type ToolchainProvenanceError struct{ Err error }
 
 func (e *ToolchainProvenanceError) Error() string { return e.Err.Error() }
@@ -124,28 +126,57 @@ func (f SampleFunc) Sample(ctx context.Context, dir string, env []string) (strin
 // performs before judging: the memoized sample in the target module's
 // directory under the consumer's runner, then the skew judgment, both
 // refusals typed. A composite is held for the lifetime its samples
-// should share — one memo: the zero value creates its own
-// gotool.Sampler once, on first use, so every Check through one
-// composite pays one sample per coordinate and environment.
+// should share — one judged run — and its sampler is the consumer's:
+// the memoized gotool.Sampler the consumer holds for that run, under
+// its own runner and policy, so one sample per
+// coordinate and environment is the consumer's one sample, never a
+// second memo the composite minted for itself. NewToolchainProvenance
+// is the one constructor; it refuses a nil sampler (a nil interface or
+// a typed nil) as a construction fault, and the zero value refuses
+// every Check the same way — neither is a provenance fault, so
+// neither is typed ToolchainProvenanceError.
 type ToolchainProvenance struct {
-	Sampler ToolchainSampler
-	once    sync.Once
+	sampler ToolchainSampler
+}
+
+// ErrNoSampler is the construction fault of a composite built without
+// a sampler: a consumer holds one memoized sampler per judged run and
+// constructs its composite over it.
+var ErrNoSampler = errors.New("toolchain provenance: no sampler — a consumer holds one memoized sampler per judged run")
+
+// NewToolchainProvenance constructs the composite over the consumer's
+// sampler, refusing none: a nil interface, or a typed nil of any
+// nilable kind — a nil SampleFunc, the shape every consumer wraps its
+// sampler in, as much as a nil pointer.
+func NewToolchainProvenance(sampler ToolchainSampler) (*ToolchainProvenance, error) {
+	if sampler == nil {
+		return nil, ErrNoSampler
+	}
+	switch v := reflect.ValueOf(sampler); v.Kind() {
+	// reflect.ValueOf unwraps the interface, so an Interface kind is
+	// never seen here.
+	case reflect.Pointer, reflect.Func, reflect.Map, reflect.Chan, reflect.Slice, reflect.UnsafePointer:
+		if v.IsNil() {
+			return nil, ErrNoSampler
+		}
+	}
+	return &ToolchainProvenance{sampler: sampler}, nil
 }
 
 // Check samples the ambient toolchain for dir under env and refuses,
 // typed, an unidentifiable toolchain ("toolchain provenance: binary
 // built with <frontend>, ambient toolchain unidentifiable — refusing to
-// judge: <cause>") or a breaking skew (ToolchainSkew's own words); the
-// sample it judged is returned beside a passing verdict, so a consumer
+// judge: <cause>") or a breaking skew (ToolchainSkew's own words); a
+// composite built without its constructor and holding no sampler
+// answers ErrNoSampler, untyped. The sample it judged is returned
+// beside a passing verdict, so a consumer
 // whose ladder reads it further (a build-events floor) reads the one
 // sample this check took.
 func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []string) (string, error) {
-	p.once.Do(func() {
-		if p.Sampler == nil {
-			p.Sampler = &gotool.Sampler{}
-		}
-	})
-	ambient, err := p.Sampler.Sample(ctx, dir, env)
+	if p == nil || p.sampler == nil {
+		return "", ErrNoSampler
+	}
+	ambient, err := p.sampler.Sample(ctx, dir, env)
 	if err != nil {
 		return "", &ToolchainProvenanceError{Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", closure.AnalyzingFrontend(), err)}
 	}

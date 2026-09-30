@@ -13,8 +13,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-toolchain"
-  content_hash: "4878944eaa8854468410b553faa044714eea7000dd924a322ca7103962a9c478"
-  source_hash: "32242c0c231e1f970a02fc4c178f50ee8bb55db171f8509ffdd5acd586be9908"
+  content_hash: "49400e74f41484385714970c8de55e33e2e3436dcc5ea32427bcc9a14a7cf4b2"
+  source_hash: "aad982c458b60d682b3999f4bf26d8376dd1b89f51323f03caae7d4fc5abe25a"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestCaptureNonEmpty"
   role: BINDING_ROLE_TESTS
@@ -329,4 +329,24 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/internal/buildflags.Validate"
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "0119477911c679a6cb3c29a61a15617498599fc5340d4ace4f7ec97717520981"
+}
+
+bindings {
+  requirement_id: "REQ-guard-toolchain"
+  content_hash: "49400e74f41484385714970c8de55e33e2e3436dcc5ea32427bcc9a14a7cf4b2"
+  source_hash: "aad982c458b60d682b3999f4bf26d8376dd1b89f51323f03caae7d4fc5abe25a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestToolchainGuardIsGoVersionsOwnForm"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3db537757fc0238e56959e4f6e87ae2f01787a206be2ba4fb61f902385fd4b81"
+}
+
+bindings {
+  requirement_id: "REQ-guard-toolchain"
+  content_hash: "49400e74f41484385714970c8de55e33e2e3436dcc5ea32427bcc9a14a7cf4b2"
+  source_hash: "aad982c458b60d682b3999f4bf26d8376dd1b89f51323f03caae7d4fc5abe25a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestViewObservationPassBatchesToolchainProbes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cea458ea0b98740a30a7f6eecb05a61b53ef6e8d5f4ea79bf07a306a32c25a57"
 }

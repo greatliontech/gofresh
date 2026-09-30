@@ -55,9 +55,9 @@ const (
 // malformed or duplicated), its snapshot the pass's one `go env -json`
 // read the build-config digest takes byte for byte (a direct probe
 // would return the same bytes, so the digest cannot drift), and its
-// runner the spawn of the toolchain guard's `go version`, which always
-// probes live: its string carries the HOST platform that `go env`'s
-// target GOOS/GOARCH does not describe. The measurement guard's
+// toolchain guard the same snapshot's GOVERSION with the host
+// platform (GOHOSTOS/GOHOSTARCH — `go version`'s own line), so a pass
+// pays one spawn for both code guards. The measurement guard's
 // runtime-config digest is computed from runtimeEnv — the environment
 // the measured processes actually run under, when it differs from the
 // analysis env (a caller injecting a GOMAXPROCS cap into the processes
@@ -107,15 +107,15 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
 	env := reader.Env
-	tc, err := toolchainOf(ctx, reader.Runner, reader.Dir, env)
+	// Both code guards read the pass's one snapshot — the bytes a direct
+	// probe would return, so neither can drift and the pass pays one
+	// spawn: the toolchain guard is the snapshot's GOVERSION with the
+	// host platform, `go version`'s own line minus its prefix.
+	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
 		return Guards{}, err
 	}
-	// The build-config digest reads the pass's one snapshot — the bytes a
-	// direct probe would return, so the digest cannot drift — and the
-	// toolchain guard's `go version` stays a live probe through the
-	// runner: it carries the host platform.
-	snapshot, err := reader.Snapshot(ctx)
+	tc, err := toolchainOf(snapshot)
 	if err != nil {
 		return Guards{}, err
 	}
@@ -163,15 +163,26 @@ func Compare(recorded, current Guards, kind Kind) string {
 	return ""
 }
 
-// toolchainOf is the `go version` identity minus the redundant leading prefix — e.g.
-// "go1.26.4 linux/amd64", including any custom or experiment suffix, which affects
-// code generation and so must be part of the guard.
-func toolchainOf(ctx context.Context, runner gotool.Runner, dir string, env []string) (string, error) {
-	out, err := runner.Run(ctx, dir, env, "version")
-	if err != nil {
-		return "", err
+// toolchainOf is the `go version` identity minus the redundant leading
+// prefix — e.g. "go1.26.4 linux/amd64", including any custom or
+// experiment suffix, which affects code generation and so must be part
+// of the guard — read from the pass's snapshot: GOVERSION is the
+// answering toolchain's runtime version, the same string `go version`
+// prints, and GOHOSTOS/GOHOSTARCH the platform it prints after it, so
+// the guard's value is byte-identical to the former live probe's
+// (TestToolchainGuardIsGoVersionsOwnForm) and no recorded guard moves.
+// A document missing or emptying any of the three is no identity — a
+// derived guard must never be non-empty over an empty version (two
+// such toolchains would compare equal and serve each other's results),
+// so the capture refuses it naming the key (REQ-guard-completeness's
+// rule applied to the derived form).
+func toolchainOf(snapshot *gotool.EnvSnapshot) (string, error) {
+	for _, key := range []string{"GOVERSION", "GOHOSTOS", "GOHOSTARCH"} {
+		if snapshot.Value(key) == "" {
+			return "", fmt.Errorf("guard: toolchain identity: go env -json answered no %s", key)
+		}
 	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "go version "), nil
+	return snapshot.Value("GOVERSION") + " " + snapshot.Value("GOHOSTOS") + "/" + snapshot.Value("GOHOSTARCH"), nil
 }
 
 // buildConfigGoEnvKeys are the go-env-reported build-affecting settings hashed into

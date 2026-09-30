@@ -78,10 +78,11 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 }
 
 // One observation pass performs one `go env -json` read (the snapshot) and
-// derives GOFLAGS validation and GOMODCACHE from it; only `go version`
-// stays a live probe (its string carries the host platform). Construction's
-// pair therefore shows exactly two env reads and two version probes, and
-// zero single-key env execs (the batched-probe contract). The env-json
+// derives GOFLAGS validation, GOMODCACHE, and the toolchain guard from it
+// (REQ-guard-toolchain: GOVERSION with the host platform — no live `go
+// version` probe). Construction's pair therefore shows exactly two env
+// reads, zero version probes, and zero single-key env execs (the
+// batched-probe contract). The env-json
 // matcher is x/tools-version-coupled: some driver versions issue key-scoped
 // `go env -json GOMOD` calls that would match the same arm - if this count
 // moves on an x/tools upgrade, recalibrate against a single packages.Load
@@ -133,7 +134,7 @@ func TestViewObservationPassBatchesToolchainProbes(t *testing.T) {
 	for _, line := range strings.Split(strings.TrimSpace(string(logged)), "\n") {
 		counts[line]++
 	}
-	if counts["env-json"] != 2 || counts["version"] != 2 || counts["env-goflags"] != 0 || counts["env-gomodcache"] != 0 {
-		t.Fatalf("construction probe counts = %v, want env-json:2 version:2 and no single-key env execs", counts)
+	if counts["env-json"] != 2 || counts["version"] != 0 || counts["env-goflags"] != 0 || counts["env-gomodcache"] != 0 {
+		t.Fatalf("construction probe counts = %v, want env-json:2, no version probe, and no single-key env execs", counts)
 	}
 }

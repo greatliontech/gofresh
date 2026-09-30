@@ -226,9 +226,11 @@ func (c Containment) grace() time.Duration {
 
 // Sampler is the memoized toolchain sampler every consumer's provenance
 // check reads: one sample per (coordinate, normalized environment) for
-// the sampler's lifetime — a pass, an operation, a process, as the
-// consumer scopes it — a failed sample memoized like an answered one
-// (the toolchain does not change between two asks in one lifetime), a
+// the sampler's lifetime, which is one judged run — the consumer's one
+// verb invocation, a long-lived server's per-request operation; never
+// a process, or a toolchain replaced under the memo is judged by its
+// predecessor's sample — a failed sample memoized like an answered
+// one (the toolchain does not change within one run), a
 // cancelled sample never memoized, and the salvage the wait-delay form
 // allows: the first line a cleanly exited process wrote is the sample
 // when it is a go version.

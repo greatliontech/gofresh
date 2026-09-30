@@ -33,7 +33,12 @@ environments, so any difference makes the result stale.
 identity — the version string including any experiment or custom suffix that affects
 code generation — so a toolchain change, which moves the standard library and
 generated code the closure deliberately does not hash, stales every result recorded
-under the old toolchain.
+under the old toolchain. The identity is read from the pass's one environment
+snapshot (`GOVERSION` with `GOHOSTOS/GOHOSTARCH`), byte-identical to the `go version`
+line minus its prefix, so a pass samples its toolchain once; a snapshot answering
+any of the three empty refuses the capture naming the key — a derived identity is
+never non-empty over an empty part. Enforced by
+`TestToolchainGuardIsGoVersionsOwnForm`.
 
 **REQ-guard-buildconfig** (behavior): The build-configuration guard MUST digest every
 build-affecting input that can change generated code without moving the toolchain or

@@ -249,13 +249,17 @@ the tool's own working directory: under GOTOOLCHAIN=auto the selected
 toolchain is per module) — the sample gofresh's go-command policy
 performs for every consumer, so no consumer spells the sampling contract
 itself: memoized per directory coordinate and environment for a
-sampler's lifetime, a cancelled sample never memoized, the answer a
+sampler's lifetime — a failed sample memoized like an answered one, a
+cancelled sample never memoized — the answer a
 cleanly exited process wrote kept when a descendant holds its pipe past
 the wait delay, and composed with this judgment into the one typed
 provenance refusal every consumer's judged run answers with — an
 unidentifiable ambient toolchain named with the frontend and the cause,
-a breaking skew in this clause's words. Enforced by
-`TestSampleGoVersionRunsInTheModuleDirectory` and
+a breaking skew in this clause's words; the composite is constructed
+over the consumer's own memoized sampler, and one built without a
+sampler refuses as a construction fault, never a provenance one.
+Enforced by `TestSampleGoVersionRunsInTheModuleDirectory`,
+`TestSamplerMemoizesAFailedSample`, and
 `TestToolchainProvenanceIsOneRefusal`.
 Within a major the refusal is directional — a frontend older than the
 ambient series refuses, since it predates the sources' language, while a
@@ -263,7 +267,11 @@ newer frontend reads older language under the Go 1 compatibility
 promise; across majors both directions refuse; an unidentifiable version
 on either side refuses. This is the guard the closure identity's
 exclusion of the analyzing frontend rests on
-(REQ-closure-identity-strategy).
+(REQ-closure-identity-strategy). Consumer obligation: a sampler lives
+one judged run — the consumer's one verb invocation, a long-lived
+server's per-request operation — never a process, since a toolchain
+replaced under a living memo would be judged by its predecessor's
+sample.
 
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the

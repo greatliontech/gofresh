@@ -327,8 +327,8 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// GOMODCACHE and GOFLAGS validation, the guard's build-config digest,
 	// and the typed load's validation all derive from it. The snapshot is
 	// pass-scoped - a later pass takes its own, so environment drift still
-	// meets an observation (REQ-guard-buildconfig; the toolchain guard's
-	// `go version` stays a live probe: it carries the host platform).
+	// meets an observation (REQ-guard-buildconfig; the toolchain guard is
+	// the snapshot's GOVERSION with the host platform, REQ-guard-toolchain).
 	reader := e.newPassReader()
 	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
@@ -358,10 +358,11 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// reads those keys before execution, so a moved delivered width
 	// stales the evidence instead of hiding behind an analysis-env
 	// stand-in.
-	// The guard reads the pass's one snapshot (primed on a reader over the
-	// guard's directory, where its `go version` runs), never a second
-	// probe of the same pass (REQ-guard-buildconfig).
-	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(e.runner, observedGuardDir(moduleDir), e.env, snapshot), e.evidenceEnv(), kind, e.guardInputs()...)
+	// The guard reads the pass's one snapshot — the reader that took it
+	// is the guard's, its directory the one every guard observation
+	// captures in — never a second probe of the same pass
+	// (REQ-guard-buildconfig, REQ-guard-toolchain).
+	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(e.runner, observedGuardDir(reader.Dir), e.env, snapshot), e.evidenceEnv(), kind, e.guardInputs()...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -1448,8 +1449,9 @@ func (v *View) runtimeCheck() func(context.Context, string, string) (runtimeinpu
 	}
 }
 
-// observedGuardDir is the directory a guard observation captures in,
-// passed through the test hook that pins it to the module directory.
+// observedGuardDir is the directory a guard observation captures in —
+// the pass reader's, where its one snapshot was taken — passed through
+// the test hook that pins it to the module directory.
 func observedGuardDir(dir string) string {
 	if viewTestHooks.guardDir != nil {
 		viewTestHooks.guardDir(dir)
