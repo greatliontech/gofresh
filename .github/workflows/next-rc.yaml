@@ -1,0 +1,71 @@
+name: Next RC
+
+# The pre-release leg, its own workflow: it is an EARLY WARNING for the
+# freeze window, not a release gate — a candidate gofresh does not yet
+# list reds this workflow loudly for the whole window, and that must
+# never block a release of the tree as it stands (the CI workflow's
+# tiers are the gate release.yaml waits for). Same triggers as CI.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The pre-release leg: go.dev/dl orders by version, newest first, so
+  # an unstable entry at the top is exactly "a candidate newer than
+  # every stable release" — the freeze-window signal this leg exists
+  # for (a point release cannot mask it: go1.N+1rc1 sorts above every
+  # go1.N.x). A stable top entry means no candidate is published and
+  # the leg no-ops — but only after the resolver AFFIRMS it parsed a
+  # plausible version AND a plausible stability flag, so a broken
+  # endpoint or a moved schema fails the job instead of impersonating
+  # the quiet season. When a candidate exists, its failure is LOUD:
+  # this is the structural prevention for release-day toolchain
+  # breakage, surfaced months early.
+  next-rc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Resolve the next Go release candidate
+        id: rc
+        # shell: bash is load-bearing: it switches Actions to
+        # `bash -eo pipefail`, so a curl failure inside the pipe fails
+        # this step instead of yielding an empty version that reads as
+        # a legitimate no-op.
+        shell: bash
+        run: |
+          top=$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' | jq -r '.[0] | "\(.version) \(.stable)"')
+          case "$top" in
+            go1.*" true" | go1.*" false") ;;
+            *) echo "resolver broke: top dl entry is '$top'" >&2; exit 1 ;;
+          esac
+          version=""
+          [ "${top##* }" = "false" ] && version="${top%% *}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "${version:-no pre-release published; leg is a no-op}"
+      - name: Install the release candidate
+        if: steps.rc.outputs.version != ''
+        shell: bash
+        run: |
+          go install "golang.org/dl/${{ steps.rc.outputs.version }}@latest"
+          wrapper="$(go env GOPATH)/bin/${{ steps.rc.outputs.version }}"
+          "$wrapper" download
+          echo "$("$wrapper" env GOROOT)/bin" >> "$GITHUB_PATH"
+      - if: steps.rc.outputs.version != ''
+        run: go version && go build ./...
+      - if: steps.rc.outputs.version != ''
+        run: go vet ./...
+      - if: steps.rc.outputs.version != ''
+        run: go test ./... -count=1 -timeout=30m

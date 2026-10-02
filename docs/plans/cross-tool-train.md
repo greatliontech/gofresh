@@ -142,14 +142,17 @@ Standing rule from the ruling (restated 2026-09-07, binding on every
 chunk): the tools' self-checks — `stipulator check` over a repo and
 gomutant campaigns — are NOT part of a chunk's fix workflow and do
 not run at a chunk's close. They run only at these named points: (1)
-before a release push of the repo being released; (2) at a band's
-close, over the settled tree; (3) where a chunk's charter names its
-own self-host verdict (141, 155 — and 175's close, where the closure
-identity becomes subject-scoped and a gofresh check turns warm). A
-chunk's close-out evidence is the full `go test` tier (never the
--short tier alone) plus the ephemeral probes of its review rounds.
-Between named points the check is not run even when cheap; running
-it "because the tree settled" was the waste the ruling ends.
+none before a release — a release's gate is CI's plain, race and
+records tiers on the pushed commit, the tag waiting for them (amended
+2026-10-02; the local self-check is no longer a release's
+precondition); (2) at a band's close, over the settled tree; (3) where
+a chunk's charter names its own self-host verdict (141, 155 — and
+175's close, where the closure identity becomes subject-scoped and a
+gofresh check turns warm); (4) on the fleet sweep's schedule, in idle
+windows. A chunk's close-out evidence is the full `go test` tier
+(never the -short tier alone) plus the ephemeral probes of its review
+rounds. Between named points the check is not run even when cheap;
+running it "because the tree settled" was the waste the ruling ends.
 Ratified 2026-09-29 (promoted from the two deleted campaign docs,
 gomutant own-face-gate-suite-decomposition and stipulator
 train-114-campaign-idle-window): a full-face campaign over a
@@ -159,13 +162,32 @@ chartered; the gate is the probes, the measured pace (148 of 11,867
 candidates in 7h26m, ~537 h projected; ~217 h on gomutant's face)
 makes the campaign worthless as an instrument, and a decomposition
 has no correctness driver.
-Ratified at Band R4 (audit 285 A17, 2026-09-29): a chunk whose charter
-says "a release" runs the repo's self-check before its push — that IS
-point (1), and the CI-on-push flow does not exempt it (289's record:
-four releases went out with a dangling binding and a deleted proof,
-found by the sweep a week later). Between named points a commit that
-deletes or renames a symbol runs the records-only bindings view, and a
-commit that amends a clause runs a scoped pass over the amended
+Ratified at Band R4 (audit 285 A17, 2026-09-29), amended 2026-10-02
+(operator: the gate must not carry the shared machine's hour): a
+release is gated in CI, not by a pre-push self-check — the release
+workflow cuts a tag only after the CI workflow succeeded on the pushed
+commit: the plain tier, a race tier over the whole tree (the policy's
+own race selection), and a RECORDS tier (the corpus compiles; every
+binding resolves to a current symbol at a consented pin — 289's
+dangling binding and deleted proof are exactly what it names; the gap
+and attestation pins stay consented locally by `stipulator pin` and
+judged by the full self-check at its named points), so no release
+stands on a red or unrun tier and the gate cannot be skipped on the
+automated path (a manual tag is outside it); the release lands on the
+judged commit itself, serialized, a superseded commit releasing
+nothing; the next-rc leg is an early warning in its own workflow,
+never a release blocker. The committer still runs the same records
+checks locally before a push — the same view through a released
+stipulator in CI and the development binary locally, a format move
+between them a red job, the safe direction — and the change sets' own
+test tiers stand as always. The full self-check
+(witness freshness, serving evidence, the race tier under the owned
+environment) runs at band closes and on the fleet sweep's schedule, in
+idle windows, never as a release's precondition. gofresh carries the
+CI gate from 281's close; gomutant, stipulator and pew adopt the same
+release/CI shape at their next chunk. Between named points a commit
+that deletes or renames a symbol runs the records-only bindings view,
+and a commit that amends a clause runs a scoped pass over the amended
 requirements — seconds, never the self-check.
 
 Previous order (user-confirmed 2026-08-26, kept for the field band's

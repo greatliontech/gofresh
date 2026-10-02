@@ -10,17 +10,21 @@ on:
 # push). Main is keyed per-SHA so no two main runs ever share a group:
 # by default GitHub cancels a group's PENDING member (cancel-in-progress
 # governs only the running one), so a shared main group would leave
-# rapid-push intermediate commits verdictless while release.yaml tags
-# them on the same push. Per-SHA grouping removes the collision
-# structurally while keeping a concurrency stanza PRs can reuse.
+# rapid-push intermediate commits verdictless — and every main commit's
+# verdict is what release.yaml waits for before it tags that commit.
+# Per-SHA grouping removes the collision structurally while keeping a
+# concurrency stanza PRs can reuse.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 
 # GOTOOLCHAIN=local pins each leg to the toolchain it installed: the
-# current leg must actually run stable and the next-rc leg must
-# actually run the candidate — auto would silently substitute the
-# go.mod-resolved toolchain and the matrix would measure nothing.
+# legs here must actually run stable (the next-rc leg, in its own
+# workflow, must actually run the candidate) — auto would silently
+# substitute the go.mod-resolved toolchain and measure nothing.
+#
+# This workflow IS the release gate: release.yaml cuts a tag only after
+# every job here succeeded on the pushed commit.
 
 jobs:
   test:
@@ -59,20 +63,28 @@ jobs:
       # measured curve — when the closure proofs grow, re-measure both.
       - run: go test ./... -count=1 -timeout=30m
 
-  # The pre-release leg: go.dev/dl orders by version, newest first, so
-  # an unstable entry at the top is exactly "a candidate newer than
-  # every stable release" — the freeze-window signal this leg exists
-  # for (a point release cannot mask it: go1.N+1rc1 sorts above every
-  # go1.N.x). A stable top entry means no candidate is published and
-  # the leg no-ops — but only after the resolver AFFIRMS it parsed a
-  # plausible version AND a plausible stability flag, so a broken
-  # endpoint or a moved schema fails the job instead of impersonating
-  # the quiet season. When a candidate exists, its failure is LOUD:
-  # this is the structural prevention for release-day toolchain
-  # breakage, surfaced months early.
-  next-rc:
+  # The race tier: every witness the stipulator policy binds runs under
+  # the race detector on every push, off the shared development
+  # machine (the plain tier above and the records tier below are the
+  # gate's other halves). The budget mirrors the policy's own race
+  # invocation (.stipulator/policy.textproto: a 60m per-binary cap,
+  # measured 2026-08-28 at 36m for the whole closure unit width-capped
+  # at 2 on the 24-core host; the race detector measures ~4x on the
+  # observability proofs — CPU-bound and in-process, so core count IS a
+  # factor here, unlike the plain tier's child-process-serialized
+  # work). On a 4-vCPU/16 GB runner the closure package alone is
+  # estimated at 50–75 minutes plus a cold -race build of ~130
+  # binaries; -p 2 keeps two race binaries' heaps (5–10x the plain
+  # heap) inside the runner's memory. The FIRST run of this job is the
+  # measurement — record its wall and peak here; an overrun afterwards
+  # is a real finding (a hang, or a suite outgrowing its budget):
+  # re-measure before raising the number. The race build is cached
+  # under its own key: setup-go's cache is keyed on go.sum alone and
+  # the plain job saves it first, so the race job would cold-build on
+  # every run otherwise.
+  race:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       GOTOOLCHAIN: local
     steps:
@@ -80,34 +92,58 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - name: Resolve the next Go release candidate
-        id: rc
-        # shell: bash is load-bearing: it switches Actions to
-        # `bash -eo pipefail`, so a curl failure inside the pipe fails
-        # this step instead of yielding an empty version that reads as
-        # a legitimate no-op.
+          cache: false
+      # A key per commit: a cache saves only on a miss, so a key fixed
+      # per go.sum would freeze the build cache at the first run and
+      # cold-build every later source change. Only main SAVES (a
+      # race-mode build cache is GB-class; one entry per PR push would
+      # press the repository's 10 GB cache limit and evict the plain
+      # tier's setup-go cache); PR runs restore from main's entries.
+      - uses: actions/cache/restore@v4
+        id: race-cache
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            race-${{ runner.os }}-
+      - run: go test -race -p 2 ./... -count=1 -timeout=100m
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.race-cache.outputs.cache-primary-key }}
+
+  # The records tier: the requirement corpus compiles and every binding
+  # resolves to a current symbol at a consented pin — the half of the
+  # release gate the test tiers cannot see (289's record: four releases
+  # went out with a dangling binding and a deleted proof, found by the
+  # fleet sweep a week later). Records-only: no witness executes here
+  # (the race and plain tiers above are the execution); stipulator is
+  # pinned to a release so a corpus-format move is a deliberate bump.
+  records:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/greatliontech/stipulator/cmd/stipulator@v0.66.1
+      - run: stipulator compile
+      - name: Every binding current and resolved
         shell: bash
         run: |
-          top=$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' | jq -r '.[0] | "\(.version) \(.stable)"')
-          case "$top" in
-            go1.*" true" | go1.*" false") ;;
-            *) echo "resolver broke: top dl entry is '$top'" >&2; exit 1 ;;
-          esac
-          version=""
-          [ "${top##* }" = "false" ] && version="${top%% *}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "${version:-no pre-release published; leg is a no-op}"
-      - name: Install the release candidate
-        if: steps.rc.outputs.version != ''
-        shell: bash
-        run: |
-          go install "golang.org/dl/${{ steps.rc.outputs.version }}@latest"
-          wrapper="$(go env GOPATH)/bin/${{ steps.rc.outputs.version }}"
-          "$wrapper" download
-          echo "$("$wrapper" env GOROOT)/bin" >> "$GITHUB_PATH"
-      - if: steps.rc.outputs.version != ''
-        run: go version && go build ./...
-      - if: steps.rc.outputs.version != ''
-        run: go vet ./...
-      - if: steps.rc.outputs.version != ''
-        run: go test ./... -count=1 -timeout=30m
+          stipulator verify --no-test --view bindings > bindings.txt
+          if grep -E 'REQ-' bindings.txt | grep -vE ' current +resolved ' | grep -q .; then
+            echo "bindings not current and resolved:" >&2
+            grep -E 'REQ-' bindings.txt | grep -vE ' current +resolved ' >&2
+            exit 1
+          fi
+          grep -cE ' current +resolved ' bindings.txt
