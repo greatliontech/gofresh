@@ -1,6 +1,24 @@
 # A runtime-input classification names `/` for every subject while the input list is empty
 
-Lands: the next report of this reason carrying its attribution — 259 landed
+Lands: cross-tool train chunk 292 (gofresh's next chunk; its open triages
+this — the trigger below FIRED 2026-10-02).
+
+Attributed occurrence (protodb, 2026-10-02, the standing channel): a
+campaign over protodb's clean tree disqualified all 54 machine-local
+records across internal/db, raftstore, tugboat and raftboot with
+`runtime-unverifiable evidence: external directory input: /; attributed
+to open "/" in <package dir>` — the attribution 259 added names the
+operation (open) and the process's directory, and protodb finds no
+`os.Open("/")` in its code: a directory sync walking up to the root, or
+a library's statfs/openat of `/`, are the candidates. What the report
+asks for is the CALL that opens `/`. The testlog carries no caller PC,
+so the call site is either a godst/toolchain question (a caller frame
+on the logged operation) or a gofresh diagnostic over the manifest's
+neighbours (the operations logged just before the `/` open, bounded) —
+292's open decides which, and whether an open of `/` by a directory
+sync (an openat on the parent chain) is an input at all.
+
+Former trigger: the next report of this reason carrying its attribution — 259 landed
 REQ-inputs-refusal-attribution (a classification refusal names the harness
 operation, its quoted logged name, and the quoted working directory it
 resolved in, after a ` — ` separator; RefusalClause is the consumer's
