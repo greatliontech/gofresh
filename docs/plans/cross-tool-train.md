@@ -214,7 +214,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 285 (2026-09-29): 281 (the release cluster's largest: the fifth reader, one sample, the zero-runner default, the salvage pin, the roots probe, the non-go containment and the series parse gomutant/pew/stipulator read), 292 (a release), 297 (the dst walk — a release stipulator 290 reads), 300 (the guidance lint — a release before 290/291), then the bumps 290/291, then 202 (design, autonomous), 191 (a release), 295 (a release), 240, 241, 260, 203, 204, 206, 192, 193, 255, 242 and 243 together, 175, 102; 199 dissolved; gomutant's order after audit 286 (2026-09-29): 283 (heads it, carrying its triage folds: the REQ-exec-go-command-runner sentence and gap, the INV pointer, the register chore) → 301 (writer-side fixture isolation) → 284 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 187 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 210 dissolved (done at 246/278); stipulator's order after audit 287 (2026-09-29): 299 → 293 → 298 (soundness first, before the bump) → 290 (the bump, when gofresh 281/292/297/300 have released) → 270 (moved up: it gates 176 and 238 and bounds 293) → 226 → 249 → 185 → 225 and 248 together → 228 → 184 → 176 → 238 (behind 270, not 226); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → stipulator 299 → 293 → 298 → 290 (bump) → pew 291 (bump) → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 269 → stipulator 270 → pew 174 → gofresh 240 → gomutant 209 → stipulator 226 → pew 252 → gofresh 241 → gomutant 268 → stipulator 249 → pew 232 → gofresh 260 → gomutant 267 → stipulator 185 → pew 276 → gofresh 203 → gomutant 258 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 245 → stipulator 228 → pew 15 → gofresh 206 → gomutant 212 → stipulator 184 → pew 127 → gofresh 192 → gomutant 216 → stipulator 176 → gofresh 193 → gomutant 218 → stipulator 238 → gofresh 255 → gomutant 217 → gofresh 242+243 → gomutant 220 → gofresh 175 → gomutant 214 → gofresh 102 → gomutant 219, 254, 296, 256, 187, 188, 233, 294; 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 285 (2026-09-29): 281 (the release cluster's largest: the fifth reader, one sample, the zero-runner default, the salvage pin, the roots probe, the non-go containment and the series parse gomutant/pew/stipulator read), 292 (a release), 297 (the dst walk — a release stipulator 290 reads), 300 (the guidance lint — a release before 290/291), then the bumps 290/291, then 202 (design, autonomous), 191 (a release), 295 (a release), 240, 241, 260, 203, 204, 206, 192, 193, 255, 242 and 243 together, 175, 102; 199 dissolved; gomutant's order after audit 286 (2026-09-29): 283 (heads it, carrying its triage folds: the REQ-exec-go-command-runner sentence and gap, the INV pointer, the register chore) → 301 (writer-side fixture isolation) → 284 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 187 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 210 dissolved (done at 246/278); stipulator's order after audit 287 (2026-09-29): 299 → 293 → 298 (soundness first, before the bump) → 290 (the bump, when gofresh 281/292/297/300 have released) → 270 (moved up: it gates 176 and 238 and bounds 293) → 226 → 249 → 185 → 225 and 248 together → 228 → 184 → 176 → 238 (behind 270, not 226); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → pew 291 (bump) → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1335,7 +1335,9 @@ in their repos.
       fixture-tier-parallelism retargeted here (its trigger reads as
       met at the recorded closes — closure 798–812s beside root
       390–398s — state the per-package reading or fire it). LOSES
-      sampler-failed-sample-memo-unpinned to 281.
+      sampler-failed-sample-memo-unpinned (resolved at 281.C; `git log
+      --all -- docs/issues/sampler-failed-sample-memo-unpinned.md`, gofresh)
+      to 281.
 
 ## Band H — gomutant under the emergent shape (chartered by audit 195)
       (261: measured — tier2* now 69 production occurrences; four global hook
@@ -2202,7 +2204,7 @@ in their repos.
       entries in a manifest are per-identity uncovered reasons that seal
       an observation proof, never a plain serve. The resolution cache's
       empty race selection stands filed (Lands 226).
-- [ ] 281. gofresh: gotool's containment over a consumer's own command
+- [x] 281. gofresh: gotool's containment over a consumer's own command
       (chartered at pew 275's close) — Containment is applied by Runner
       alone, which prepares `go` only; gomutant's oracle, stipulator's
       resolver child, and pew's runCommand each carry a hand copy of the
@@ -2223,7 +2225,9 @@ in their repos.
       drops the policy (provenance.go:145 mints a Sampler with the
       zero Runner when the field is unset — Structural-check: the
       default is representable and wrong); (d)
-      sampler-failed-sample-memo-unpinned moves here
+      sampler-failed-sample-memo-unpinned (resolved at 281.C; `git log
+      --all -- docs/issues/sampler-failed-sample-memo-unpinned.md`, gofresh)
+      moves here
       (gotool/gotool.go:171–178 unpinned; stipulator retired its pin
       at 272 on the premise gofresh covers it); (e) the roots probe is
       a second go env keyed on the raw dir and raw env order
@@ -2429,6 +2433,22 @@ in their repos.
       Progress.IsUnit/UnitPhases unused while derive.go:980
       keep-alives on every event; recordstore.fingerprintDigest takes
       any.
+      Rider (2026-09-30, gofresh 281 landed — v0.108.1 and the
+      releases after it): the bump adopts 281's forms — the resolver
+      child's and the driver's boundary copies delete against
+      gotool.Runner.Program (SysProcAttr fields set after construction
+      merge into Program's); discovery's `go list` reads
+      gotool.Runner.List, whose refusal carries
+      gotool.ErrListingRefused, never exec.ErrWaitDelay, so
+      discovery.go:258's own wait-delay arm is re-derived there; the
+      provenance composite is constructed through
+      gofresh.NewToolchainProvenance; the MCP server holds one
+      gotool.Sampler and one runtimeinput.Roots per served operation
+      (never per process —
+      docs/issues/mcp-server-holds-one-toolchain-sampler-per-process.md
+      lands here) and passes the memo on every ProducerIngest; any
+      series parse of its own folds onto
+      gotool.LanguageSeries/ParseGoVersion.
 - [ ] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
       docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
@@ -2446,6 +2466,15 @@ in their repos.
       checked sample; (c) the row projection validates through
       gofresh's Fingerprint.Validate (285 A14 / 240's projection
       obligation).
+      Rider (2026-09-30, gofresh 281 landed): the bump adopts 281's
+      forms — runCommand's boundary copy deletes against
+      gotool.Runner.Program (its post-construction SysProcAttr fields
+      merged, never replaced); every `go list` of its own reads
+      gotool.Runner.List; the provenance composite is constructed
+      through gofresh.NewToolchainProvenance; one runtimeinput.Roots
+      per verb invocation on every ProducerIngest beside its sampler;
+      any GOVERSION parse folds onto
+      gotool.LanguageSeries/ParseGoVersion.
 - [ ] 292. gofresh: an in-module refused path's clause spelled
       module-relative (gofresh
       docs/issues/refused-in-module-path-spelled-absolute.md — derived
@@ -2622,6 +2651,69 @@ in their repos.
       read-only by construction (a pin that refuses a dirty fixture
       tree after the suite). Directly after 283, before any chunk
       whose probes read the shared tree.
+- [ ] 302. gomutant: a findings record keyed by (symbol, selection)
+      (gomutant docs/issues/findings-records-keyed-by-symbol-alone.md,
+      filed at 284's review): a record keyed by its symbol alone lets
+      two build selections over one document re-measure each other,
+      and a drift re-measure under the default selection turns the
+      integration selection's kill into a survivor — measured at 284:
+      89.4% of the root's statements covered under the integration
+      selection, 59.9% under the default, 1,601 of 4,958 covered
+      blocks and 97 of 514 covered functions reach zero under the
+      affordable selection; the document holds one record per
+      selection it was measured under, the faces read the selection's
+      records, serving and drift judged within a selection, a survivor
+      under one selection carrying the other's verdict where one
+      exists; REQ-result-record's key sentence and the tables amended,
+      the document version bumped; the bump behind gofresh 303 rides
+      it (the integration campaign then serves), and that bump adopts
+      281's forms: gotool.Runner.List for the linked-set `go list`
+      (buildset.go's served salvage retires),
+      gofresh.NewToolchainProvenance for the composite, one
+      runtimeinput.Roots and one gotool.Sampler per judged run on
+      every ProducerIngest, parseGoVersion/releaseTags folded onto
+      gotool.ParseGoVersion/ReleaseTags (the development-build
+      divergence declared), the oracle's boundary through
+      Runner.Program. Correctness first: heads gomutant's tail,
+      directly before 269.
+- [ ] 303. gofresh: a build selection whose tags constrain no
+      standard-library file is admitted with the base selection's
+      audit (gofresh
+      docs/issues/selection-with-no-standard-library-delta-unwalked.md,
+      filed at 284's review): a tag absent from every build constraint
+      under GOROOT/src has an empty delta by construction, yet the
+      toolchain audit refuses it as unwalked — gomutant's
+      `integration` tag, measured 2026-09-30: zero files under
+      go1.27.0-dst.15's GOROOT/src carry the constraint, and its
+      integration campaign cannot serve; the selections axis gains the
+      derived arm (a scan of //go:build lines and the platform name
+      suffixes under GOROOT/src, memoized per toolchain), a tag any
+      standard-library file names keeps the listed-or-refused rule,
+      the clause stating the listed rule amended. A release, directly
+      after 300; gomutant's next bump (302) reads it.
+- [ ] 304. gomutant: the derived oracle narrowed by measured
+      reachability before measurement (gomutant
+      docs/issues/derived-oracle-is-the-whole-closure-and-prices-out.md
+      — protodb's field report 2026-10-02, the standing channel): over
+      a tree whose root links everything the derived oracle is the
+      whole suite for every target (protodb: 2,269 tests across 10
+      packages, 0 of 112 targets committed in 75 minutes; the train's
+      own pb campaign stalled the same way at 257), and the workaround
+      is a hand-built targets document with oracleExplicit per symbol
+      that can drop an oracle silently. The sound narrowing is the one
+      the narrowed survivor already rests on — a test whose execution
+      never reaches the mutated function cannot observe the mutation —
+      applied before measurement from the baseline's per-test coverage
+      the campaign already pays: a target's oracle is its reaching
+      tests, the non-reaching remainder exempt on that measured
+      coverage; a target whose narrowed oracle still prices past the
+      window is refused with its pricing (114/137's rule), never a
+      prefix survivor; own-package-first ordering and a test-count
+      prefix commit refused as unsound for survivors (recorded in the
+      issue). The report's condition is the measure at close: a
+      `--changed` run over protodb's tree commits its first target
+      within an hour with no targets document. Correctness first:
+      directly after 284 in gomutant's order, before 302.
 
 
 - [x] 278. gomutant: the bump behind gofresh 265, 266, and 274 (the lane's
