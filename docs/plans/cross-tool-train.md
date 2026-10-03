@@ -2717,9 +2717,11 @@ in their repos.
       `--changed` run over protodb's tree commits its first target
       within an hour with no targets document. Correctness first:
       directly after 284 in gomutant's order, before 302.
-- [ ] 305. gofresh: the analysis budget bounds the dynamic-state
+- [x] 305. gofresh: the analysis budget bounds the dynamic-state
       discharge's reachability analysis (gofresh
-      docs/issues/analysis-budget-skips-the-dynamic-state-discharge.md
+      analysis-budget-skips-the-dynamic-state-discharge, resolved at 305;
+      `git log --all --
+      docs/issues/analysis-budget-skips-the-dynamic-state-discharge.md`
       — protodb's field report 2026-10-02, triaged at gomutant 304's
       open): the `prove (1/1)` unit is closure/rooted.go's
       ComputeRootedFunctions, the discharge's attributed RTA, run from
