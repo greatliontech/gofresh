@@ -456,7 +456,19 @@ a proof refused under an exhausted budget names the budget in its unavailable
 reason, the pass reports the exhaustion once with the count of subjects it left
 unproven, and a validation the budget cut reports the unavailability only after
 every other check of the validation passed, the runtime-input comparison closing
-the proof pass included.
+the proof pass included. The precise-analysis tier is the observability proof
+AND the dynamic-state discharges' reachability analysis in every observation
+pass (REQ-closure-shared-dynamic-state-reachability in
+[closure.md](closure.md)): the same budget bounds the discharge alone — never
+the listing, the typed load, the derivation, or the closure fold — a cut leaves
+every culprit of that pass standing, its reason naming the budget, with the
+pass reporting the exhaustion once and the count it left undischarged, and the
+pass persists no scan facts of a package it cut. A cut is the pass's fact,
+never the tree's: the construction pair compares the fields a discharge shapes
+only between passes not cut on the subject and takes the cut pass's
+fail-closed shape, and a validation whose comparison differs only in those
+fields of a cut subject reports the analysis's unavailability — after every
+other comparison held — never drift.
 
 **REQ-fresh-preparation** (invariant): Every refusal an operation can decide from
 inputs it already holds — the package listing, the recorded record's shape, kind,

@@ -60,7 +60,13 @@ type View struct {
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
-	runtimeCurrent       func(context.Context, string, string) (runtimeinput.State, error)
+	// cutUnavailable holds a comparison's unavailability that a budget
+	// cut alone explains (compareFactsContext): never returned where it
+	// arose — a capture keeps the view's fail-closed facts, a validation
+	// runs every other check first — and read by the observed
+	// validation's end (REQ-fresh-context).
+	cutUnavailable error
+	runtimeCurrent func(context.Context, string, string) (runtimeinput.State, error)
 	// beforePreciseAnalysis observes the start of drift-forced precise analysis
 	// (the observability proof). Tests use it to pin which check paths run
 	// analysis and to inject cancellation at the analysis boundary. It stays
@@ -132,7 +138,12 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if first.maximal[subject] != second.maximal[subject] {
+		// A budget cut in either pass is the pass's fact, never the
+		// tree's: the fields the discharge shapes are compared only
+		// between uncut passes, and the view takes the cut pass's
+		// fail-closed shape for the subject (REQ-fresh-context).
+		cut := first.cut[subject] || second.cut[subject]
+		if dischargeNeutral(first.maximal[subject], cut) != dischargeNeutral(second.maximal[subject], cut) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
@@ -150,17 +161,20 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if first.attestationDischarges[subject] != second.attestationDischarges[subject] {
+		if !cut && first.attestationDischarges[subject] != second.attestationDischarges[subject] {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return nil, fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if first.packageProcessDischarges[subject] != second.packageProcessDischarges[subject] {
+		if !cut && first.packageProcessDischarges[subject] != second.packageProcessDischarges[subject] {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return nil, fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+		}
+		if second.cut[subject] && !first.cut[subject] {
+			first.takeCut(second, subject)
 		}
 		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
@@ -222,8 +236,15 @@ type observationFacts struct {
 	// packageProcessDischarges mirrors attestationDischarges for the
 	// package-process attestation's binary-scoped discharges.
 	packageProcessDischarges map[Subject]string
-	sourceFiles              []string
-	sourceFilesBySubject     map[Subject][]string
+	// cut is the set of subjects the analysis budget left undischarged
+	// in this pass — a fact of the pass, never of the tree: the fields
+	// the discharge shapes (the downgrade in maximal, the attestation
+	// and package-process discharges) are compared only between passes
+	// not cut on the subject, and a difference a cut explains is the
+	// analysis's unavailability, never drift (REQ-fresh-context).
+	cut                  map[Subject]bool
+	sourceFiles          []string
+	sourceFilesBySubject map[Subject][]string
 	// fileDigests carries a construction-time content digest per source
 	// identity, so a later validation failure can name the moved file
 	// (REQ-fresh-producer-view's naming arm). Best-effort attribution:
@@ -386,10 +407,13 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if viewTestHooks.factScope != nil {
 		viewTestHooks.factScope(scope.Facts())
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, scope, e.buildFlags, packages...)
+	scan, _, cut, err := scanViewSubjects(ctx, hasher, scope, e.buildFlags, e.analysisBudget, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
+	// One diagnostic per pass the budget cut, never one per subject —
+	// the discharge's twin of the proof pass's report (REQ-fresh-progress).
+	reportBudgetCut(e.progress, e.analysisBudget, len(cut), "undischarged")
 	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
 	// Subject existence is decided by the scan; refusing here, before
 	// the maximal fold reads and hashes every contributing file, is
@@ -413,6 +437,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return observationFacts{}, err
 	}
 	observation := observationFacts{
+		cut:                      cut,
 		snapshot:                 snapshot,
 		reader:                   reader,
 		maximal:                  make(map[Subject]closure.Closure, len(subjects)),
@@ -466,6 +491,13 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			maximal.Reason = closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())
 		}
 		if reason := scan.downgradeReason[subject]; reason != "" {
+			// A culprit the budget left unjudged names the budget: the
+			// reason is the record's, read long after the pass, and the
+			// culprit alone would read as the program's own refusal
+			// (REQ-fresh-context).
+			if cut[subject] {
+				reason += " (reachability unjudged: " + budgetExhausted(e.analysisBudget) + ")"
+			}
 			maximal.Unverifiable = true
 			maximal.Reason = closure.AttributeSelection(reason, hasher.SelectionAttribution())
 		}
@@ -1191,7 +1223,7 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := v.compareObservationContext(ctx, observation); err != nil {
+	if err := v.holdCutUnavailable(v.compareObservationContext(ctx, observation)); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -1288,7 +1320,33 @@ func (v *View) validateObserved(ctx context.Context) error {
 	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
 		return err
 	}
+	// The held cut-explained unavailability — the seeded view's
+	// re-observation or the closing pass — is reported last, after the
+	// closing runtime-input comparison, exactly as the proof's.
+	for _, held := range []*View{v, current} {
+		held.mu.RLock()
+		cut := held.cutUnavailable
+		held.mu.RUnlock()
+		if unavailable == nil && cut != nil {
+			unavailable = cut
+		}
+	}
 	return unavailable
+}
+
+// holdCutUnavailable keeps a comparison's cut-explained unavailability on
+// the view and reports nil for it, so the caller continues; every other
+// error is returned as is.
+func (v *View) holdCutUnavailable(err error) error {
+	if err == nil || !errors.Is(err, ErrAnalysisUnavailable) {
+		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cutUnavailable == nil {
+		v.cutUnavailable = err
+	}
+	return nil
 }
 
 // compareObservationProof re-establishes one captured observation disposition
@@ -1559,11 +1617,54 @@ func (v *View) reobserveBase(ctx context.Context) error {
 }
 
 func (v *View) compareBaseContext(ctx context.Context, current *View) error {
-	return v.compareFactsContext(ctx, current.facts.guards, current.facts.sourceFiles, current.facts.maximal, current.facts.purity, current.facts.sourceFilesBySubject, current.facts.fileDigests)
+	return v.compareFactsContext(ctx, current.facts.guards, current.facts.sourceFiles, current.facts.maximal, current.facts.purity, current.facts.sourceFilesBySubject, current.facts.fileDigests, current.facts.cut)
 }
 
 func (v *View) compareObservationContext(ctx context.Context, observation observationFacts) error {
-	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests)
+	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests, observation.cut)
+}
+
+// dischargeNeutral is the closure with the fields the dynamic-state
+// discharge shapes cleared when cut is set — the comparison form for a
+// subject a budget cut left unjudged in either compared observation.
+func dischargeNeutral(c closure.Closure, cut bool) closure.Closure {
+	if cut {
+		c.Unverifiable, c.Reason = false, ""
+	}
+	return c
+}
+
+// takeCut adopts the other observation's fail-closed shape for a subject
+// it cut: the undischarged downgrade and the absent discharges.
+func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
+	f.maximal[subject] = other.maximal[subject]
+	delete(f.attestationDischarges, subject)
+	delete(f.packageProcessDischarges, subject)
+	if f.cut == nil {
+		f.cut = map[Subject]bool{}
+	}
+	f.cut[subject] = true
+}
+
+// analysisBound derives the analysis context a precise-analysis phase
+// runs under: the operation's own when the budget is zero, a child with
+// the budget's deadline otherwise (REQ-fresh-context). The cancel is the
+// caller's to defer.
+func analysisBound(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	if budget <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, budget)
+}
+
+// reportBudgetCut reports one pass's cut — once, with the count of
+// subjects the budget left in the named state — on the progress sink;
+// a pass that cut nothing reports nothing (REQ-fresh-progress).
+func reportBudgetCut(progress func(Progress), budget time.Duration, cut int, state string) {
+	if cut == 0 || progress == nil {
+		return
+	}
+	progress(Progress{Phase: "budget-exhausted", Detail: budgetExhausted(budget) + ": " + countNoun(cut, "subject") + " " + state})
 }
 
 // compareFactsContext deliberately omits the vouch-discharge map: the
@@ -1573,7 +1674,7 @@ func (v *View) compareObservationContext(ctx context.Context, observation observ
 // a discharge delta cannot occur while every compared input holds
 // (construction's paired observations still compare discharges
 // directly, where no such immutability argument is available).
-func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string) error {
+func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
@@ -1595,6 +1696,7 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 		}
 		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(v.facts.sourceFiles, sourceFiles, v.facts.fileDigests, fileDigests))
 	}
+	var unjudged []Subject
 	for _, subject := range v.subjects {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1605,11 +1707,19 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 			}
 			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
 		}
-		if maximal[subject] != v.facts.maximal[subject] {
+		// A subject the budget cut in either observation compares with
+		// the discharge-shaped fields cleared; a difference those fields
+		// alone carry is the analysis's unavailability, reported after
+		// every other comparison held (REQ-fresh-context).
+		cutHere := cut[subject] || v.facts.cut[subject]
+		if dischargeNeutral(maximal[subject], cutHere) != dischargeNeutral(v.facts.maximal[subject], cutHere) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
+		}
+		if cutHere && maximal[subject] != v.facts.maximal[subject] {
+			unjudged = append(unjudged, subject)
 		}
 		if purity[subject] != v.facts.purity[subject] {
 			if err := ctx.Err(); err != nil {
@@ -1618,7 +1728,26 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 			return fmt.Errorf("%w: purity for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
 		}
 	}
+	if len(unjudged) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: the dynamic-state discharge for %s was cut by the analysis budget (%s)", ErrAnalysisUnavailable, countNoun(len(unjudged), "subject"), subjectNames(unjudged))
+	}
 	return ctx.Err()
+}
+
+// subjectNames spells subjects for a refusal, bounded at four.
+func subjectNames(subjects []Subject) string {
+	var names []string
+	for i, s := range subjects {
+		if i == 4 {
+			names = append(names, fmt.Sprintf("+%d more", len(subjects)-i))
+			break
+		}
+		names = append(names, s.Package+"."+s.Symbol)
+	}
+	return strings.Join(names, ", ")
 }
 
 // ensureObservable runs the drift-forced observability proof for subjects
@@ -1690,9 +1819,9 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	var analysisCtx context.Context
 	budget := v.engine.analysisBudget
 	if budget > 0 {
-		var cancelBudget context.CancelFunc
-		analysisCtx, cancelBudget = context.WithTimeout(ctx, budget)
+		bound, cancelBudget := analysisBound(ctx, budget)
 		defer cancelBudget()
+		analysisCtx = bound
 		if err := hasher.BoundAnalysis(analysisCtx); err != nil {
 			return err
 		}
@@ -1734,18 +1863,16 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 			}
 			maps.Copy(observableComputed, isolated)
 		}
-		if cut > 0 && v.engine.progress != nil {
-			// One diagnostic per pass the budget cut, never one per
-			// subject: the count is the fact, the per-subject reasons
-			// ride the records (REQ-fresh-progress).
-			v.engine.progress(Progress{Phase: "budget-exhausted", Detail: budgetExhausted(budget) + ": " + countNoun(cut, "subject") + " unproven"})
-		}
+		// One diagnostic per pass the budget cut, never one per
+		// subject: the count is the fact, the per-subject reasons
+		// ride the records (REQ-fresh-progress).
+		reportBudgetCut(v.engine.progress, budget, cut, "unproven")
 	}
 	after, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return err
 	}
-	if err := v.compareObservationContext(ctx, after); err != nil {
+	if err := v.holdCutUnavailable(v.compareObservationContext(ctx, after)); err != nil {
 		return err
 	}
 	v.mu.Lock()

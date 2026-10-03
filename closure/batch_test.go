@@ -299,7 +299,7 @@ func TestObservabilityBatchSplitsAttributedStateAtMaskWidth(t *testing.T) {
 	// The rooted inventories slice on the same width over the whole
 	// batch: a subject past the word would report a complete inventory
 	// with nothing in it, which discharges everything.
-	rooted, err := h.ComputeRootedFunctions(subjects)
+	rooted, err := h.ComputeRootedFunctions(h.ctx, subjects)
 	if err != nil {
 		t.Fatal(err)
 	}

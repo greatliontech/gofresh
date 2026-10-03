@@ -628,7 +628,14 @@ downgrade lifts for that subject
 alone — the next reachable culprit, if any, names the refusal instead.
 The reachability proof is the attributed RTA the observability proof
 rides, at least as wide as that tier's dispatch and reflection
-widenings, and the discharge is fail-closed on every gap: an
+widenings, and precise analysis under the caller's analysis budget
+exactly as that proof is (REQ-fresh-context in
+[overview.md](overview.md)): a pass the budget cuts leaves every
+culprit of the pass standing — undischarged, the judgment whole, never
+validity, its reason naming the budget — reports the exhaustion once
+with the count of subjects left undischarged, and persists nothing of
+the cut package's derivation (a later pass derives it cold); and the
+discharge is fail-closed on every gap: an
 open-world widening or an unrooted subject symbol grants nothing (no
 proof, no discharge — the judgment then stands whole), a mark without
 function attribution — an init-flow refusal's, a deferral

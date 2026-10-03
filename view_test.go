@@ -3,6 +3,7 @@ package gofresh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10560,4 +10561,293 @@ func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
 	if owned != "" && !strings.Contains(got[0], `selection "dup"`) {
 		t.Fatalf("owned rendering does not name the axis: %q", got[0])
 	}
+}
+
+// The analysis budget bounds the dynamic-state discharges' reachability
+// analysis exactly as it bounds the observability proof: a pass the
+// budget cuts leaves the culprit STANDING — the subject keeps its
+// refusal, nothing is discharged, never validity — reports the
+// exhaustion once with the count of subjects left undischarged, and
+// persists no scan facts, so the next unbounded pass derives cold and
+// discharges; a cut in one pass of a comparing pair is the pass's fact,
+// never drift (REQ-fresh-context,
+// REQ-closure-shared-dynamic-state-reachability).
+func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds module fixtures and runs the engine over them")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	capture := func(t *testing.T, dir string, subject Subject, opts ...Option) (Fingerprint, Verdict, []string) {
+		t.Helper()
+		var mu sync.Mutex
+		var cuts []string
+		opts = append([]Option{WithDir(dir), WithProgress(func(p Progress) {
+			if p.Phase == "budget-exhausted" {
+				mu.Lock()
+				defer mu.Unlock()
+				cuts = append(cuts, p.Detail)
+			}
+		})}, opts...)
+		engine, err := New(opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return fingerprint, verdict, cuts
+	}
+	loads := 0
+	viewTestHooks.typedLoad = func() { loads++ }
+	defer func() { viewTestHooks.typedLoad = nil }()
+	t.Run("single-subject discharge", func(t *testing.T) {
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
+			"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+		})
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		fingerprint, verdict, cuts := capture(t, dir, subject, WithSingleSubjectExecution(), WithAnalysisBudget(time.Nanosecond))
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 1ns exhausted)") {
+			t.Fatalf("verdict under a cut budget = %+v, want the downgrade naming gen.memo AND the budget — a cut discharges nothing and the record says why", verdict)
+		}
+		if fingerprint.SingleSubjectDischarges != "" {
+			t.Fatalf("a cut pass recorded a discharge: %q", fingerprint.SingleSubjectDischarges)
+		}
+		// The pass judges every downgraded subject of the scanned
+		// package (F and Property both carry gen.memo), and the view's
+		// construction pair is two observation passes — one event
+		// each, never one per subject.
+		if want := []string{"analysis budget 1ns exhausted: 2 subjects undischarged", "analysis budget 1ns exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
+			t.Fatalf("budget-exhausted events = %q, want %q (once per pass, with the pass's count)", cuts, want)
+		}
+		// The cut persisted no scan facts: the unbounded pass pays its
+		// typed load and discharges; the pass after it is served.
+		loads = 0
+		fingerprint, verdict, cuts = capture(t, dir, subject, WithSingleSubjectExecution())
+		if verdict.Status != Valid || fingerprint.SingleSubjectDischarges != "example.com/view/gen.memo" || len(cuts) != 0 {
+			t.Fatalf("the unbounded pass after a cut = %+v / %q / %q, want the discharge", verdict, fingerprint.SingleSubjectDischarges, cuts)
+		}
+		if loads == 0 {
+			t.Fatal("the unbounded pass paid no typed load — the cut pass persisted its undischarged scan")
+		}
+		loads = 0
+		capture(t, dir, subject, WithSingleSubjectExecution())
+		if loads != 0 {
+			t.Fatalf("the pass after a complete derivation paid %d typed loads — the derivation did not persist", loads)
+		}
+	})
+	t.Run("an operation cancelled at the discharge is never a budget cut", func(t *testing.T) {
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
+			"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+		})
+		// A cache home of its own: the first arm persisted this
+		// content's discharged scan, which would serve the pass whole
+		// before any discharge ran.
+		t.Setenv("XDG_CACHE_HOME", t.TempDir())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		viewTestHooks.beforeDischarge = cancel
+		defer func() { viewTestHooks.beforeDischarge = nil }()
+		var mu sync.Mutex
+		var cuts []string
+		engine, err := New(WithDir(dir), WithSingleSubjectExecution(), WithAnalysisBudget(time.Minute), WithProgress(func(p Progress) {
+			if p.Phase == "budget-exhausted" {
+				mu.Lock()
+				defer mu.Unlock()
+				cuts = append(cuts, p.Detail)
+			}
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := engine.NewView(ctx, []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); !errors.Is(err, context.Canceled) {
+			t.Fatalf("a view construction cancelled at the discharge = %v, want the operation's cancellation", err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(cuts) != 0 {
+			t.Fatalf("the operation's cancellation was reported as a budget cut: %q", cuts)
+		}
+	})
+	// A cut in ONE pass of a comparing pair is the pass's fact, never the
+	// tree's: the construction pair builds the view when its first or
+	// its second pass alone is cut (taking the cut pass's fail-closed
+	// shape), and a validation whose re-observation alone is cut reports
+	// the analysis's unavailability, never drift. The hook sleeps the
+	// budget away on exactly one pass. A pass after a completed one is
+	// served by the scan memo before any discharge runs, so the cut pass
+	// is given a fresh cache home at its observation — the cache-loss
+	// shape, the one route to a cut re-observation of an unchanged tree.
+	const straddleBudget = 10 * time.Second
+	straddle := func(t *testing.T, cutPass int) (Fingerprint, Verdict, []string, *View, *Engine) {
+		t.Helper()
+		t.Setenv("XDG_CACHE_HOME", t.TempDir())
+		observations := 0
+		viewTestHooks.observe = func() {
+			observations++
+			if observations == cutPass && cutPass > 1 {
+				t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			}
+		}
+		t.Cleanup(func() { viewTestHooks.observe = nil })
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":     "module example.com/view\n\ngo 1.26\n",
+			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
+			"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+		})
+		// Keyed on the observation count, not on discharge calls: a
+		// memo-served pass runs no discharge.
+		viewTestHooks.beforeDischarge = func() {
+			if observations == cutPass {
+				time.Sleep(straddleBudget + time.Second)
+			}
+		}
+		t.Cleanup(func() { viewTestHooks.beforeDischarge = nil })
+		var mu sync.Mutex
+		var cuts []string
+		engine, err := New(WithDir(dir), WithSingleSubjectExecution(), WithAnalysisBudget(straddleBudget), WithProgress(func(p Progress) {
+			if p.Phase == "budget-exhausted" {
+				mu.Lock()
+				defer mu.Unlock()
+				cuts = append(cuts, p.Detail)
+			}
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatalf("a construction pair with pass %d cut refused: %v — a cut is the pass's fact, never the tree's", cutPass, err)
+		}
+		fingerprint, err := view.Capture(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return fingerprint, verdict, append([]string(nil), cuts...), view, engine
+	}
+	for _, cutPass := range []int{1, 2} {
+		t.Run(fmt.Sprintf("construction pair with pass %d cut builds fail-closed", cutPass), func(t *testing.T) {
+			fingerprint, verdict, cuts, _, _ := straddle(t, cutPass)
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") || fingerprint.SingleSubjectDischarges != "" {
+				t.Fatalf("pass %d cut: verdict %+v, discharges %q — want the cut pass's fail-closed shape naming the budget", cutPass, verdict, fingerprint.SingleSubjectDischarges)
+			}
+			if want := []string{"analysis budget 10s exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
+				t.Fatalf("pass %d cut: events %q, want %q (the cut pass alone reports)", cutPass, cuts, want)
+			}
+		})
+	}
+	t.Run("a capture after a cut construction keeps the fail-closed facts; its validation reports the cut last", func(t *testing.T) {
+		// Pass 1 cut, pass 2 served from nothing (the cut persisted no
+		// facts) and discharged: the view is fail-closed. The capture's
+		// closing pass is served discharged — a difference the cut alone
+		// explains — and the capture SUCCEEDS; the observed validation
+		// then reports that unavailability after every other check.
+		_, _, _, view, _ := straddle(t, 1)
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatalf("CaptureObserved after a cut construction = %v, want the capture to keep the view's fail-closed facts", err)
+		}
+		if verdict, err := view.Check(context.Background(), fingerprint, subject); err != nil || verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") {
+			t.Fatalf("the captured record's verdict = %+v (%v), want the cut's fail-closed refusal naming the budget", verdict, err)
+		}
+		// A stable attached observation: the observed validation runs
+		// every other check (all holding) and then reports the cut.
+		dir := view.moduleDir
+		if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("stable"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+			t.Fatal(err)
+		}
+		if err := view.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
+			t.Fatalf("validation after a cut construction = %v, want ErrAnalysisUnavailable (held, reported last)", err)
+		}
+	})
+	t.Run("a moved runtime input outranks a cut re-observation", func(t *testing.T) {
+		// Passes 1 and 2 build the view uncut, the capture's closing pass
+		// is observation 3; the attached observation's fixture moves; the
+		// validation's re-observation (observation 4) is cut. The moved
+		// input is drift and is reported — the cut's unavailability waits
+		// behind every other check.
+		_, _, _, view, _ := straddle(t, 4)
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := view.moduleDir
+		fixture := filepath.Join(dir, "fixture")
+		if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err = view.Validate(context.Background())
+		if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
+			t.Fatalf("validation with a moved input and a cut re-observation = %v, want the moved input reported as drift, the cut held behind it", err)
+		}
+	})
+	t.Run("a validation cut alone reports unavailability, never drift", func(t *testing.T) {
+		// Passes 1 and 2 build the view uncut (discharged); the third
+		// pass — the validation's re-observation — is cut.
+		_, _, _, view, _ := straddle(t, 3)
+		err := view.Validate(context.Background())
+		if !errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "example.com/view.F") {
+			t.Fatalf("validation under a cut re-observation = %v, want ErrAnalysisUnavailable naming the subject", err)
+		}
+	})
+	t.Run("package-process discharge", func(t *testing.T) {
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":          "module example.com/view\n\ngo 1.26\n",
+			"wire/wire.go":    "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
+			"app/app.go":      "package app\n\nimport \"example.com/view/wire\"\n\nfunc F() bool { return wire.Armed() }\n",
+			"app/app_test.go": "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n",
+		})
+		subject := Subject{Package: "example.com/view/app", Symbol: "F"}
+		fingerprint, verdict, cuts := capture(t, dir, subject, WithPackageProcessExecution(), WithAnalysisBudget(time.Nanosecond))
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") || fingerprint.PackageProcessDischarges != "" {
+			t.Fatalf("verdict under a cut budget = %+v / %q, want the downgrade naming wire.reg and no discharge", verdict, fingerprint.PackageProcessDischarges)
+		}
+		// F and TestF both carry wire.reg; two passes, one event each.
+		if want := []string{"analysis budget 1ns exhausted: 2 subjects undischarged", "analysis budget 1ns exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
+			t.Fatalf("budget-exhausted events = %q, want %q", cuts, want)
+		}
+		if _, verdict, _ := capture(t, dir, subject, WithPackageProcessExecution()); verdict.Status != Valid {
+			t.Fatalf("the unbounded pass after a cut = %+v, want the binary-scoped discharge", verdict)
+		}
+	})
 }

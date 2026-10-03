@@ -1423,8 +1423,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-reachability"
-  content_hash: "560e1c192f699393235155986c95069a6a5876bf66ca07bfd7ad53e4a7e4b7ad"
-  source_hash: "3c9fcb217db3937872e152c0484b3f95b743f005da01dafd1d4fd36ee8348f51"
+  content_hash: "4f96845281d9c4ea9ef4f2b8ada08c963597791c1e5a38b71494bfb6fa881731"
+  source_hash: "7099629acbc2e217ad402c7c7a9451a021cbd3167c607fbdaa0a165822a97e57"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCulpritDischargeRecordsTheSortedPrefix"
   role: BINDING_ROLE_TESTS
@@ -1579,4 +1579,44 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestViewObservationPassPerformsOneTypedLoad"
   role: BINDING_ROLE_TESTS
   shape_hash: "ee25413fc388cc4949ad81c50ccf948a0522c88d8189050db59655d253dd1a56"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-reachability"
+  content_hash: "4f96845281d9c4ea9ef4f2b8ada08c963597791c1e5a38b71494bfb6fa881731"
+  source_hash: "7099629acbc2e217ad402c7c7a9451a021cbd3167c607fbdaa0a165822a97e57"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAnalysisBudgetCutLeavesTheCulpritStanding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c29040d5f9834580ff2e504ecb5f68d3ef0c4208e3cb25f7de2738cb3e4a63dc"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-reachability"
+  content_hash: "4f96845281d9c4ea9ef4f2b8ada08c963597791c1e5a38b71494bfb6fa881731"
+  source_hash: "7099629acbc2e217ad402c7c7a9451a021cbd3167c607fbdaa0a165822a97e57"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRootedFunctionsUnderAnEndedContextMemoizeNoLoadFailure"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "be9936eaed5a3cf103899934b65b8246aa148ffc44419ac8e9a5a9e7a6ecf5c3"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-reachability"
+  content_hash: "4f96845281d9c4ea9ef4f2b8ada08c963597791c1e5a38b71494bfb6fa881731"
+  source_hash: "7099629acbc2e217ad402c7c7a9451a021cbd3167c607fbdaa0a165822a97e57"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRootedFunctionsReleaseEachGroupsProgram"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7db011bb6cce43243d8610c82438cbe8aff6805e0fdcee6a98a169293de59e51"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-reachability"
+  content_hash: "4f96845281d9c4ea9ef4f2b8ada08c963597791c1e5a38b71494bfb6fa881731"
+  source_hash: "7099629acbc2e217ad402c7c7a9451a021cbd3167c607fbdaa0a165822a97e57"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestBinaryRootedFunctionsReleaseThePackagesProgram"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7d2e7c9d0a43428920197d1ac131efd91232342f1d965d25364e3277cb4a85cc"
 }

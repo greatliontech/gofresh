@@ -3099,3 +3099,122 @@ func BenchmarkHashFiles(b *testing.B) {
 		}
 	}
 }
+
+// The rooted-flow inventory runs under the analysis context its caller
+// passes — the budget-bounded one — and a context that ends during the
+// pass ends it with the context's error while memoizing no load
+// failure: the next analysis under a live context loads again
+// (REQ-closure-shared-dynamic-state-reachability's budget sentence).
+func TestRootedFunctionsUnderAnEndedContextMemoizeNoLoadFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
+	h, err := newAt("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/observable"
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.ComputeRootedFunctions(ended, []Subject{{Package: pkg, Symbol: "TestReadFile"}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ComputeRootedFunctions under an ended context = %v, want context.Canceled", err)
+	}
+	// The pass's own check returns before any load; the load itself,
+	// reached under the ended context, fails and memoizes nothing.
+	if _, err := h.loadCachedContext(ended, pkg); err == nil {
+		t.Fatal("a program load under an ended context succeeded")
+	}
+	if _, memoized := h.progErrs[pkg]; memoized {
+		t.Fatal("the ended context's load failure was memoized — a later live analysis would inherit the cut")
+	}
+	// The reachability itself reads the caller's context, not the
+	// Hasher's: with the program already loaded (the load's own context
+	// reads would count too), a counting context sees the traversal's
+	// checks beyond the pass's own two and the trailing one, so a reach
+	// bound to the Hasher's context would leave the count at three.
+	if _, err := h.loadCached(pkg); err != nil {
+		t.Fatal(err)
+	}
+	counting := &countingContext{Context: h.ctx}
+	rooted, err := h.ComputeRootedFunctions(counting, []Subject{{Package: pkg, Symbol: "TestReadFile"}})
+	if err != nil {
+		t.Fatalf("the live analysis after a cut failed: %v", err)
+	}
+	if proof := rooted[Subject{Package: pkg, Symbol: "TestReadFile"}]; !proof.Complete {
+		t.Fatalf("the live analysis after a cut granted no inventory: %+v", proof)
+	}
+	if counting.calls <= 3 {
+		t.Fatalf("the reachability read the caller's context %d times — the pass's own checks alone; the traversal ran under another context", counting.calls)
+	}
+}
+
+// countingContext counts its Err reads; it never ends.
+type countingContext struct {
+	context.Context
+	calls int
+}
+
+func (c *countingContext) Err() error {
+	c.calls++
+	return c.Context.Err()
+}
+
+// The rooted-flow inventory releases each package group's whole-program
+// SSA at the end of that group — never across groups, so peak memory
+// does not grow with the pass's package count — and holds none when the
+// pass returns (REQ-closure-shared-dynamic-state-reachability).
+func TestRootedFunctionsReleaseEachGroupsProgram(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
+	h, err := newAt("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const first = "github.com/greatliontech/gofresh/closure/fixtures/observable"
+	const second = "github.com/greatliontech/gofresh/closure/fixtures/observableconcurrent"
+	var retainedAtSecondLoad int
+	h.OnProgress(func(phase, pkgPath string) {
+		if phase == "load" && pkgPath == second {
+			retainedAtSecondLoad = len(h.progs)
+		}
+	})
+	rooted, err := h.ComputeRootedFunctions(h.ctx, []Subject{{Package: first, Symbol: "TestReadFile"}, {Package: second, Symbol: "TestConcurrentFileRead"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rooted[Subject{Package: first, Symbol: "TestReadFile"}].Complete || !rooted[Subject{Package: second, Symbol: "TestConcurrentFileRead"}].Complete {
+		t.Fatalf("inventories incomplete: %+v", rooted)
+	}
+	if retainedAtSecondLoad != 0 {
+		t.Fatalf("the first group's program was still held when the second loaded (%d retained) — programs are released per group", retainedAtSecondLoad)
+	}
+	if len(h.progs) != 0 {
+		t.Fatalf("%d programs retained after the pass", len(h.progs))
+	}
+}
+
+// The binary inventory releases a package's program on every exit of
+// the package — the tombstoned-root exit included, where the inventory
+// is incomplete and no per-root pass ran to release it
+// (REQ-closure-shared-dynamic-state-reachability).
+func TestBinaryRootedFunctionsReleaseThePackagesProgram(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the engine over the fixture corpus")
+	}
+	h, err := newAt("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ambiguous = "github.com/greatliontech/gofresh/closure/fixtures/ambiguousroot"
+	inventories, err := h.ComputeBinaryRootedFunctions(h.ctx, []string{ambiguous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventories[ambiguous].Complete {
+		t.Fatalf("an ambiguous harness root granted an inventory: %+v", inventories[ambiguous])
+	}
+	if len(h.progs) != 0 {
+		t.Fatalf("%d programs retained after the incomplete exit", len(h.progs))
+	}
+}

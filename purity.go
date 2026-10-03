@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/gotool"
@@ -53,7 +54,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 	if err != nil {
 		return nil, err
 	}
-	scan, _, err := scanViewSubjects(ctx, hasher, closure.AnalysisScope{}, buildFlags, pkgPaths...)
+	scan, _, _, err := scanViewSubjects(ctx, hasher, closure.AnalysisScope{}, buildFlags, 0, pkgPaths...)
 	return scan, err
 }
 
@@ -63,8 +64,12 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // the dynamic-state derivation serves version-pinned facts from the memo, and
 // the subject walk reads that one load (REQ-fresh-coherent-view). The typed
 // load is installed on the hasher for the pass's sibling consumers. An empty
-// factScope disables fact persistence, never the derivation.
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, error) {
+// factScope disables fact persistence, never the derivation. budget bounds
+// the reachability discharges' precise analysis (zero: unbounded); a pass
+// the budget cuts leaves every culprit standing and persists no scan facts
+// of a package it cut — cut is the set of subjects it left undischarged
+// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	// The scope is the one source of the attestations and the vouches:
 	// what keys a memo is what the derivation applies.
 	factScope := scope.Facts()
@@ -101,14 +106,14 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		misses = append(misses, pkgPath)
 	}
 	if len(misses) == 0 {
-		return scanFromEntries(served), nil, nil
+		return scanFromEntries(served), nil, nil, nil
 	}
 	// Every listing, load, and derivation below reads the misses' graph
 	// alone; a served package's cone costs the pass nothing.
 	pkgPaths = misses
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	requested := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
@@ -123,7 +128,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	// pinned-fact path as before.
 	for _, node := range meta {
 		if node.Class == closure.PinnedPackage && node.ForTest != "" && requested[node.ForTest] && (node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test") {
-			return nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
+			return nil, nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
 		}
 	}
 	patterns := append([]string(nil), pkgPaths...)
@@ -150,24 +155,34 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	hasher.Unit("typecheck", "", 0, len(patterns))
 	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	hasher.UseViewLoad(load)
 	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, pkgPaths, vouches, singleSubject)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	scan, err := scanSubjectsFromLoaded(hasher.SelectionAudited(), load.Packages(), state, pkgPaths...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	// The discharges' reachability analysis is precise analysis under
+	// the caller's budget: bounded here alone — the listing, the typed
+	// load, the derivation, and the closure fold stay under the
+	// operation's own context (REQ-fresh-context).
+	analysisCtx, cancelBudget := analysisBound(ctx, budget)
+	defer cancelBudget()
+	var cut map[Subject]bool
+	if viewTestHooks.beforeDischarge != nil {
+		viewTestHooks.beforeDischarge()
 	}
 	if singleSubject {
 		// The attestation-gated reachability scoping: per downgraded
 		// subject, a culprit whose every marking site is provably
 		// outside the subject's rooted flow discharges — no proof, no
 		// discharge (REQ-closure-shared-dynamic-state).
-		if err := dischargeUnreachableCulprits(hasher, state, scan); err != nil {
-			return nil, nil, err
+		if cut, err = dischargeUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
+			return nil, nil, nil, err
 		}
 	} else if packageProcess {
 		// The package-process attestation's binary-scoped reachability
@@ -177,19 +192,26 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		// post-init flow can reach is init-determined for every subject
 		// of the binary — no proof, no discharge
 		// (REQ-closure-shared-dynamic-state).
-		if err := dischargeBinaryUnreachableCulprits(hasher, state, scan); err != nil {
-			return nil, nil, err
+		if cut, err = dischargeBinaryUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 	// Persist each missed package's outputs now that the discharges have
-	// finished shaping them, then fold the served packages' in.
+	// finished shaping them, then fold the served packages' in. A package
+	// the budget cut persists nothing: its undischarged shape is the
+	// budget's, not the program's, and the next pass derives it cold;
+	// the other missed packages' facts are the program's and persist.
+	cutPackages := map[string]bool{}
+	for subject := range cut {
+		cutPackages[subject.Package] = true
+	}
 	for _, pkgPath := range pkgPaths {
-		if key := keys[pkgPath]; key != "" {
+		if key := keys[pkgPath]; key != "" && !cutPackages[pkgPath] {
 			closure.StoreScanFacts(scanScope, key, entryOf(scan, pkgPath))
 		}
 	}
 	mergeEntries(scan, served)
-	return scan, load, nil
+	return scan, load, cut, nil
 }
 
 // scanEntryVersion versions the persisted scan entry's shape; a shape

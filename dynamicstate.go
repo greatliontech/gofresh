@@ -724,7 +724,7 @@ type viewDynamicState struct {
 // and the audited channels (pooling, mapping, memoization, the
 // variable directive, vouches) already discharged at composition, so
 // nothing here can weaken them (REQ-closure-shared-dynamic-state).
-func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) error {
+func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
 	var downgraded []Subject
 	for subject := range scan.known {
 		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
@@ -732,15 +732,15 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 		}
 	}
 	if len(downgraded) == 0 {
-		return nil
+		return nil, nil
 	}
 	requests := make([]closure.Subject, len(downgraded))
 	for i, subject := range downgraded {
 		requests[i] = closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 	}
-	rooted, err := hasher.ComputeRootedFunctions(requests)
+	rooted, err := hasher.ComputeRootedFunctions(analysisCtx, requests)
 	if err != nil {
-		return err
+		return dischargeCut(ctx, analysisCtx, downgraded, err)
 	}
 	for i, subject := range downgraded {
 		proof := rooted[requests[i]]
@@ -767,7 +767,33 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 			scan.attestationDischarges[subject] = joinDischargedKeys(dischargedKeys)
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// dischargeCut classifies a reachability analysis's failure: the
+// operation's own cancellation propagates as the operation's (typed as
+// the context's error, exactly as the proof pass's); a pass the
+// analysis budget cut leaves every downgraded subject standing —
+// undischarged, the judgment whole — and reports that set
+// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability);
+// any other analysis failure is the operation's error, as before. The
+// classification reads the two contexts, not the error's text: a load
+// failure never wraps the context that ended it, so an analysis
+// failure that returns in the instant the budget's deadline passes is
+// read as the cut — fail-closed and reported as the budget's, the
+// program's own fault then surfacing on the next unbounded pass.
+func dischargeCut(ctx, analysisCtx context.Context, downgraded []Subject, err error) (map[Subject]bool, error) {
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("gofresh: dynamic-state discharge cancelled: %w", ctx.Err())
+	}
+	if analysisCtx.Err() != nil {
+		cut := make(map[Subject]bool, len(downgraded))
+		for _, subject := range downgraded {
+			cut[subject] = true
+		}
+		return cut, nil
+	}
+	return nil, err
 }
 
 // dischargeBinaryUnreachableCulprits applies the BINARY-scoped
@@ -789,24 +815,26 @@ func dischargeUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicStat
 // record, exactly as the content-proven pooling discharge does; the
 // audited channels already discharged at composition and nothing here
 // can weaken them (REQ-closure-shared-dynamic-state).
-func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) error {
+func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
 	packageSubjects := map[string][]Subject{}
+	var downgraded []Subject
 	for subject := range scan.known {
 		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
 			packageSubjects[subject.Package] = append(packageSubjects[subject.Package], subject)
+			downgraded = append(downgraded, subject)
 		}
 	}
 	if len(packageSubjects) == 0 {
-		return nil
+		return nil, nil
 	}
 	paths := make([]string, 0, len(packageSubjects))
 	for path := range packageSubjects {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	inventories, err := hasher.ComputeBinaryRootedFunctions(paths)
+	inventories, err := hasher.ComputeBinaryRootedFunctions(analysisCtx, paths)
 	if err != nil {
-		return err
+		return dischargeCut(ctx, analysisCtx, downgraded, err)
 	}
 	for _, path := range paths {
 		proof := inventories[path]
@@ -829,7 +857,7 @@ func dischargeBinaryUnreachableCulprits(hasher *closure.Hasher, state *viewDynam
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // dischargeCulprits walks one package's root culprits against a

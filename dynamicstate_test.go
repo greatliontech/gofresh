@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"go/types"
 	"os"
 	"os/exec"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
@@ -92,7 +95,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	for v := range vouches {
 		analysis.Vouches = append(analysis.Vouches, v)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, pkgPaths...)
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, 0, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,7 +1002,7 @@ func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/acct/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/acct/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1027,7 +1030,7 @@ func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/hooks/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/hooks/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1062,7 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/aliased/reg", "example.com/aliased/dyn")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/aliased/reg", "example.com/aliased/dyn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1092,7 +1095,7 @@ func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/wrapped/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/wrapped/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1120,7 +1123,7 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/params/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/params/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,7 +1156,7 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/beside/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/beside/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1182,7 +1185,7 @@ func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, "example.com/homebrew/reg")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, closure.AnalysisScope{}, nil, 0, "example.com/homebrew/reg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1241,7 +1244,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), nil, "example.com/dirhost")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), nil, 0, "example.com/dirhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2239,5 +2242,31 @@ func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
 	}
 	if e.depResolved("example.com/dep\x00Make") {
 		t.Fatal("misfiled key discharges a return-proof dependency")
+	}
+}
+
+// dischargeCut classifies a reachability analysis's failure by the two
+// contexts: an operation cancelled during the analysis propagates its
+// own cancellation TYPED as the context's — even when the budget's
+// deadline had already fired and the analysis error wraps it — a budget
+// cut returns the downgraded set, and any other failure is the
+// operation's error (REQ-fresh-context).
+func TestDischargeCutClassifiesByTheTwoContexts(t *testing.T) {
+	downgraded := []Subject{{Package: "example.com/p", Symbol: "F"}}
+	expired, cancelExpired := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancelExpired()
+	<-expired.Done()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	analysisErr := fmt.Errorf("closure: analysis cancelled: %w", context.DeadlineExceeded)
+	if cut, err := dischargeCut(cancelled, expired, downgraded, analysisErr); cut != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("operation cancelled after the budget fired: cut=%v err=%v, want the operation's cancellation typed Canceled", cut, err)
+	}
+	if cut, err := dischargeCut(context.Background(), expired, downgraded, analysisErr); err != nil || !cut[downgraded[0]] || len(cut) != 1 {
+		t.Fatalf("budget cut: cut=%v err=%v, want the downgraded set", cut, err)
+	}
+	other := errors.New("closure: load failed")
+	if cut, err := dischargeCut(context.Background(), context.Background(), downgraded, other); cut != nil || err != other {
+		t.Fatalf("other failure: cut=%v err=%v, want the error itself", cut, err)
 	}
 }

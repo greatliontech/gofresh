@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"context"
 	"fmt"
 	"go/token"
 	"go/types"
@@ -29,8 +30,17 @@ func parameterizedBody(fn *ssa.Function) bool {
 // loadCached loads (once) and returns the whole-program SSA for pkgPath. Load
 // failures are memoized for the Hasher's lifetime alongside successes: one
 // analysis observes one load outcome per package, so retrying subjects of a
-// failing package never repeats its failing load.
+// failing package never repeats its failing load. The load runs under the
+// Hasher's analysis context; loadCachedContext takes a narrower one.
 func (h *Hasher) loadCached(pkgPath string) (*program, error) {
+	return h.loadCachedContext(h.ctx, pkgPath)
+}
+
+// loadCachedContext is loadCached under ctx, which must descend from the
+// Hasher's analysis context — the dynamic-state discharge's budget-bounded
+// pass. A load the context ends is never memoized as a failure: the next
+// analysis under a live context loads again.
+func (h *Hasher) loadCachedContext(ctx context.Context, pkgPath string) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
@@ -38,9 +48,9 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 		return nil, err
 	}
 	h.emitProgress("load", pkgPath)
-	p, err := prog.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+	p, err := prog.Load(ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 	if err != nil {
-		if h.ctx.Err() == nil {
+		if ctx.Err() == nil {
 			h.progErrs[pkgPath] = err
 		}
 		return nil, err

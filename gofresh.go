@@ -624,6 +624,11 @@ var viewTestHooks struct {
 	// start, after its Hasher exists — tests cancel there to pin the
 	// kept-on-cancel report.
 	beforeAnalysis func()
+	// beforeDischarge observes the point the dynamic-state discharges'
+	// reachability analysis is about to start — tests cancel there to
+	// pin that an operation's cancellation is never read as a budget
+	// cut.
+	beforeDischarge func()
 	// scanMemoOff disables the view scan memo (REQ-closure-scan-memo) so
 	// derivation tests that poison the in-process fact cache between two
 	// scans — a seam with no production analogue, since a pinned fact
@@ -786,11 +791,16 @@ func DiagnosticsTo(w io.Writer) func(Progress) {
 
 // WithAnalysisBudget bounds each precise-analysis phase — observability
 // proving, whether selected at capture or re-established at
-// validation — to d of wall clock. A
+// validation, and the dynamic-state discharges' reachability analysis
+// in every observation pass — to d of wall clock. A
 // batched operation's shared analysis draws on one budget; each operation
 // derives a fresh one. An exhausted budget yields unavailable evidence for the
 // affected subjects — captures record the unavailable proof, validation
-// reports ErrAnalysisUnavailable — and it never cancels
+// reports ErrAnalysisUnavailable — or leaves a culprit the discharge
+// could not judge standing (the subject keeps its refusal, its reason
+// naming the budget; the pass persists no scan facts of that package;
+// a difference between two observations that the cut alone explains
+// is the analysis's unavailability, never drift), and it never cancels
 // the operation itself, which remains governed solely by the caller's context
 // (REQ-fresh-context). Zero means unbounded.
 func WithAnalysisBudget(d time.Duration) Option {
