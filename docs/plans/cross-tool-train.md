@@ -2736,10 +2736,13 @@ in their repos.
       WithAnalysisBudget's doc name the tier; the rooted inventories'
       memo is 202's. A release, directly after 304; gomutant reads it
       at its next bump.
-- [ ] 306. gomutant: an explicit oracle superset re-measures only the
+- [x] 306. gomutant: an explicit oracle superset re-measures only the
       open survivors against the added tests (gomutant
-      docs/issues/explicit-oracle-growth-serves-the-prior-record.md —
-      protodb's field report 2026-10-02; the serve claim refuted at
+      explicit-oracle-growth-serves-the-prior-record, resolved at 306;
+      `git log --all --
+      docs/issues/explicit-oracle-growth-serves-the-prior-record.md`,
+      gomutant — protodb's field report 2026-10-02; the serve claim
+      refuted at
       HEAD by the match gate and two pins: an explicit superset
       re-measures WHOLE today): with every pin holding and the
       request's explicit set a superset of the record's, kills stand
