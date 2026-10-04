@@ -214,7 +214,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 285 (2026-09-29): 281 (the release cluster's largest: the fifth reader, one sample, the zero-runner default, the salvage pin, the roots probe, the non-go containment and the series parse gomutant/pew/stipulator read), 292 (a release), 297 (the dst walk — a release stipulator 290 reads), 300 (the guidance lint — a release before 290/291), then the bumps 290/291, then 202 (design, autonomous), 191 (a release), 295 (a release), 240, 241, 260, 203, 204, 206, 192, 193, 255, 242 and 243 together, 175, 102; 199 dissolved; gomutant's order after audit 286 (2026-09-29): 283 (heads it, carrying its triage folds: the REQ-exec-go-command-runner sentence and gap, the INV pointer, the register chore) → 301 (writer-side fixture isolation) → 284 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 187 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 210 dissolved (done at 246/278); stipulator's order after audit 287 (2026-09-29): 299 → 293 → 298 (soundness first, before the bump) → 290 (the bump, when gofresh 281/292/297/300 have released) → 270 (moved up: it gates 176 and 238 and bounds 293) → 226 → 249 → 185 → 225 and 248 together → 228 → 184 → 176 → 238 (behind 270, not 226); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → pew 291 (bump) → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → gofresh 305 (release) → gomutant 306 → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 285 (2026-09-29): 281 (the release cluster's largest: the fifth reader, one sample, the zero-runner default, the salvage pin, the roots probe, the non-go containment and the series parse gomutant/pew/stipulator read), 292 (a release), 297 (the dst walk — a release stipulator 290 reads), 300 (the guidance lint — a release before 290/291), then the bumps 290/291, then 202 (design, autonomous), 191 (a release), 295 (a release), 240, 241, 260, 203, 204, 206, 192, 193, 255, 242 and 243 together, 175, 102; 199 dissolved; gomutant's order after audit 286 (2026-09-29): 283 (heads it, carrying its triage folds: the REQ-exec-go-command-runner sentence and gap, the INV pointer, the register chore) → 301 (writer-side fixture isolation) → 284 → 308 (the resident set released, directly after stipulator 307) → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 187 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 210 dissolved (done at 246/278); stipulator's order after audit 287 (2026-09-29), 307 heading it since the 2026-10-04 replan (the pass's resident set — a run the host kills writes no verdict; the user's ask): 307 → 299 → 293 → 298 (soundness first, before the bump) → 290 (the bump, when gofresh 281/292/297/300 have released) → 270 (moved up: it gates 176 and 238 and bounds 293) → 226 → 249 → 185 → 225 and 248 together → 228 → 184 → 176 → 238 (behind 270, not 226); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → pew 291 (bump) → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → gofresh 305 (release) → gomutant 306 → stipulator 307 → gomutant 308 → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -2603,6 +2603,13 @@ in their repos.
       structural (the class carries its explain kind);
       seeding-walk-unreached-routes folds here (its trigger fired at
       272.F's staticCallees).
+      Rider (2026-10-04): testing/quick.Check recognized as a direct
+      property driver (stipulator docs/issues/
+      testing-quick-property-driver.md — Weaver's field report; the
+      derivation at open: Check and CheckEqual, the callback's
+      quantification, Config.Rand against the time seed — the
+      runtime-seeded freshness class every other driver carries; an
+      unsupported driver named in the diagnostic).
 - [ ] 299. stipulator: a policy toolchain pin the environment does not
       satisfy refuses at load (the stipulator field report
       toolchain-pin-unhonored-runs-silently — tugboat, 2026-09-29: the
@@ -2754,6 +2761,66 @@ in their repos.
       REQ-result-stale's "a grown set serves only when … both
       non-explicit" sentence amended (its reason is scoping, not
       soundness). Directly after 304 and 305 in the lane.
+- [ ] 307. stipulator: the pass's resident set bounded and stated
+      (stipulator docs/issues/resolver-child-resident-set.md — two
+      cerebro field reports, 2026-09-22 and 2026-10-04: the resolver
+      child at 3.2–4.7 GB RSS before any test executed and alive through
+      execution; the parent `check` at 6.9 GB during execution beside
+      111 `go test -json` children; the host at zero available memory,
+      runs killed by its guard with no verdict written). Mapped
+      2026-10-04: the child loads `./...` per workspace member per
+      build selection (Tests: true; NeedSyntax, NeedTypes,
+      NeedTypesInfo) into Backend.pkgs/byPath/typesPkg and the seeding
+      walk's declIndex (on-demand loads kept by their ASTs), released
+      never; first spawned at discovery (NeverServe + typed per witness)
+      and closed at check.Run's and verifyrun's return — after
+      execution — because verify.Run resolves every bound symbol after
+      execution and Served.Close publishes then (classify, NeverServe,
+      the closing capture of the straddle check); the parent holds per
+      capture group witnessGroup{engine, view, observed, fps} and the
+      execMerge's rows, diagnostics and ProcessObservation.Runtime
+      manifests for the run, the per-package output capped at 64 KiB
+      per in-flight test; the only memory controls are two
+      debug.FreeOSMemory calls; the spawn bound is GOMAXPROCS/2 with no
+      memory term. Change sets: (A) the measure — a per-phase
+      resident-set line on the progress channel (the parent's and the
+      child's VmRSS/VmHWM at every phase transition and in the summary;
+      the never-silent rule) and a reproduction over gofresh's own
+      corpus; (B) the child's life ends before execution — every
+      question the pass asks (verify.Run's per-binding resolve, class
+      and package) asked at discovery, the publish with its straddle
+      capture run before PHASE_EXECUTION, the child closed there; its
+      load scoped to the unserved symbols' packages per selection
+      (childPatterns' `./...` arm and the NotFound widening
+      re-derived), each selection's load released once its answers are
+      memoized, the seeding walk's on-demand ASTs released after the
+      walk (answers memoized by declKey); (C) the tool's own processes
+      under a ceiling derived from the host (MemTotal's share, the
+      oracle ceiling's derivation) through debug.SetMemoryLimit on the
+      parent and the child — never GOMEMLIMIT on a witness child: it is
+      a runtime-config guard key (gofresh guard.go's
+      runtimeConfigEnvKeys) and would re-key every recording — the spawn
+      bound gaining a memory term (a per-package estimate from the
+      invocation's own completed packages, the first package alone
+      until one completes) and a pass the host cannot hold refusing
+      stated instead of dying under its guard; (D) the parent's
+      run-long accumulations bounded or streamed (the execMerge's rows
+      and diagnostics, a manifest held only until its ingest). Heads
+      stipulator's order and the lane (the user's ask 2026-10-04); the
+      issue deletes at close.
+- [ ] 308. gomutant: the server's and the pass's resident set released
+      (gomutant docs/issues/mcp-server-retains-the-pass-resident-set.md
+      — cerebro, 2026-09-22: an idle `gomutant mcp` at 2.29 GB RSS,
+      23.7 h up, nothing in flight; the 233 rider promoted to its own
+      chunk at the 2026-10-04 replan, the host baseline that leaves
+      stipulator's spike no room): the pass's programs and memo
+      released at the end of every request (the persistent memo layer
+      serves shared folds across passes), the heap returned to the host
+      at request end (debug.FreeOSMemory), the server's own process
+      under the oracle ceiling's derivation (debug.SetMemoryLimit),
+      and the run's per-phase resident-set line on both faces in 307's
+      words; acceptance a measured before/after — VmRSS at idle after a
+      run-class request. Directly after stipulator 307 in the lane.
 
 
 
