@@ -64,16 +64,15 @@ register.
   whole union before the first target commits (the prove phase;
   observed-union-memory-slicing's trigger, 277), to become per group
   (prove the group's union, commit its targets, the next group).
-  stipulator's vertical is the witness group under its invocation —
-  persisted at its last covering invocation (223.B1) — with its
-  discovery the deviation: the whole corpus resolved typed in one child
-  and every unserved subject captured under every selection before any
-  execution, the resolution records published only at close; the
-  resolver child's whole-closure resident set IS that deviation, and
-  307.B restages discovery per vertical (resolve, capture, decide,
-  execute, revalidate, install, publish the group's records, release
-  the group's loads; the isolation re-runs' placement checked at its
-  open). pew's vertical is the arm (157.2a's preparation, 157.3's
+  stipulator's vertical is the PACKAGE under its covering invocation — a
+  witness group is the invocation's build coordinate and spans every
+  package the invocation runs, so the group was the deviation (a check
+  cancelled at 1h51m "kept nothing"); 307.B2a lands the package unit on
+  the selective form (its executed records publish at its completion,
+  its isolation re-runs inside its unit, its served records revalidated
+  after every execution), 307.B2b on the health-judged form — with the
+  resolver child's whole-corpus discovery the remaining deviation (307.B's
+  last step). pew's vertical is the arm (157.2a's preparation, 157.3's
   per-arm persistence and gates) — conforms. gofresh is the library:
   the view a consumer builds is the vertical, every pass is per view
   and bounded by the analysis budget (305); its conformance is its
