@@ -50,7 +50,35 @@ register.
   after measurement is a defect, filed like any other. The loop then
   runs per unit: check freshness (serve what is proven), measure only
   what is not, persist before the next unit starts, repeat — so an
-  interruption loses one unit, never a run. The same rule governs
+  interruption loses one unit, never a run. The unit is a coherent
+  VERTICAL — one slice carried from freshness through measurement to
+  persisted evidence before the next slice is touched — and the whole
+  of an operation (every symbol resolved, every subject captured,
+  every proof proven) is never computed up front when the slice can
+  carry its own share; "committed evidence first" is the test of
+  conformance. Per tool (restated by the user 2026-10-04, recorded so
+  it is never re-derived): gomutant's vertical is the target within
+  its window — preparation fail-early, freshness per record, the
+  window committed and banked per batch (207.2b, 304) — with ONE known
+  deviation: the derived oracle's observation-proof pass runs over the
+  whole union before the first target commits (the prove phase;
+  observed-union-memory-slicing's trigger, 277), to become per group
+  (prove the group's union, commit its targets, the next group).
+  stipulator's vertical is the witness group under its invocation —
+  persisted at its last covering invocation (223.B1) — with its
+  discovery the deviation: the whole corpus resolved typed in one child
+  and every unserved subject captured under every selection before any
+  execution, the resolution records published only at close; the
+  resolver child's whole-closure resident set IS that deviation, and
+  307.B restages discovery per vertical (resolve, capture, decide,
+  execute, revalidate, install, publish the group's records, release
+  the group's loads; the isolation re-runs' placement checked at its
+  open). pew's vertical is the arm (157.2a's preparation, 157.3's
+  per-arm persistence and gates) — conforms. gofresh is the library:
+  the view a consumer builds is the vertical, every pass is per view
+  and bounded by the analysis budget (305); its conformance is its
+  consumers' slicing. The principle holds across the board; what is per
+  tool is only the vertical's unit. The same rule governs
   this train's own gates: a long measurement runs once, over the
   settled tree, after the loop converges; a measurement started
   before its inputs settle is wasted work, not diligence. A
