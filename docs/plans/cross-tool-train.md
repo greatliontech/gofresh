@@ -2913,7 +2913,7 @@ in their repos.
       listed-or-refused rule amended; 303's selection axis re-derives on
       the content key (its rider). Heads gofresh's order; directly after
       gomutant 308 in the lane; consumers read it at their bumps.
-- [ ] 311. gomutant: the observation-proof pass per group — the vertical
+- [x] 311. gomutant: the observation-proof pass per group — the vertical
       (the user's ruling 2026-10-04: the unit loop's deviations are the
       source of most of the fleet's problems and take priority; gomutant
       docs/issues/observed-union-memory-slicing.md, its measured trigger
