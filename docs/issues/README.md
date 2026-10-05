@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [unbacked-single-subject-directive-unnamed](unbacked-single-subject-directive-unnamed.md) | under the package-process attestation a culprit whose declaration carries `//gofresh:single-subject` is still pointed at the single-subject attestation as its remedy; the reason should name the directive as present and unbacked | cross-tool train chunk 310 (filed from stipulator 309) |
 | [guidance-lint-zero-default-spelling](guidance-lint-zero-default-spelling.md) | the usage projection drops every `(default X)` form while the CLI lint refuses a spelled default only for a printed one — a derived default on a zero-registered flag vanishes from the served help unjudged | cross-tool train chunk 300 (audit 285: the guidance lint's gofresh half) |
 | [prints-default-one-home](prints-default-one-home.md) | the printed-default predicate the guidance CLI lint registers is a type switch copied into stipulator, gomutant, and pew; one fleet home over pflag's two strings | cross-tool train chunk 300 (audit 285: as a name-keyed table; the pflag-typed switch refused on the dependency boundary) |
 | [containment-windows-job-object](containment-windows-job-object.md) | gotool.Containment's Windows arm is a tree kill; gomutant's oracle keeps its own Job Object containment beside it | a Windows consumer's field report (derived 2026-09-29) |
