@@ -1004,7 +1004,7 @@ func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (
 	return pureKey, externalKey
 }
 
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject bool) (*viewDynamicState, error) {
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool) (*viewDynamicState, error) {
 	meta, err := hasher.GraphMetadata(viewPackages...)
 	if err != nil {
 		return nil, err
@@ -1193,7 +1193,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	for _, viewPackage := range viewPackages {
 		coneMeta, coneFacts := dynamicStateCone(meta, nodesByListing, factsByListing, viewPackage)
 		state.cones[viewPackage] = coneFacts
-		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject)
+		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
 		if reason := cone.downgraded[viewPackage]; reason != "" {
 			state.downgraded[viewPackage] = reason
 		}
@@ -1230,7 +1230,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 // for each exactly the judgment its solitary view yields, and a
 // package's outputs are a pure function of its own graph
 // (REQ-closure-shared-dynamic-state, REQ-closure-scan-memo).
-func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject bool) *viewDynamicState {
+func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) *viewDynamicState {
 	state := &viewDynamicState{facts: facts, downgraded: map[string]string{}}
 	viewPackages := []string{viewPackage}
 	// Compose: the demonstrated-mutation and escape unions across the
@@ -1851,7 +1851,15 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// pkgPath can differ on the persisted-fact channel's foreign keys),
 	// illustrating the flag spelling consumers that take flags share; a
 	// mutable-local variable names the restructure and the
-	// single-subject directive, the vouch boundary's exact inverse. The
+	// single-subject directive, the vouch boundary's exact inverse —
+	// under the package-process attestation, which the directive's
+	// discharge does not ride, the channel names the restructure as the
+	// one remedy left, the directive as present and unbacked where the
+	// declaration carries it and as single-subject-only where it does
+	// not: a consumer whose model forbids single-subject execution is
+	// never pointed at it, nor at a directive that would only move it
+	// to the unbacked text (an unattested consumer is still pointed at
+	// the directive and the attestation — its own half to give). The
 	// audit obligation follows the CARRIER, not the reported verb: the
 	// culprit list dedupes per variable with mutation and escape
 	// outranking the environment mark, so a function-value carrier can
@@ -1861,6 +1869,12 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// rank (REQ-vouch-discharge's whole-surface exemption).
 	dischargeChannel := func(pkgPath, key string) string {
 		if mutableLocalPkg[pkgPath] {
+			switch {
+			case packageProcess && directiveCovered[key]:
+				return " (its //gofresh:single-subject directive is backed by no single-subject attestation here; dischargeable by restructuring the state)"
+			case packageProcess:
+				return " (dischargeable by restructuring the state; the //gofresh:single-subject directive discharges only under the caller's single-subject attestation, which the package-process model does not give)"
+			}
 			return " (dischargeable by restructuring the state, or by the //gofresh:single-subject directive on the declaration under the caller's single-subject attestation)"
 		}
 		imp, bare := pkgPath, key

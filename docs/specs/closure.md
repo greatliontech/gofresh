@@ -1111,7 +1111,15 @@ variable names the caller-vouch channel by the variable's canonical identity
 with the vouch's full audit obligation (for a function-value carrier that
 obligation includes the registered values' environment-freedom, since the lift
 covers the environment-audit rank too); a mutable-local variable names the
-restructure and the single-subject directive with its attestation caveat. The
+restructure and the single-subject directive with its attestation caveat
+— per attestation: with none, the directive and the attestation (the
+caller's own half to give); under the single-subject attestation, the
+directive; under the package-process attestation, which the directive's
+discharge does not ride, the restructure alone as the remedy, the
+directive named as present and unbacked where the declaration carries it
+and as single-subject-only where it does not, so that consumer is never
+pointed at an attestation its model forbids nor at a directive that would
+only move it to the unbacked text. The
 reason may illustrate a consumer CLI spelling, but the channel and identity are
 the contract — consumers differ in how vouches are supplied.
 

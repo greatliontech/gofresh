@@ -9088,6 +9088,9 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	// The memo-served arm below reads this test's own cache home,
+	// never the user's store.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	// The arming call is rooted in the subject: the directive's
 	// remaining role after the reachability scoping is exactly
 	// rooted-but-subject-own state (an unrooted armer discharges by
@@ -9146,6 +9149,57 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 	}
 	if unattested.SingleSubjectDischarges != "" {
 		t.Fatalf("directive-only evidence recorded %q, want nothing", unattested.SingleSubjectDischarges)
+	}
+	// The directive-only reason still names the attestation: an
+	// unattested consumer's own half is exactly that.
+	if !strings.Contains(unattestedVerdict.Reason, "or by the //gofresh:single-subject directive on the declaration under the caller's single-subject attestation") {
+		t.Fatalf("directive-only reason = %q, want the two-leg channel", unattestedVerdict.Reason)
+	}
+	// The directive met under the package-process attestation, which
+	// does not back it, is named as present and unbacked, the
+	// restructure the one remedy left — never the single-subject
+	// attestation that model forbids
+	// (REQ-closure-shared-dynamic-state-reason).
+	fp, verdict := capture(t, directed, WithPackageProcessExecution())
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.frameAccounting is mutated") {
+		t.Fatalf("package-process directed verdict = %+v, want the downgrade", verdict)
+	}
+	if !strings.Contains(verdict.Reason, "//gofresh:single-subject directive is backed by no single-subject attestation here; dischargeable by restructuring the state") || strings.Contains(verdict.Reason, "under the caller's single-subject attestation") {
+		t.Fatalf("package-process directed reason = %q, want the directive named unbacked with the restructure alone", verdict.Reason)
+	}
+	if fp.SingleSubjectDischarges != "" || fp.PackageProcessDischarges != "" {
+		t.Fatalf("package-process directed evidence recorded %q/%q, want nothing", fp.SingleSubjectDischarges, fp.PackageProcessDischarges)
+	}
+	// An undirected variable under the package-process model is pointed
+	// at the restructure alone, the directive named as single-subject-
+	// only — never a remedy that would only move it to the unbacked
+	// text.
+	_, bareVerdict = capture(t, undirected, WithPackageProcessExecution())
+	if !strings.Contains(bareVerdict.Reason, "dischargeable by restructuring the state; the //gofresh:single-subject directive discharges only under the caller's single-subject attestation, which the package-process model does not give") || strings.Contains(bareVerdict.Reason, "or by the //gofresh:single-subject directive") {
+		t.Fatalf("package-process undirected reason = %q, want the restructure alone with the directive named single-subject-only", bareVerdict.Reason)
+	}
+	// Both attestations set: the single-subject judgment takes
+	// precedence and the directive discharges — no unbacked text is
+	// composed, the discharge is recorded.
+	bothFP, bothVerdict := capture(t, directed, WithSingleSubjectExecution(), WithPackageProcessExecution())
+	if bothVerdict.Status != Valid || bothFP.SingleSubjectDischarges != "example.com/view.frameAccounting" {
+		t.Fatalf("both attestations: verdict = %+v evidence = %q, want Valid with the single-subject discharge recorded", bothVerdict, bothFP.SingleSubjectDischarges)
+	}
+	// The text is scan output served from the memo: a second capture
+	// under the same cache home serves the scan entry — counted through
+	// the progress face — and carries the same text (the entry's
+	// version keys it).
+	servedScans := 0
+	_, served := capture(t, directed, WithPackageProcessExecution(), WithProgress(func(p Progress) {
+		if p.Phase == "served" && p.Served == "scan" {
+			servedScans += p.Index
+		}
+	}))
+	if servedScans == 0 {
+		t.Fatal("the second capture served no scan entry from the memo")
+	}
+	if served.Reason != verdict.Reason {
+		t.Fatalf("memo-served reason = %q, want the computed %q", served.Reason, verdict.Reason)
 	}
 }
 

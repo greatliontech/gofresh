@@ -158,7 +158,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		return nil, nil, nil, err
 	}
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, pkgPaths, vouches, singleSubject)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, pkgPaths, vouches, singleSubject, scope.PackageProcess)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -214,9 +214,11 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	return scan, load, cut, nil
 }
 
-// scanEntryVersion versions the persisted scan entry's shape; a shape
-// change recomputes rather than misreading an older entry.
-const scanEntryVersion = 2
+// scanEntryVersion versions the persisted scan entry — its shape and the
+// text of every field it persists (a downgrade reason is scan output, so
+// a change to its composition bumps the version); a bump recomputes
+// rather than serving an older entry's text or misreading its shape.
+const scanEntryVersion = 3
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {

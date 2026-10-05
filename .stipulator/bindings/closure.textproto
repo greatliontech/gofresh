@@ -353,8 +353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-reason"
-  content_hash: "7d26b0bc2a93de90bf4e3dd2705490bbb6c12d7df02ebfe2cabcc1d66902fc50"
-  source_hash: "5de895b21558e05a23e29d62dac6d96cc0147f69af17be1f70104a92ca18ddc6"
+  content_hash: "2821547345ce8c36d87a8cc6291d4c7cd6f0dd003b02687f0cefb03e20bf557d"
+  source_hash: "dfe6d03f741cc4e87baa6d77f6a9bd3bd65444eaf4b12643d7e29d618f360acc"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit"
   role: BINDING_ROLE_TESTS
