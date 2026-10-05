@@ -282,6 +282,35 @@ server's per-request operation — never a process, since a toolchain
 replaced under a living memo would be judged by its predecessor's
 sample.
 
+**REQ-fresh-resident-readings** (behavior): The fleet's one resident
+sampler (the `resident` package) MUST answer a process's resident set as
+the kernel states it — the process's own resident and peak resident
+bytes, and over its live descendants (every process whose parent chain
+reaches it, a zombie or dead one excluded) their count, their summed
+resident bytes, the largest single descendant's own peak, and each
+direct child's subtree attributed whole to that child — in one walk of
+the process table; beside it the host's memory (its total and what it
+has available for new allocations) and the soft ceiling a consumer
+derives from the host's reading and installs as its runtime's memory
+limit: half of what the host had available, floored at one gibibyte,
+never above the limit in force before the first derivation — an
+operator's, or one installed earlier — (that limit taken once per
+process, so a later derivation rises or falls with the host and is never
+judged against an earlier derivation of its own), and the limit in force
+rides every later sample. Where the host does not answer — a platform
+without the /proc form, an unlistable table, a descendant whose status
+exists but cannot be read — the reading is absent, never zero or
+partial: a consumer that gets no reading derives no memory term,
+installs no ceiling, and says so by carrying none. Not counted, voiding
+nothing: a descendant whose files vanish between the listing and the
+read (exited), one whose stat cannot be read or does not parse (hidden
+by the table, or leaving), and a live one whose status carries no memory
+line at all (its memory released on its way out) — a status carrying a
+memory line the sampler cannot read whole voids the reading like one it
+cannot read. Consumers compose their own policies over the readings (a
+spawn admission's memory term, a server's idle release, a progress
+line's words); the sampler states facts and installs the one ceiling.
+
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the
 current tree — two recordings that agree on every guard but differ in commit
