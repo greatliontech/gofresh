@@ -2863,8 +2863,8 @@ in their repos.
       and the run's per-phase resident-set line on both faces in 307's
       words; acceptance a measured before/after — VmRSS at idle after a
       run-class request. Directly after stipulator 307 in the lane.
-- [ ] 309. stipulator: the witness engine attests its execution model
-      (stipulator docs/issues/engine-call-attests-no-execution-model.md
+- [x] 309. stipulator: the witness engine attests its execution model
+      (stipulator `git log --all -- docs/issues/engine-call-attests-no-execution-model.md`
       — tugboat, 2026-09-29: every engine call attests neither
       WithSingleSubjectExecution nor WithPackageProcessExecution, so
       gofresh's two-leg own-code discharges never apply to a stipulator
