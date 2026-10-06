@@ -55,3 +55,10 @@ stays on while it passes — a pass is evidence of the tree and the
 toolchain alike; a red carrying only this report takes the same
 disposition. Reporting the race upstream is an external act the fleet's
 owner takes or declines; the sites above are the report's content.
+
+When the tier returns it runs sharded as gofresh's does (the gate's
+`race-shards` input): the partition judgment — every Test, Example
+and Fuzz function in exactly one shard — then moves to a home both
+callers read (the gate's own `go test -list` step over each shard's
+regex, or a fleet package) rather than a second copy of gofresh's
+raceshards_test.go.

@@ -43,10 +43,20 @@ concurrency:
 # 2026-08-28 at 36m for the whole closure unit width-capped at 2 on the
 # 24-core host; the race detector measures ~4x on the observability
 # proofs — CPU-bound and in-process, so core count IS a factor here).
-# On a 4-vCPU/16 GB runner the closure package alone is estimated at
-# 50–75 minutes plus a cold -race build of ~130 binaries; race-p 2
-# keeps two race binaries' heaps inside the runner's memory. The first
-# run of the race job was the measurement (2026-10-03: 54m26s).
+# race-p 2 keeps two race binaries' heaps inside the runner's memory.
+# The tier is sharded (race-shards): one race job per entry, its `-run`
+# regex applied to every package, and the regexes partition the
+# module's tests by name — raceshards_test.go pins every Test, Example
+# and Fuzz function in exactly one shard, so none runs twice or leaves
+# the tier. The classes balance the closure package's measured plain
+# durations (2026-10-06, alone on the dev host, 778s over 259 tests:
+# R 235s, of which one proof 223s; A–I less C 199s; C with J–N 175s;
+# the rest with the fuzz seeds 167s), so the slowest shard is that one
+# proof's ~4x under the detector plus its share of the other packages
+# and a restored race build. Unsharded, the job measured 54m26s
+# (2026-10-03) and 61m32s (2026-10-06) on the 4-vCPU runner; the first
+# sharded run is the shards' measurement. Every shard runs under the
+# whole race-timeout and race-job-minutes.
 
 jobs:
   gate:
@@ -61,5 +71,6 @@ jobs:
       race-p: 2
       race-timeout: 100m
       race-job-minutes: 150
+      race-shards: '[{"name":"r","run":"^TestR"},{"name":"abd-i","run":"^Test[ABD-I]"},{"name":"cj-n","run":"^Test[CJ-N]"},{"name":"o-z","run":"^Test[O-QS-Z0-9_]|^Example|^Fuzz"}]'
       records: true
       stipulator-version: v0.66.1
