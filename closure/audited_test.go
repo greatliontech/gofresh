@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1252,13 +1253,21 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 // audited sets claim properties of specific standard-library source;
 // this test is the release listing's enforcement pointer.
 func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
-	if !auditedToolchainSource() {
-		t.Fatalf("running toolchain %q (audit key %q) is not in auditedToolchainSelections: walk its standard-library delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family) and list the audit key in closure/toolchainaudit.go", runtime.Version(), toolchainKey(runtime.Version()))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, sel := range listedSelections {
+		h, err := newAtEnv(context.Background(), ".", environmentWith(sel.Env...), sel.Flags...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !h.SelectionAudited() {
+			moved, closest := movedKeys(h.source, auditedToolchainSources)
+			t.Fatalf("running toolchain %q under %v %v is not listed in auditedToolchainSources — %s. Walk the moved keys' delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family, the linkname floor) and list this row in closure/toolchainaudit.go:\n%s", runtime.Version(), sel.Env, sel.Flags, h.SelectionNotice(), h.source.rowLiteral(runtime.Version()+sel.Suffix, closest, moved))
+		}
 	}
 }
 
-// A false audit verdict — an unlisted release or an unaudited build
-// selection, computed once per analysis by AuditedToolchainSelection —
+// A false audit verdict — an unlisted surface or an unaudited build
+// selection, resolved once per analysis at the Hasher's construction —
 // keeps every toolchain-source admission's ordinary fail-closed
 // classification: the direction that makes an unaudited stdlib refuse
 // instead of silently inheriting a stale proof.

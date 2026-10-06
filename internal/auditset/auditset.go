@@ -179,6 +179,23 @@ var purePackages = map[string]bool{
 // set.
 func PurePackage(pkgPath string) bool { return purePackages[pkgPath] }
 
+// PurePackages lists the audited-pure standard package set, sorted —
+// the toolchain-source audit's key walks it.
+func PurePackages() []string {
+	keys := make([]string, 0, len(purePackages))
+	for k := range purePackages {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// ReceiverPackages lists the packages whose receiver tables this set
+// carries — sync's synchronization, pool and memo methods, reflect's
+// view surface, time's receiver-qualified names — sorted; the
+// toolchain-source audit's key walks it beside the symbol tables.
+func ReceiverPackages() []string { return []string{"reflect", "sync", "time"} }
+
 // timeSymbols is the audited surface of package time, matched by bare
 // name at every tier: fixed-argument construction and value
 // computation over Time, Duration, Month, and Weekday that reads

@@ -1589,70 +1589,103 @@ package set (encoding/base32 a member alongside base64, audited on the same
 terms: single-file value computation, io-interface-only wrappers, exported
 Encoding variables never mutated in-package), the class-B operations, the
 sync/pool/reflect symbols, the atomic transparency, the harness channels,
-and the writer-sink family — MUST be keyed to an exact-version list of audited
-toolchain releases, experiment and vendor flavors included (both select
-source): the audit is a property of specific standard-library source, no
-other release inherits a proof, and an unlisted release keeps every
-symbol's ordinary fail-closed classification — the direction that makes an
-unaudited standard library refuse loudly instead of silently inheriting a
-stale admission, exactly as the version-gated third-party harness audit and
-the version-pinned module-variable audits already behave. A toolchain move
-therefore fails as one named canary (the release-listing enforcement test)
-rather than a scatter of proof flips, and listing a release requires the
-release's standard-library delta walked against the admission bar; an
-unlisted release additionally announces itself once per engine on the
+the writer-sink family, and the linkname-target floor — MUST be keyed to the
+CONTENT the admissions were audited over: per audited surface package, a
+digest of the files the build selects for it under the analysis' effective
+selection, as found in the GOROOT in use; a listing is a row of digests
+labelled by the version it was listed over, and an admission answers true
+exactly when one row's chain lists every surface key's running digest. The
+audit is a property of
+specific standard-library source: no other source inherits a proof, and a
+toolchain whose surface carries a digest no chain lists keeps every symbol's
+ordinary fail-closed classification, refusing loudly and naming the keys
+that moved off the closest row (bounded, the rest counted) — the direction
+that makes an unaudited standard library refuse instead of silently
+inheriting a stale admission, exactly as the version-gated third-party
+harness audit and the version-pinned module audits already behave — while
+a rebuild of identical source admits by equality whatever its version
+string says: an experiment selecting no different file, a vendor flavor
+whose patches the selection does not select, a distro build, a point
+release off the audited surface. The surface is DERIVED, never hand-listed:
+the union of every admission table's standard packages (the linkname-target
+floor's runtime and syscall among them), the packages the go command links
+without any dependency naming them (the detectors' runtimes), and every
+standard package they reach through the listing's dependencies and imports,
+transitively, with no exclusion (the cgo bridge among them, wherever a
+dependency links it) — the implementation packages an
+audited body's behaviour rests on at any depth, and the runtime every
+admission compiles against, where a vendor fork's hooks live — so a table
+added without its package joining the key is unrepresentable, a runtime
+patch moves the key, and an over-wide surface only refuses more; a table
+package that is a version-pinned module's (its own audit keys it) is
+outside the toolchain's surface, and so is the toolchain's code generation
+by premise (the compiler's intrinsics and instrumentation passes, the
+linker: the admissions are judged over source semantics as the language
+specifies them, and a miscompiling toolchain invalidates every proof, not
+the admissions alone). Keys are judged per row chain: a root row lists the
+whole surface, a delta row the keys that differ from its base row's chain
+— a point release, a vendor build's hooks, another platform's split files,
+a build selection's seams (the files the race selection moves —
+internal/race's instrumentation, sync/atomic's assembly, the runtime's, its
+sys delegate's and runtime/race's race files — judged inert; one row per
+toolchain over its own chain, since the runtime's race file is each
+toolchain's own) — and no key of one chain admits beside another chain's: a
+tree mixing two listed releases' packages, one release's race runtime over
+the other's files included, is no listed toolchain; a listing whose labels
+collide, whose base names no row, or whose chains cycle is refused by the
+listing's own shape test. A
+toolchain move therefore fails as one named canary (the listing enforcement
+test, which prints the row to list over the moved keys with the closest row
+as its base) rather than a scatter of proof flips, and listing a row
+requires the moved keys' delta walked against the admission bar; an
+unlisted surface additionally announces itself once per engine on the
 progress channel's diagnostic face (a Detail-bearing event, delivered
-exactly when the consumer installs a progress callback and a run
-reaches precise analysis) — the running version and the walk needed —
-so a consuming run's log points at the listing instead of reading only
-the scattered ordinary refusals; a consumer that installs no callback
-forgoes the notice, and each engine's announcement is its own, never
-spent by another engine's run. The key binds every
-tier that answers a toolchain-source claim — the purity tier's audited synchronization,
-pooling, and immutable-type admissions and the audited linkname-target floor included —
-through one list, and the key is TWO-AXIS — release and build selection —
-over the analysis' EFFECTIVE selection, never the explicit flags alone: the
-go command merges GOFLAGS into every invocation, GOEXPERIMENT swaps
-build-tagged standard-library source, and GOOS/GOARCH select per-platform
-files, so the selection derives from the explicit build flags joined with
-the environment's resolved GOFLAGS, canonicalized to a sorted tag-set key
-(the declared `-tags` union the tags the sanitizer flags select, their
-explicit boolean value forms classified or refused — an unclassifiable flag
-set never admits), with the experiment axis fail-closed: an environment
-GOEXPERIMENT differing from the binary's baked one is a selection no walk
-covered and never admits. GOOS/GOARCH selection needs no axis — the delta
-walks read each audited package's non-test source whole, platform-split
-files included, so a platform selection of an audited package selects
-among walked files, and the memo scopes carry the platform through the
-build configuration. The release axis keys on the toolchain's reported identity under
-the one spelling the listing carries: a toolchain that reports its
-experiment set hyphenated (`go1.27.0-X:nodwarf5`, the VERSION-file form)
-is the same toolchain as the space-separated runtime form, and the key
-folds exactly that separator when an experiment set (GOEXPERIMENT's
-comma-separated names) follows it — never a release, a flavor, or an
-experiment name — so one audited toolchain is admitted under both its
-spellings and an unlisted one under neither, and a refusal names the key
-the listing would carry. An
-admission answers true only when the running release AND the effective
-selection are both listed. Each listing names the selections its walks
-cover — the default, and the race selection, whose walk found that no
-audited package has a non-test file constrained on a tag the -race
-selection sets (audited packages carry other build-constrained files;
-those ride the platform axes and unwalked tag keys, which refuse
-separately), so every audited package's selected non-test source is
-byte-identical under plain -race — and a selection whose tags swap audited
-bodies (a vendor fork's hook tag) is outside the key until its own delta
-is walked: it degrades every stdlib admission to the ordinary fail-closed
-classification, announced on the same diagnostic face as an unlisted
-release, never inheriting the default selection's audit. The verdict's
-rendering is additionally served to consumers as one owned notice — the
-missing axis named (release, experiment, classification-defeating flag,
-or canonical selection key) with the walk that would list it, where one
-exists (an unclassifiable flag set has no listing walk and is never
-admitted), and the notice empty exactly when the selection is admitted,
-so text and verdict can never disagree — and a consuming tool can
-attribute the degradation at the tier where the selection was authored
-(its own policy or configuration record) without re-deriving the key.
+exactly when the consumer installs a progress callback and a run reaches
+precise analysis) — the moved keys and the walk needed — so a consuming
+run's log points at the listing instead of reading only the scattered
+ordinary refusals; a consumer that installs no callback forgoes the notice,
+and each engine's announcement is its own, never spent by another engine's
+run. The key binds every tier that answers a toolchain-source claim — the
+purity tier's audited synchronization, pooling, and immutable-type
+admissions and the audited linkname-target floor included — through one
+listing, over the analysis' EFFECTIVE selection as the go command selects
+it: the standard library is listed in the analysis' own environment with
+its explicit build flags, so GOFLAGS merges and an explicit flag overrides
+exactly as the go command does, and the digests are taken over the files
+that listing selects — the platform, the cgo setting, the tags, the
+experiment and FIPS module sets each key the selection exactly as far as
+they select bytes, through the files, never as an axis of their own; a
+flag set the go command refuses lists nothing and is never admitted. A tag
+no surface file is constrained on and an experiment that swaps none yield
+the listed digests and admit by content; a selection that selects other
+bytes (a vendor fork's hook tag selecting its live hook bodies, a tag
+selecting a surface package's constrained files, another platform's split
+files, cgo off) refuses until its own row is listed, announced on the same
+diagnostic face as an unlisted toolchain, never inheriting another
+selection's audit; a platform's or cgo-off row is a delta over the host's
+default row listed from any host carrying the toolchain (every platform's
+files are in the one GOROOT: the audited packages' split files were read
+whole by the walks, and the deeper packages ride the toolchain judgment as
+they do under the default selection), and the listing hosts list a stated
+selection set — their own default, the race seams, cgo off, and the
+platforms the fleet analyzes for from another host. The listing is memoized
+per
+selection scope — the explicit flags and the pass snapshot's identity —
+and a record serves only while every listed directory — a package's and
+every subdirectory an embedded file lives in — still carries exactly the
+entries it was listed over, each with its recorded size, modification time
+and change time (a platform whose stat carries no change time never serves
+the memo): a tree moved under a scope re-lists, and the digests themselves
+are read from the files on every construction, never served. The recording
+skew identity (REQ-fresh-toolchain-skew) stays by version: a measurement's
+cache key, not an admission. The verdict's rendering is additionally served
+to consumers as one owned notice — the refusing axis named (the moved keys
+off the closest row, or a surface that could not be listed or read) with
+the walk that would list it, and the notice empty exactly when the
+selection is admitted, so text and verdict can never disagree — and a
+consuming tool can attribute the degradation at the tier where the
+selection was authored (its own policy or configuration record) without
+re-deriving the key.
 
 **REQ-closure-observability-harness-logging** (invariant): The audited set MUST carry the testing harness's
 failure/logging channel — exactly the testing-package symbols named `Fatal`,

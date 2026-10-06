@@ -347,8 +347,8 @@ const ClosureStrategy = closure.IdentityStrategy
 // named registrations included, not just init-parented closures) stays
 // out of an enumeration-closed subject's target set, on @24's own
 // soundness ground — keys every toolchain-source admission to the
-// audited-release list (closure/toolchainaudit.go: an unlisted release
-// keeps fail-closed classifications), and admits encoding/base32 into
+// toolchain-source listing (closure/toolchainaudit.go: an unlisted
+// surface keeps fail-closed classifications), and admits encoding/base32 into
 // the source-only audited set on base64's terms
 // (REQ-closure-observability-toolchain-key).
 // @28 admits math/big whole into the source-only audited set on its

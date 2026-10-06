@@ -1907,10 +1907,10 @@ func observationProofEvidence(maximalClosure, assertion string, proof Observatio
 
 // emitUnauditedToolchainNotice announces an unlisted toolchain ONCE
 // PER ENGINE on the diagnostic channel: one line of each consumer
-// run's output points at the missing axis - release, experiment,
-// classification-defeating flags, or unwalked selection - without
-// which the degradation surfaces only as a scatter of ordinary
-// fail-closed refusals, the exact discovery shape the exact-version
+// run's output points at the refusing axis - the surface keys that
+// moved off the closest listed row, or a surface that could not be
+// read - without which the degradation surfaces only as a scatter of
+// ordinary fail-closed refusals, the exact discovery shape the content
 // keying was built to prevent. Per-engine (not per-process) so a long-lived
 // server's every campaign log carries it; the once is the caller's,
 // so a consumer-less engine's emission is never spent into a void it

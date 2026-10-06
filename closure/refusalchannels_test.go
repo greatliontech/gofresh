@@ -68,14 +68,17 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 		}
 	}
 	subject := Subject{Package: "example.com/attributed", Symbol: "Read"}
-	axis := " (judged under an unaudited toolchain selection: selection \"dst\" under " + runtime.Version() + " is unwalked)"
+	// netgo selects net's netgo-constrained files — audited bytes no
+	// walk read — on every listed toolchain: the one unaudited selection
+	// every host reaches.
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + ": net)"
 	var cold Observability
 	for pass, want := range []int{1, 0} {
-		h, err := newAt(dir, "-tags=dst")
+		h, err := newAt(dir, "-tags=netgo")
 		if err != nil {
 			t.Fatal(err)
 		}
-		h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "dst"})
+		h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "netgo"})
 		loads := 0
 		h.OnProgress(func(phase, _ string) {
 			if phase == "load" || phase == "prove" {
@@ -91,7 +94,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 		}
 		proof := proofs[subject]
 		if proof.Observable || !strings.HasSuffix(proof.Reason, axis) || strings.Count(proof.Reason, "judged under") != 1 {
-			t.Fatalf("pass %d under dst: %+v, want the refusal with the axis appended once", pass, proof)
+			t.Fatalf("pass %d under netgo: %+v, want the refusal with the axis appended once", pass, proof)
 		}
 		if pass == 0 {
 			cold = proof

@@ -56,7 +56,9 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over fixtures")
 	}
-	axis := " (judged under an unaudited toolchain selection: selection \"dst\" under " + runtime.Version() + " is unwalked)"
+	// netgo selects net's netgo-constrained files — audited bytes no
+	// walk read — on every listed toolchain.
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + ": net)"
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":           "module example.com/view\n\ngo 1.26\n",
@@ -81,7 +83,7 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		}
 		return out
 	}
-	engine, err := New(WithDir(dir), WithBuildFlags("-tags=dst"))
+	engine, err := New(WithDir(dir), WithBuildFlags("-tags=netgo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		t.Fatalf("ambiguous identity = %q, want no attribution", got)
 	}
 	for _, symbol := range []string{"Declared", "Twice", "Open"} {
-		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, WithBuildFlags("-tags=dst"))
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, WithBuildFlags("-tags=netgo"))
 		if verdict.Status != Unverifiable || (symbol == "Declared" && verdict.Reason != "external directive") || (symbol == "Open" && !strings.HasSuffix(verdict.Reason, axis)) {
 			t.Fatalf("%s verdict = %+v", symbol, verdict)
 		}

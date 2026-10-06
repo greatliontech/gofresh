@@ -38,6 +38,7 @@ type Package struct {
 	XTestEmbedPatterns []string
 	CgoLDFLAGS         []string
 	Imports            []string
+	Deps               []string
 	ForTest            string
 	Module             *Module
 	Error              *Error

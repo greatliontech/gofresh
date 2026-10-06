@@ -3506,7 +3506,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		case "analysis-unavailable", "toolchain-unaudited":
 			// Diagnostic phases carry their payload in Detail; both
 			// fire only under their conditions (an isolated analysis
-			// failure; an unlisted release), so their absence here is
+			// failure; an unlisted toolchain surface), so their absence here is
 			// as legal as their presence on the next-rc leg.
 			if event.Detail == "" {
 				t.Fatalf("diagnostic phase %q carries no detail", event.Phase)
@@ -10586,9 +10586,9 @@ func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
 // The unaudited-toolchain notice fires exactly once per engine and
 // serves the audit's OWNED axis-naming rendering with the source
 // pointer appended; an audited selection (empty notice) emits nothing
-// — without the notice, an unlisted release surfaces only as a
+// — without the notice, an unlisted toolchain surfaces only as a
 // scatter of ordinary fail-closed refusals, the discovery shape the
-// exact-version keying was built to prevent.
+// content keying was built to prevent.
 func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
 	var got []string
 	var once sync.Once
@@ -10596,7 +10596,8 @@ func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("audited selection emitted a notice: %v", got)
 	}
-	owned := closure.ToolchainSelectionNotice([]string{"-tags=dup"}, "", "")
+	owned := "toolchain-selection audit: the audited surface of go1.99.0 moved in 1 keys off go1.99.0: strings — standard-library observation admissions are disabled"
+
 	emitUnauditedToolchainNotice(&once, owned, func(d string) { got = append(got, d) })
 	emitUnauditedToolchainNotice(&once, owned, func(d string) { got = append(got, d) })
 	if len(got) != 1 {
@@ -10612,7 +10613,7 @@ func TestUnauditedToolchainNoticeFiresOnceAndNames(t *testing.T) {
 	if !strings.Contains(got[0], owned) || !strings.Contains(got[0], "toolchainaudit.go") {
 		t.Fatalf("notice does not serve the owned rendering with the pointer: %q", got[0])
 	}
-	if owned != "" && !strings.Contains(got[0], `selection "dup"`) {
+	if owned != "" && !strings.Contains(got[0], "moved in 1 keys off go1.99.0: strings") {
 		t.Fatalf("owned rendering does not name the axis: %q", got[0])
 	}
 }

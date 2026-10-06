@@ -7,7 +7,7 @@ import (
 )
 
 // TestUnauditedToolchainDropsPurityAdmissions pins the purity tier's
-// half of the exact-version keying: on an unlisted release the audited
+// half of the content keying: on an unlisted surface the audited
 // synchronization, pooling, and immutable-type admissions all keep
 // their fail-closed classifications
 // (REQ-closure-observability-toolchain-key).
@@ -26,8 +26,8 @@ func TestUnauditedToolchainDropsPurityAdmissions(t *testing.T) {
 	// The vacuity guard: under an audited verdict the fakes admit, so
 	// the refusals below witness the verdict parameter, not a
 	// malformed fake. The verdict is the two-axis
-	// AuditedToolchainSelection value the scan entries compute once —
-	// an unlisted release or unaudited selection reaches every
+	// Hasher-resolved audit verdict the scan entries read once — an
+	// unlisted surface or unaudited selection reaches every
 	// admission as false.
 	if !auditedSynchronization(true, lock) || !auditedPooling(true, get) || !auditedImmutableType(true, reflType) {
 		t.Fatal("fakes not admitted under an audited verdict; the refusal arms below would be vacuous")

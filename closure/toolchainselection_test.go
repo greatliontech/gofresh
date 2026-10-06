@@ -2,8 +2,10 @@ package closure
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -11,144 +13,157 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 )
 
-// The selection axis of the toolchain-audit key: build flags
-// canonicalize to a sorted tag-set key, the sanitizer flags implying
-// their tags, and an unclassifiable flag set never admits
+// Every selection the content key admits or refuses, on the running
+// toolchain (the canary pins that it is listed): the default and race
+// selections admit — the race selection selects the same audited files
+// (the recorded fact, now enforced by equality); a tag no audited file
+// is constrained on selects the same files and admits BY CONTENT (the
+// selection axis dissolved); an unclassifiable flag set refuses; and a
+// tag that selects different audited bytes — the dst hook tag on a
+// godst toolchain, whose dst-tagged files sit in the surface — refuses
+// naming the packages that moved
 // (REQ-closure-observability-toolchain-key).
-func TestSelectionAuditKeyCanonicalizesBuildFlags(t *testing.T) {
-	cases := []struct {
+func TestSelectionsAdmitByContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("lists the standard library under several selections")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	hasher := func(flags ...string) *Hasher {
+		t.Helper()
+		h, err := newAt(dir, flags...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	if h := hasher(); !h.SelectionAudited() {
+		t.Skipf("running toolchain unlisted (the canary covers it): %s", h.SelectionNotice())
+	}
+	for _, tc := range []struct {
 		name  string
 		flags []string
-		key   string
-		ok    bool
 	}{
-		{"no flags is the default selection", nil, "", true},
-		{"selection-neutral flags stay default", []string{"-pgo=auto", "-trimpath"}, "", true},
-		{"tags equals form", []string{"-tags=dst"}, "dst", true},
-		{"tags two-argument form", []string{"-tags", "dst"}, "dst", true},
-		{"tag sets sort and dedup", []string{"-tags=b,a", "-tags=a"}, "a,b", true},
-		{"race implies its tag", []string{"-race"}, "race", true},
-		{"race unions declared tags", []string{"-race", "-tags=dst"}, "dst,race", true},
-		{"msan and asan imply their tags", []string{"-msan", "-asan"}, "asan,msan", true},
-		{"bare -tags is unclassifiable", []string{"-tags"}, "", false},
-	}
-	for _, tc := range cases {
-		key, ok := selectionAuditKey(tc.flags)
-		if key != tc.key || ok != tc.ok {
-			t.Errorf("%s: selectionAuditKey(%v) = %q,%v want %q,%v", tc.name, tc.flags, key, ok, tc.key, tc.ok)
+		{"race selects the same audited files", []string{"-race"}},
+		{"a tag no audited file is constrained on selects the same files", []string{"-tags=dup"}},
+		{"race with such a tag", []string{"-race", "-tags=dup"}},
+	} {
+		if h := hasher(tc.flags...); !h.SelectionAudited() {
+			t.Errorf("%s: refused — %s", tc.name, h.SelectionNotice())
 		}
+	}
+	// A flag set the go command refuses lists nothing: refused as an
+	// unreadable surface naming the go command's own statement — an
+	// unclassifiable selection is never admitted.
+	if h := hasher("-tags"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "could not be read") {
+		t.Errorf("unclassifiable flags: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
+	}
+	// A tag that selects audited bytes refuses naming the package: netgo
+	// selects net's netgo-constrained files on every listed toolchain;
+	// the refusal labels the surface by the go command's own version
+	// (the pass snapshot's), never the analyzing process's.
+	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := hasher("-tags=netgo"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "the audited surface of "+snapshot.Value("GOVERSION")+" moved in 1 keys off") || !strings.HasSuffix(h.SelectionAttribution(), ": net") {
+		t.Errorf("netgo selection: audited=%v attribution %q, want net named as moved off the snapshot's version", h.SelectionAudited(), h.SelectionAttribution())
+	}
+	// An explicit flag overrides GOFLAGS, as the go command merges them:
+	// `-tags=dup` under GOFLAGS=-tags=netgo selects no netgo file and
+	// admits, and the union spelled explicitly — refused — shares no
+	// memo record with it (the scope is the snapshot's identity).
+	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOFLAGS=-tags=netgo"), "-tags=dup"); err != nil {
+		t.Fatal(err)
+	} else if !h.SelectionAudited() {
+		t.Errorf("an explicit -tags=dup under GOFLAGS=-tags=netgo refused: %s", h.SelectionNotice())
+	}
+	if h := hasher("-tags=dup,netgo"); h.SelectionAudited() || !strings.HasSuffix(h.SelectionAttribution(), ": net") {
+		t.Errorf("the explicit union served the override's record: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
+	}
+	// Another platform's analysis selects other bytes — its split
+	// files: a listed platform row (plan9/amd64, listed from this host
+	// over its default row) admits by content; a platform no row covers
+	// refuses until a host lists it.
+	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=plan9", "GOARCH=amd64")); err != nil {
+		t.Fatal(err)
+	} else if !h.SelectionAudited() {
+		t.Errorf("the listed plan9/amd64 selection refused: %s", h.SelectionNotice())
+	}
+	// cgo off — every host without a C compiler — is listed from this
+	// host as the same kind of delta row.
+	if h, err := newAtEnv(context.Background(), dir, environmentWith("CGO_ENABLED=0")); err != nil {
+		t.Fatal(err)
+	} else if !h.SelectionAudited() {
+		t.Errorf("the listed cgo-off selection refused: %s", h.SelectionNotice())
+	}
+	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=windows", "GOARCH=arm64")); err != nil {
+		t.Fatal(err)
+	} else if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") {
+		t.Errorf("an unlisted platform: audited=%v attribution %q, want the moved keys named", h.SelectionAudited(), h.SelectionAttribution())
+	}
+	// A tag that selects different audited bytes refuses: the godst
+	// hook tag where the running GOROOT carries dst-tagged files in an
+	// audited package (time's dst_tz.go); elsewhere the arm is
+	// unreachable and skipped — the planted-listing pin below carries
+	// the refusal's shape on every host.
+	if _, err := os.Stat(filepath.Join(snapshot.Value("GOROOT"), "src", "time", "dst_tz.go")); err != nil {
+		t.Skip("no dst-tagged audited file in the running GOROOT; the dst arm needs a godst toolchain")
+	}
+	h := hasher("-tags=dst")
+	if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") || !strings.Contains(h.SelectionAttribution(), "time") {
+		t.Errorf("dst selection: audited=%v attribution %q, want the moved packages named with time among them", h.SelectionAudited(), h.SelectionAttribution())
 	}
 }
 
-// The two-axis verdict: on a listed release the default and race
-// selections are audited (the race walk landed with the axis: the
-// audited surface's selected non-test source is byte-identical under
-// plain -race), a dst-tagged selection refuses until its own walk
-// lists it, and an unclassifiable flag set refuses.
-func TestAuditedToolchainSelectionAxes(t *testing.T) {
-	if !auditedToolchainSource() {
-		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
+// The degradation over explicit inputs — the unlisted world a listed
+// toolchain cannot reach: an unclassifiable flag set, an unreadable
+// surface, moved keys named and bounded with the lacking ones, and the
+// audited verdict; the notice is axis + consequence + remedy, and the
+// attribution the bare axis (REQ-closure-refusal-channels).
+func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
+	prior := auditedToolchainSources
+	t.Cleanup(func() { auditedToolchainSources = prior })
+	auditedToolchainSources = []toolchainSourceRow{{Label: "go1.99.0", Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s"}}}
+	same := sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s"}}
+	if d := toolchainSourceDegradation("go1.99.0", same, nil); !d.audited() || d.notice() != "" || d.axis != "" {
+		t.Fatalf("every digest listed, yet %+v", d)
 	}
-	cases := []struct {
+	for _, tc := range []struct {
 		name    string
-		flags   []string
-		audited bool
+		d       sourceDigests
+		listErr error
+		axis    string
+		remedy  string
 	}{
-		{"default selection audited", nil, true},
-		{"race selection audited by the race walk", []string{"-race"}, true},
-		{"dst selection refuses until walked", []string{"-tags=dst"}, false},
-		{"dst-race refuses until walked", []string{"-race", "-tags=dst"}, false},
-		{"unknown tag refuses", []string{"-tags=mysterytag"}, false},
-		{"unclassifiable flags refuse", []string{"-tags"}, false},
-	}
-	for _, tc := range cases {
-		if got := AuditedToolchainSelection(tc.flags, "", ""); got != tc.audited {
-			t.Errorf("%s: AuditedToolchainSelection(%v) = %v want %v", tc.name, tc.flags, got, tc.audited)
+		{"unreadable surface (an unclassifiable flag set included)", sourceDigests{}, errors.New("listing the standard library: boom"), "could not be read: listing the standard library: boom", "listed and readable"},
+		{"one package moved", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "moved", "runtime": "s"}}, nil, "moved in 1 keys off go1.99.0: bytes", "walked against the admissions"},
+		{"the runtime moved", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "moved"}}, nil, "moved in 1 keys off go1.99.0: runtime", "digests listed"},
+		{"a key the row lacks", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s", "unique": "u"}}, nil, "moved in 1 keys off go1.99.0: unique", "listed"},
+	} {
+		d := toolchainSourceDegradation("go1.99.0", tc.d, tc.listErr)
+		if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
+			t.Errorf("%s: degradation %+v, want axis %q and remedy %q", tc.name, d, tc.axis, tc.remedy)
 		}
-	}
-}
-
-// Every listed release carries its default-selection audit — the one
-// listing keys releases to selections, so a release without a row is
-// unlisted by construction, and a row without the default selection is
-// a listing error.
-func TestAuditedSelectionsCoverEveryListedRelease(t *testing.T) {
-	for release, sels := range auditedToolchainSelections {
-		if !sels[""] {
-			t.Errorf("release %s listed without a default-selection audit entry", release)
+		if notice := d.notice(); !strings.HasPrefix(notice, "toolchain-selection audit: "+d.axis+" — ") || !strings.HasSuffix(notice, d.remedy) {
+			t.Errorf("%s: notice %q is not axis+consequence+remedy", tc.name, notice)
 		}
+		requireBareAxis(t, tc.name, d.notice(), d.axis)
 	}
-}
-
-// An unaudited selection degrades every stdlib admission to the
-// ordinary fail-closed classification — the same posture as an
-// unlisted release — at the admission functions themselves.
-func TestUnauditedSelectionDisablesAdmissions(t *testing.T) {
-	if auditedSyncSymbol(true, "sync", "Lock") == auditedSyncSymbol(false, "sync", "Lock") {
-		t.Error("sync admission ignores the selection verdict")
+	// Many moved keys: packages first, then symbols, bounded and the
+	// rest counted.
+	many := sourceDigests{Packages: map[string]string{}}
+	for _, p := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"} {
+		many.Packages[p] = "x"
 	}
-	if classBPureStandard(true, "fmt", "Sprintf") == classBPureStandard(false, "fmt", "Sprintf") {
-		t.Error("class-B admission ignores the selection verdict")
+	d := toolchainSourceDegradation("go1.99.0", many, nil)
+	if want := "moved in 11 keys off go1.99.0: a, b, c, d, e, f, g, h (+3 more)"; !strings.Contains(d.axis, want) {
+		t.Fatalf("bounded naming: %q, want %q", d.axis, want)
 	}
-	if isSourceOnlyStandardPackage(true, "bytes") == isSourceOnlyStandardPackage(false, "bytes") {
-		t.Error("source-only set ignores the selection verdict")
-	}
-	if auditedHarnessLogging(true, "testing", "Fatal") == auditedHarnessLogging(false, "testing", "Fatal") {
-		t.Error("harness-logging admission ignores the selection verdict")
-	}
-}
-
-// The environment axes: GOFLAGS joins the effective selection, and a
-// GOEXPERIMENT or GOOS/GOARCH differing from this binary's own is a
-// selection no walk covered — each refuses, fail-closed, exactly as
-// an unwalked tag set does (the env channel that would otherwise
-// bypass the flag-derived key).
-func TestAuditedToolchainSelectionEnvAxes(t *testing.T) {
-	if !auditedToolchainSource() {
-		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
-	}
-	if !AuditedToolchainSelection(nil, "", "") {
-		t.Fatal("default selection with default env refused")
-	}
-	if AuditedToolchainSelection(nil, "-tags=dst", "") {
-		t.Error("GOFLAGS-carried dst tag bypassed the selection axis")
-	}
-	if !AuditedToolchainSelection(nil, "-race", "") {
-		t.Error("GOFLAGS-carried -race refused despite the race listing")
-	}
-	if AuditedToolchainSelection(nil, "", "somefutureexp") {
-		t.Error("an environment GOEXPERIMENT differing from the binary's admitted")
-	}
-	if !AuditedToolchainSelection(nil, "", experimentOf(runtime.Version())) {
-		t.Error("the binary's own experiment refused")
-	}
-	// GOOS/GOARCH need no axis: the delta walks read the audited
-	// packages' platform-split files whole, so cross-platform
-	// selections of the audited packages ride the walked source (the
-	// pre-existing cross-GOOS analysis capability stays —
-	// TestOpenFileFlagsUseSelectedGOOS pins it end to end).
-}
-
-// Sanitizer value forms classify or refuse — never silently default
-// (the -msan=true hole): an explicit true selects the tag, false
-// stays default, and an unparsable value never admits.
-func TestSelectionAuditKeySanitizerValueForms(t *testing.T) {
-	cases := []struct {
-		flags []string
-		key   string
-		ok    bool
-	}{
-		{[]string{"-race=true"}, "race", true},
-		{[]string{"-race=false"}, "", true},
-		{[]string{"-msan=true"}, "msan", true},
-		{[]string{"-asan=1"}, "asan", true},
-		{[]string{"-race=weird"}, "", false},
-	}
-	for _, tc := range cases {
-		key, ok := selectionAuditKey(tc.flags)
-		if key != tc.key || ok != tc.ok {
-			t.Errorf("selectionAuditKey(%v) = %q,%v want %q,%v", tc.flags, key, ok, tc.key, tc.ok)
-		}
+	// No row listed at all: every key moved, off no row.
+	auditedToolchainSources = nil
+	if d := toolchainSourceDegradation("go1.99.0", same, nil); !strings.Contains(d.axis, "moved in 3 keys (no row listed): bytes, runtime, strings") {
+		t.Fatalf("no rows: %q", d.axis)
 	}
 }
 
@@ -168,127 +183,95 @@ func TestEffectScanScopeDiscriminatesSelectionVerdict(t *testing.T) {
 	}
 }
 
-// The end-to-end refusal: a Hasher constructed with an unwalked tag
-// selection degrades stdlib admissions for real analyses — a subject
-// observable under the default selection refuses under -tags=dst,
-// with the ordinary fail-closed classification carrying the reason
-// (the verdict threads from construction to the admission sites, not
-// merely honored as a parameter).
-func TestUnwalkedTagSelectionRefusesObservability(t *testing.T) {
+// An unaudited selection degrades every stdlib admission to the
+// ordinary fail-closed classification — the same posture as an
+// unlisted toolchain — at the admission functions themselves.
+func TestUnauditedSelectionDisablesAdmissions(t *testing.T) {
+	if auditedSyncSymbol(true, "sync", "Lock") == auditedSyncSymbol(false, "sync", "Lock") {
+		t.Error("sync admission ignores the selection verdict")
+	}
+	if classBPureStandard(true, "fmt", "Sprintf") == classBPureStandard(false, "fmt", "Sprintf") {
+		t.Error("class-B admission ignores the selection verdict")
+	}
+	if isSourceOnlyStandardPackage(true, "bytes") == isSourceOnlyStandardPackage(false, "bytes") {
+		t.Error("source-only set ignores the selection verdict")
+	}
+	if auditedHarnessLogging(true, "testing", "Fatal") == auditedHarnessLogging(false, "testing", "Fatal") {
+		t.Error("harness-logging admission ignores the selection verdict")
+	}
+}
+
+// The end-to-end refusal: a Hasher constructed over an unlisted
+// surface — the listing emptied under the test — degrades stdlib
+// admissions for real analyses: a subject observable under the listed
+// toolchain refuses, with the ordinary fail-closed classification
+// carrying the reason (the verdict threads from construction to the
+// admission sites, not merely honored as a parameter).
+func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	if !auditedToolchainSource() {
-		t.Skip("running toolchain not in the audited-release list")
-	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	fixture, err := filepath.Abs("fixtures/observable")
 	if err != nil {
 		t.Fatal(err)
 	}
-	def, err := newAt(fixture)
+	listed, err := newAt(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !def.SelectionAudited() {
-		t.Fatal("default-selection hasher reports unaudited")
+	if !listed.SelectionAudited() {
+		t.Skipf("running toolchain unlisted (the canary covers it): %s", listed.SelectionNotice())
 	}
-	tagged, err := newAt(fixture, "-tags=dst")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tagged.SelectionAudited() {
-		t.Fatal("dst-tagged hasher reports audited — the unwalked selection inherited the default audit")
-	}
-	// The verdict reaches the analysis itself: a subject observable
-	// under the default selection refuses under the unwalked tag —
-	// the end-to-end arm the per-function refusal pins cannot carry.
 	subject := Subject{Package: "github.com/greatliontech/gofresh/closure/fixtures/observable", Symbol: "TestReadFile"}
-	defObs, err := def.ComputeObservabilityBatch([]Subject{subject})
+	listedObs, err := listed.ComputeObservabilityBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o := defObs[subject]; !o.Observable {
-		t.Fatalf("fixture assumption moved: TestReadFile not observable under the default selection: %+v", o)
+	if o := listedObs[subject]; !o.Observable {
+		t.Fatalf("fixture assumption moved: TestReadFile not observable under the listed toolchain: %+v", o)
 	}
-	taggedObs, err := tagged.ComputeObservabilityBatch([]Subject{subject})
+	prior := auditedToolchainSources
+	t.Cleanup(func() { auditedToolchainSources = prior })
+	auditedToolchainSources = nil
+	unlisted, err := newAt(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o := taggedObs[subject]; o.Observable {
-		t.Fatalf("dst-tagged analysis kept the observability proof — the selection verdict never reached the admission sites: %+v", o)
+	if unlisted.SelectionAudited() || !strings.Contains(unlisted.SelectionAttribution(), "moved in") {
+		t.Fatalf("an emptied listing admitted: %v %q", unlisted.SelectionAudited(), unlisted.SelectionAttribution())
+	}
+	unlistedObs, err := unlisted.ComputeObservabilityBatch([]Subject{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := unlistedObs[subject]; o.Observable {
+		t.Fatalf("the unlisted analysis kept the observability proof — the verdict never reached the admission sites: %+v", o)
 	}
 }
 
-// The exported notice is the same derivation as the admission bool —
-// "" exactly when admitted — and names the missing axis with the walk
-// that would land it, so a consumer's attribution can never disagree
-// with the verdict it explains.
-func TestToolchainSelectionNoticeMatchesVerdict(t *testing.T) {
-	if !auditedToolchainSource() {
-		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
-	}
-	for _, tc := range []struct {
-		name          string
-		flags         []string
-		goflags       string
-		goexperiment  string
-		wantFragments []string
-	}{
-		{"audited selection renders no notice", []string{"-race"}, "", "", nil},
-		{"unwalked selection names its canonical key", []string{"-tags=dup"}, "", "", []string{`selection "dup" under ` + runtime.Version(), "unwalked", "observation admissions are disabled"}},
-		{"goflags join the effective selection", nil, "-tags=dup", "", []string{`selection "dup"`}},
-		{"experiment mismatch names the axis rule", nil, "", "somefutureexp", []string{"GOEXPERIMENT", "never inherited", "under " + runtime.Version()}},
-		{"unclassifiable flags name the flag set", []string{"-tags"}, "", "", []string{"defeat selection classification", "under " + runtime.Version()}},
-	} {
-		notice := ToolchainSelectionNotice(tc.flags, tc.goflags, tc.goexperiment)
-		audited := AuditedToolchainSelection(tc.flags, tc.goflags, tc.goexperiment)
-		if (notice == "") != audited {
-			t.Errorf("%s: notice %q disagrees with verdict %v", tc.name, notice, audited)
-		}
-		// The attribution is the same verdict's third reading: "" exactly
-		// when audited, the notice's axis with neither consequence nor
-		// remedy (REQ-closure-refusal-channels).
-		attribution := selectionDegradationFor(runtime.Version(), tc.flags, tc.goflags, tc.goexperiment).axis
-		if (attribution == "") != audited {
-			t.Errorf("%s: attribution %q disagrees with verdict %v", tc.name, attribution, audited)
-		}
-		if attribution != "" {
-			requireBareAxis(t, tc.name, notice, attribution)
-		}
-		if len(tc.wantFragments) == 0 && notice != "" {
-			t.Errorf("%s: unexpected notice %q", tc.name, notice)
-		}
-		for _, frag := range tc.wantFragments {
-			if !strings.Contains(notice, frag) {
-				t.Errorf("%s: notice %q missing %q", tc.name, notice, frag)
-			}
-		}
-	}
-}
-
-// The resolving notice entry reads the effective GOFLAGS and
-// GOEXPERIMENT from the caller's environment — go-env read and
-// snapshot-fed alike — and cannot silently lose the notice: this is
-// the entry a consumer without a Hasher calls, so its resolution path
-// is the chunk's actual serving surface.
+// The resolving notice entry reads the effective GOFLAGS from the
+// caller's environment — go-env read and snapshot-fed alike — and
+// cannot silently lose the notice: this is the entry a consumer without
+// a Hasher calls, so its resolution path is the serving surface. A
+// GOFLAGS the classification cannot read refuses through it; a clean
+// default selection on a listed toolchain resolves no notice.
 func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	if !auditedToolchainSource() {
-		t.Skip("running toolchain not in the audited-release list; the version canary covers this")
-	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	// The ambient environment carries GOENV, as a witness runner's does:
 	// the settings below are replaced, never appended, or the
 	// environment normalizer refuses the doubled key.
 	t.Setenv("GOENV", "warm")
 	dir := t.TempDir()
-	env := environmentWith("GOENV=off", "GOFLAGS=-tags=dup", "GOEXPERIMENT=")
+	env := environmentWith("GOENV=off", "GOFLAGS=-tags", "GOEXPERIMENT=")
 	notice, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(notice, `selection "dup"`) {
+	if !strings.Contains(notice, "could not be read") || !strings.Contains(notice, "-tags (from $GOFLAGS)") {
 		t.Fatalf("go-env-resolved notice lost the GOFLAGS selection: %q", notice)
 	}
 	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
@@ -296,28 +279,17 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 		t.Fatal(err)
 	}
 	notice, err = ToolchainSelectionNoticeResolved(context.Background(), gotool.PrimedEnvReader(gotool.Runner{}, dir, env, snapshot), nil)
-	if err != nil || !strings.Contains(notice, `selection "dup"`) {
+	if err != nil || !strings.Contains(notice, "-tags (from $GOFLAGS)") {
 		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
 	}
 	clean, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT=")), nil)
-	if err != nil || clean != "" {
-		t.Fatalf("default selection resolved a notice: %v %q", err, clean)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// The release axis renders through the same core the exported entry
-// uses, driven directly so the unlisted-release world — unreachable
-// under a listed toolchain, where every other test in this file runs —
-// stays pinned.
-func TestToolchainSelectionNoticeNamesUnlistedRelease(t *testing.T) {
-	notice := toolchainSelectionDegradation(false, "go9.99", "", nil, nil, "", "").notice()
-	for _, frag := range []string{"release go9.99 is not listed", "observation admissions are disabled", "walked and listed"} {
-		if !strings.Contains(notice, frag) {
-			t.Fatalf("unlisted-release notice %q missing %q", notice, frag)
-		}
-	}
-	if toolchainSelectionDegradation(true, "go9.99", "", map[string]bool{"": true}, nil, "", "").notice() != "" {
-		t.Fatal("listed default selection rendered a notice through the core")
+	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT=")); err != nil {
+		t.Fatal(err)
+	} else if (clean == "") != h.SelectionAudited() || clean != h.SelectionNotice() {
+		t.Fatalf("the resolved notice %q disagrees with the constructed verdict (audited=%v, notice %q)", clean, h.SelectionAudited(), h.SelectionNotice())
 	}
 }
 
@@ -350,7 +322,7 @@ func requireBareAxis(t *testing.T, name, notice, attribution string) {
 	if !strings.HasPrefix(notice, "toolchain-selection audit: "+attribution+" — ") {
 		t.Errorf("%s: attribution %q is not the notice's axis (%q)", name, attribution, notice)
 	}
-	for _, forbidden := range []string{"admission", "walked and listed", "never inherited", "never admitted", "—"} {
+	for _, forbidden := range []string{"admission", "walked against", "never admitted", "listed and readable", "—"} {
 		if strings.Contains(attribution, forbidden) {
 			t.Errorf("%s: attribution %q carries %q — consequence or remedy text", name, attribution, forbidden)
 		}
@@ -374,33 +346,18 @@ func environmentWith(settings ...string) []string {
 	return append(env, settings...)
 }
 
-// Every axis of the degradation names itself in the attribution and
-// its remedy in the notice, over explicit inputs so the unlisted-release
-// world a listed toolchain cannot reach is pinned too
-// (REQ-closure-refusal-channels).
-func TestSelectionDegradationNamesEveryAxis(t *testing.T) {
-	listed := map[string]bool{"": true, "race": true}
-	for _, tc := range []struct {
-		name         string
-		sourceListed bool
-		flags        []string
-		goexperiment string
-		axis, remedy string
-	}{
-		{"unlisted release", false, nil, "", "release go1.99.0 is not listed", "walked and listed under that key"},
-		{"experiment mismatch", true, nil, "somefutureexp", `GOEXPERIMENT "somefutureexp" under go1.99.0`, "never inherited"},
-		{"unclassifiable flags", true, []string{"-tags"}, "", "defeat selection classification", "never admitted"},
-		{"unwalked selection", true, []string{"-tags=dup"}, "", `selection "dup" under go1.99.0 is unwalked`, "walked and listed"},
-	} {
-		d := toolchainSelectionDegradation(tc.sourceListed, "go1.99.0", "", listed, tc.flags, "", tc.goexperiment)
-		if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
-			t.Errorf("%s: degradation %+v, want axis %q and remedy %q", tc.name, d, tc.axis, tc.remedy)
-		}
-		if notice := d.notice(); !strings.HasPrefix(notice, "toolchain-selection audit: "+d.axis+" — ") || !strings.HasSuffix(notice, d.remedy) {
-			t.Errorf("%s: notice %q is not axis+consequence+remedy", tc.name, notice)
-		}
+// The listing hosts list the stated selection set — the host default,
+// the race seams, the platforms the fleet analyzes for from another
+// host, and cgo off — exactly: a selection struck from the set would
+// leave the canary silent about a row the fleet relies on.
+func TestListedSelectionsAreTheStatedSet(t *testing.T) {
+	want := []listedSelection{
+		{},
+		{Suffix: " race", Flags: []string{"-race"}},
+		{Suffix: " plan9/amd64", Env: []string{"GOOS=plan9", "GOARCH=amd64"}},
+		{Suffix: " cgo0", Env: []string{"CGO_ENABLED=0"}},
 	}
-	if d := toolchainSelectionDegradation(true, "go1.99.0", "", listed, []string{"-race"}, "", ""); !d.audited() || d.notice() != "" || d.axis != "" {
-		t.Errorf("audited selection degraded: %+v", d)
+	if !reflect.DeepEqual(listedSelections, want) {
+		t.Fatalf("listedSelections = %+v, want the stated set %+v", listedSelections, want)
 	}
 }

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -88,9 +87,12 @@ type Hasher struct {
 	// notice, and every refusal's attribution are its readings
 	// (REQ-closure-refusal-channels).
 	selection selectionDegradation
-	progs     map[string]*program  // by package import path
-	progErrs  map[string]error     // memoized load failures, by package import path
-	lists     map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	// source is the audited surface's digests the verdict was judged
+	// over — the row a listing host prints when unlisted.
+	source   sourceDigests
+	progs    map[string]*program  // by package import path
+	progErrs map[string]error     // memoized load failures, by package import path
+	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
 	// snapshot is the pass's env snapshot when the caller supplied one —
 	// the listing memo's scope identity; nil leaves that memo inert.
 	snapshot       *gotool.EnvSnapshot
@@ -316,14 +318,21 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 	if err != nil {
 		return nil, err
 	}
-	mc, goflags, goexperiment := snapshot.Value("GOMODCACHE"), snapshot.Value("GOFLAGS"), snapshot.Value("GOEXPERIMENT")
+	mc := snapshot.Value("GOMODCACHE")
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
+	}
+	// The toolchain-source verdict is resolved at construction: the
+	// audited surface's digests under the pass's effective selection
+	// (memoized per selection scope), judged against the listing.
+	selection, source, err := resolveSelection(ctx, reader, buildFlags)
+	if err != nil {
+		return nil, fmt.Errorf("closure: %w", err)
 	}
 	dir := reader.Dir
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, runner: reader.Runner, buildFlags: append([]string(nil), buildFlags...), snapshot: snapshot,
-		selectionResolved: true, selection: selectionDegradationFor(runtime.Version(), buildFlags, goflags, goexperiment),
+		selectionResolved: true, selection: selection, source: source,
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
 		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]compartment.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),

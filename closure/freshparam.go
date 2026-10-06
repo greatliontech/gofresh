@@ -44,8 +44,8 @@ type freshParamAnalysis struct {
 	// the closed-value walk's harness arms consult it so no admission
 	// outlives the audit.
 	propertyHarnessAudited bool
-	// selectionAudited is the analysis' two-axis toolchain-selection
-	// audit verdict (AuditedToolchainSelection): the closed-value
+	// selectionAudited is the analysis' toolchain-source audit verdict
+	// (the Hasher's, resolved at construction): the closed-value
 	// walk's audited-set arms consult it exactly as the harness arms
 	// consult propertyHarnessAudited.
 	selectionAudited bool

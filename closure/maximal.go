@@ -884,8 +884,8 @@ func networkPackage(pkgPath string) bool {
 // operations cannot directly acquire process-external state. Unknown standard
 // packages fail closed to package-wide unverifiability; additions require a
 // source audit, not an API-name heuristic — and the whole set is keyed to the
-// audited toolchain releases (toolchainaudit.go): the audit is a property of
-// specific standard-library source, so an unlisted release keeps every
+// listed toolchain source (toolchainaudit.go): the audit is a property of
+// specific standard-library source, so an unlisted surface keeps every
 // package's fail-closed classification until its delta is walked.
 func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	if !audited {
@@ -959,7 +959,7 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 		}
 		if !audited {
 			// The audited targets are claims about runtime/syscall
-			// source; an unlisted release keeps the opaque-linkage
+			// source; an unlisted surface keeps the opaque-linkage
 			// floor for every directive-bearing file
 			// (REQ-closure-observability-toolchain-key
 			// keying clause).
