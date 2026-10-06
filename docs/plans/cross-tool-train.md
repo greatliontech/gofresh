@@ -208,7 +208,10 @@ Ratified at Band R4 (audit 285 A17, 2026-09-29), amended 2026-10-02
 release is gated in CI, not by a pre-push self-check — the release
 workflow cuts a tag only after the CI workflow succeeded on the pushed
 commit: the plain tier, a race tier over the whole tree (the policy's
-own race selection), and a RECORDS tier (the corpus compiles; every
+own race selection — run as shards whose `-run` regexes partition the
+tree's tests, each Test, Example and Fuzz function in exactly one,
+the partition pinned in the tree; the shards together are the tier),
+and a RECORDS tier (the corpus compiles; every
 binding resolves to a current symbol at a consented pin — 289's
 dangling binding and deleted proof are exactly what it names; the gap
 and attestation pins stay consented locally by `stipulator pin` and
@@ -3105,7 +3108,7 @@ in their repos.
       Run/SampleGoVersion/TakeEnvSnapshot forwarders, EnvReader.Taken,
       ParseEnvDocument, Containment.Quit/Grace). Before stipulator
       290.2b and gomutant 324. A release.
-- [ ] 329. cross-repo: the race tier sharded (the user's ruling
+- [x] 329. cross-repo: the race tier sharded (the user's ruling
       2026-10-06 — a release waited an hour on one job: gofresh's race
       tier is the closure package's observability proofs under the
       detector, about four times their plain cost on a 4-vCPU runner,
