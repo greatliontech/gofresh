@@ -251,7 +251,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 285 (2026-09-29), 310 heading the remainder since 2026-10-04 (the toolchain audit keyed by content — every host move costs a listing release and consumer bumps; a release): 310 → 315 (the audit's machine-walk half, decided by its measurement at open; a release) → 281 (the release cluster's largest: the fifth reader, one sample, the zero-runner default, the salvage pin, the roots probe, the non-go containment and the series parse gomutant/pew/stipulator read), 292 (a release), 297 (the dst walk — a release stipulator 290 reads), 300 (the guidance lint — a release before 290/291), then the bumps 290/291, then 202 (design, autonomous), 191 (a release), 295 (a release), 240, 241, 260, 203, 204, 206, 192, 193, 255, 242 and 243 together, 175, 102; 199 dissolved; gomutant's order after audit 317 (2026-10-06): 323 (the CI gate) → 302 → 187 → 324 → 313 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 284 dissolved (its campaign half 302's close); 210 dissolved (done at 246/278); stipulator's order after audit 318 (2026-10-06): 321 (the CI gate) → 290.2b (the v0.109.x bump, one toolchain read, the resident fold) → 299 → 293 → 298 → 322 (after gofresh 314) → 290r (behind gofresh 292/297/300) → 270 → 226 → 249 → 185 → 225 and 248 together → 228 → 184 (behind gofresh 300) → 176 → 238 (behind gofresh 241); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → [pew 291 lands as pew's performance-evidence plan chunk 2 on the other machine; pew's tail re-chartered at 319] → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → gofresh 305 (release) → gomutant 306 → stipulator 290.2a (the compile-breaking pin bump, landed cbc9908) → stipulator 307 (A, then B — the unit loop's vertical for discovery; C and D after 311) → gomutant 311 (the proof pass per group) → stipulator 309 → gofresh 310 (release; the resident sampler's fleet home rides it) → gomutant 308 → gomutant 312 (the server writes nothing in the repo) → the fifth re-audit band 316–319 (gofresh, gomutant, stipulator, pew; the replan at 319; the count restarts at zero — twelve whole chunks landed since 285–288) → gomutant 313 (the repo declares its own facts) → gofresh 314 (release) → 315 (release) → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 316 (2026-10-06): 325 (the reusable CI workflow, cross-repo) → 326 (the resident release) → 327 (the gotool surface release) → 292 (a release) → 300 (a release) → 315 (the machine walk with 297's corpus; a release) → 314 (a release) → 202 (design, autonomous) → 191 (a release) → 295 (a release) → 240 → 241 → 260 → 203 → 204 → 206 → 192 → 193 → 255 → 242 and 243 together → 175 → 102; 297 merged into 315; 303 closed by verdict; 199 dissolved; gomutant's order after audit 317 (2026-10-06): 323 (the CI gate) → 302 → 187 → 324 → 313 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 284 dissolved (its campaign half 302's close); 210 dissolved (done at 246/278); stipulator's order after audit 318 (2026-10-06): 321 (the CI gate) → 290.2b (the v0.109.x bump, one toolchain read, the resident fold) → 299 → 293 → 298 → 322 (after gofresh 314) → 290r (behind gofresh 292/297/300) → 270 → 226 → 249 → 185 → 225 and 248 together → 228 → 184 (behind gofresh 300) → 176 → 238 (behind gofresh 241); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → [pew 291 lands as pew's performance-evidence plan chunk 2 on the other machine; pew's tail re-chartered at 319] → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → gofresh 305 (release) → gomutant 306 → stipulator 290.2a (the compile-breaking pin bump, landed cbc9908) → stipulator 307 (A, then B — the unit loop's vertical for discovery; C and D after 311) → gomutant 311 (the proof pass per group) → stipulator 309 → gofresh 310 (release; the resident sampler's fleet home rides it) → gomutant 308 → gomutant 312 (the server writes nothing in the repo) → the fifth re-audit band 316–319 (gofresh, gomutant, stipulator, pew; the replan at 319; the count restarts at zero — twelve whole chunks landed since 285–288) → gomutant 313 (the repo declares its own facts) → gofresh 314 (release) → 315 (release) → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1334,6 +1334,7 @@ in their repos.
       (bindings/closure.textproto:1565); only REQ-closure-scan-memo
       remains unbound/ungapped. Repair memo-scope-axes.md's Lands line
       at open (a dangling half-sentence).
+      Grown (2026-10-06, audit 316): two persistent memos of one go list question — closure/listingmemo.go (content digests, listingRecordVersion + shape, serves off unix) and toolchainsource.go's listing memo (stat stamps, sourceDigestsVersion, never off unix) — one served-listing rule with one record-versioning rule, or the reason GOROOT warrants stamps stated (the digests never memoized; a stale record never decides selection); the scanmemo pins reading scanEntryVersion; REQ-closure-scan-memo is bound (that item done).
 - [ ] 204. gofresh: auditset's receiver side as one table — the five
       parallel method tables and their predicates one package-keyed
       map behind the one ladder, as symbolTables already is; BoundedToken
@@ -1378,6 +1379,7 @@ in their repos.
       sampler-failed-sample-memo-unpinned (resolved at 281.C; `git log
       --all -- docs/issues/sampler-failed-sample-memo-unpinned.md`, gofresh)
       to 281.
+      Grown (2026-10-06, audit 316): the toolchain-key gap fires — the row-chain admission is a for-all a generated-rows property witnesses (sixteen content-key pins exist); cgoEnabled(t) duplicated across the root and closure test packages; gotool/contain_test.go's TestContain* names refer to the deleted Contain/Apply; apisurface_test.go's hand-listed roots omit resident/ (reads GOMEMLIMIT by design — state the exemption); the canary's row table is the hand mirror 315 retires.
 
 ## Band H — gomutant under the emergent shape (chartered by audit 195)
       (261: measured — tier2* now 69 production occurrences; four global hook
@@ -1710,6 +1712,7 @@ in their repos.
       (e) REQ-fresh-progress states the fact/diagnostic phase set; (f)
       one pass over the 43 gap records: 40 carry one boilerplate
       condition — each clause's own witness shape stated.
+      Grown (2026-10-06, audit 316): the overview's substrate paragraph and Documents list name the resident package; REQ-fresh-resident-readings gains its Enforced-by pointers (eight bindings exist); REQ-closure-observability-toolchain-key's opening set↔scope sentence split into its own sub-id (203 enforces it); the pre-310 vocabulary's doc half (toolchainkey_test.go, effectmemo.go, VersionListing's and dynamicstate.go's 'toolchain release' docs); REQ-fresh-caller-pins the one unbound, ungapped id; the thirty-seven boilerplate gap conditions (f). Loses UnsetEnv to 327 and (a) as done at 281 (2dbbc6f deleted the guard's go version spawn, 53b9e1d named List) — spec and records only.
 - [ ] 241. gofresh: one typed-load seam (234 C2/A6/A7) — four
       packages.Load sites with four hand-built configs (viewload.go the
       designated seam; explain.go, maximal.go, internal/program) merge
@@ -1727,6 +1730,7 @@ in their repos.
       REQ-fresh-go-command-policy's exception (cfg.Env != nil pinned
       nowhere); explain.go:122 skips buildflags.Validate where
       closure/viewload.go:75 treats it as part of the pass.
+      Grown (2026-10-06, audit 316): explain-no-chain-for-a-dependency-culprit named here (its Lands said so); loses one-memo-shape to 327.
 - [ ] 242. gofresh: closure/ an internal package (234 C7) — a public
       package with zero external importers publishing Hasher and forty
       methods, AnalysisScope, the memo loaders, the attribution entries
@@ -1740,6 +1744,7 @@ in their repos.
       own capture): the internalization keeps that entry reachable
       through a root alias. 242 and 243 LAND TOGETHER (one symbol set
       after 202; two passes double the binding retargets).
+      Grown (2026-10-06, audit 316): the pre-310 vocabulary renamed once on the public surface — Hasher's selectionResolved/selection ('two-axis'), selectionDegradation, the 'toolchain-selection audit:' notice and its source-path suffix (view.go appends ' (closure/toolchainaudit.go)' to every notice), SelectionAudited/SelectionNotice/SelectionAttribution/AttributeSelection — the spec's one concept is the toolchain-source audit.
 - [ ] 243. gofresh: the vestigial sweep 234 found (C10) — guard's
       invalidKind (zero references in four repos); ScanPureDirectives
       exported with no production caller in any repo (the exported face
@@ -1777,6 +1782,7 @@ in their repos.
       (pew/cmd/pew/canary_test.go:26 reads it);
       runtime-input-entries-implicit-context and the two retire riders
       stand. Lands together with 242; 295 no longer waits on it.
+      Narrowed (2026-10-06, audit 316): the gotool dead set (package-level Run/SampleGoVersion/TakeEnvSnapshot forwarders, EnvReader.Taken, ParseEnvDocument, Containment.Quit/Grace with no reader) moves to 327.
 - [x] 244. gomutant: the face-parity residue (235 C2/C3/C4/C12 +
       A3/A4/A5) — 207 landed one rendering seam and left the run
       epilogue written twice (the attest snapshot, the shed-dedup key at
@@ -2635,7 +2641,7 @@ in their repos.
       the exclusion is a counted coverage cap, the consumer's
       obligation to fix the test stays). After 254; doc deletes at
       close.
-- [ ] 297. gofresh: the dst-selection walk for the toolchain-audit key
+- [x] 297. gofresh: the dst-selection walk for the toolchain-audit key
       (gofresh docs/issues/walk-dst-selection-for-audit-key.md, whose
       trigger fired 2026-09-29 — the field report
       dst-selection-walk-trigger-fired-tugboat in gofresh's index:
@@ -2659,6 +2665,7 @@ in their repos.
       self-contained walk plus a selections-axis entry, a release
       stipulator's bump 290 reads for tugboat's dst legs; 191 keeps
       its place behind 202.
+      Merged into 315 (2026-10-06, audit 316): the dst walk's ~19k-line os fault-injection delta is the largest moved-key corpus the fleet has — walking it by hand and then measuring 315 over the same bytes walks it twice; 315's measurement at open takes it as its first corpus, the human walk the fallback for the classes the scans cannot judge (the harness channels, the linkname floor); 315's open also measures which toolchains the fleet runs and lists the walked godst builds (dst.10–15, go1.27.1-dst.12 — present on this host; 310's tick claimed otherwise) as delta rows over their chains or records the drop. Its charter's 'selections axis' and 'two-axis key' vocabulary is 310's content-key form: a dst row is a listedSelections entry, ' dst' and ' dst race' delta rows over the host chain.
 - [ ] 298. stipulator: the seeding walk's declaration lookup under the
       invocation's own selection (the stipulator field report
       seeding-declaration-not-in-default-view — tugboat,
@@ -3024,6 +3031,7 @@ in their repos.
       package — the cost model stated in the clause with the measured
       anchor; a release, after 313 in the lane; consumers read it at
       their bumps.
+      Narrowed (2026-10-06, audit 316): program retention alone — the ceiling's own-set derivation and the children's budget are 326's (a release before stipulator 290.2b/322 and gomutant 214).
 - [ ] 315. gofresh: the toolchain-source audit's second half — the walk
       the machine can do (310's charter, deferred at 310's open to its
       own measurement; a release). The content key names the keys that
@@ -3039,8 +3047,9 @@ in their repos.
       digest-keyed table. A measurement showing the scans cannot judge a
       class soundly closes that class by verdict and records why. After
       314 in gofresh's order and the lane.
+      Grown (2026-10-06, audit 316): 297 merged in as the first measured corpus (its human walk the fallback); the fleet's toolchain census at open, the walked godst builds listed or their drop recorded; the long-term relief of the release gate's floating toolchain (325 pins the gate meanwhile). Before 314 in gofresh's order.
 
-- [ ] 316. gofresh: the fifth re-audit band's gofresh audit — one
+- [x] 316. gofresh: the fifth re-audit band's gofresh audit — one
       read-only Opus auditor over the repo with the eight lenses (the
       designR shape), output a disposition tick and issue docs, no
       code; chartered at 312's tick (twelve whole chunks landed since
@@ -3048,6 +3057,43 @@ in their repos.
       312; 284 pending its parked campaign). The band 316–319 closes
       with the cross-repo replan at 319; the audit count restarts at
       zero.
+      Dispositioned 2026-10-06: ten coherence findings, six consolidation candidates, the queue walked — 325 chartered (the reusable CI/release workflow; the trigger fired at 48bbe3a; the gate's toolchain pinned with a next-stable leg), 326 (the resident release: the own-set derivation + the children's budget), 327 (the gotool surface release: UnsetEnv, one judged-run memo, the ToolchainSampler over an EnvReader, the dead set); 297 merged into 315; 314 narrowed; 202/240/241/203/206/242 grown; the register: five retargets, a phrase corrected, two binding chores (the retired version-listing witness rebound off the toolchain-key clause; TestUnauditedSelectionDisablesAdmissions bound). Disputes D1–D5 accepted as argued.
+- [ ] 325. cross-repo: the reusable CI/release workflow (audit 316;
+      reusable-ci-workflow's trigger fired at gofresh 48bbe3a — the
+      race/records/workflow_run gate is the CI-contract change every
+      copy must carry, and 321/323 were about to hand-copy it): one
+      org-level workflow (greatliontech/.github) the four repos call
+      with their inputs (race on or off and its budget, the records
+      tier, the package pattern); the gate's toolchain PINNED to a
+      listed one (the canary row's version) — on `stable` a commit's
+      releasability changes with Go's release calendar, and the first
+      point release reds every gofresh release until a listing lands
+      — with a next-stable early-warning leg beside next-rc; 321 and
+      323 shrink to the call. Opens with the user's confirmation of
+      the org repo's creation (an outward-facing action). Heads the
+      lane.
+
+- [ ] 326. gofresh: the resident release (audit 316): resident.Ceiling
+      derives from available plus the process's own set (the halved
+      rule installs a ceiling below a live heap and pins the collector
+      at its CPU cap — ceiling-derivation-excludes-the-callers-own-set),
+      and the package exports the children's complementary budget
+      composed from the same reading (gomutant's oracle bounds and
+      stipulator's admission term derive it locally today); absent
+      never zero, the operator's word wins, the floor. Before
+      stipulator 290.2b/322 and gomutant 214. A release.
+
+- [ ] 327. gofresh: the gotool surface release (audit 316): UnsetEnv
+      beside SetEnv; one generic judged-run memo with the Sampler and
+      runtimeinput.Roots its instances (one key spelling: the
+      coordinate plus the normalized environment; a failed answer
+      memoized, a cancellation never); the ToolchainSampler over an
+      EnvReader offered (provenance-sample-and-the-pass-snapshot-are-
+      two-reads' gofresh half); the dead set deleted (the package-level
+      Run/SampleGoVersion/TakeEnvSnapshot forwarders, EnvReader.Taken,
+      ParseEnvDocument, Containment.Quit/Grace). Before stipulator
+      290.2b and gomutant 324. A release.
+
 
 - [x] 317. gomutant: the fifth re-audit band's gomutant audit (as 316).
       Dispositioned 2026-10-06: twelve coherence findings, seven consolidation candidates, the queue walked — 323 chartered (the CI/release gate: plain + records, no race — the policy's own selection), 324 chartered (the 281 adoption with the rc-toolchain divergence pinned), 284 dissolved, 187 derived and moved up, 233 re-aimed, 302/313/256/209/268/267/258/220/214/219/269 grown, 254 narrowed; the register: evidence-attach-resident-spike deleted, two docs filed (the campaign silent past its deadline; 304's measure), eight retargets, two test files renamed off their codename.
@@ -3442,6 +3488,7 @@ in their repos.
       mechanism for the other reason family; the walk context's design
       names the typed class the ENGINE VERDICT reads, not only the
       composers 199 folded in.
+      Grown (2026-10-06, audit 316): the analysis-unavailable class is discriminated by a reason-string prefix spelled in two packages (view.go's analysisUnavailablePrefix, closure/observability.go) — 305 widened its use — the typed verdict class covers it with the shared-dynamic-state family, one spelling on closure's side; generated-proto-discharge-single-subject-only (named here: the descriptor's content-invariance binds no execution model); 305's cut fact (observationFacts.cut, the held unavailability) and 5a7f309's per-attestation channel are tier-boundary inputs to the design.
 
       Triage 281.1 (2026-09-30): two tugboat field reports ride here
       as design inputs —
