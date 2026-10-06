@@ -3088,8 +3088,9 @@ in their repos.
       runtimeinput.Roots its instances (one key spelling: the
       coordinate plus the normalized environment; a failed answer
       memoized, a cancellation never); the ToolchainSampler over an
-      EnvReader offered (provenance-sample-and-the-pass-snapshot-are-
-      two-reads' gofresh half); the dead set deleted (the package-level
+      EnvReader offered (the gofresh half of
+      provenance-sample-and-the-pass-snapshot-are-two-reads); the dead
+      set deleted (the package-level
       Run/SampleGoVersion/TakeEnvSnapshot forwarders, EnvReader.Taken,
       ParseEnvDocument, Containment.Quit/Grace). Before stipulator
       290.2b and gomutant 324. A release.
