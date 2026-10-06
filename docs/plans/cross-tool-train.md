@@ -3134,7 +3134,7 @@ in their repos.
 
 - [x] 318. stipulator: the fifth re-audit band's stipulator audit (as 316).
       Dispositioned 2026-10-06: twelve coherence findings, eight consolidation candidates, the queue walked — 321 chartered (the CI/release gate, heading stipulator), 290 split (290.2b now: the v0.109.x bump, one toolchain read, the resident fold, the spec amendments, the per-operation sampler), 322 chartered (per-operation readings in a long-lived server, after gofresh 314), 299/298/270/226/249/185/225/248/228/176 grown, 238's dependency corrected; the register: four retargets (property-completion derived to 298, dotted-package to 226, kill-orphans to the first Runner.Program spawn, aborted-pass re-derived at 249); A10's gap-record claim REFUTED (a gap record is a tracking artifact — it may cite the plan); C8 (the 1 GiB floor spelled twice across repos) relayed to 316.
-- [ ] 321. stipulator: the CI/release gate — gofresh 48bbe3a's shape
+- [x] 321. stipulator: the CI/release gate — gofresh 48bbe3a's shape
       (audit 318): release.yaml on `workflow_run` of a successful CI
       for a same-repository push, serialized, SEMREL_BRANCH=head_sha, a
       superseded commit releasing nothing; a race job with its budget

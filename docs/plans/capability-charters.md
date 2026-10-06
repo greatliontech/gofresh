@@ -10,7 +10,7 @@ leaves this register.
 
 | charter | repo | activates when |
 |---|---|---|
-| proto-backend | stipulator | a corpus needs wire evidence that shape pins and Go witnesses cannot cover |
+| proto-backend | stipulator | a party outside the repository consumes stipulator's protos — a module importing gen/stipulator/v1, or a non-Go consumer of proto/stipulator/v1 |
 | out-of-process-backends | stipulator | a second language backend is planned |
 | prover-trust-tiers | stipulator | a heuristic analyzer prover is proposed |
 | performance-evidence-axis | stipulator | a corpus declares a performance requirement |
