@@ -3082,7 +3082,7 @@ in their repos.
       the org repo's creation (an outward-facing action). Heads the
       lane.
 
-- [ ] 326. gofresh: the resident release (audit 316): resident.Ceiling
+- [x] 326. gofresh: the resident release (audit 316): resident.Ceiling
       derives from available plus the process's own set (the halved
       rule installs a ceiling below a live heap and pins the collector
       at its CPU cap — ceiling-derivation-excludes-the-callers-own-set),
