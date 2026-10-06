@@ -1750,3 +1750,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "275cb1fe5ae3e0828299a6d5cbfa2a527cecbba3a9250b3d1dd0fb3f10d704f9"
 }
+
+bindings {
+  requirement_id: "REQ-closure-observability-toolchain-key"
+  content_hash: "208eb9ffece89307d4c854325788dfca9cc3aaa49467cfcf0ed0e74059dc12a6"
+  source_hash: "2b7b5f5d9f98bc0cd6ab2a94f2ee50c7e89e858ef8e8db5dbd4cfbb52b3ddf11"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestAuditedExperimentRejectsUnlistedSourceChanges"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3510f73fcb108e09d69085ac20bc74ce72a79a749194325c33fc384b931dcd85"
+}

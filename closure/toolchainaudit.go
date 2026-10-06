@@ -468,6 +468,58 @@ var auditedToolchainSources = []toolchainSourceRow{
 			"plugin": "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
 		},
 	},
+	// Disabling DWARF 5 selects only the alternate goexperiment constants;
+	// it introduces no effectful standard-library body. Code-generation
+	// differences remain guarded by the toolchain and build configuration.
+	{
+		Label: "go1.27.1-X:nodwarf5",
+		Base:  "go1.27.1",
+		Packages: map[string]string{
+			"internal/goexperiment": "6970d45d798281d7e388da92e9c7160901094abc95ae3a09de1bd8de69b1324e",
+		},
+	},
+	{
+		Label: "go1.27.1-X:nodwarf5 race",
+		Base:  "go1.27.1-X:nodwarf5",
+		Packages: map[string]string{
+			"internal/race":        "e80429a1ec958b17e616e45f07b6b6f6cd205a925896d2268f95cb19da585dc5",
+			"internal/runtime/sys": "508268ec7dd881dad867d5d8ccfe777ee12c3b68de5e5c19051311eea63251bc",
+			"runtime":              "03f63c5da14e3825c5adcffb7911a40837e1689cd004409cb7f7e0b0619d8863",
+			"runtime/race":         "286c7e1ff0150cf2df8713e402d61c6a93c0f5f938bc3f220a6e35026782043c",
+			"sync/atomic":          "6f499cf4f7d682fbdf6ac4ded188a15d21c48854a80a04aaf5c08939f2c717e0",
+		},
+	},
+	{
+		Label: "go1.27.1-X:nodwarf5 plan9/amd64",
+		Base:  "go1.27.1-X:nodwarf5",
+		Packages: map[string]string{
+			"crypto/internal/sysrand":     "e9a964825483a4de332fe115d57b8669ed7acbcd1cf6099f94ea6f96343aa84d",
+			"crypto/x509":                 "e373324ba6d8be424d8d3bdafe3480eccc1b5bce1249f7f5554b9bbbeffab06f",
+			"internal/bytealg":            "9edabccd7d8972a52f4cdeaf43faf6fb035c837214c2d1de91ccead42a619546",
+			"internal/filepathlite":       "07fbc7b432b0c2c924d3cff03eb8265e93fb286491aea80201501795f8a40872",
+			"internal/goos":               "2c261770f7872d52fad29d60c41a1c77ded1efeac849c3c6bc3a4b99afb2de1a",
+			"internal/poll":               "53c15da3d437d242781cb300fdeda446d4d8c41ff86a83f048950b9e664bcf57",
+			"internal/sysinfo":            "4b67cd60d2c15f926b34def981df7cadca0908305d1096932a055f6cb3f1965c",
+			"mime":                        "57ab58c0a78c521ac4c0d94bf3b983a8eee260c1b98cc933976fea1f553a6cfd",
+			"net":                         "eb3bbf18fcf139b9116d3cd6847f5ba52178349347d4e1dd75522906875f622d",
+			"os":                          "260b9ccfad18429175eb866fb5701b6cda116461bd214c0117eb648fe176cf9d",
+			"path/filepath":               "2bca3fd096d61b21b4a7589bff53bfac85c1a9a793121f57be981583eb2c13cc",
+			"plugin":                      "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
+			"runtime":                     "9a35fe7f5ee7264805e3e3d153f3dce437aa0779798f7f7e82ad1f41d7ee825b",
+			"runtime/race":                "4a07f81aac3ba889c683d6eac16dd0296cd69ab3a519fd9d40c9e7b3ee524284",
+			"syscall":                     "b81f6c90213b3e8485343abc31f3ecf884084d12f3caf95dd7601b8e8b2e1c75",
+			"time":                        "088f86c38caf2b2a52b1cca6e74561bf3df5e39662e73c29bb1e9fdda64213b1",
+			"vendor/golang.org/x/sys/cpu": "345ea2e752f7b4f79a427a074ef04bb32a9a19fea34766d502e8346f7c6370b8",
+		},
+	},
+	{
+		Label: "go1.27.1-X:nodwarf5 cgo0",
+		Base:  "go1.27.1-X:nodwarf5",
+		Packages: map[string]string{
+			"net":    "24ff91ed9c0e683918309399ba24d80c9edf432de3240537d4daaf3763255c1b",
+			"plugin": "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
+		},
+	},
 	// Stock go1.27.0 (the dl tool's tree), over go1.27.1's chain: the
 	// three keys the point release moved — encoding/json, its v2
 	// engine, net/http — exactly the walk's three audited-surface

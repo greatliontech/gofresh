@@ -3580,6 +3580,11 @@ in their repos.
       deletes at close.
       Audit 285 (2026-09-29): stands (autonomous since ede9ab0).
 
+- [ ] 328. gofresh: admit the source-audited go1.27.1 nodwarf5 selection and its standard selection variants without weakening content-key admission.
+  - [x] 328.1 Reproduce the unlisted internal/goexperiment key, compare the dwarf5 selection against the existing audited chain, and inspect the selected constants and their consumers.
+  - [x] 328.2 Record the audited source deltas and retain rejection of unlisted content, including selection-specific chains.
+  - [ ] 328.3 Run the applicable Go tests and mutation evidence, converge independent review, commit and push the completed source audit, and make its released version available to the consumer bump.
+
 ## Ecosystem-blocked
 
 - [ ] 95. gomutant: MCP Tasks adoption — protocol-level operation
