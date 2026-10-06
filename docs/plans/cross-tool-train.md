@@ -220,8 +220,10 @@ nothing; the next-rc leg is an early warning in its own workflow,
 never a release blocker. The committer still runs the same records
 checks locally before a push — the same view through a released
 stipulator in CI and the development binary locally, a format move
-between them a red job, the safe direction — and the change sets' own
-test tiers stand as always. The full self-check
+between them a red job, the safe direction; stipulator's own gate
+builds it from the tree, since a pinned release could not read a
+format move the tree makes — and the change sets' own test tiers
+stand as always. The full self-check
 (witness freshness, serving evidence, the race tier under the owned
 environment) runs at band closes and on the fleet sweep's schedule, in
 idle windows, never as a release's precondition. gofresh carries the
@@ -3107,7 +3109,7 @@ in their repos.
 
 - [x] 317. gomutant: the fifth re-audit band's gomutant audit (as 316).
       Dispositioned 2026-10-06: twelve coherence findings, seven consolidation candidates, the queue walked — 323 chartered (the CI/release gate: plain + records, no race — the policy's own selection), 324 chartered (the 281 adoption with the rc-toolchain divergence pinned), 284 dissolved, 187 derived and moved up, 233 re-aimed, 302/313/256/209/268/267/258/220/214/219/269 grown, 254 narrowed; the register: evidence-attach-resident-spike deleted, two docs filed (the campaign silent past its deadline; 304's measure), eight retargets, two test files renamed off their codename.
-- [ ] 323. gomutant: the CI/release gate — gofresh 48bbe3a's shape (audit
+- [x] 323. gomutant: the CI/release gate — gofresh 48bbe3a's shape (audit
       317): release.yaml on `workflow_run` of a successful CI for a
       same-repository push, serialized, SEMREL_BRANCH=head_sha, a
       superseded commit releasing nothing; a records job (stipulator
