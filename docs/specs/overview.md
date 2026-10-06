@@ -315,8 +315,14 @@ by the table, or leaving), and a live one whose status carries no memory
 line at all (its memory released on its way out) — a status carrying a
 memory line the sampler cannot read whole voids the reading like one it
 cannot read. Consumers compose their own policies over the readings (a
-spawn admission's memory term, a server's idle release, a progress
-line's words); the sampler states facts and installs the one ceiling.
+spawn admission's memory term, a server's idle release); the sampler
+states facts, installs the one ceiling, and spells a reading once for
+every face — the consumer's moment, the set and peak, the descendants'
+summed set, count and largest peak exactly when there are any, the
+ceiling exactly when one is installed and last; byte counts in rounded
+binary units, one decimal from a gibibyte up, a value rounding up to the
+next unit rendering in it — so one tool's progress line reads as
+another's.
 
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the
