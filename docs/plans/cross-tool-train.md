@@ -2483,6 +2483,19 @@ in their repos.
       lands here) and passes the memo on every ProducerIngest; any
       series parse of its own folds onto
       gotool.LanguageSeries/ParseGoVersion.
+      Rider (2026-10-06, gofresh 51cac16 — released after v0.109.0):
+      gofresh/resident's ceiling rule now lets an explicit operator
+      GOMEMLIMIT replace the derivation, `off` included — an
+      environment carrying GOMEMLIMIT suppresses the derivation for
+      the whole process, an oracle's test binary included (the
+      clause's consumer obligation); stipulator's two ceiling pins
+      (internal/mcpserver/contract_test.go's installed-ceiling arm,
+      internal/cmd/execute_test.go's ceiling assertion) lift the limit
+      alone today and go red under an ambient or oracle GOMEMLIMIT
+      once the bump reads the fleet rule — they clear GOMEMLIMIT in
+      their TestMain before the process's first derivation;
+      internal/resident folds onto gofresh/resident (the resident-
+      package-folds-onto-gofresh issue) at the same bump.
 - [ ] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
       docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
@@ -2863,6 +2876,19 @@ in their repos.
       and the run's per-phase resident-set line on both faces in 307's
       words; acceptance a measured before/after — VmRSS at idle after a
       run-class request. Directly after stipulator 307 in the lane.
+      Rider (2026-10-06, at 308.A's review): the process memory limit
+      is NOT gomutant's own derivation — it is gofresh/resident's
+      fleet rule (InstallCeiling: the host's available memory halved,
+      1 GiB floor; an explicit operator GOMEMLIMIT replacing it, `off`
+      included — gofresh 51cac16), installed in the CLI's shared
+      preamble (every verb) and at serve start, with the bump that
+      reads gofresh/resident (change set B; the gap on REQ-mcp-
+      resident-set names it); B's acceptance measures the idle
+      resident set and the cold single-target run's wall time under
+      the ceiling (gctrace) beside the per-phase resident line;
+      gomutant's own pins clear GOMEMLIMIT before the first
+      derivation, as the clause's consumer obligation requires (the
+      oracle sets it on every test binary).
 - [x] 309. stipulator: the witness engine attests its execution model
       (stipulator `git log --all -- docs/issues/engine-call-attests-no-execution-model.md`
       — tugboat, 2026-09-29: every engine call attests neither
