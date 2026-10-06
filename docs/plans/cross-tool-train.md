@@ -3067,7 +3067,7 @@ in their repos.
       with the cross-repo replan at 319; the audit count restarts at
       zero.
       Dispositioned 2026-10-06: ten coherence findings, six consolidation candidates, the queue walked — 325 chartered (the reusable CI/release workflow; the trigger fired at 48bbe3a; the gate's toolchain pinned with a next-stable leg), 326 (the resident release: the own-set derivation + the children's budget), 327 (the gotool surface release: UnsetEnv, one judged-run memo, the ToolchainSampler over an EnvReader, the dead set); 297 merged into 315; 314 narrowed; 202/240/241/203/206/242 grown; the register: five retargets, a phrase corrected, two binding chores (the retired version-listing witness rebound off the toolchain-key clause; TestUnauditedSelectionDisablesAdmissions bound). Disputes D1–D5 accepted as argued.
-- [ ] 325. cross-repo: the reusable CI/release workflow (audit 316;
+- [x] 325. cross-repo: the reusable CI/release workflow (audit 316;
       reusable-ci-workflow's trigger fired at gofresh 48bbe3a — the
       race/records/workflow_run gate is the CI-contract change every
       copy must carry, and 321/323 were about to hand-copy it): one
