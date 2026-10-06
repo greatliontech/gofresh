@@ -1,3 +1,5 @@
+//go:build linux
+
 package resident
 
 import (
@@ -48,7 +50,7 @@ func TestMeminfoParsesTheTwoHostLines(t *testing.T) {
 // TestCeilingIsHalfTheFamilysRoom's.
 func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 6 << 30}, 0); got != 3<<30 {
-		t.Fatalf("Ceiling = %d, want half the available memory (%d)", got, 3<<30)
+		t.Fatalf("Ceiling = %d, want half the available memory (%d)", got, int64(3<<30))
 	}
 	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 600 << 20}, 0); got != CeilingFloor {
 		t.Fatalf("Ceiling under a short host = %d, want the floor %d", got, CeilingFloor)
@@ -95,10 +97,10 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 		t.Fatalf("HostMemory = %+v %v, want the synthetic meminfo's two lines", m, ok)
 	}
 	if c := InstallCeiling(); c != 2<<30 {
-		t.Fatalf("InstallCeiling = %d, want half the available memory (%d)", c, 2<<30)
+		t.Fatalf("InstallCeiling = %d, want half the available memory (%d)", c, int64(2<<30))
 	}
 	if got := installedCeiling(); got != 2<<30 {
-		t.Fatalf("the installed ceiling reads back as %d, want %d", got, 2<<30)
+		t.Fatalf("the installed ceiling reads back as %d, want %d", got, int64(2<<30))
 	}
 	// A later operation's derivation follows the host up as well as
 	// down — never pinned by an earlier derivation of its own.
@@ -106,7 +108,7 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c := InstallCeiling(); c != 12<<30 || installedCeiling() != 12<<30 {
-		t.Fatalf("a later operation's re-derivation installed %d (reads back %d), want %d", c, installedCeiling(), 12<<30)
+		t.Fatalf("a later operation's re-derivation installed %d (reads back %d), want %d", c, installedCeiling(), int64(12<<30))
 	}
 	// The operator's limit — the one in force before the first
 	// derivation — is never widened: a narrower process stays narrower
@@ -114,10 +116,10 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	resetWord()
 	debug.SetMemoryLimit(1 << 30)
 	if c := InstallCeiling(); c != 1<<30 || installedCeiling() != 1<<30 {
-		t.Fatalf("InstallCeiling over an operator's narrower limit installed %d (reads back %d), want the narrower %d kept", c, installedCeiling(), 1<<30)
+		t.Fatalf("InstallCeiling over an operator's narrower limit installed %d (reads back %d), want the narrower %d kept", c, installedCeiling(), int64(1<<30))
 	}
 	if c := InstallCeiling(); c != 1<<30 {
-		t.Fatalf("a second derivation under the operator's limit installed %d, want %d kept", c, 1<<30)
+		t.Fatalf("a second derivation under the operator's limit installed %d, want %d kept", c, int64(1<<30))
 	}
 	// A limit installed earlier that is wider than the derivation does
 	// not widen it: the derivation installs; an earlier word only ever
@@ -125,7 +127,7 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	resetWord()
 	debug.SetMemoryLimit(16 << 30)
 	if c := InstallCeiling(); c != 12<<30 || installedCeiling() != 12<<30 {
-		t.Fatalf("InstallCeiling under an earlier wider limit installed %d (reads back %d), want the derived %d", c, installedCeiling(), 12<<30)
+		t.Fatalf("InstallCeiling under an earlier wider limit installed %d (reads back %d), want the derived %d", c, installedCeiling(), int64(12<<30))
 	}
 	// The operator's explicit GOMEMLIMIT replaces the derivation
 	// whatever its size — wider or narrower — and `off` installs

@@ -23,6 +23,13 @@ concurrency:
 # plain, race and records tiers) succeeded on the pushed commit. The
 # inputs are this repository's own facts:
 #
+# pre vets the module under platforms besides the runner's linux, so a
+# platform-bound spelling reds the plain tier on the push that
+# introduces it: darwin (a stat's change time spelled Ctimespec),
+# openbsd (Ctim, off linux) and windows (no unix file at all). The
+# runner is amd64 and the fixture corpus's assembly rows are amd64, so
+# the loop checks platforms, never architectures.
+#
 # go-version pins the stock release the toolchain audit lists
 # (closure/toolchainaudit.go's go1.27.1 chain row) — never `stable`, which
 # would make a commit's releasability a function of Go's release
@@ -63,6 +70,8 @@ jobs:
     uses: greatliontech/actions/.github/workflows/go-gate.yml@main
     with:
       go-version: "1.27.1"
+      pre: |
+        for os in darwin openbsd windows; do GOOS=$os go vet ./...; done
       short: true
       short-timeout: 5m
       full-timeout: 30m
