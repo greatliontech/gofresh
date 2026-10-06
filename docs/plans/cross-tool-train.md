@@ -2863,8 +2863,9 @@ in their repos.
       Sequencing (the user's ruling 2026-10-04): B is the unit loop's
       vertical for discovery and lands directly after A, ahead of C and
       D, which follow gomutant 311.
-- [ ] 308. gomutant: the server's and the pass's resident set released
-      (gomutant docs/issues/mcp-server-retains-the-pass-resident-set.md
+- [x] 308. gomutant: the server's and the pass's resident set released
+      (gomutant `git log --all --
+      docs/issues/mcp-server-retains-the-pass-resident-set.md`
       — cerebro, 2026-09-22: an idle `gomutant mcp` at 2.29 GB RSS,
       23.7 h up, nothing in flight; the 233 rider promoted to its own
       chunk at the 2026-10-04 replan, the host baseline that leaves
