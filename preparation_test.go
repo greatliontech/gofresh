@@ -163,14 +163,18 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 // The toolchain-selection notice is announced at view construction —
 // where the Hasher resolved it, one go env read the engine's own
 // construction never pays — before any load, not first on the
-// precise-analysis path.
+// precise-analysis path. The selection is netgo: it selects net's
+// netgo-constrained files, audited bytes no listed row carries, on
+// every toolchain the audit lists (a tag constraining no std file,
+// such as the godst hook tag on a stock toolchain, selects the same
+// files and is admitted by content — no notice).
 func TestToolchainSelectionNoticeAnnouncedAtViewConstruction(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := writeViewModule(t, preparationSource)
 	var events []Progress
-	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }), WithBuildFlags("-tags=dst"))
+	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }), WithBuildFlags("-tags=netgo"))
 	if err != nil {
 		t.Fatal(err)
 	}

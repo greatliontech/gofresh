@@ -70,8 +70,10 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 	subject := Subject{Package: "example.com/attributed", Symbol: "Read"}
 	// netgo selects net's netgo-constrained files — audited bytes no
 	// walk read — on every listed toolchain: the one unaudited selection
-	// every host reaches.
-	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + ": net)"
+	// every host reaches; the closest chain is the toolchain's base row
+	// under cgo and its cgo0 row without (net's netgo file is the one
+	// key off either; plugin's stub is a second key off the base).
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + closestChainSuffix(t) + ": net)"
 	var cold Observability
 	for pass, want := range []int{1, 0} {
 		h, err := newAt(dir, "-tags=netgo")

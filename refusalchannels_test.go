@@ -57,8 +57,11 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		t.Skip("runs the engine over fixtures")
 	}
 	// netgo selects net's netgo-constrained files — audited bytes no
-	// walk read — on every listed toolchain.
-	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + ": net)"
+	// walk read — on every listed toolchain; the closest chain is the
+	// toolchain's base row under cgo and its cgo0 row without (net's
+	// netgo file is the one key off either; plugin's stub is a second
+	// key off the base).
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + closestChainSuffix(t) + ": net)"
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":           "module example.com/view\n\ngo 1.26\n",

@@ -40,14 +40,22 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	if h := hasher(); !h.SelectionAudited() {
 		t.Skipf("running toolchain unlisted (the canary covers it): %s", h.SelectionNotice())
 	}
+	// The race arms need cgo: the go command refuses a race listing
+	// without it.
+	cgo := cgoEnabled(t)
 	for _, tc := range []struct {
 		name  string
 		flags []string
+		cgo   bool
 	}{
-		{"race selects the same audited files", []string{"-race"}},
-		{"a tag no audited file is constrained on selects the same files", []string{"-tags=dup"}},
-		{"race with such a tag", []string{"-race", "-tags=dup"}},
+		{"race selects the same audited files", []string{"-race"}, true},
+		{"a tag no audited file is constrained on selects the same files", []string{"-tags=dup"}, false},
+		{"race with such a tag", []string{"-race", "-tags=dup"}, true},
 	} {
+		if tc.cgo && !cgo {
+			t.Logf("%s: skipped, cgo disabled", tc.name)
+			continue
+		}
 		if h := hasher(tc.flags...); !h.SelectionAudited() {
 			t.Errorf("%s: refused — %s", tc.name, h.SelectionNotice())
 		}
