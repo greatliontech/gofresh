@@ -251,7 +251,7 @@ external-input refusal, beside 138's bracket declarations) — then
 91, 92, 96, then 129, 130, 139, 131, then the bldc stipulator band 142, 143, 144, 145 in that order, then the precision/discharge band
 116–125 and 98–101 (with their recorded rides) in field-mass order at
 triage, then the 125 histogram's charters 179–181 in that order (their
-recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 316 (2026-10-06): 325 (the reusable CI workflow, cross-repo) → 326 (the resident release) → 327 (the gotool surface release) → 292 (a release) → 300 (a release) → 315 (the machine walk with 297's corpus; a release) → 314 (a release) → 202 (design, autonomous) → 191 (a release) → 295 (a release) → 240 → 241 → 260 → 203 → 204 → 206 → 192 → 193 → 255 → 242 and 243 together → 175 → 102; 297 merged into 315; 303 closed by verdict; 199 dissolved; gomutant's order after audit 317 (2026-10-06): 323 (the CI gate) → 302 → 187 → 324 → 313 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 284 dissolved (its campaign half 302's close); 210 dissolved (done at 246/278); stipulator's order after audit 318 (2026-10-06): 321 (the CI gate) → 290.2b (the v0.109.x bump, one toolchain read, the resident fold) → 299 → 293 → 298 → 322 (after gofresh 314) → 290r (behind gofresh 292/297/300) → 270 → 226 → 249 → 185 → 225 and 248 together → 228 → 184 (behind gofresh 300) → 176 → 238 (behind gofresh 241); 97 un-chartered; pew's order after audit 288 (2026-09-29): 291 (the bump, when gofresh 281/292/297/300 have released — ahead of 252, which builds over gofresh 265's setter the v0.105.1 pin lacks) → 174 → 252 → 232 → 276 → 177 → 15 (after gofresh 175/102) → 127; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fourth re-audit band (285–288, closed 2026-09-29; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, design chunks autonomous, 95 last — gomutant 283 → 301 → 284 → gofresh 281 (release) → 292 (release) → 297 (release) → 300 (release) → 303 (release) → stipulator 299 → 293 → 298 → 290 (bump) → [pew 291 lands as pew's performance-evidence plan chunk 2 on the other machine; pew's tail re-chartered at 319] → gofresh 202 → 191 (release) → 295 (release) → then the tails round-robin in each repo's recorded order: gomutant 304 → gofresh 305 (release) → gomutant 306 → stipulator 290.2a (the compile-breaking pin bump, landed cbc9908) → stipulator 307 (A, then B — the unit loop's vertical for discovery; C and D after 311) → gomutant 311 (the proof pass per group) → stipulator 309 → gofresh 310 (release; the resident sampler's fleet home rides it) → gomutant 308 → gomutant 312 (the server writes nothing in the repo) → the fifth re-audit band 316–319 (gofresh, gomutant, stipulator, pew; the replan at 319; the count restarts at zero — twelve whole chunks landed since 285–288) → gomutant 313 (the repo declares its own facts) → gofresh 314 (release) → 315 (release) → stipulator 270 → pew 174 → gofresh 240 → gomutant 302 → stipulator 226 → pew 252 → gofresh 241 → gomutant 269 → stipulator 249 → pew 232 → gofresh 260 → gomutant 209 → stipulator 185 → pew 276 → gofresh 203 → gomutant 268 → stipulator 225+248 → pew 177 → gofresh 204 → gomutant 267 → stipulator 228 → pew 15 → gofresh 206 → gomutant 258 → stipulator 184 → pew 127 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 187, 188, 233, 294; 95 last
+recorded field mass), then 182 (chartered from the 180 re-measurement), then Band F 158–178 in its listed order with 183 directly after 170 (triage 2026-09-09), the re-audit band 194–197 directly after 183 (its replan re-sequences everything below), and 184–193 after 178 (175 is a design chunk opening with the user); gofresh's order after audit 316 (2026-10-06): 325 (the reusable CI workflow, cross-repo) → 326 (the resident release) → 327 (the gotool surface release) → 292 (a release) → 300 (a release) → 315 (the machine walk with 297's corpus; a release) → 314 (a release) → 202 (design, autonomous) → 191 (a release) → 295 (a release) → 240 → 241 → 260 → 203 → 204 → 206 → 192 → 193 → 255 → 242 and 243 together → 175 → 102; 297 merged into 315; 303 closed by verdict; 199 dissolved; gomutant's order after audit 317 (2026-10-06): 323 (the CI gate) → 302 → 187 → 324 → 313 → 269 → 209 → 268 → 267 → 258 → 245 → 212 → 216 → 218 → 217 → 220 → 214 → 219 → 254 → 296 → 256 → 188 → 233 → 294 → 95 last when its SDK prerequisite lands; 284 dissolved (its campaign half 302's close); 210 dissolved (done at 246/278); stipulator's order after audit 318 (2026-10-06): 321 (the CI gate) → 290.2b (the v0.109.x bump, one toolchain read, the resident fold) → 299 → 293 → 298 → 322 (after gofresh 314) → 290r (behind gofresh 292/297/300) → 270 → 226 → 249 → 185 → 225 and 248 together → 228 → 184 (behind gofresh 300) → 176 → 238 (behind gofresh 241); 97 un-chartered; pew's order after audit 319 (2026-10-06): via pew's performance-evidence plan chunks 2–8 on the other machine (291, 174, 127, 15, 177 dissolved into them; the handoff doc names every rider); after that plan closes, 320 → 252r → 232r → 276r; 173 dissolved (landed at 275.C); THE CROSS-REPO LANE after the fifth re-audit band (316–319, closed 2026-10-06; the audit count restarts at zero): soundness and conformance first, a producer's release before the consumer bump that reads it, pew's slots deferred to the other machine's plan, design chunks autonomous, 95 last — cross-repo 325 (the reusable CI/release workflow; opens with the user's confirmation of the org repo) → gomutant 323 (the CI gate, the call) → stipulator 321 (the CI gate, the call) → gofresh 326 (the resident release) → 327 (the gotool surface release) → stipulator 290.2b (the v0.109.x bump: one toolchain read, the resident fold) → gofresh 292 (release) → 300 (release) → stipulator 299 → 293 → 298 → [pew: via performance-evidence chunk 2 (the train's 291 with its handoff riders) and chunk 3 (the loader's legacy lines) on the other machine] → gomutant 302 → 187 → 324 (the 281 adoption) → 313 → gofresh 315 (the machine walk with 297's corpus; release) → 314 (release) → stipulator 322 (after 314) → 290r (behind 292/297/300) → gofresh 202 (design, autonomous) → 191 (release) → 295 (release) → stipulator 270 → gofresh 240 → stipulator 226 → [pew: via performance-evidence chunk 4 (174's verdict path, 127, the two covered gaps' anchors)] → gofresh 241 → gomutant 269 → stipulator 249 → [pew: via performance-evidence chunks 5–8 (177, 15, the metric registry, ab's git stages)] → then the tails round-robin in each repo's recorded order: gofresh 260 → gomutant 209 → stipulator 185 → gofresh 203 → gomutant 268 → stipulator 225+248 → gofresh 204 → gomutant 267 → stipulator 228 → gofresh 206 → gomutant 258 → stipulator 184 → gofresh 192 → gomutant 245 → stipulator 176 → gofresh 193 → gomutant 212 → stipulator 238 → gofresh 255 → gomutant 216 → gofresh 242+243 → gomutant 218 → gofresh 175 → gomutant 217 → gofresh 102 → gomutant 220, 214, 219, 254, 296, 256, 188, 233, 294; after performance-evidence closes, pew 320 → 252r → 232r → 276r; 95 last
 (ecosystem-blocked, re-audited at open), with the
 design chunks 15 (102 inside it), 97, and 127 opening with the user
 and scheduled at the user's convenience.
@@ -1043,7 +1043,7 @@ in their repos.
       the doc it cited was deleted at 275); the residue (§12's purpose
       column; the root command's hand-written Short outside
       visitLeafVerbs) is 232's.
-- [ ] 174. pew: `ab --out` per package and one verdict path (pew
+- [x] 174. pew: `ab --out` per package and one verdict path (pew
       docs/issues/ab-out-multi-package.md, verdict-path-consolidation.md)
       — one artifact per package under a derived path, its encoding
       (pew-ab: 1, dirty, pkg, pew-ab-ref, pew-ab-side) stated in §12;
@@ -1087,6 +1087,7 @@ in their repos.
       verdict is unexplainable by pew's own --explain), the rung
       stated once; admission reads the registry's validity? column
       (232 adds it). Heads pew's tail after the bump.
+      Dissolved (2026-10-06, audit 319): the verdict path, the row decode, the vouch threading and the explain row per validity key → performance-evidence chunk 4; `ab --out` per package and the artifact's keys → chunk 7 (the handoff doc).
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
       clause-structured-whole-claims.md; user ruling 2026-09-07) — a
@@ -1107,7 +1108,7 @@ in their repos.
       (internal/coverage.TestPolicyDefaults) — the exact false-green
       channel 176 closes; it follows 270 for scale only.
       Rider (2026-10-06, audit 318): bindings-per-requirement-file-derivation lands here (its Lands said so; the entry did not) — cerebro's hand-move on every supersede.
-- [ ] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
+- [x] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
       mcp-surface.md; user ruling 2026-09-07) — the progress channel half
       landed with REQ-pew-progress (every verb's 30 s cadence line); the
       MCP surface itself waits for a driving agent to appear; doc
@@ -1115,6 +1116,7 @@ in their repos.
       Audit 288 (2026-09-29): stands — --json on status and stat only;
       §12's 'where one exists' reads as intent; the MCP half's trigger
       is checkable.
+      Dissolved (2026-10-06, audit 319): `--json` and parity → performance-evidence 8.1/5.2; the MCP half keeps mcp-surface's checkable trigger.
 
 - [x] 178. stipulator: policy-declared scratch namespaces (the consumer
       half of the in-module scratch discharge, chunk 100's verdict) — a
@@ -1972,6 +1974,7 @@ in their repos.
       RepositoryState.Root, run.Demux, ReproducibleAtWithin); C7 the
       audit-note renderers; the CommandDir = gotool.Coordinate copy
       (286 C1); A6 sourceBenchmarks vs selectedBenchmarks one rule.
+      Narrowed (2026-10-06, audit 319): the git stages → performance-evidence 7, environment-normalized-once → 2, the metric set and audit notes → 5; the residue — seven containment spellings, two module resolvers, the vestige set (ExecuteBinary, recordingFromPath, run.Execute, gotool.RunIn, gitblob.State, checkOne, equalExcept's unused parameter), the stretch literals, the writer census, the declared-benchmarks rule, stat's partial pkgMeta — stands after that plan closes.
 - [x] 253. pew: the gofresh bump after 239's and 205's releases — the
       go-tool consumer arm (pew/internal/gotool's six importers and its
       divergent dir policy onto gofresh's exported policy with 239's
@@ -2347,6 +2350,7 @@ in their repos.
       eight bare-engine pins bypassing buildEngine; the generator
       VEHICLE stated at open (rapid is not in pew's go.mod — extend
       the seeded-loop pattern, or a dependency ask).
+      Narrowed (2026-10-06, audit 319): liftOversizedConfig no longer exists (deleted at 230); performance-evidence 1 added the one Fuzz (native fuzzing, no dependency) and 3.2 the long-line regressions; the residue — §9's corruption grammar, the ledger round trip, the conditions grammar, the pin ladder, the eleven uncited ids, the self-oracle pins (guidance_test.go, knobs_test.go), the six bare gofresh.New() engines in tests — stands after that plan closes.
 - [x] 277. gomutant: a delta run's preparation scales with the delta
       (pb's second field report at 257's close: over a 308-record document a one-target and
       a 73-target `--changed` run spend the same first quarter hour — the
@@ -2532,7 +2536,7 @@ in their repos.
       internal/resident folds onto gofresh/resident (the resident-
       package-folds-onto-gofresh issue) at the same bump.
       Split (2026-10-06, audit 318): 290.2b lands NOW — the bump to gofresh v0.109.x (014efbd deleted closure.ToolchainSelectionNotice and AuditedToolchainSelection: the notice through the pass reader, ToolchainSelectionNoticeResolved); one toolchain read (the snapshot's GOVERSION feeds provenance, the per-member check and the selection notice; provenance.go's discarded Check sample and its per-member re-sample delete — gofresh's provenance-sample-and-the-pass-snapshot-are-two-reads); internal/resident folded onto gofresh/resident (the explicit-GOMEMLIMIT word, Words/Suffix/ByteWord, one walk per transition; the six duplicated tests delete; gofresh refuses a malformed memory line where stipulator skipped it — declared); the spec's ceiling sentence amended to the fleet rule and REQ-policy-explicit's 'only sources of execution bounds' universal qualified by the admission's memory term (307.C); the MCP sampler per operation; the server derives the ceiling only at the zero-in-flight transition (gomutant 308's shape) until the own-set derivation lands in gofresh 314; the two ceiling pins clear GOMEMLIMIT (their TestMains); resolver-child-kill-orphans retargeted to the first Runner.Program spawn. The remainder (292's clause re-key, 297's walk, 300's lint) stays behind gofresh 292/297/300.
-- [ ] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
+- [x] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
       docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
       Rider (2026-09-29 replan): gofresh 292's clause re-key, as at 290.
@@ -2560,6 +2564,7 @@ in their repos.
       per verb invocation on every ProducerIngest beside its sampler;
       any GOVERSION parse folds onto
       gotool.LanguageSeries/ParseGoVersion.
+      Dissolved (2026-10-06, audit 319): lands as pew's performance-evidence plan chunk 2 on the other machine; its riders in pew docs/issues/train-riders-for-the-performance-evidence-plan.md.
 - [ ] 292. gofresh: an in-module refused path's clause spelled
       module-relative (gofresh
       docs/issues/refused-in-module-path-spelled-absolute.md — derived
@@ -3147,8 +3152,15 @@ in their repos.
       admission. After gofresh 314 (the own-set derivation).
 
 
-- [ ] 319. pew: the fifth re-audit band's pew audit (as 316); closes the
+- [x] 319. pew: the fifth re-audit band's pew audit (as 316); closes the
       band with the cross-repo lane re-sequenced.
+      Dispositioned 2026-10-06 — BAND R5 CLOSED: twelve coherence findings, seven consolidation candidates, the queue walked — 291, 174, 127, 15 and 177 dissolved into pew's performance-evidence plan (the handoff doc carries their riders), 252, 232 and 276 narrowed to residues after that plan closes, 320 chartered (the residual bump), A3's circular remedy (the train's 230 anchor) handed to that plan's chunk 3, A5's gomutant half filed. The cross-repo lane is in the order sentence; the audit count restarts at zero.
+- [ ] 320. pew: the residual bump (audit 319): the gofresh release
+      pew's performance-evidence chunk 2 predates — 292's clause re-key,
+      297's dst walk, 300's guidance lint with its pew half (the five
+      derived defaults 275 spelled in prose, which the lint must see)
+      — taken after that plan closes, before 252r/232r/276r.
+
 
 - [x] 311. gomutant: the observation-proof pass per group — the vertical
       (the user's ruling 2026-10-04: the unit loop's deviations are the
@@ -3452,6 +3464,7 @@ in their repos.
       stand (§11's git-binary sentence, --explain's stream, the
       reader-injected pew-format-invalid key, REQ-pew-derived-state's
       payload list, §§1–12 ids, the purpose column).
+      Narrowed (2026-10-06, audit 319): the format sentences → performance-evidence 3, the validity column and the strategy class's origin → 4, §11's git sentence and subprocess list → 7, the purpose-column doc → 8.2; the residue — `--explain`'s stream, the `pew-format-invalid` key, REQ-pew-derived-state's payload list, the REQ home rule — stands after that plan closes.
 
 ## Band E — design chunks (open with the user)
       (264: grows — states which files a package's benchmarks are (§4's B,
@@ -3503,7 +3516,7 @@ in their repos.
       cannot live in generated code — a generated-package admission
       keyed on the generator's marker, or the vouch extended in-module
       under an attestation).
-- [ ] 15. pew: profile capture and attribution as recording
+- [x] 15. pew: profile capture and attribution as recording
       companions (pew docs/issues/profile-capture-attribution.md and
       per-arm-noise-floors.md) — --profile captures per-arm cpu (and
       mem where B/op is claimed) evidence under the recording's
@@ -3515,6 +3528,7 @@ in their repos.
       lineage's same-closure recordings, the bar named per row); 102
       lands inside this chunk's arc, after gofresh 175.
       Audit 288 (2026-09-29): stands (after gofresh 175/102).
+      Dissolved (2026-10-06, audit 319): profiles → performance-evidence chunks 6/7, per-arm noise floors → 8.1 (sound on the package closure today; gofresh 102 only refines them).
 - [ ] 102. gofresh: per-subject sliced closures — Fingerprint gains
       SlicedClosure (declaration-level hash over the subject's
       attributed-reachable set; widens to the maximal hash where
@@ -3526,7 +3540,7 @@ in their repos.
       (234: after 175 — both derive a subject-scoped hash over the
       attributed-reachable set; 175 decides whether that identity is
       semantic and how it composes into IdentityStrategy.)
-- [ ] 127. pew: observed-fingerprint recording path (pew
+- [x] 127. pew: observed-fingerprint recording path (pew
       docs/issues/observed-fingerprint-recording-path.md) —
       plain-Capture recordings leave every true-external-effect
       benchmark permanently unverifiable; adopt CaptureObserved per
@@ -3542,6 +3556,7 @@ in their repos.
       has no rows for, exempted 'recomputed at judge time, never
       served' — §7.8's retiring sentence): two omittable rows + the
       format bump + that exemption flipped.
+      Dissolved (2026-10-06, audit 319): → performance-evidence chunk 4, with the format bump DERIVED there, never assumed (§5's omittable class reads an absent row as today's behaviour).
 
 - [ ] 175. gofresh: subject-scoped closure identity (design — derived
       2026-09-29: the identity is the canonical member form over the
