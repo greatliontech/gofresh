@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [ceiling-derivation-excludes-the-callers-own-set](ceiling-derivation-excludes-the-callers-own-set.md) | the fleet ceiling derives from available memory, which excludes the deriving process's own resident set — a re-derivation under a held working set installs a ceiling below it (a throughput collapse under the collector) | cross-tool train chunk 314 (a release, after 313) |
 | [cold-analysis-pass-program-retention](cold-analysis-pass-program-retention.md) | a cold pass keeps every program it loaded for its life (0.54 GB warm vs 3.47 GB cold for one gomutant target; 8.4 GB at campaign scale) — the live set bounded by the current subject's need | cross-tool train chunk 314 (a release, after 313) |
 | [generated-proto-discharge-single-subject-only](generated-proto-discharge-single-subject-only.md) | the generated-proto descriptor cluster discharges under the single-subject attestation alone, though its argument (a content-invariant fill under the audited runtime) binds no execution model — tugboat's 100 package-process witnesses refused on one descriptor | cross-tool train chunk 202 (filed from stipulator 309's measurement) |
 | [explain-no-chain-for-a-dependency-culprit](explain-no-chain-for-a-dependency-culprit.md) | explain re-derives the view's own packages with hooks, so a culprit marked in dependency facts answers "not a culprit" while the check refuses on it | cross-tool train chunk 241 (filed from stipulator 309's measurement) |
