@@ -182,7 +182,11 @@ not run at a chunk's close. They run only at these named points: (1)
 none before a release — a release's gate is CI's plain, race and
 records tiers on the pushed commit, the tag waiting for them (amended
 2026-10-02; the local self-check is no longer a release's
-precondition); (2) at a band's close, over the settled tree; (3) where
+precondition), the tiers one reusable workflow in
+greatliontech/actions every repository calls with its own inputs —
+its toolchain pinned to a listed release, never `stable` — so a
+change to the gate's contract lands in every repository at once
+(2026-10-06, chunk 325); (2) at a band's close, over the settled tree; (3) where
 a chunk's charter names its own self-host verdict (141, 155 — and
 175's close, where the closure identity becomes subject-scoped and a
 gofresh check turns warm); (4) on the fleet sweep's schedule, in idle
@@ -291,8 +295,8 @@ code moves.
       contrary claim corrected) and per test wherever a test asserts
       memo state; `t.Parallel()` on the child-process-bound
       fixture tier; a Taskfile with `test:short`, `test`, `vet`
-      (gofresh is the one repo without one — folds gofresh
-      docs/issues/reusable-ci-workflow.md's Taskfile half); CI runs
+      (gofresh is the one repo without one — folds the Taskfile half of
+      `git log --all -- docs/issues/reusable-ci-workflow.md`); CI runs
       the full tier at its measured budget. Measurement: none.
 - [x] 151. gomutant: self-test partition — `task test:short`
       (`go test -short ./...`, the 179 existing gates: ~436 of 615

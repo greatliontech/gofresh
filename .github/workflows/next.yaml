@@ -1,0 +1,31 @@
+name: Next
+
+# The early-warning legs (greatliontech/actions go-next.yml), their own
+# workflow: next-rc builds and tests under a published Go release
+# candidate (a candidate gofresh does not yet list reds this loudly for
+# the whole freeze window), next-stable runs the fast tier — the audit
+# canary and every fast pin — under the current stable release, so a
+# point release that moves the audited bytes reds here as soon as it is
+# published while the gate stays on its pinned listing. Neither is a
+# release gate: a red here must never block a release of the tree as
+# it stands (the CI workflow's tiers are the gate release.yaml waits
+# for). Same triggers as CI.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  next:
+    uses: greatliontech/actions/.github/workflows/go-next.yml@main
+    with:
+      short: true
+      short-timeout: 5m
+      full-timeout: 30m
+      job-minutes: 60

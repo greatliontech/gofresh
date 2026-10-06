@@ -18,132 +18,48 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 
-# GOTOOLCHAIN=local pins each leg to the toolchain it installed: the
-# legs here must actually run stable (the next-rc leg, in its own
-# workflow, must actually run the candidate) — auto would silently
-# substitute the go.mod-resolved toolchain and measure nothing.
-#
 # This workflow IS the release gate: release.yaml cuts a tag only after
-# every job here succeeded on the pushed commit.
+# every job of the fleet's gate (greatliontech/actions go-gate.yml: the
+# plain, race and records tiers) succeeded on the pushed commit. The
+# inputs are this repository's own facts:
+#
+# go-version pins the stock release the toolchain audit lists
+# (closure/toolchainaudit.go's go1.27.1 chain row) — never `stable`, which
+# would make a commit's releasability a function of Go's release
+# calendar; a point release that moves the audited bytes reds the
+# next-stable leg (next.yaml) first, and the listing lands before the
+# pin moves.
+#
+# full-timeout: the suite budget measured 2026-08-27 on the 24-core dev
+# host under upstream stock go1.27.0 (fork-vs-stock measured at n=1
+# per arm: noise-class at that length): slowest package closure 544s,
+# whole run 555s; headroom ~3.3x. Core count is a measured non-factor
+# (24 -> 4 cores cost ~4% on the child-process-serialized workload); a
+# cold cache lands on the job ceiling, not this flag. An overrun is a
+# real finding — re-measure before raising the number.
+#
+# race-timeout mirrors the policy's own race invocation
+# (.stipulator/policy.textproto: a 60m per-binary cap, measured
+# 2026-08-28 at 36m for the whole closure unit width-capped at 2 on the
+# 24-core host; the race detector measures ~4x on the observability
+# proofs — CPU-bound and in-process, so core count IS a factor here).
+# On a 4-vCPU/16 GB runner the closure package alone is estimated at
+# 50–75 minutes plus a cold -race build of ~130 binaries; race-p 2
+# keeps two race binaries' heaps inside the runner's memory. The first
+# run of the race job was the measurement (2026-10-03: 54m26s).
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - run: go build ./...
-      - run: go vet ./...
-      # The fast tier first: the engine's code without the engine over a
-      # tree. Every fixture-driven run and observability proof is
-      # -short-gated, so this step fails on a code defect before the
-      # minutes-class tier below spends its budget. Measured 2026-09-02
-      # on the 24-core dev host, warm build cache: ~8s wall for root +
-      # closure. On a cold runner cache the step is build-bound (130
-      # test binaries, 132 of them closure/fixtures packages) — that
-      # build is reused by the full step, so it is moved, not added.
-      - run: go test -short ./... -count=1 -timeout=5m
-      # Suite budget measured 2026-08-27 on the 24-core dev host under
-      # UPSTREAM stock go1.27.0 (fork-vs-stock measured at n=1 per arm:
-      # -2.1..-4.4% on the three long suites, +19% on pew's 83s arm —
-      # noise-class at that length; no arm approaches its headroom): slowest package closure 544s, whole run 555s. Headroom over that: ~3.3x.
-      # Core count is a measured non-factor too (24 -> 4 cores cost
-      # ~4% on the dominant child-process-serialized workload, probed
-      # 2026-08-27); per-core runner speed is asserted within the
-      # headroom, and a cold cache lands on the job ceiling, not this
-      # flag. A budget overrun is a real finding (a hang, or a suite
-      # outgrowing its budget) — re-measure before raising the number.
-      # The race-mode witness budget for the same suite lives at
-      # .stipulator/policy.textproto's -test.timeout with its own
-      # measured curve — when the closure proofs grow, re-measure both.
-      - run: go test ./... -count=1 -timeout=30m
-
-  # The race tier: every witness the stipulator policy binds runs under
-  # the race detector on every push, off the shared development
-  # machine (the plain tier above and the records tier below are the
-  # gate's other halves). The budget mirrors the policy's own race
-  # invocation (.stipulator/policy.textproto: a 60m per-binary cap,
-  # measured 2026-08-28 at 36m for the whole closure unit width-capped
-  # at 2 on the 24-core host; the race detector measures ~4x on the
-  # observability proofs — CPU-bound and in-process, so core count IS a
-  # factor here, unlike the plain tier's child-process-serialized
-  # work). On a 4-vCPU/16 GB runner the closure package alone is
-  # estimated at 50–75 minutes plus a cold -race build of ~130
-  # binaries; -p 2 keeps two race binaries' heaps (5–10x the plain
-  # heap) inside the runner's memory. The FIRST run of this job is the
-  # measurement — record its wall and peak here; an overrun afterwards
-  # is a real finding (a hang, or a suite outgrowing its budget):
-  # re-measure before raising the number. The race build is cached
-  # under its own key: setup-go's cache is keyed on go.sum alone and
-  # the plain job saves it first, so the race job would cold-build on
-  # every run otherwise.
-  race:
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: false
-      # A key per commit: a cache saves only on a miss, so a key fixed
-      # per go.sum would freeze the build cache at the first run and
-      # cold-build every later source change. Only main SAVES (a
-      # race-mode build cache is GB-class; one entry per PR push would
-      # press the repository's 10 GB cache limit and evict the plain
-      # tier's setup-go cache); PR runs restore from main's entries.
-      - uses: actions/cache/restore@v4
-        id: race-cache
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            race-${{ runner.os }}-
-      - run: go test -race -p 2 ./... -count=1 -timeout=100m
-      - uses: actions/cache/save@v4
-        if: github.ref == 'refs/heads/main'
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ steps.race-cache.outputs.cache-primary-key }}
-
-  # The records tier: the requirement corpus compiles and every binding
-  # resolves to a current symbol at a consented pin — the half of the
-  # release gate the test tiers cannot see (289's record: four releases
-  # went out with a dangling binding and a deleted proof, found by the
-  # fleet sweep a week later). Records-only: no witness executes here
-  # (the race and plain tiers above are the execution); stipulator is
-  # pinned to a release so a corpus-format move is a deliberate bump.
-  records:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - run: go install github.com/greatliontech/stipulator/cmd/stipulator@v0.66.1
-      - run: stipulator compile
-      - name: Every binding current and resolved
-        shell: bash
-        run: |
-          stipulator verify --no-test --view bindings > bindings.txt
-          if grep -E 'REQ-' bindings.txt | grep -vE ' current +resolved ' | grep -q .; then
-            echo "bindings not current and resolved:" >&2
-            grep -E 'REQ-' bindings.txt | grep -vE ' current +resolved ' >&2
-            exit 1
-          fi
-          grep -cE ' current +resolved ' bindings.txt
+  gate:
+    uses: greatliontech/actions/.github/workflows/go-gate.yml@main
+    with:
+      go-version: "1.27.1"
+      short: true
+      short-timeout: 5m
+      full-timeout: 30m
+      test-job-minutes: 60
+      race: true
+      race-p: 2
+      race-timeout: 100m
+      race-job-minutes: 150
+      records: true
+      stipulator-version: v0.66.1

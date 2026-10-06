@@ -1,24 +1,14 @@
 name: Release
 
-# The release gate: a tag is cut only after the CI workflow — the plain,
-# race, and records tiers — succeeded on the pushed commit; a push whose
-# CI is red or still running produces no release, and the gate cannot be
-# skipped on the automated path (a manual tag is outside it). Three
-# rules keep the tag on the commit CI judged: (1) the event is a PUSH
-# run of THIS repository (a fork's branch named main runs CI as a pull
-# request and would otherwise fire this with the app's secrets); (2)
-# releases serialize and a superseded commit releases nothing — when
-# origin/main has moved past the judged commit, the newer commit's own
-# green CI run releases, so two runs finishing out of order never cut a
-# version over older content with the whole history as its notes
-# (semrel takes the highest tag in the repo and walks back from HEAD to
-# it); the concurrency group holds one running and one pending run, so
-# a third arrival cancels the pending one — if the tip's run was the
-# one cancelled, re-run it by hand or let the next green push release
-# the missed commits with its own (fail-safe: no wrong tag is cut);
-# (3) semrel's target is the judged commit itself (SEMREL_BRANCH names
-# it), never the branch tip, so a commit pushed during the race tier's
-# hour is not tagged on an earlier commit's verdict.
+# The release gate: a tag is cut only after the CI workflow — the
+# fleet's gate (greatliontech/actions go-gate.yml: the plain, race and
+# records tiers) — succeeded on the pushed commit. The rules that keep
+# the tag on the judged commit live in the called workflow
+# (go-release.yml): a push run of this repository, the tip-of-main
+# check, semrel targeting the judged commit. This caller supplies the
+# trigger, the serializing group (one running and one pending run; a
+# third arrival cancels the pending one — fail-safe: no wrong tag is
+# cut), the releaser app's secret and the write permission.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -32,42 +22,7 @@ concurrency:
 
 jobs:
   release:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+    uses: greatliontech/actions/.github/workflows/go-release.yml@main
     permissions:
       contents: write
-    env:
-      SEMREL_BRANCH: ${{ github.event.workflow_run.head_sha }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-          fetch-tags: true
-      - name: Release only the current tip of main
-        id: tip
-        shell: bash
-        run: |
-          git fetch origin main
-          if [ "$(git rev-parse origin/main)" != "${{ github.event.workflow_run.head_sha }}" ]; then
-            echo "superseded: origin/main moved past the judged commit; its own CI run releases"
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/create-github-app-token@v2
-        if: steps.tip.outputs.release == 'true'
-        id: app-token
-        with:
-          app-id: ${{ vars.GLT_RELEASER_APP_ID }}
-          private-key: ${{ secrets.GLT_RELEASER_APP_KEY }}
-
-      - uses: greatliontech/semrel@main
-        if: steps.tip.outputs.release == 'true'
-        with:
-          release: true
-          releaseToken: ${{ steps.app-token.outputs.token }}
+    secrets: inherit
