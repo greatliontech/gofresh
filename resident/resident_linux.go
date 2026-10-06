@@ -46,11 +46,11 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 	if err != nil {
 		return Set{}, nil, false
 	}
-	rss, peak, ok := parseStatus(string(status))
+	own, ok := parseStatus(string(status))
 	if !ok {
 		return Set{}, nil, false
 	}
-	set := Set{ProcessBytes: rss, ProcessPeakBytes: peak}
+	set := Set{ProcessBytes: own.rss, ProcessPeakBytes: own.peak, ProcessHeldBytes: own.held, HeldKnown: own.heldKnown}
 	trees := map[int]uint64{}
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -104,7 +104,7 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 			if err != nil {
 				return Set{}, nil, false
 			}
-			rss, peak, leaving, ok := parseDescendantStatus(string(text))
+			st, leaving, ok := parseDescendantStatus(string(text))
 			if leaving {
 				// No memory line at all: the process has released
 				// its memory on its way out — not counted.
@@ -116,9 +116,10 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 				return Set{}, nil, false
 			}
 			set.Descendants++
-			set.DescendantsBytes += rss
-			set.DescendantPeakBytes = max(set.DescendantPeakBytes, peak)
-			trees[tree] += rss
+			set.DescendantsBytes += st.rss
+			set.DescendantsHeldBytes += st.held
+			set.DescendantPeakBytes = max(set.DescendantPeakBytes, st.peak)
+			trees[tree] += st.rss
 		}
 	}
 	return set, trees, true

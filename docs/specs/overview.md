@@ -292,8 +292,28 @@ direct child's subtree attributed whole to that child — in one walk of
 the process table; beside it the host's memory (its total and what it
 has available for new allocations) and the soft ceiling a consumer
 derives from the host's reading and installs as its runtime's memory
-limit: half of what the host had available, floored at one gibibyte,
-never above a limit a caller installed before the first derivation (that
+limit: half of the room the host has for the process's family — what
+the host has available plus what the family (the process and its
+descendants) holds that the host cannot reclaim at the derivation, its
+anonymous and shared-memory pages (a file-backed page is the page
+cache's, counted in the host's availability already), so the family's
+own pages never count as the host's unavailability and a later
+derivation moves with the host's other tenants and with the family's
+memory the walk cannot see — its unmapped tmpfs files, the kernel's
+allocations on its behalf, which read as the host's — never with the
+family's own held pages — floored at one gibibyte, with the other half
+stated beside it as the children's budget (the room less the ceiling:
+what the consumer may hand the processes it spawns, in total, from the
+same reading — a consumer admits a spawn against the budget less the
+children's held set), taken from ONE reading (the host's memory and the
+walk together: where either is absent, or the walk read no held set —
+a kernel before 4.5 states none, and the reading then stands with the
+held set unknown — neither the ceiling nor the budget derives and the
+limit in force stands; a host with nothing available is a reading, and
+the room is then what the family holds), never above a limit a caller
+installed
+before the first derivation
+(that
 limit taken once per process, so a later derivation rises or falls with
 the host and is never judged against an earlier derivation of its own)
 — unless GOMEMLIMIT is present and non-empty in the environment at the
@@ -308,11 +328,13 @@ the host does not answer — a platform
 without the /proc form, an unlistable table, a descendant whose status
 exists but cannot be read — the reading is absent, never zero or
 partial: a consumer that gets no reading derives no memory term,
-installs no ceiling, and says so by carrying none. Not counted, voiding
-nothing: a descendant whose files vanish between the listing and the
-read (exited), one whose stat cannot be read or does not parse (hidden
-by the table, or leaving), and a live one whose status carries no memory
-line at all (its memory released on its way out) — a status carrying a
+installs nothing new (the limit in force stands), and says so by
+carrying none. Not counted, voiding nothing: a descendant whose files
+vanish between the listing and the read (exited), one whose stat cannot
+be read or does not parse (hidden by the table, or leaving), and a live
+one whose status carries no resident line at all (its memory released
+on its way out) — the room then lacks what such a descendant holds, so a
+derivation over the reading errs low, never high; a status carrying a
 memory line the sampler cannot read whole voids the reading like one it
 cannot read. Consumers compose their own policies over the readings (a
 spawn admission's memory term, a server's idle release); the sampler

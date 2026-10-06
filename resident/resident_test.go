@@ -13,25 +13,35 @@ import (
 )
 
 // TestStatusParsesTheTwoResidentLines pins the status reading over
-// synthetic text: VmRSS and VmHWM in kibibytes become bytes, other lines
-// are ignored, and a missing or malformed line yields no reading rather
-// than a zero one (the reading is absent, never
-// zero (REQ-fresh-resident-readings), where the host does not answer).
+// synthetic text: VmRSS and VmHWM in kibibytes become bytes, the held
+// set is RssAnon plus RssShmem and known exactly when both are stated
+// (a kernel before 4.5 states neither: the reading stands, the held
+// set unknown), other lines are ignored, and a missing or malformed
+// resident line — or one held line without the other — yields no
+// reading rather than a zero one (the reading is absent, never zero
+// (REQ-fresh-resident-readings), where the host does not answer).
 func TestStatusParsesTheTwoResidentLines(t *testing.T) {
-	rss, peak, ok := parseStatus("Name:\tstipulator\nVmPeak:\t 9999 kB\nVmHWM:\t  1004 kB\nVmRSS:\t   75 kB\nThreads:\t12\n")
-	if !ok || rss != 75*1024 || peak != 1004*1024 {
-		t.Fatalf("parseStatus = %d %d %v, want 76800 1028096 true", rss, peak, ok)
+	st, ok := parseStatus("Name:\tstipulator\nVmPeak:\t 9999 kB\nVmHWM:\t  1004 kB\nVmRSS:\t   75 kB\nRssAnon:\t   50 kB\nRssFile:\t   20 kB\nRssShmem:\t   5 kB\nThreads:\t12\n")
+	if want := (status{rss: 75 * 1024, peak: 1004 * 1024, held: 55 * 1024, heldKnown: true}); !ok || st != want {
+		t.Fatalf("parseStatus = %+v %v, want %+v true", st, ok, want)
+	}
+	st, ok = parseStatus("VmHWM:\t  1004 kB\nVmRSS:\t   75 kB\n")
+	if want := (status{rss: 75 * 1024, peak: 1004 * 1024}); !ok || st != want {
+		t.Fatalf("parseStatus of a pre-4.5 status = %+v %v, want %+v true (the held set unknown)", st, ok, want)
 	}
 	for name, text := range map[string]string{
-		"no peak":       "VmRSS:\t 75 kB\n",
-		"no rss":        "VmHWM:\t 75 kB\n",
-		"wrong unit":    "VmHWM:\t 1 mB\nVmRSS:\t 75 kB\n",
-		"not a number":  "VmHWM:\t x kB\nVmRSS:\t 75 kB\n",
-		"empty":         "",
-		"missing value": "VmHWM:\nVmRSS:\t 75 kB\n",
-		"past bytes":    "VmHWM:\t 18446744073709551615 kB\nVmRSS:\t 75 kB\n",
+		"no peak":        "VmRSS:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
+		"no rss":         "VmHWM:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
+		"no anon":        "VmHWM:\t 75 kB\nVmRSS:\t 75 kB\nRssShmem:\t 0 kB\n",
+		"no shmem":       "VmHWM:\t 75 kB\nVmRSS:\t 75 kB\nRssAnon:\t 1 kB\n",
+		"malformed anon": "VmHWM:\t 75 kB\nVmRSS:\t 75 kB\nRssAnon:\t x kB\nRssShmem:\t 0 kB\n",
+		"wrong unit":     "VmHWM:\t 1 mB\nVmRSS:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
+		"not a number":   "VmHWM:\t x kB\nVmRSS:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
+		"empty":          "",
+		"missing value":  "VmHWM:\nVmRSS:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
+		"past bytes":     "VmHWM:\t 18446744073709551615 kB\nVmRSS:\t 75 kB\nRssAnon:\t 1 kB\nRssShmem:\t 0 kB\n",
 	} {
-		if _, _, ok := parseStatus(text); ok {
+		if _, ok := parseStatus(text); ok {
 			t.Errorf("%s: parsed a reading from %q", name, text)
 		}
 	}
@@ -70,6 +80,19 @@ func TestStatParsesPastTheCommandName(t *testing.T) {
 // the listing and the read).
 func procTree(t *testing.T, procs map[int][4]int) string {
 	t.Helper()
+	held := map[int][6]int{}
+	for pid, p := range procs {
+		// The held set equals the resident set unless a pin says
+		// otherwise (procTreeHeld): anonymous pages only.
+		held[pid] = [6]int{p[0], p[1], p[2], p[3], p[2], 0}
+	}
+	return procTreeHeld(t, held)
+}
+
+// procTreeHeld plants a table whose status lines carry the held set
+// too: {ppid, state, rss, hwm, anon, shmem} in kibibytes.
+func procTreeHeld(t *testing.T, procs map[int][6]int) string {
+	t.Helper()
 	root := t.TempDir()
 	for pid, p := range procs {
 		dir := filepath.Join(root, strconv.Itoa(pid))
@@ -83,7 +106,7 @@ func procTree(t *testing.T, procs map[int][4]int) string {
 		if p[2] < 0 {
 			continue
 		}
-		status := "Name:\tp" + strconv.Itoa(pid) + "\nVmHWM:\t" + strconv.Itoa(p[3]) + " kB\nVmRSS:\t" + strconv.Itoa(p[2]) + " kB\n"
+		status := "Name:\tp" + strconv.Itoa(pid) + "\nVmHWM:\t" + strconv.Itoa(p[3]) + " kB\nVmRSS:\t" + strconv.Itoa(p[2]) + " kB\nRssAnon:\t" + strconv.Itoa(p[4]) + " kB\nRssShmem:\t" + strconv.Itoa(p[5]) + " kB\n"
 		if err := os.WriteFile(filepath.Join(dir, "status"), []byte(status), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +136,7 @@ func TestSampleWalksTheLiveDescendants(t *testing.T) {
 		400: {101, 'S', 999, 9999}, // the sibling's child: not ours
 	})
 	set, trees, ok := sampleAt(root, 100)
-	want := Set{ProcessBytes: 75 * 1024, ProcessPeakBytes: 1004 * 1024, Descendants: 3, DescendantsBytes: (400 + 10 + 900) * 1024, DescendantPeakBytes: 950 * 1024}
+	want := Set{ProcessBytes: 75 * 1024, ProcessHeldBytes: 75 * 1024, ProcessPeakBytes: 1004 * 1024, Descendants: 3, DescendantsBytes: (400 + 10 + 900) * 1024, DescendantsHeldBytes: (400 + 10 + 900) * 1024, DescendantPeakBytes: 950 * 1024, HeldKnown: true}
 	if !ok || set != want {
 		t.Fatalf("sampleAt = %+v %v, want %+v true", set, ok, want)
 	}
@@ -282,7 +305,7 @@ func TestReadingsComposeTheWalkTheHostAndTheCeiling(t *testing.T) {
 	if !ok {
 		t.Fatal("Readings answered nothing over a complete table")
 	}
-	wantSet := Set{ProcessBytes: 75 * 1024, ProcessPeakBytes: 1004 * 1024, Descendants: 2, DescendantsBytes: 410 * 1024, DescendantPeakBytes: 505 * 1024, CeilingBytes: 5 << 30}
+	wantSet := Set{ProcessBytes: 75 * 1024, ProcessHeldBytes: 75 * 1024, ProcessPeakBytes: 1004 * 1024, Descendants: 2, DescendantsBytes: 410 * 1024, DescendantsHeldBytes: 410 * 1024, DescendantPeakBytes: 505 * 1024, CeilingBytes: 5 << 30, HeldKnown: true}
 	if r.Set != wantSet {
 		t.Fatalf("Readings.Set = %+v, want %+v", r.Set, wantSet)
 	}

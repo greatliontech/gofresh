@@ -26,6 +26,8 @@ func TestMeminfoParsesTheTwoHostLines(t *testing.T) {
 		{"missing total", "MemAvailable:    64000 kB\n", Memory{}, false},
 		{"wrong unit", "MemTotal:       128000 MB\nMemAvailable:    64000 kB\n", Memory{}, false},
 		{"not a number", "MemTotal:       lots kB\nMemAvailable:    64000 kB\n", Memory{}, false},
+		{"nothing available", "MemTotal:       128000 kB\nMemAvailable:    0 kB\n", Memory{TotalBytes: 128000 * 1024}, true},
+		{"no memory", "MemTotal:       0 kB\nMemAvailable:    0 kB\n", Memory{}, false},
 		{"empty", "", Memory{}, false},
 	}
 	for _, c := range cases {
@@ -37,18 +39,21 @@ func TestMeminfoParsesTheTwoHostLines(t *testing.T) {
 }
 
 // TestCeilingIsHalfTheHostsAvailableMemory pins the ceiling's derivation
-// and its installation (REQ-fresh-resident-readings): half of what the host had
-// available at the process's start; a host without the reading derives
-// none and installs none, and the installed ceiling reads back as the
-// runtime's soft limit — the value the resident datum states.
+// and its installation over a family holding nothing
+// (REQ-fresh-resident-readings): half of what the host has available,
+// the floor, the operator's words; a host without the reading derives
+// none and leaves the limit in force (none here), and the installed
+// ceiling reads back as the runtime's soft limit — the value the
+// resident datum states. The family term is
+// TestCeilingIsHalfTheFamilysRoom's.
 func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
-	if got := Ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 6 << 30}); got != 3<<30 {
+	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 6 << 30}, 0); got != 3<<30 {
 		t.Fatalf("Ceiling = %d, want half the available memory (%d)", got, 3<<30)
 	}
-	if got := Ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 600 << 20}); got != CeilingFloor {
+	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 600 << 20}, 0); got != CeilingFloor {
 		t.Fatalf("Ceiling under a short host = %d, want the floor %d", got, CeilingFloor)
 	}
-	if got := Ceiling(Memory{}); got != 0 {
+	if got := ceiling(Memory{}, 6<<30); got != 0 {
 		t.Fatalf("Ceiling of no reading = %d, want 0", got)
 	}
 	prior := debug.SetMemoryLimit(-1)
@@ -70,7 +75,11 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	if got := installedCeiling(); got != 0 {
 		t.Fatalf("installedCeiling under the runtime's default = %d, want 0 (none installed)", got)
 	}
-	root := t.TempDir()
+	// The synthetic root carries this process holding nothing, so the
+	// family term is zero and the derivation reads as half of the
+	// host's availability; an absent host reading leaves the limit in
+	// force (none here).
+	root := procTree(t, map[int][4]int{1: {0, 'S', 1, 1}, os.Getpid(): {1, 'S', 0, 0}})
 	priorRoot := procRoot
 	procRoot = root
 	t.Cleanup(func() { procRoot = priorRoot })
