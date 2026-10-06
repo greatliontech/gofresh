@@ -16,5 +16,4 @@ two instances. Invariants preserved: the per-judged-run bound both
 docs state, the failed-answer memo, the never-memoized cancellation,
 the key's coordinate-and-normalized-environment rule.
 
-Lands: cross-tool train chunk 241 (the one typed-load seam chunk —
-gotool's reader and memo shapes are its neighbours).
+Lands: cross-tool train chunk 327 (the gotool surface release: one generic judged-run memo, the Sampler and runtimeinput.Roots its instances with one key spelling; audit 316).

@@ -19,6 +19,4 @@ provenance runs at preparation, before an engine exists, so the shape
 is the consumer's to choose at its bump and gofresh's to offer: a
 ToolchainSampler over an EnvReader.
 
-Lands: cross-tool train chunk 290 (the first consumer bump behind
-gofresh 281 that holds both the composite and an engine pass in one
-operation).
+Lands: cross-tool train chunk 327 (the gotool surface release offers the ToolchainSampler over an EnvReader — gofresh's half; stipulator 290.2b and gomutant 324 then read it instead of building a local stand-in; audit 316).

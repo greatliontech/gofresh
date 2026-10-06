@@ -11,7 +11,4 @@ greatliontech/.github repo, inputs test-timeout/job-timeout/
 packages) would single-source it; the org already centralizes
 greatliontech/semrel@main, so the convention exists.
 
-Lands: a fifth copy (a new repo adopting ci.yaml), or a CI-contract change
-that must land in all four copies at once — the checkable condition
-(derived 2026-09-29; the org-level repo is created then, as the change's
-own step). Until then the four copies are maintained in step.
+Lands: cross-tool train chunk 325 (the trigger fired at gofresh 48bbe3a — the race/records/workflow_run gate is the CI-contract change every copy must carry, and gomutant 323 and stipulator 321 were about to copy it by hand; one org-level reusable workflow the four repos call with their inputs, the gate's toolchain pinned to a listed one with a next-stable early-warning leg; opens with the user's confirmation of the org repo's creation; audit 316).

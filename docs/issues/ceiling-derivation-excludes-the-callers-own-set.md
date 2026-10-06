@@ -17,6 +17,4 @@ available plus the process's own resident set (the sampler reads both
 in one walk: resident.Readings) would make every call site safe,
 stipulator's per-operation install included.
 
-Lands: cross-tool train chunk 314 (a release, after 313 — the resident
-domain's next gofresh chunk; the consumers' re-derivation sites adopt
-at their bumps).
+Lands: cross-tool train chunk 326 (the resident release: the derivation from available plus the process's own set, and the children's budget exported from the one reading — before stipulator 290.2b/322 and gomutant 214 fold onto resident; audit 316).

@@ -1102,16 +1102,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-closure-observability-toolchain-key"
-  content_hash: "208eb9ffece89307d4c854325788dfca9cc3aaa49467cfcf0ed0e74059dc12a6"
-  source_hash: "2b7b5f5d9f98bc0cd6ab2a94f2ee50c7e89e858ef8e8db5dbd4cfbb52b3ddf11"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/auditset.TestVersionListingAdmitsOnlyListedVersions"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "c339efa3ec995fc47159ef1cb5f7d96a5fee33d6baaa65630b48f79ff200ab53"
-}
-
-bindings {
   requirement_id: "REQ-closure-observability-audited-set"
   content_hash: "fb389834562819f54c8ad362d27e1cc75fd49335fecf9794e089adde92f07688"
   source_hash: "ca07b66c9e5d9ff80ecd1bee6cd1f2111bf33fedac4c534c001783f660d2f144"
@@ -1739,4 +1729,24 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/closure.TestListingErrorsRefuseByNameAndTheEmptySelectionDigests"
   role: BINDING_ROLE_TESTS
   shape_hash: "9a2eb038e8a83cd2380c40d4413364854f2137f358f749b5cca307e685f5083d"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-audited-discharges"
+  content_hash: "97fcf5c2ddf2f3c6f7289f76ed68ff62cf82576710b6897c2091415c3c2e22e1"
+  source_hash: "f21353a3282b02116c3c10bf6c7b80e1412aff893f3d751b4a03ddf475003c3c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/auditset.TestVersionListingAdmitsOnlyListedVersions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c339efa3ec995fc47159ef1cb5f7d96a5fee33d6baaa65630b48f79ff200ab53"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-toolchain-key"
+  content_hash: "208eb9ffece89307d4c854325788dfca9cc3aaa49467cfcf0ed0e74059dc12a6"
+  source_hash: "2b7b5f5d9f98bc0cd6ab2a94f2ee50c7e89e858ef8e8db5dbd4cfbb52b3ddf11"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestUnauditedSelectionDisablesAdmissions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "275cb1fe5ae3e0828299a6d5cbfa2a527cecbba3a9250b3d1dd0fb3f10d704f9"
 }

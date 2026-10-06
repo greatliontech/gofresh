@@ -1,6 +1,6 @@
 # A runtime-input classification names `/` for every subject while the input list is empty
 
-Lands: cross-tool train chunk 292 (gofresh's next chunk; its open triages
+Lands: cross-tool train chunk 292 (its open triages
 this — the trigger below FIRED 2026-10-02).
 
 Attributed occurrence (protodb, 2026-10-02, the standing channel): a
