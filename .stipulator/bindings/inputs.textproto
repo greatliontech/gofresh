@@ -1542,16 +1542,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-inputs-observation-coherence"
-  content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
-  source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRootsKeyCoversTheCoordinateAndEnvironment"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "78c3a168dc2ff955490fd85774e0d0abd86164d2f6f4615831d31c3e2dceca98"
-}
-
-bindings {
   requirement_id: "REQ-inputs-guard-covered"
   content_hash: "b2451cc04e4e540269fb460af93f0b8e025a2935ee8411ade0600850bae42d8b"
   source_hash: "ecad4e9692fec440adc4ac28ba0b47fb3d13a597be34a31228d455e2e805d295"
@@ -1579,4 +1569,44 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerIngestReadsItsRootsMemo"
   role: BINDING_ROLE_TESTS
   shape_hash: "8e1122641c5acea88ec42b21254fead6478c5600ea2ea67c6038a9e773246cf2"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-coherence"
+  content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
+  source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestMemoKeyCoversTheCoordinateAndEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "658ad333f0f7e3043bfb2799e1b32f0779e482aed6cd174bac8bc815012abff5"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-guard-covered"
+  content_hash: "b2451cc04e4e540269fb460af93f0b8e025a2935ee8411ade0600850bae42d8b"
+  source_hash: "ecad4e9692fec440adc4ac28ba0b47fb3d13a597be34a31228d455e2e805d295"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeResolvesGuardRootsFromTheEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7766537c09ac9bbc6f88df60a4e0260bd777e79c45ce428f3f8d34587404f921"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-ephemeral-root"
+  content_hash: "a7c933c9f3adbd655a9558c18bc643dbc656122be88b940ba7935094db4a1d0a"
+  source_hash: "868397cab877ba36f47d10662fe3661fd59e9f44f299cb15aaf2de9f418b6f55"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeResolvesTheTempRootFromTheEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f1404c36b8037d40444a522dcd91bb7060907cf69efeb43fcee8b70288beaa4f"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "0157f5138b165a2fa7756a913ede4dff6ed703615457099dc152a938d018b85d"
+  source_hash: "2ab235d4f4a00692f97dc33bc18c3a769a4c2197eda175d4c74a1d424bc92831"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerFacadeResolvesTheTempRootFromTheEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f1404c36b8037d40444a522dcd91bb7060907cf69efeb43fcee8b70288beaa4f"
 }

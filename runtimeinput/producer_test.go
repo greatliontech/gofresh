@@ -296,7 +296,7 @@ func TestProducerFacadeResolvesGuardRootsFromTheEnvironment(t *testing.T) {
 	root, pkgDir := producerModule(t)
 	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
 	env := producerEnv(pkgDir)
-	goroot, err := gotool.Run(context.Background(), pkgDir, env, "env", "GOROOT")
+	goroot, err := (gotool.Runner{}).Run(context.Background(), pkgDir, env, "env", "GOROOT")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestProducerFacadeResolvesTheTempRootFromTheEnvironment(t *testing.T) {
 		t.Fatal("an in-tree TMPDIR declared an ephemeral root")
 	}
 	broken := producerEnv(pkgDir, "GOTOOLCHAIN=go9.99.99+auto")
-	if _, err := gotool.Run(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
+	if _, err := (gotool.Runner{}).Run(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
 		t.Skip("the toolchain answers under an invalid GOTOOLCHAIN; no failing environment to pin")
 	}
 	_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: broken})

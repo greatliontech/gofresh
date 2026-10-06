@@ -338,7 +338,7 @@ func TestListingErrorsRefuseByNameAndTheEmptySelectionDigests(t *testing.T) {
 		}
 	}}
 	dir := t.TempDir()
-	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, os.Environ())
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +509,7 @@ func TestToolchainSourceScopeDiscriminatesEveryAxis(t *testing.T) {
 				settings = append(settings, setting)
 			}
 		}
-		s, err := gotool.TakeEnvSnapshot(ctx, dir, environmentWith(settings...))
+		s, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, environmentWith(settings...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -582,7 +582,7 @@ func TestToolchainSourceMemoRelistsAMovedTree(t *testing.T) {
 		}
 	}}
 	dir := t.TempDir()
-	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, os.Environ())
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

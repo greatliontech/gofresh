@@ -12,7 +12,7 @@ import (
 // rather than answering empty values for a snapshot never taken.
 func TestPrimedEnvReaderPrimesOnlyARealSnapshot(t *testing.T) {
 	ctx := context.Background()
-	taken, err := TakeEnvSnapshot(ctx, "", os.Environ())
+	taken, err := (Runner{}).TakeEnvSnapshot(ctx, "", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

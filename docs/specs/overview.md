@@ -202,7 +202,7 @@ configuration drift, while a test verdict, which neither can change, is not.
 spawns itself MUST run through the go-command policy's runner: under one
 complete normalized environment (deterministic order, duplicate keys
 refused, `PWD` derived from the command's directory, the ordinary loader
-pinned; one setter keeping that order), under the process-boundary rule
+pinned when one is named, the caller's own kept otherwise; one setter and one remover keeping that order), under the process-boundary rule
 its runner carries where the runner carries one — the plain runner
 carries none; a consumer's runner applies the one rule (the child in
 its own process group, a cancellation sweeping the group, an
@@ -256,10 +256,22 @@ go/version grammar over the trimmed value cut at its first space
 the legacy `devel …` spelling, a `go version` line, and whatever that
 grammar refuses answer no series), the one grammar gofresh's series
 judgment reads, exported for every consumer's build-events floor and
-release-tag derivation — memoized per directory coordinate
-and environment for a sampler's lifetime — a failed sample memoized
-like an answered one, a
-cancelled sample never memoized — the answer a
+release-tag derivation — memoized for a sampler's lifetime in the one
+judged-run memo shape a runtime-input ingest's roots also instance,
+keyed by the directory's coordinate and the normalized environment,
+less PWD when a directory is named (the coordinate collapses its
+spellings; with none named the command runs in the process's own
+directory, which the go command reads through PWD, so PWD stays in
+the key) — two spellings of one directory and two orderings of one
+environment one key; a malformed environment refused, never keyed raw
+— each key's holder taking its answer once — a failed sample
+memoized like an answered one, a cancelled sample never memoized,
+concurrent asks on one key waiting on the first's spawn, each under
+its own context (a waiter whose context ends leaves with its
+cancellation while the spawn runs on) — or answered
+from a pass reader's one snapshot by a consumer that holds it (the
+GOVERSION the snapshot carries, for the reader's own directory and
+environment alone, no second process) — the answer a
 cleanly exited process wrote kept when a descendant holds its pipe past
 the wait delay, and composed with this judgment into the one typed
 provenance refusal every consumer's judged run answers with — an
@@ -268,7 +280,13 @@ a breaking skew in this clause's words; the composite is constructed
 over the consumer's own memoized sampler, and one built without a
 sampler refuses as a construction fault, never a provenance one.
 Enforced by `TestSampleGoVersionRunsInTheModuleDirectory`,
-`TestSamplerMemoizesAFailedSample`, and
+`TestSamplerMemoizesAFailedSample`,
+`TestMemoKeyCoversTheCoordinateAndEnvironment`,
+`TestRunMemoHoldsOneHolderPerKey`,
+`TestSamplerSerializesConcurrentAsksOnOneKey`,
+`TestSamplerWaiterLeavesWithItsOwnCancellation`,
+`TestSamplerReleasesTheHolderAfterAPanickingTake`,
+`TestSnapshotSamplerAnswersItsReadersPassWithoutASpawn`, and
 `TestToolchainProvenanceIsOneRefusal`.
 Within a major the refusal is directional — a frontend older than the
 ambient series refuses, since it predates the sources' language, while a

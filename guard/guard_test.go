@@ -322,7 +322,7 @@ func TestCaptureUsesSuppliedEnvironmentForGuards(t *testing.T) {
 // for itself, so the pass's batching of probes can never move a
 // recorded guard (REQ-guard-buildconfig).
 func TestPrimedAndProbedCapturesDigestAlike(t *testing.T) {
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), "", os.Environ())
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), "", os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment(t *testing.T) {
 // guard does: the pass's one snapshot, then the digest over its bytes.
 func buildConfigOfT(t *testing.T, dir string, env, buildInputs []string) (string, error) {
 	t.Helper()
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, env)
 	if err != nil {
 		return "", err
 	}

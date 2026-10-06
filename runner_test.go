@@ -85,9 +85,10 @@ func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 }
 
 // Every go command the engine's packages spawn goes through a Runner
-// value: the free-function spawns (gotool.Run, TakeEnvSnapshot,
-// SampleGoVersion — the (ctx, dir, env) forms a runner value also
-// offers) and an inline plain runner's call appear in no non-test
+// value: gotool exports no free-function spawn (a package-level
+// (ctx, dir, env) form a runner value also offers — the forwarders
+// gotool once carried are gone, and one returning would re-enter the
+// walk here), and an inline plain runner's call appears in no non-test
 // source outside gotool itself, so a site cannot bypass the runner it
 // was handed by spelling the plain one. A plain Runner value built at
 // a site and handed on (the directive scan's) is that site's stated
@@ -95,8 +96,8 @@ func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 // hand-edit oracle); its logic is pinned over synthetic sources below.
 func TestEngineSpawnSitesReadARunner(t *testing.T) {
 	free := freeSpawnFunctions(t)
-	if want := []string{"Run", "SampleGoVersion", "TakeEnvSnapshot"}; strings.Join(free, ",") != strings.Join(want, ",") {
-		t.Fatalf("gotool's free spawn functions = %v, want %v (a fourth one joins the walk here)", free, want)
+	if len(free) != 0 {
+		t.Fatalf("gotool exports free spawn functions %v; every spawn rides a Runner value", free)
 	}
 	bare, err := bareSpawnSites(".", free)
 	if err != nil {

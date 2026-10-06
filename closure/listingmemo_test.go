@@ -99,7 +99,7 @@ func listOnce(t *testing.T, dir string, env []string, snapshot *gotool.EnvSnapsh
 
 func snapshotFor(t *testing.T, dir string, env []string) *gotool.EnvSnapshot {
 	t.Helper()
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}

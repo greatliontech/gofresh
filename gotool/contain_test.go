@@ -196,7 +196,7 @@ func TestContainmentDefaultsTheDelayAndRunBoundsTheRefusal(t *testing.T) {
 		t.Fatalf("the reap waited %v: the delay was not bounded", took)
 	}
 	env = shimGo(t, "head -c 200000 /dev/zero | tr '\\0' 'e' >&2\nexit 1\n")
-	_, err = Runner{}.Run(ctx, "", env, "list")
+	_, err = (Runner{}).Run(ctx, "", env, "list")
 	if err == nil || len(err.Error()) > stderrBound+256 || !strings.Contains(err.Error(), "bytes elided") {
 		t.Fatalf("refusal is unbounded or unmarked: len %d", len(err.Error()))
 	}

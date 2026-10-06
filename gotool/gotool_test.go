@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunOK(t *testing.T) {
-	out, err := Run(context.Background(), "", os.Environ(), "env", "GOMODCACHE")
+	out, err := (Runner{}).Run(context.Background(), "", os.Environ(), "env", "GOMODCACHE")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func TestRunOK(t *testing.T) {
 }
 
 func TestRunError(t *testing.T) {
-	if _, err := Run(context.Background(), "", os.Environ(), "this-is-not-a-go-subcommand"); err == nil {
+	if _, err := (Runner{}).Run(context.Background(), "", os.Environ(), "this-is-not-a-go-subcommand"); err == nil {
 		t.Fatal("expected error")
 	} else if !strings.Contains(err.Error(), "go this-is-not-a-go-subcommand") {
 		t.Errorf("error not wrapped with command: %v", err)
@@ -30,10 +30,10 @@ func TestRunError(t *testing.T) {
 //
 //gofresh:pure
 func TestRunRefusesANilEnvironment(t *testing.T) {
-	if _, err := Run(context.Background(), "", nil, "version"); err == nil {
+	if _, err := (Runner{}).Run(context.Background(), "", nil, "version"); err == nil {
 		t.Fatal("a nil environment ran go under the ambient one")
 	}
-	if _, err := TakeEnvSnapshot(context.Background(), "", nil); err == nil {
+	if _, err := (Runner{}).TakeEnvSnapshot(context.Background(), "", nil); err == nil {
 		t.Fatal("a nil environment snapshotted the ambient one")
 	}
 }

@@ -17,20 +17,21 @@ func TestEnvReaderNeverMemoizesACancellation(t *testing.T) {
 	if _, err := r.Snapshot(cancelled); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled snapshot = %v", err)
 	}
-	if r.Taken() != nil {
+	if r.once.taken {
 		t.Fatal("a cancelled snapshot was held")
 	}
-	if snapshot, err := r.Snapshot(context.Background()); err != nil || snapshot == nil || snapshot.Value("GOROOT") == "" {
+	snapshot, err := r.Snapshot(context.Background())
+	if err != nil || snapshot == nil || snapshot.Value("GOROOT") == "" {
 		t.Fatalf("the live snapshot after a cancellation: %v, %v", snapshot, err)
 	}
-	if r.Taken() == nil {
+	if again, err := r.Snapshot(context.Background()); err != nil || again != snapshot {
 		t.Fatal("the live snapshot is not held")
 	}
 	failing := NewEnvReader(Runner{}, "", []string{"BAD"})
 	if _, err := failing.Snapshot(context.Background()); err == nil {
 		t.Fatal("a malformed environment took a snapshot")
 	}
-	if _, err := failing.Snapshot(context.Background()); err == nil || failing.Taken() != nil {
+	if _, err := failing.Snapshot(context.Background()); err == nil {
 		t.Fatal("a failed snapshot is not the reader's sticky answer")
 	}
 }

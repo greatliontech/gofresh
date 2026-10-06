@@ -28,19 +28,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
-
-// Run executes `go <args>` in dir ("" = current directory) with env as
-// its complete process environment and returns stdout. On failure the
-// error includes the command and go's stderr. The directory matters: a
-// go.mod `toolchain` directive / GOTOOLCHAIN is resolved relative to it,
-// so provenance capture and `go test` must run in the same dir to
-// describe the same toolchain.
-func Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
-	return Runner{}.Run(ctx, dir, env, args...)
-}
 
 // Runner runs the go command line tool — and prepares a consumer's own
 // program the same way (Program) — under a caller-owned spawn policy.
@@ -227,52 +216,46 @@ func (c Containment) grace() time.Duration {
 	return c.Grace
 }
 
-// Sampler is the memoized toolchain sampler every consumer's provenance
-// check reads: one sample per (coordinate, normalized environment) for
-// the sampler's lifetime, which is one judged run — the consumer's one
-// verb invocation, a long-lived server's per-request operation; never
-// a process, or a toolchain replaced under the memo is judged by its
-// predecessor's sample — a failed sample memoized like an answered
-// one (the toolchain does not change within one run), a
-// cancelled sample never memoized, and the salvage the wait-delay form
-// allows: the first line a cleanly exited process wrote is the sample
-// when it is a go version.
+// Sampler is the one toolchain sampler a consumer holds for one
+// judged run (REQ-fresh-toolchain-skew's bound): SampleGoVersion
+// memoized by MemoKey through the one judged-run memo — the toolchain
+// does not change within one run — each key's holder taking its sample
+// under its own lock, so a failed sample is the run's answer for that
+// key like an answered one, a cancelled sample is never memoized (the
+// cancellation answered, the next live ask sampling), concurrent asks
+// on one key wait on the first's spawn, and the salvage the wait-delay
+// form allows stands: the first line a cleanly exited process wrote is
+// the sample when it is a go version.
 type Sampler struct {
 	Runner Runner
-	mu     sync.Mutex
-	memo   map[string]sampled
+	memo   RunMemo[*versionReader]
 }
 
-type sampled struct {
-	version string
-	err     error
+// versionReader is one key's holder: the sample taken once, the one
+// holder discipline over `go env GOVERSION`.
+type versionReader struct {
+	runner Runner
+	dir    string
+	env    []string
+	once   once[string]
 }
 
-// Sample is SampleGoVersion memoized by Coordinate(dir) and env.
+func (r *versionReader) sample(ctx context.Context) (string, error) {
+	return r.once.take(ctx, func(ctx context.Context) (string, error) {
+		return r.runner.SampleGoVersion(ctx, r.dir, r.env)
+	})
+}
+
+// Sample is SampleGoVersion memoized by MemoKey for the sampler's
+// lifetime.
 func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string, error) {
-	if err := ctx.Err(); err != nil {
+	reader, err := s.memo.Get(dir, env, func() *versionReader {
+		return &versionReader{runner: s.Runner, dir: dir, env: env}
+	})
+	if err != nil {
 		return "", err
 	}
-	key := Coordinate(dir) + "\x00" + strings.Join(memoEnv(env), "\x00")
-	s.mu.Lock()
-	got, ok := s.memo[key]
-	s.mu.Unlock()
-	if ok {
-		return got.version, got.err
-	}
-	got.version, got.err = s.Runner.SampleGoVersion(ctx, dir, env)
-	if ctx.Err() != nil {
-		// A cancelled sample is no sample: never memoized, the
-		// cancellation answered whatever the memo holds.
-		return "", ctx.Err()
-	}
-	s.mu.Lock()
-	if s.memo == nil {
-		s.memo = map[string]sampled{}
-	}
-	s.memo[key] = got
-	s.mu.Unlock()
-	return got.version, got.err
+	return reader.sample(ctx)
 }
 
 // EnvReader reads go's environment for one pass: the first key takes
@@ -286,13 +269,10 @@ func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string,
 // reader's answer for its whole lifetime: the pass fails closed rather
 // than re-probing an environment that refused.
 type EnvReader struct {
-	Runner   Runner
-	Dir      string
-	Env      []string
-	mu       sync.Mutex
-	taken    bool
-	snapshot *EnvSnapshot
-	err      error
+	Runner Runner
+	Dir    string
+	Env    []string
+	once   once[*EnvSnapshot]
 }
 
 // NewEnvReader is a pass's reader over the runner, directory, and
@@ -311,7 +291,7 @@ func NewEnvReader(r Runner, dir string, env []string) *EnvReader {
 func PrimedEnvReader(r Runner, dir string, env []string, snapshot *EnvSnapshot) *EnvReader {
 	reader := NewEnvReader(r, dir, env)
 	if snapshot != nil {
-		reader.snapshot, reader.taken = snapshot, true
+		reader.once.prime(snapshot)
 	}
 	return reader
 }
@@ -321,29 +301,9 @@ func PrimedEnvReader(r Runner, dir string, env []string, snapshot *EnvSnapshot) 
 // pass fails closed rather than re-probing an environment that refused
 // — except a cancellation, which is the caller's and never memoized.
 func (r *EnvReader) Snapshot(ctx context.Context) (*EnvSnapshot, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.taken {
-		return r.snapshot, r.err
-	}
-	snapshot, err := r.Runner.TakeEnvSnapshot(ctx, r.Dir, r.Env)
-	if err != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	r.snapshot, r.err, r.taken = snapshot, err, true
-	return r.snapshot, r.err
-}
-
-// Taken returns the snapshot the reader holds, nil until its first
-// successful read — a caller building a sibling reader over the same
-// pass primes it with this, so the pass probes once.
-func (r *EnvReader) Taken() *EnvSnapshot {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.err != nil {
-		return nil
-	}
-	return r.snapshot
+	return r.once.take(ctx, func(ctx context.Context) (*EnvSnapshot, error) {
+		return r.Runner.TakeEnvSnapshot(ctx, r.Dir, r.Env)
+	})
 }
 
 // Value returns one go-env setting from the pass's snapshot.
@@ -429,7 +389,7 @@ func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (
 	if err != nil && !Salvaged(ctx, err) {
 		return nil, err
 	}
-	values, parseErr := ParseEnvDocument(out)
+	values, parseErr := parseEnvDocument(out)
 	if parseErr != nil {
 		// The answer a cleanly exited process wrote beside a descendant's
 		// pipe hold serves when it is a whole document; a torn one refuses
@@ -442,10 +402,10 @@ func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (
 	return &EnvSnapshot{JSON: out, values: values}, nil
 }
 
-// ParseEnvDocument parses a `go env -json` answer: a document with at
+// parseEnvDocument parses a `go env -json` answer: a document with at
 // least one key — `null` and an empty object are no environment, and a
 // torn document does not parse.
-func ParseEnvDocument(out []byte) (map[string]string, error) {
+func parseEnvDocument(out []byte) (map[string]string, error) {
 	var values map[string]string
 	if err := json.Unmarshal(out, &values); err != nil {
 		return nil, fmt.Errorf("gotool: parse go env -json: %w", err)
@@ -491,26 +451,6 @@ func (r Runner) SampleGoVersion(ctx context.Context, dir string, env []string) (
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// SampleGoVersion is Runner{}.SampleGoVersion.
-func SampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
-	return Runner{}.SampleGoVersion(ctx, dir, env)
-}
-
-// TakeEnvSnapshot is Runner{}.TakeEnvSnapshot.
-func TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapshot, error) {
-	return Runner{}.TakeEnvSnapshot(ctx, dir, env)
-}
-
-// memoEnv is the environment half of a memo key: normalized when the
-// entries allow it, so two orderings of one environment key alike, the
-// raw entries otherwise (the spawn refuses those on its own).
-func memoEnv(env []string) []string {
-	if normalized, err := NormalizeEnv(env); err == nil {
-		return normalized
-	}
-	return env
 }
 
 // Coordinate is the degrading form of CanonicalDir every consumer

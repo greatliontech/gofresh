@@ -64,3 +64,29 @@ func TestNormalizeEnvRefusesDuplicateKeys(t *testing.T) {
 		t.Fatal("duplicate PWD accepted through EnvForCommand")
 	}
 }
+
+// UnsetEnv removes every entry under the key as the policy judges keys
+// and keeps the rest in order — SetEnv's exact inverse, so setting then
+// unsetting a key returns the environment less that key, and unsetting
+// an absent key changes nothing (REQ-fresh-go-command-policy).
+func TestUnsetEnvRemovesEveryEntryUnderTheKey(t *testing.T) {
+	env := []string{"A=1", "B=2", "a=3", "C=4"}
+	got := UnsetEnv(env, "A")
+	want := []string{"B=2", "a=3", "C=4"}
+	if len(got) != len(want) {
+		t.Fatalf("UnsetEnv = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("UnsetEnv = %v, want %v", got, want)
+		}
+	}
+	if same := UnsetEnv(env, "ZZ"); len(same) != len(env) {
+		t.Fatalf("an absent key changed the environment: %v", same)
+	}
+	set := SetEnv(env, "B", "9")
+	back := UnsetEnv(set, "B")
+	if len(back) != 3 || back[0] != "A=1" || back[1] != "a=3" || back[2] != "C=4" {
+		t.Fatalf("set then unset = %v, want the environment less B", back)
+	}
+}

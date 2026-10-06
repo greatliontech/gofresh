@@ -27,7 +27,7 @@ func loadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []stri
 // row's rather than the base's.
 func cgoEnabled(t *testing.T) bool {
 	t.Helper()
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), t.TempDir(), os.Environ())
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), t.TempDir(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,17 +23,26 @@ import (
 // consumer's environment never diverges from the policy's order by
 // appending.
 func SetEnv(env []string, key, value string) []string {
+	out := UnsetEnv(env, key)
+	entry := key + "=" + value
+	i := sort.Search(len(out), func(i int) bool { return entryLess(entry, out[i]) })
+	out = append(out, "")
+	copy(out[i+1:], out[i:])
+	out[i] = entry
+	return out
+}
+
+// UnsetEnv returns env without every entry under key, judged as the
+// policy judges keys (EqualEnvKey), the remaining entries in their
+// order — the one remover beside the one setter, so a consumer that
+// strips a setting never spells the key comparison itself.
+func UnsetEnv(env []string, key string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, entry := range env {
 		if name, _, ok := split(entry); !ok || !equalKey(name, key) {
 			out = append(out, entry)
 		}
 	}
-	entry := key + "=" + value
-	i := sort.Search(len(out), func(i int) bool { return entryLess(entry, out[i]) })
-	out = append(out, "")
-	copy(out[i+1:], out[i:])
-	out[i] = entry
 	return out
 }
 

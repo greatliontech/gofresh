@@ -70,7 +70,7 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	// selects net's netgo-constrained files on every listed toolchain;
 	// the refusal labels the surface by the go command's own version
 	// (the pass snapshot's), never the analyzing process's.
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, os.Environ())
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if !strings.Contains(notice, "could not be read") || !strings.Contains(notice, "-tags (from $GOFLAGS)") {
 		t.Fatalf("go-env-resolved notice lost the GOFLAGS selection: %q", notice)
 	}
-	snapshot, err := gotool.TakeEnvSnapshot(context.Background(), dir, env)
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,11 +21,11 @@ func TestEnvSnapshotIdentityIsStableAcrossTakes(t *testing.T) {
 	}
 	env := append(append([]string(nil), base...), "GOENV=off", "GOFLAGS=")
 	dir := t.TempDir()
-	first, err := TakeEnvSnapshot(context.Background(), dir, env)
+	first, err := (Runner{}).TakeEnvSnapshot(context.Background(), dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := TakeEnvSnapshot(context.Background(), dir, env)
+	second, err := (Runner{}).TakeEnvSnapshot(context.Background(), dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestEnvSnapshotIdentityIsStableAcrossTakes(t *testing.T) {
 	if (*EnvSnapshot)(nil).Identity() != "" {
 		t.Fatal("nil snapshot has an identity")
 	}
-	tagged, err := TakeEnvSnapshot(context.Background(), dir, append(append([]string(nil), base...), "GOENV=off", "GOFLAGS=-tags=x"))
+	tagged, err := (Runner{}).TakeEnvSnapshot(context.Background(), dir, append(append([]string(nil), base...), "GOENV=off", "GOFLAGS=-tags=x"))
 	if err != nil {
 		t.Fatal(err)
 	}

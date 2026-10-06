@@ -21,7 +21,7 @@ func TestBracketLiveSnapshotIsItsOwnPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	construction, err := gotool.TakeEnvSnapshot(ctx, dir, os.Environ())
+	construction, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

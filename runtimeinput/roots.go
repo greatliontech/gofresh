@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/greatliontech/gofresh/gotool"
 )
@@ -61,11 +60,11 @@ func (r resolvedRoots) ephemeralRoots(scratch, treeRoot string) []string {
 // server's per-request operation, never a process, the bound its
 // toolchain Sampler carries (REQ-inputs-observation-coherence: the
 // caller holds the resolution's inputs still for exactly that span) —
-// keyed by the package directory's coordinate and the normalized
-// environment less PWD, which the facade has already required to name
-// the directory, so no setting the toolchain consults is left out and
-// no spelling of one directory or ordering of one environment pays
-// twice: one `go env -json` per key, a pass reader held across the
+// keyed by gotool.MemoKey — the package directory's coordinate and the
+// normalized environment less PWD, which the facade has already
+// required to name the directory, so no setting the toolchain consults
+// is left out and no spelling of one directory or ordering of one
+// environment pays twice: one `go env -json` per key, a pass reader held across the
 // run's observations as the memo (sanctioned by the reader's own doc
 // under this obligation). A snapshot that failed is the memo's answer
 // for the run: a cause among the resolution inputs the obligation
@@ -81,49 +80,20 @@ func (r resolvedRoots) ephemeralRoots(scratch, treeRoot string) []string {
 // environment it ingests pays one query per run and one entry per
 // value. A nil Roots resolves unmemoized: every run pays its query.
 type Roots struct {
-	mu      sync.Mutex
-	readers map[string]*gotool.EnvReader
+	memo gotool.RunMemo[*gotool.EnvReader]
 }
 
-// rootsKey is the memo key: the directory's coordinate and the
-// normalized environment less PWD.
-func rootsKey(pkgDir string, env []string) (string, error) {
-	normalized, err := gotool.NormalizeEnv(env)
-	if err != nil {
-		return "", err
-	}
-	var key strings.Builder
-	key.WriteString(gotool.Coordinate(pkgDir))
-	for _, entry := range normalized {
-		if name, _, _ := strings.Cut(entry, "="); gotool.EqualEnvKey(name, "PWD") {
-			continue
-		}
-		key.WriteString("\x00" + entry)
-	}
-	return key.String(), nil
-}
-
-// reader answers the memoized pass reader for pkgDir under env,
-// creating it on the first ask; a nil memo answers a fresh reader.
+// reader answers the memoized pass reader for pkgDir under env —
+// filed under gotool.MemoKey in the one judged-run memo shape
+// (gotool.RunMemo) the toolchain sampler also instances — creating it
+// on the first ask; a nil memo answers a fresh reader.
 func (r *Roots) reader(runner gotool.Runner, pkgDir string, env []string) (*gotool.EnvReader, error) {
 	if r == nil {
 		return gotool.NewEnvReader(runner, pkgDir, env), nil
 	}
-	key, err := rootsKey(pkgDir, env)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if reader, ok := r.readers[key]; ok {
-		return reader, nil
-	}
-	if r.readers == nil {
-		r.readers = map[string]*gotool.EnvReader{}
-	}
-	reader := gotool.NewEnvReader(runner, pkgDir, env)
-	r.readers[key] = reader
-	return reader, nil
+	return r.memo.Get(pkgDir, env, func() *gotool.EnvReader {
+		return gotool.NewEnvReader(runner, pkgDir, env)
+	})
 }
 
 // resolveRoots answers the classification roots of a run of pkgDir under
