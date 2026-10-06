@@ -293,11 +293,18 @@ the process table; beside it the host's memory (its total and what it
 has available for new allocations) and the soft ceiling a consumer
 derives from the host's reading and installs as its runtime's memory
 limit: half of what the host had available, floored at one gibibyte,
-never above the limit in force before the first derivation — an
-operator's, or one installed earlier — (that limit taken once per
-process, so a later derivation rises or falls with the host and is never
-judged against an earlier derivation of its own), and the limit in force
-rides every later sample. Where the host does not answer — a platform
+never above a limit a caller installed before the first derivation (that
+limit taken once per process, so a later derivation rises or falls with
+the host and is never judged against an earlier derivation of its own)
+— unless GOMEMLIMIT is present and non-empty in the environment at the
+first derivation (the operator's word: a size, or `off`; an empty value
+is no word, as the runtime reads it), which replaces the derivation —
+nothing installed, the limit in force returned, none carried under `off`
+— and the limit in force rides every later sample. Consumer obligation:
+an environment carrying GOMEMLIMIT suppresses the derivation for the
+whole process, an oracle's test binary included — a pin that expects a
+derived ceiling clears GOMEMLIMIT before the process's first derivation. Where
+the host does not answer — a platform
 without the /proc form, an unlistable table, a descendant whose status
 exists but cannot be read — the reading is absent, never zero or
 partial: a consumer that gets no reading derives no memory term,

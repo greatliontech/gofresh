@@ -53,13 +53,19 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	}
 	prior := debug.SetMemoryLimit(-1)
 	t.Cleanup(func() { debug.SetMemoryLimit(prior) })
-	resetOperatorLimit := func() {
-		operatorLimit.mu.Lock()
-		operatorLimit.taken, operatorLimit.limit = false, 0
-		operatorLimit.mu.Unlock()
+	resetWord := func() {
+		operatorWord.mu.Lock()
+		operatorWord.taken, operatorWord.kind, operatorWord.limit = false, wordNone, 0
+		operatorWord.mu.Unlock()
 	}
-	resetOperatorLimit()
-	t.Cleanup(resetOperatorLimit)
+	resetWord()
+	t.Cleanup(resetWord)
+	// The environment carries no operator word for the derivation arms
+	// (an oracle running this binary sets GOMEMLIMIT on it).
+	if prior, set := os.LookupEnv("GOMEMLIMIT"); set {
+		t.Cleanup(func() { os.Setenv("GOMEMLIMIT", prior) })
+		os.Unsetenv("GOMEMLIMIT")
+	}
 	debug.SetMemoryLimit(math.MaxInt64)
 	if got := installedCeiling(); got != 0 {
 		t.Fatalf("installedCeiling under the runtime's default = %d, want 0 (none installed)", got)
@@ -96,7 +102,7 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	// The operator's limit — the one in force before the first
 	// derivation — is never widened: a narrower process stays narrower
 	// across every later derivation.
-	resetOperatorLimit()
+	resetWord()
 	debug.SetMemoryLimit(1 << 30)
 	if c := InstallCeiling(); c != 1<<30 || installedCeiling() != 1<<30 {
 		t.Fatalf("InstallCeiling over an operator's narrower limit installed %d (reads back %d), want the narrower %d kept", c, installedCeiling(), 1<<30)
@@ -104,13 +110,64 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	if c := InstallCeiling(); c != 1<<30 {
 		t.Fatalf("a second derivation under the operator's limit installed %d, want %d kept", c, 1<<30)
 	}
-	// An operator's limit wider than the derivation does not widen it:
-	// the derivation installs, the operator's word only ever narrows.
-	resetOperatorLimit()
+	// A limit installed earlier that is wider than the derivation does
+	// not widen it: the derivation installs; an earlier word only ever
+	// narrows.
+	resetWord()
 	debug.SetMemoryLimit(16 << 30)
 	if c := InstallCeiling(); c != 12<<30 || installedCeiling() != 12<<30 {
-		t.Fatalf("InstallCeiling under an operator's wider limit installed %d (reads back %d), want the derived %d", c, installedCeiling(), 12<<30)
+		t.Fatalf("InstallCeiling under an earlier wider limit installed %d (reads back %d), want the derived %d", c, installedCeiling(), 12<<30)
 	}
+	// The operator's explicit GOMEMLIMIT replaces the derivation
+	// whatever its size — wider or narrower — and `off` installs
+	// nothing: the runtime's none stands, 0 is returned, no ceiling is
+	// carried, and a later derivation never overrides it; an EMPTY
+	// value is no word, as the runtime reads it: the derivation
+	// installs.
+	for _, tc := range []struct {
+		word  string
+		limit int64
+		want  int64
+	}{{"16GiB", 16 << 30, 16 << 30}, {"512MiB", 512 << 20, 512 << 20}, {"off", math.MaxInt64, 0}, {"", math.MaxInt64, 12 << 30}} {
+		resetWord()
+		t.Setenv("GOMEMLIMIT", tc.word)
+		debug.SetMemoryLimit(tc.limit)
+		if c := InstallCeiling(); c != tc.want || int64(installedCeiling()) != tc.want {
+			t.Fatalf("GOMEMLIMIT=%q: InstallCeiling = %d (reads back %d), want %d", tc.word, c, installedCeiling(), tc.want)
+		}
+		if c := InstallCeiling(); c != tc.want {
+			t.Fatalf("GOMEMLIMIT=%q: a second derivation answered %d, want %d", tc.word, c, tc.want)
+		}
+	}
+	// Under the operator's word the ceiling returned is the one in
+	// force NOW — a limit a library installed later rides it.
+	resetWord()
+	t.Setenv("GOMEMLIMIT", "off")
+	debug.SetMemoryLimit(math.MaxInt64)
+	if c := InstallCeiling(); c != 0 {
+		t.Fatalf("GOMEMLIMIT=off: %d in force", c)
+	}
+	debug.SetMemoryLimit(4 << 30)
+	if c := InstallCeiling(); c != 4<<30 {
+		t.Fatalf("GOMEMLIMIT=off with 4 GiB installed later: InstallCeiling = %d, want the limit in force", c)
+	}
+	// Under `off` the reading carries no ceiling — judged over the real
+	// process table (the synthetic root holds no status file; a host
+	// answering no reading skips here, as the live-sample arm does).
+	resetWord()
+	debug.SetMemoryLimit(math.MaxInt64)
+	if c := InstallCeiling(); c != 0 {
+		t.Fatalf("GOMEMLIMIT=off: %d in force", c)
+	}
+	procRoot = priorRoot
+	if r, ok := Readings(); !ok {
+		t.Skip("the host answers no resident reading")
+	} else if r.Set.CeilingBytes != 0 {
+		t.Fatalf("GOMEMLIMIT=off: the reading carries ceiling %d, want none", r.Set.CeilingBytes)
+	}
+	procRoot = root
+	resetWord()
+	debug.SetMemoryLimit(math.MaxInt64)
 	// The live sample states the installed ceiling beside the kernel's
 	// readings (over the real process table).
 	procRoot = priorRoot

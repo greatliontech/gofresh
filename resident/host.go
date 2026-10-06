@@ -2,6 +2,7 @@ package resident
 
 import (
 	"math"
+	"os"
 	"runtime/debug"
 	"sync"
 )
@@ -54,39 +55,66 @@ func Ceiling(m Memory) int64 {
 	return max(int64(m.AvailableBytes/2), CeilingFloor)
 }
 
-// operatorLimit is the memory limit in force before the first derivation
-// — an operator's GOMEMLIMIT, one an earlier caller installed, or the
-// runtime's none — taken once per process so a later derivation is
-// judged against that word and never against an earlier derivation of
-// its own.
-var operatorLimit struct {
+// wordKind classifies the word in force at the first derivation.
+type wordKind int
+
+const (
+	// wordNone: no operator word and no limit installed — the derivation
+	// installs.
+	wordNone wordKind = iota
+	// wordPrior: a limit a caller installed before the first derivation
+	// — it caps every derivation.
+	wordPrior
+	// wordOperator: GOMEMLIMIT present and non-empty in the environment
+	// at the first derivation (a size, or `off`) — the operator's word,
+	// which no derivation overrides; an empty value is no word, as the
+	// runtime reads it.
+	wordOperator
+)
+
+// operatorWord is the word taken once per process at the first
+// derivation, so a later derivation is judged against it and never
+// against an earlier derivation of its own: its kind and, for a prior
+// install, the limit.
+var operatorWord struct {
 	mu    sync.Mutex
 	taken bool
+	kind  wordKind
 	limit int64
 }
 
-// operatorCeiling returns the operator's limit, 0 for none.
-func operatorCeiling() int64 {
-	operatorLimit.mu.Lock()
-	defer operatorLimit.mu.Unlock()
-	if !operatorLimit.taken {
-		operatorLimit.taken = true
-		if limit := debug.SetMemoryLimit(-1); limit > 0 && limit != math.MaxInt64 {
-			operatorLimit.limit = limit
+// takeWord takes the word in force at the first derivation and returns
+// it on every call.
+func takeWord() (wordKind, int64) {
+	operatorWord.mu.Lock()
+	defer operatorWord.mu.Unlock()
+	if !operatorWord.taken {
+		operatorWord.taken = true
+		switch limit := installedCeiling(); {
+		case os.Getenv("GOMEMLIMIT") != "":
+			operatorWord.kind = wordOperator
+		case limit > 0:
+			operatorWord.kind, operatorWord.limit = wordPrior, int64(limit)
 		}
 	}
-	return operatorLimit.limit
+	return operatorWord.kind, operatorWord.limit
 }
 
 // InstallCeiling derives the running process's ceiling from the host's
 // reading at this moment and installs it as the runtime's soft memory
-// limit — never above the operator's limit (the one in force before the
-// first derivation): a process the operator narrowed stays narrower,
-// and a later derivation rises or falls with the host, never pinned by
-// an earlier derivation of its own. It returns the installed ceiling, 0
-// when the host gave no reading and nothing was installed.
+// limit — unless the operator's word stands (GOMEMLIMIT present and
+// non-empty in the environment at the first derivation — a size, or
+// `off`): then nothing is installed and the limit in force is returned
+// (0 for none) — and never above a limit a caller installed before the
+// first derivation: a process narrowed earlier stays narrower, and a
+// later derivation rises or falls with the host, never pinned by an
+// earlier derivation of its own. It returns the ceiling in force, 0
+// when none is.
 func InstallCeiling() int64 {
-	operator := operatorCeiling()
+	kind, prior := takeWord()
+	if kind == wordOperator {
+		return int64(installedCeiling())
+	}
 	m, ok := HostMemory()
 	if !ok {
 		return 0
@@ -95,8 +123,8 @@ func InstallCeiling() int64 {
 	if c <= 0 {
 		return 0
 	}
-	if operator > 0 && operator < c {
-		c = operator
+	if kind == wordPrior && prior < c {
+		c = prior
 	}
 	debug.SetMemoryLimit(c)
 	return c

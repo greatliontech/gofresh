@@ -913,8 +913,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestMeminfoParsesTheTwoHostLines"
   role: BINDING_ROLE_TESTS
@@ -923,8 +923,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestCeilingIsHalfTheHostsAvailableMemory"
   role: BINDING_ROLE_TESTS
@@ -933,8 +933,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestStatusParsesTheTwoResidentLines"
   role: BINDING_ROLE_TESTS
@@ -943,8 +943,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestStatParsesPastTheCommandName"
   role: BINDING_ROLE_TESTS
@@ -953,8 +953,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestSampleWalksTheLiveDescendants"
   role: BINDING_ROLE_TESTS
@@ -963,8 +963,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestSampleCountsALiveDescendantChain"
   role: BINDING_ROLE_TESTS
@@ -973,8 +973,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-resident-readings"
-  content_hash: "9bac27f403434446a11fdcdf9b3acdfd205f03030345d0dbb03b61cf7953cd46"
-  source_hash: "76446a4ed76453e7f663b143d60bb697dab76d9558f8f3e4581f1b275fbea0fa"
+  content_hash: "e6e397bb4f53d6bebdb02ee21445425428334e97a399fab0d89354499c4801c6"
+  source_hash: "babfd2911fed52b4f18de9695b99958a4e090154044c1f64a6d19d2f351c48ff"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/resident.TestReadingsComposeTheWalkTheHostAndTheCeiling"
   role: BINDING_ROLE_TESTS
