@@ -2,6 +2,7 @@ package runtimeinput
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -264,10 +265,55 @@ func TestRefusalClauseSurvivesSeparatorsInNames(t *testing.T) {
 		// shape — a path deliberately named with a quote — is split.
 		{"unhashable runtime input: /x" + sep + `open "a" in "b"`, "unhashable runtime input: /x"},
 	}
+	// The moved-bracket reason: its attribution is the bracketed member
+	// list after " [", split from the first bracket whose suffix parses;
+	// a bracketed segment that is no member list (a label-less one, an
+	// unterminated one, one on another clause) is the reason's own.
+	cases = append(cases,
+		struct{ reason, clause string }{"observation bracket moved: fixtures [added: a.txt, b.txt]", "observation bracket moved: fixtures"},
+		struct{ reason, clause string }{"observation bracket moved: fixtures [added: a.txt; removed: b.txt]", "observation bracket moved: fixtures"},
+		struct{ reason, clause string }{"observation bracket moved: fixtures [recently touched: a.txt (2026-10-07T00:00:00Z)]", "observation bracket moved: fixtures"},
+		struct{ reason, clause string }{"observation bracket moved: fixtures [data]", "observation bracket moved: fixtures [data]"},
+		struct{ reason, clause string }{"observation bracket moved: fixtures [added: a.txt", "observation bracket moved: fixtures [added: a.txt"},
+		struct{ reason, clause string }{"observation bracket moved", "observation bracket moved"},
+		struct{ reason, clause string }{"external directory input: /x [added: y]", "external directory input: /x [added: y]"},
+		// The recorded residual: a root whose own name carries the form
+		// garbles the clause from that bracket on, the same on both
+		// sides of a consumer's match.
+		struct{ reason, clause string }{"observation bracket moved: fix [added: x] [removed: y]", "observation bracket moved: fix"},
+		// A member carrying the list's own framing travels quoted, so
+		// the list stays splittable.
+		struct{ reason, clause string }{`observation bracket moved: fixtures [added: "a; b.txt", "c]d.txt"]`, "observation bracket moved: fixtures"},
+		// A member carrying a bare quote travels quoted too: bare, it
+		// would pair with a later quoted member's opening quote and
+		// swallow that member's separator.
+		struct{ reason, clause string }{`observation bracket moved: data [added: "a\"b", "x; y"; removed: z]`, "observation bracket moved: data"},
+	)
+	for _, name := range []string{"a; b.txt", "c]d.txt", "[e.txt", `a"b`} {
+		if got := memberListName(name); got != strconv.Quote(name) {
+			t.Fatalf("memberListName(%q) = %q, want it quoted: it carries the member list's framing", name, got)
+		}
+	}
+	if got := memberListName("plain.txt"); got != "plain.txt" {
+		t.Fatalf("memberListName(plain.txt) = %q", got)
+	}
+	// The walk's clauses quote for representability alone: a bracketed
+	// or quoted name is an ordinary member name there.
+	for _, name := range []string{"data/a[1]", `data/a"b`, "data/a; b"} {
+		if got := representableReasonName(name); got != name {
+			t.Fatalf("representableReasonName(%q) = %q, want it bare: the list's framing rule is the list's alone", name, got)
+		}
+	}
+	if got := representableReasonName("a\x00b"); got != strconv.Quote("a\x00b") {
+		t.Fatalf("representableReasonName(a\\x00b) = %q, want it quoted", got)
+	}
 	for _, c := range cases {
 		if got := RefusalClause(c.reason); got != c.clause {
 			t.Errorf("RefusalClause(%q) = %q, want %q", c.reason, got, c.clause)
 		}
+	}
+	if got := RefusalAttribution("observation bracket moved: fixtures [added: a.txt; removed: b.txt]"); got != "added: a.txt; removed: b.txt" {
+		t.Fatalf("the moved-bracket attribution = %q, want the member list without its brackets", got)
 	}
 	// The builder's attribution, pasted after a clause, round-trips
 	// through the split for every operation of the one vocabulary; an
@@ -341,6 +387,166 @@ func TestConvertAttributionDirRewritesOnlyTheOperationForm(t *testing.T) {
 	} {
 		if got := convertAttributionDir(c.in, upper); got != c.want {
 			t.Errorf("convertAttributionDir(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// A refused path inside the module is spelled module-relative in its
+// clause: one tree in two checkouts, each carrying a symbolic link to
+// the same external directory and to the same external file, yields one
+// manifest, one digest and one reason — the clauses name `escape` and
+// `escapefile`, never the checkout's absolute path — while the
+// attribution names the recorded path and its target
+// (REQ-inputs-refusal-attribution's spelling rule, the identity clause's
+// "keyed by what was measured, never by the checkout root").
+func TestInModuleRefusedPathSpellsModuleRelative(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var states [2]Observation
+	for i := range states {
+		moduleDir, packageDir := testDirs(t)
+		if err := os.Symlink(outside, filepath.Join(moduleDir, "escape")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "f.txt"), filepath.Join(moduleDir, "escapefile")); err != nil {
+			t.Fatal(err)
+		}
+		state, err := FromTestLog([]byte("open ../escape\nopen ../escapefile\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "escape", "escapefile")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !state.Unverifiable {
+			t.Fatalf("checkout %d: the escaping links were admitted: %+v", i, state.State)
+		}
+		for _, abs := range []string{moduleDir, packageDir} {
+			if strings.Contains(state.Reason, abs) || strings.Contains(state.Manifest, abs) {
+				t.Fatalf("checkout %d: the identity names the checkout %q: reason %q", i, abs, state.Reason)
+			}
+		}
+		// The bracket's capture reaches the hashing pass first and
+		// wraps its refusal; the refused path is spelled relative there
+		// and the attribution names the recorded path and its target.
+		if clause := RefusalClause(state.Reason); !strings.HasSuffix(clause, "external directory input: escape") {
+			t.Fatalf("checkout %d: the clause = %q, want the module-relative spelling", i, clause)
+		}
+		if attribution := RefusalAttribution(state.Reason); attribution != `recorded path "escape" resolves to `+strconv.Quote(outside)+` outside the tree` {
+			t.Fatalf("checkout %d: the attribution = %q, want the recorded path and its target", i, attribution)
+		}
+		states[i] = state
+	}
+	if states[0].Manifest != states[1].Manifest || states[0].Digest != states[1].Digest || states[0].Reason != states[1].Reason {
+		t.Fatalf("two checkouts' identities differ:\n%+v\n%+v", states[0].State, states[1].State)
+	}
+	// No manifest clause spells the checkout: every refused in-module
+	// path is relative there too.
+	m, err := decode(states[0].Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Unverifiable) == 0 {
+		t.Fatal("the manifest carries no refusal")
+	}
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(RefusalClause(reason), "/") {
+			t.Fatalf("a manifest clause spells an in-module path absolute: %q", reason)
+		}
+	}
+	// The file link alone, under a bracket covering it: the target
+	// refusal spells it relative as well.
+	moduleDir, packageDir := testDirs(t)
+	if err := os.Symlink(filepath.Join(outside, "f.txt"), filepath.Join(moduleDir, "escapefile")); err != nil {
+		t.Fatal(err)
+	}
+	file, err := FromTestLog([]byte("open ../escapefile\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "escapefile")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clause := RefusalClause(file.Reason); !strings.HasSuffix(clause, "external runtime input target: escapefile") {
+		t.Fatalf("the file link's clause = %q, want the module-relative spelling", clause)
+	}
+}
+
+// A module reached through a symlinked prefix spells an escaping link
+// relative all the same: the coverage walk resolves the module root
+// before following the chain, and the clause names the link as the
+// tree spells it, never as the resolved host path.
+func TestEscapingLinkSpellsRelativeUnderASymlinkedPrefix(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(filepath.Join(real, "mod", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	view := filepath.Join(t.TempDir(), "view")
+	if err := os.Symlink(real, view); err != nil {
+		t.Fatal(err)
+	}
+	moduleDir := filepath.Join(view, "mod")
+	packageDir := filepath.Join(moduleDir, "pkg")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(moduleDir, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	// The bracket root is the link itself: its resolved position holds
+	// the input, the link hop lies outside it, and the coverage refusal
+	// names the hop.
+	state, err := FromTestLog([]byte("open ../escape\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir, "escape")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, "(symlink outside every bracket root: escape)") {
+			found = true
+		}
+		if strings.Contains(reason, real) || strings.Contains(reason, view) {
+			t.Fatalf("a clause spells the host path: %q", reason)
+		}
+	}
+	if !found {
+		t.Fatalf("the escaping link is not named relative: %v", m.Unverifiable)
+	}
+}
+
+// A moved bracket's member list is its attribution: the manifest
+// carries the clause alone (a member's modification time never enters
+// the identity) and the observation's attribution field carries the
+// list, as a classification refusal's does
+// (REQ-inputs-refusal-attribution).
+func TestMovedBracketMemberListIsTheAttribution(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.MkdirAll(filepath.Join(moduleDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "data", "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bracket := testBracket(t, moduleDir, "data")
+	// Two members join: a plain name, and one carrying the list's
+	// separator, which the writer quotes so the list stays splittable.
+	for _, name := range []string{"b.txt", "x; y.txt"} {
+		if err := os.WriteFile(filepath.Join(moduleDir, "data", name), []byte("b"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, err := FromTestLog([]byte("open ../data/a.txt\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Reason != "observation bracket moved: data" || state.Attribution != `added: b.txt, "x; y.txt"` {
+		t.Fatalf("reason %q attributed %q, want the clause alone and the member list", state.Reason, state.Attribution)
+	}
+	m, err := decode(state.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range m.Unverifiable {
+		if strings.Contains(reason, " [") {
+			t.Fatalf("a member list entered the manifest: %q", reason)
 		}
 	}
 }

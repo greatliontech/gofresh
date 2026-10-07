@@ -1,7 +1,14 @@
 # A runtime-input classification names `/` for every subject while the input list is empty
 
-Lands: cross-tool train chunk 292 (its open triages
-this — the trigger below FIRED 2026-10-02).
+Lands: cross-tool train chunk 330 (godst: the test log carries the
+operation's caller frame — an open of a directory is an
+observed input under the test log's vocabulary — open, stat, chdir, no
+read — so a directory opened for a sync and one listed are
+indistinguishable to the log and the classification stands fail-closed;
+the CALL that opened `/` is a caller frame only the toolchain can log,
+and the manifest-neighbour heuristic is refused as a guess: the manifest
+is sorted, log order does not survive it, and a neighbour names no
+caller).
 
 Attributed occurrence (protodb, 2026-10-02, the standing channel): a
 campaign over protodb's clean tree disqualified all 54 machine-local

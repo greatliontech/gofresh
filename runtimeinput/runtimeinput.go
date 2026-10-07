@@ -1115,6 +1115,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 		if !covered {
 			reason := "runtime input not covered by observation bracket: " + id.displayPath()
 			if escapedLink != "" && utf8.ValidString(escapedLink) && !strings.ContainsAny(escapedLink, "\x00\r\n") {
+				// covers spells the escaping link as its identity is —
+				// module-relative inside the module, so the clause is
+				// the same from any checkout; absolute outside it.
 				reason += " (symlink outside every bracket root: " + escapedLink + ")"
 			}
 			addUnverifiable(&m, unverifiableSeen, reason)
@@ -1140,6 +1143,15 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 	if !unchanged {
 		if !strings.HasPrefix(reason, "observation bracket") {
 			reason = "observation bracket unverifiable: " + reason
+		}
+		// The manifest carries the refusal's clause; a moved bracket's
+		// member list — its attribution, timestamps included — rides the
+		// observation's attribution field like a classification
+		// refusal's, outside the identity (REQ-inputs-refusal-attribution).
+		clause, attribution := splitAttribution(reason)
+		if attribution != "" && strings.HasPrefix(reason, movedBracketClause) {
+			noteAttribution(attributions, clause, attribution)
+			reason = clause
 		}
 		addUnverifiable(&m, unverifiableSeen, reason)
 		sortManifest(&m)
@@ -1801,11 +1813,13 @@ var attributionOps = []string{"open", "stat", "chdir"}
 
 // RefusalClause is the clause of a refusal reason — the text a consumer
 // keys on (an exemption record, a disposition table), before the
-// attribution a resolved-target reason carries or a consumer pastes
-// after it (REQ-inputs-refusal-attribution). The attribution
-// is the one well-formed suffix: from a separator, an operation and its
-// quoted name and quoted directory, or `recorded path`, its quoted
-// spelling, and its quoted target, running exactly to the reason's end
+// attribution a resolved-target reason carries, a moved-bracket reason
+// carries, or a consumer pastes after it
+// (REQ-inputs-refusal-attribution). The attribution is the one
+// well-formed suffix: from a separator, an operation and its quoted
+// name and quoted directory, or `recorded path`, its quoted spelling,
+// and its quoted target, running exactly to the reason's end; or, for
+// the moved-bracket reason alone, from " [" the bracketed member list
 // — a quoted string cannot carry an unescaped quote, so no separator
 // inside a quoted name or directory, or inside the refused path of an
 // attributed reason (the fake never runs to the end), parses that way.
@@ -1836,6 +1850,9 @@ func RefusalAttribution(reason string) string {
 // RefusalAttribution read: the clause before the first separator whose
 // suffix is exactly one well-formed attribution, and that suffix.
 func splitAttribution(reason string) (clause, attribution string) {
+	if clause, attribution, ok := splitBracketAttribution(reason); ok {
+		return clause, attribution
+	}
 	for i := strings.Index(reason, attributionSeparator); i >= 0; {
 		if suffix := reason[i+len(attributionSeparator):]; attributionWellFormed(suffix) {
 			return reason[:i], suffix
@@ -1860,6 +1877,92 @@ func attributionWellFormed(s string) bool {
 		return quotedThen(rest, " resolves to ", " outside the tree")
 	}
 	return false
+}
+
+// movedBracketClause heads the observation-bracket refusal's reason,
+// the one reason whose attribution is a bracketed member list.
+const movedBracketClause = "observation bracket moved"
+
+// bracketAttributionLabels are the member-list parts a moved-bracket
+// attribution is made of (bracketMoveAttribution): each part one label
+// and its capped list, the parts joined by "; " inside one bracket pair.
+var bracketAttributionLabels = []string{"added: ", "removed: ", "recently touched: "}
+
+// bracketAttributionWellFormed reports whether s is exactly one
+// moved-bracket attribution: `[<part>(; <part>)*]` running to the end,
+// every part beginning with one of the labels.
+func bracketAttributionWellFormed(s string) bool {
+	inner, ok := strings.CutPrefix(s, "[")
+	if !ok {
+		return false
+	}
+	inner, ok = strings.CutSuffix(inner, "]")
+	if !ok {
+		return false
+	}
+	for _, part := range bracketAttributionParts(inner) {
+		labelled := false
+		for _, label := range bracketAttributionLabels {
+			if strings.HasPrefix(part, label) {
+				labelled = true
+			}
+		}
+		if !labelled {
+			return false
+		}
+	}
+	return true
+}
+
+// bracketAttributionParts splits a member list's inner text at its
+// part separators outside quoted members: a member carrying the list's
+// framing travels quoted (memberListName), so a "; " inside
+// a quoted name is the name's, never a separator.
+func bracketAttributionParts(inner string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(inner); {
+		switch {
+		case inner[i] == '"':
+			quoted, err := strconv.QuotedPrefix(inner[i:])
+			if err != nil {
+				i++
+				continue
+			}
+			i += len(quoted)
+		case strings.HasPrefix(inner[i:], "; "):
+			parts = append(parts, inner[start:i])
+			i += 2
+			start = i
+		default:
+			i++
+		}
+	}
+	return append(parts, inner[start:])
+}
+
+// splitBracketAttribution is the split for the moved-bracket reason:
+// the clause before the FIRST " [" whose suffix is one well-formed
+// member list, the suffix without its brackets. The split reads from the
+// prefix, never from the last bracket, so a member whose own name
+// carries the form garbles the clause from that member on — the
+// recorded residual (REQ-inputs-refusal-attribution), the same both
+// sides of a consumer's match see.
+func splitBracketAttribution(reason string) (clause, attribution string, ok bool) {
+	if !strings.HasPrefix(reason, movedBracketClause) {
+		return reason, "", false
+	}
+	for i := strings.Index(reason, " ["); i >= 0; {
+		if suffix := reason[i+1:]; bracketAttributionWellFormed(suffix) {
+			return reason[:i], suffix[1 : len(suffix)-1], true
+		}
+		next := strings.Index(reason[i+1:], " [")
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+	return reason, "", false
 }
 
 // quotedThen reports whether s is a quoted string, then mid, then a
@@ -2124,7 +2227,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		facts, err := currentMachineFacts()
 		if err != nil {
 			fprintf(h, "path %s %s machine-unhashable\n", id.Kind, id.Path)
-			return true, "unhashable runtime input: " + p, nil
+			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		fprintf(h, "path %s %s machine %s\n", id.Kind, id.Path, facts.Fingerprint())
 		return false, "", nil
@@ -2136,7 +2239,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 	}
 	if err != nil {
 		fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
-		return true, "unhashable runtime input: " + p, nil
+		return true, "unhashable runtime input: " + id.displayPath(), nil
 	}
 	target := p
 	if id.Kind == pathRel {
@@ -2144,15 +2247,15 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		target, external, err = resolvedTarget(p, moduleDir)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
-			return true, "unhashable runtime input: " + p, nil
+			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		if external {
 			if info.IsDir() {
 				fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
-				return true, "external directory input: " + p + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
+				return true, "external directory input: " + id.displayPath() + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 			}
 			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
-			return true, "external runtime input target: " + p + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
+			return true, "external runtime input target: " + id.displayPath() + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 		}
 	} else if info.IsDir() && !existenceBindsExternalDirs {
 		// An absolute directory bracket root walks its resolved
@@ -2164,7 +2267,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		// link into a volatile tree walks nothing.
 		if target, err = filepath.EvalSymlinks(p); err != nil {
 			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
-			return true, "unhashable runtime input: " + p, nil
+			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		if volatileOSPath(target) {
 			fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
@@ -2182,12 +2285,12 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		sum, err := fileHash(ctx, target)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
-			return true, "unhashable runtime input: " + p, nil
+			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
 		return false, "", nil
 	case info.IsDir() && (id.Kind == pathRel || !existenceBindsExternalDirs):
-		sum, unv, reason, err := dirHashFiltered(ctx, target, skip, visit, metadata)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, id.displayPath(), skip, visit, metadata)
 		if err != nil {
 			return false, "", err
 		}
@@ -2208,10 +2311,15 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		return false, "", nil
 	default:
 		fprintf(h, "path %s %s unhashable-mode %s\n", id.Kind, id.Path, mode.String())
-		return true, "unhashable runtime input: " + p, nil
+		return true, "unhashable runtime input: " + id.displayPath(), nil
 	}
 }
 
+// displayPath is the identity's one spelling in a clause: a
+// module-relative identity by its slash-relative path — a clause is
+// then a function of the tree's content, the same from any checkout —
+// and an absolute identity by its own clean spelling, which IS that
+// object's identity (REQ-inputs-refusal-attribution's spelling rule).
 func (id pathID) displayPath() string {
 	if id.Kind == pathRel {
 		return id.Path
@@ -2275,20 +2383,34 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 	return sum, nil
 }
 
-func dirHash(ctx context.Context, root string) ([32]byte, bool, string, error) {
-	return dirHashFiltered(ctx, root, nil, nil, true)
-}
-
-// dirHashFiltered is dirHash with a skip predicate over the slash-form path of
-// each entry relative to root; a skipped directory's subtree contributes
-// nothing to the digest. A nil skip digests the complete tree. A non-nil
+// dirHashFiltered digests a directory tree under a skip predicate over
+// the slash-form path of each entry relative to root; a skipped
+// directory's subtree contributes nothing to the digest. A nil skip
+// digests the complete tree. A non-nil
 // visit receives each digested entry's slash-form rel (the root's own "."
 // included), letting a bracket capture retain the walked membership without
 // a second walk that could diverge from the hashing semantics.
-func dirHashFiltered(ctx context.Context, root string, skip func(rel string) bool, visit func(rel string), metadata bool) ([32]byte, bool, string, error) {
+// dirHashFiltered walks the directory at root — the resolved position
+// of the identity whose clause spelling is display — hashing its
+// membership and content; a member it cannot hash is named in the
+// refusal under the identity's spelling (display, then the member's
+// walk-relative path), never under the walked absolute position, so
+// the clause is the same from any checkout
+// (REQ-inputs-refusal-attribution's spelling rule).
+func dirHashFiltered(ctx context.Context, root, display string, skip func(rel string) bool, visit func(rel string), metadata bool) ([32]byte, bool, string, error) {
 	h := sha256.New()
 	unverifiable := false
 	reason := ""
+	member := func(path string) string {
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." {
+			return display
+		}
+		if display == "." {
+			return filepath.ToSlash(rel)
+		}
+		return display + "/" + filepath.ToSlash(rel)
+	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return contextErr
@@ -2306,7 +2428,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 		if err != nil {
 			unverifiable = true
 			if reason == "" {
-				reason = "unhashable runtime directory: " + representableReasonName(path)
+				reason = "unhashable runtime directory: " + representableReasonName(member(path))
 			}
 			return nil
 		}
@@ -2319,7 +2441,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 		if err != nil {
 			unverifiable = true
 			if reason == "" {
-				reason = "unhashable runtime directory: " + representableReasonName(path)
+				reason = "unhashable runtime directory: " + representableReasonName(member(path))
 			}
 			return nil
 		}
@@ -2343,7 +2465,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			if err != nil {
 				unverifiable = true
 				if reason == "" {
-					reason = "unhashable runtime directory file: " + representableReasonName(path)
+					reason = "unhashable runtime directory file: " + representableReasonName(member(path))
 				}
 				return nil
 			}
@@ -2354,7 +2476,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 			if err != nil {
 				unverifiable = true
 				if reason == "" {
-					reason = "unhashable runtime directory symlink: " + path
+					reason = "unhashable runtime directory symlink: " + representableReasonName(member(path))
 				}
 				return nil
 			}
@@ -2362,7 +2484,7 @@ func dirHashFiltered(ctx context.Context, root string, skip func(rel string) boo
 		default:
 			unverifiable = true
 			if reason == "" {
-				reason = "unhashable runtime directory entry: " + path
+				reason = "unhashable runtime directory entry: " + representableReasonName(member(path))
 			}
 			fprintf(h, "unhashable %s %s\n", rel, info.Mode().String())
 		}

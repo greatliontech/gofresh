@@ -65,7 +65,7 @@ func TestCurrentStopsBetweenInputsAndFileChunks(t *testing.T) {
 		t.Fatalf("file-chunk cancellation = %v, want context.Canceled", err)
 	}
 	dirCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
-	if _, _, _, err := dirHash(dirCtx, moduleDir); !errors.Is(err, context.Canceled) {
+	if _, _, _, err := dirHashFiltered(dirCtx, moduleDir, moduleDir, nil, nil, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("directory-entry cancellation = %v, want context.Canceled", err)
 	}
 }

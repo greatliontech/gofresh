@@ -213,10 +213,10 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 	}
 	for i, root := range b.roots {
 		if current.roots[i].digest != root.digest {
-			return false, "observation bracket moved: " + root.id.displayPath() + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
+			return false, movedBracketClause + ": " + root.id.displayPath() + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
 		}
 	}
-	return false, "observation bracket moved", nil
+	return false, movedBracketClause, nil
 }
 
 // bracketMoveAttribution names WHAT moved inside a refused root, best
@@ -243,10 +243,10 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 	sort.Strings(removed)
 	var parts []string
 	if len(added) > 0 {
-		parts = append(parts, "added: "+render.CappedList(representableReasonNames(added)))
+		parts = append(parts, "added: "+render.CappedList(memberListNames(added)))
 	}
 	if len(removed) > 0 {
-		parts = append(parts, "removed: "+render.CappedList(representableReasonNames(removed)))
+		parts = append(parts, "removed: "+render.CappedList(memberListNames(removed)))
 	}
 	if len(parts) == 0 {
 		p, err := materializePath(moduleDir, captured.id)
@@ -272,7 +272,7 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 			})
 			var names []string
 			for _, t := range recent {
-				names = append(names, representableReasonName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
+				names = append(names, memberListName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
 			}
 			if len(names) > 0 {
 				parts = append(parts, "recently touched: "+render.CappedList(names))
@@ -298,10 +298,24 @@ func representableReasonName(name string) string {
 	return strconv.Quote(name)
 }
 
-func representableReasonNames(names []string) []string {
+// memberListName renders one member of a moved-bracket attribution's
+// list: a representable name travels bare unless it carries the list's
+// own framing — a part separator "; ", a bracket, or a quote, which
+// would pair with a later quoted member's — so an unquoted member
+// never contains a byte the split reads, and every quoted one is a Go
+// quoted string the split consumes whole
+// (REQ-inputs-refusal-attribution).
+func memberListName(name string) string {
+	if !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n[]\"") || strings.Contains(name, "; ") {
+		return strconv.Quote(name)
+	}
+	return name
+}
+
+func memberListNames(names []string) []string {
 	out := make([]string, len(names))
 	for i, name := range names {
-		out[i] = representableReasonName(name)
+		out[i] = memberListName(name)
 	}
 	return out
 }
@@ -510,6 +524,14 @@ func (c bracketCoverage) covers(id pathID) (bool, string, error) {
 	}
 	for _, link := range links {
 		if !c.contains(link, false) {
+			// The escaping link is named as its identity is: relative
+			// to the resolved module root the chain was walked from
+			// when it lies under it, so the clause is the same from
+			// any checkout (a symlinked prefix included); absolute
+			// outside the module, where that spelling is its identity.
+			if rel, ok := relUnder(c.moduleRoot, link); ok {
+				return false, filepath.ToSlash(rel), nil
+			}
 			return false, link, nil
 		}
 	}
