@@ -1,6 +1,7 @@
 # The children's budget is not bounded by the host's available memory
 
-Lands: cross-tool train chunk 314 (the resident release)
+Lands: cross-tool train chunk 240 (audit 332: a spec correction — REQ-fresh-resident-readings' admission sentence struck, the budget stated as an oracle tree's handed-down target; no admission reads the budget, gomutant 214's oracle bound its one planned reader).
+
 
 REQ-fresh-resident-readings derives the children's budget as the
 family's room less the pass's own ceiling — room = available + the

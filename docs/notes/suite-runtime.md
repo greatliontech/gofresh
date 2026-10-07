@@ -16,7 +16,7 @@ Two tests active when the full run timed out complete independently:
 Diagnostic CPU/allocation profiles were captured with `go test`, outside
 Stipulator, under shared machine coordination. They are attribution runs, not
 quiet statistical performance recordings. Profile data and matching binaries
-are under `/tmp/opencode/gofresh-root*` and `/tmp/opencode/gofresh-closure*`.
+were taken under a scratch directory that did not persist; re-measure before reading them.
 
 ## Evidence
 

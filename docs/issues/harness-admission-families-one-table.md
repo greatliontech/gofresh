@@ -17,4 +17,4 @@ constructor, one body-cut term, one dynamic-target arm, and one
 inventory walk — a fifth family becomes a table row, and a missing
 site becomes unrepresentable.
 
-Lands: with the next harness admission family.
+Lands: cross-tool train chunk 204 (audit 332/335: the table beside the auditset tables — 3361645's immutableEnvironmentMethod is the seventh spelling site; the passive 'next family' trigger retired).

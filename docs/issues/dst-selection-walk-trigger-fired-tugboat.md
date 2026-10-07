@@ -39,6 +39,4 @@ dst.14, a flock's release deferred to the last shared mapping in
 os/dst_fs.go, dst_flock_linux.go and dst_mmap_linux.go, lies inside
 it).
 
-Lands: cross-tool train chunk 297 (the dst-selection walk, chartered from this
-report at chunk 289's record; this report fires walk-dst-selection-for-audit-key's
-trigger — the two are one work item and land together).
+Lands: cross-tool train chunk 315 (the machine walk; 297 merged into it at audit 316). Audit 332 merged walk-dst-selection-for-audit-key into this doc — it described the pre-310 mechanism (a version-axis table, `runtime.Version()` membership); since 310 admission is a content key against chain rows, so the walk's question is which standard-library files the dst tag selects and whether their digests sit on a listed chain, the refusal naming the keys off the closest chain.
