@@ -334,6 +334,14 @@ Explicit purity remains the separate caller-responsible override in the freshnes
 contract. It may affect the final verdict without relabeling an incomplete
 observation as complete or an assertion as verified evidence.
 
+**REQ-inputs-identity-facade** (behavior): The shared producer facade MUST also
+provide explicit identity-only finalization for a normally completed process,
+using the same receipt binding, frame, capture validation, environment,
+classifications, bracket and cancellation rules. This operation preserves
+observed identities for drift detection without claiming outcome agreement and
+never emits outcome-support fields, even if a caller supplies a capability.
+Missing, mismatched or abnormal completion remains explicitly incomplete.
+
 **REQ-inputs-bound-outcomes** (invariant): Supported observation construction MUST
 match independently prepared outcome support and a normal-completion receipt to
 the same captured process frame, process identity and complete normalized

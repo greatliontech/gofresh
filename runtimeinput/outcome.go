@@ -60,21 +60,21 @@ func HasOutcomeSupport(encoded, subject string) bool {
 	return err == nil && slices.Contains(m.Subjects, subject)
 }
 
-func (f ProducerFrame) outcomePremise(in ProducerIngest) string {
+func (f ProducerFrame) completionPremise(in ProducerIngest) (outcome.Binding, string) {
 	if in.Completion.binding.Process == "" {
-		return "process completion receipt unavailable"
+		return outcome.Binding{}, "process completion receipt unavailable"
 	}
 	binding, err := f.OutcomeBinding(in.Identity, in.Env)
 	if err != nil {
-		return fmt.Sprintf("process binding invalid: %v", err)
+		return outcome.Binding{}, fmt.Sprintf("process binding invalid: %v", err)
 	}
 	if in.Completion.binding != binding {
-		return "process completion receipt belongs to a different execution or environment"
+		return outcome.Binding{}, "process completion receipt belongs to a different execution or environment"
 	}
 	if in.Completion.reason != "" {
-		return in.Completion.reason
+		return outcome.Binding{}, in.Completion.reason
 	}
-	return in.Outcome.Reason(binding)
+	return binding, ""
 }
 
 func environmentLog(ctx context.Context, log []byte) (bool, error) {

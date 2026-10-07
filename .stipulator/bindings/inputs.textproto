@@ -1840,3 +1840,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "4a9fadd804494716aabd91b3944f7334d8d1c4bd85df64dee411775bc2e7b117"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-identity-facade"
+  content_hash: "acf1cca9af78ac82f0c8dae5df39584292401391de3f3402729a350d9d0c25e3"
+  source_hash: "cc6de671a9f99737d52a62f397c47827400d96fc4561fdd0363e5339848c88ac"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.ProducerFrame.ObserveInputs"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "0f05367c42a243ab55671d69ee5ff9ee69f3fc708753826e85a4ab2fb977032a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-identity-facade"
+  content_hash: "acf1cca9af78ac82f0c8dae5df39584292401391de3f3402729a350d9d0c25e3"
+  source_hash: "cc6de671a9f99737d52a62f397c47827400d96fc4561fdd0363e5339848c88ac"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d830b4bf42aa2b206bce3a52f25c35916c42f48228507e3ade857936a55f5587"
+}

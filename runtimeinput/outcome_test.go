@@ -163,7 +163,7 @@ func TestOutcomePremiseInputsAndExportedSubjects(t *testing.T) {
 	in := supportedIngest(t, frame, "worker", env)
 	invalidIngest := in
 	invalidIngest.Env = []string{"missing-equals"}
-	if reason := frame.outcomePremise(invalidIngest); !strings.Contains(reason, "binding invalid") {
+	if _, reason := frame.completionPremise(invalidIngest); !strings.Contains(reason, "binding invalid") {
 		t.Fatalf("malformed binding reported as another premise: %q", reason)
 	}
 	exported := in.Outcome.Subjects()
@@ -171,6 +171,74 @@ func TestOutcomePremiseInputsAndExportedSubjects(t *testing.T) {
 	obs, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), in)
 	if err != nil || reason != "" || !HasOutcomeSupport(obs.Manifest, supportedSubject) || HasOutcomeSupport(obs.Manifest, exported[0]) {
 		t.Fatalf("exported subjects altered opaque support: %+v %q %v", obs, reason, err)
+	}
+}
+
+func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
+	root, dir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})
+	env := producerEnv(dir)
+	in := supportedIngest(t, frame, "worker", env)
+	empty, err := frame.ObserveInputs(context.Background(), writeTestlog(t, ""), in)
+	if err != nil || !empty.OK || empty.Manifest == "" || empty.Unverifiable || HasOutcomeSupport(empty.Manifest, supportedSubject) {
+		t.Fatalf("identity-only empty capture: %+v %v", empty, err)
+	}
+	observation, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), in)
+	if err != nil || observation.Unverifiable {
+		t.Fatalf("identity capture: %+v %v", observation, err)
+	}
+	paths, err := ModuleRelPaths(observation.Manifest)
+	if err != nil || len(paths) != 1 || paths[0] != "pkg/fixture" {
+		t.Fatalf("identity paths=%v %v", paths, err)
+	}
+	if HasOutcomeSupport(observation.Manifest, supportedSubject) {
+		t.Fatal("identity capture granted outcomes")
+	}
+	binding, err := frame.OutcomeBinding("worker", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, support := range []OutcomeSupport{{}, outcome.Prepare(binding, []string{supportedSubject}, "unsupported file inventory")} {
+		withoutSupport := in
+		withoutSupport.Outcome = support
+		got, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), withoutSupport)
+		if err != nil || !got.OK || got.Unverifiable || got.State != observation.State || HasOutcomeSupport(got.Manifest, supportedSubject) {
+			t.Fatalf("unavailable outcomes lost identity guards: %+v %v", got, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(context.Background(), observation.Manifest, root, env)
+	if err != nil || current.Digest == observation.Digest {
+		t.Fatalf("identity guard missed movement: %+v %v", current, err)
+	}
+	for _, modify := range []func(*ProducerIngest){
+		func(in *ProducerIngest) { in.Completion = CompletionReceipt{} },
+		func(in *ProducerIngest) { in.Identity = "another process" },
+		func(in *ProducerIngest) {
+			var err error
+			in.Completion, err = frame.Completion(in.Identity, in.Env, "process aborted")
+			if err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		bad := in
+		modify(&bad)
+		obs, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), bad)
+		if err != nil || !obs.Unverifiable {
+			t.Fatalf("invalid completion yielded identity evidence: %+v %v", obs, err)
+		}
+		paths, err := ModuleRelPaths(obs.Manifest)
+		if err != nil || len(paths) != 0 {
+			t.Fatalf("uncompleted capture retained identities: %v %v", paths, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if obs, err := frame.ObserveInputs(ctx, writeTestlog(t, ""), in); !errors.Is(err, context.Canceled) || obs.OK {
+		t.Fatalf("cancelled identity capture=%+v %v", obs, err)
 	}
 }
 

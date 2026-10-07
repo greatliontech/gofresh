@@ -163,13 +163,34 @@ type ProducerIngest struct {
 // the process's effective incompleteness, empty exactly when the
 // observation completed (REQ-inputs-producer-facade).
 func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in ProducerIngest) (Observation, string, error) {
+	return f.observe(ctx, testlogPath, in, true)
+}
+
+// ObserveInputs finalizes identity-only input guards for a normally completed
+// process. It preserves the facade's frame, environment, classification and
+// cancellation rules, but never emits outcome support, even when supplied.
+// It is not a request for completion-bearing observation evidence and cannot
+// authorize observation-based reuse.
+func (f ProducerFrame) ObserveInputs(ctx context.Context, testlogPath string, in ProducerIngest) (Observation, error) {
+	observation, _, err := f.observe(ctx, testlogPath, in, false)
+	return observation, err
+}
+
+func (f ProducerFrame) observe(ctx context.Context, testlogPath string, in ProducerIngest, requireOutcomes bool) (Observation, string, error) {
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
 	// Bind and finalize from one owned environment, even when a runner hook
 	// updates the caller's configuration while resolving classification roots.
 	in.Env = slices.Clone(in.Env)
-	if reason := f.outcomePremise(in); reason != "" {
+	binding, reason := f.completionPremise(in)
+	if reason == "" && requireOutcomes {
+		reason = in.Outcome.Reason(binding)
+	}
+	if !requireOutcomes {
+		in.Outcome = OutcomeSupport{}
+	}
+	if reason != "" {
 		return f.incomplete(ctx, in, reason)
 	}
 	log, reason, err := readProducerLog(ctx, testlogPath)
@@ -179,12 +200,14 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	if reason != "" {
 		return f.incomplete(ctx, in, reason)
 	}
-	allowed, err := environmentLog(ctx, log)
-	if err != nil {
-		return Observation{}, "", err
-	}
-	if !allowed {
-		return f.incomplete(ctx, in, "operation-outcome support does not cover the captured operations")
+	if requireOutcomes {
+		allowed, err := environmentLog(ctx, log)
+		if err != nil {
+			return Observation{}, "", err
+		}
+		if !allowed {
+			return f.incomplete(ctx, in, "operation-outcome support does not cover the captured operations")
+		}
 	}
 	observation, reason, err := f.captureBytes(ctx, log, in)
 	if err != nil || reason != "" {
