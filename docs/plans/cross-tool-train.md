@@ -2713,9 +2713,11 @@ in their repos.
       runtime-seeded freshness class every other driver carries; an
       unsupported driver named in the diagnostic).
       Grown (2026-10-06, audit 318): property-completion-adapter-guidance (derived: the direct-driver rule is soundness; the remedy a diagnostic naming the reached-through helper and the direct-call form).
-- [ ] 299. stipulator: a policy toolchain pin the environment does not
-      satisfy refuses at load (the stipulator field report
-      toolchain-pin-unhonored-runs-silently — tugboat, 2026-09-29: the
+- [x] 299. stipulator: a policy toolchain pin the environment does not
+      satisfy refuses at load (the stipulator field report, resolved at
+      299 — stipulator `git log --all --
+      docs/issues/toolchain-pin-unhonored-runs-silently.md` — tugboat,
+      2026-09-29: the
       policy pins go1.26.5-dst.6, the exported GOTOOLCHAIN is overridden
       by the machine's go wrapper, and every witness executed and was
       judged under go1.27.0-dst.14 with no diagnostic — a pin with no
