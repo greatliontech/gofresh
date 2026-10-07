@@ -14,6 +14,7 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 
 	prog "github.com/greatliontech/gofresh/closure/internal/program"
+	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
 // parameterizedBody reports whether fn's body is generic (uninstantiated):
@@ -93,7 +94,7 @@ type Observability struct {
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
 // set or admitted environment lookups under an unchanged complete inherited
 // environment. Its implementation semantics are audited for Linux only.
-const ImmutableEnvironmentOutcomes = "gofresh/immutable-environment@1"
+const ImmutableEnvironmentOutcomes = outcome.Method
 
 // maxAttributedSubjects bounds one attributed-RTA slice: a package's
 // subjects are proven in slices of this width, each slice a walk over

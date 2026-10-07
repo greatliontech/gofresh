@@ -39,6 +39,23 @@ func writeTestlog(t *testing.T, lines string) string {
 	return path
 }
 
+// captureGuards exercises the facade's identity-guard assembly independently of
+// execution-bound support. These fixtures deliberately include filesystem
+// observations, for which the current outcome method grants no support.
+func captureGuards(frame ProducerFrame, ctx context.Context, path string, in ProducerIngest) (Observation, string, error) {
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	log, reason, err := readProducerLog(ctx, path)
+	if err != nil {
+		return Observation{}, "", err
+	}
+	if reason != "" {
+		return frame.incomplete(ctx, in, reason)
+	}
+	return frame.captureBytes(ctx, log, in)
+}
+
 // The facade's completed path reproduces the hand-assembled conjunction
 // byte for byte: same frame, same options, same manifest and digest -
 // the producers' correctness-by-construction claim
@@ -52,7 +69,7 @@ func TestProducerFacadeMatchesHandAssembly(t *testing.T) {
 	logPath := writeTestlog(t, "getenv PRODUCER_PROBE\nopen fixture\nopen "+
 		filepath.Join(frame.Root, ".git", "HEAD")+"\nopen "+frame.Root+"\n")
 	env := []string{"PRODUCER_PROBE=1", "PWD=" + pkgDir}
-	observation, reason, err := frame.Observe(context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env})
+	observation, reason, err := captureGuards(frame, context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env})
 	if err != nil || reason != "" {
 		t.Fatalf("facade observe = reason %q, err %v", reason, err)
 	}
@@ -105,13 +122,17 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 	frame := CaptureProducerFrame(context.Background(), root, pkgDir, FrameOptions{})
 	env := []string{"PWD=" + pkgDir}
 	t.Run("caller health verdict wins", func(t *testing.T) {
-		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: env, IncompleteReason: "process timed out"})
+		receipt, err := frame.Completion("worker", env, "process timed out")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: env, Completion: receipt})
 		if err != nil || reason != "process timed out" {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
 	})
 	t.Run("missing capture", func(t *testing.T) {
-		_, reason, err := frame.Observe(context.Background(), filepath.Join(t.TempDir(), "missing.testlog"), ProducerIngest{Identity: "worker", Env: env})
+		_, reason, err := captureGuards(frame, context.Background(), filepath.Join(t.TempDir(), "missing.testlog"), ProducerIngest{Identity: "worker", Env: env})
 		if err != nil || reason != "test process produced no runtime-input log" {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
@@ -121,7 +142,7 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, reason, err := frame.Observe(context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
+		_, reason, err := captureGuards(frame, context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
 		if err != nil || !strings.Contains(reason, "no test-log header") {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
@@ -131,7 +152,7 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 		if err := os.WriteFile(path, []byte("# test log"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, reason, err := frame.Observe(context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
+		_, reason, err := captureGuards(frame, context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
 		if err != nil || !strings.Contains(reason, "no test-log header") {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
@@ -142,7 +163,7 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 		if refused.Reason() == "" || !strings.Contains(refused.Reason(), "outside the tree") {
 			t.Fatalf("frame = %+v, want the out-of-tree refusal", refused)
 		}
-		_, reason, err := refused.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: env})
+		_, reason, err := captureGuards(refused, context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: env})
 		if err != nil || reason != refused.Reason() {
 			t.Fatalf("reason = %q, err %v, want the frame's own refusal", reason, err)
 		}
@@ -155,13 +176,13 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 		if err := os.Chmod(path, 0o000); err != nil {
 			t.Fatal(err)
 		}
-		_, reason, err := frame.Observe(context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
+		_, reason, err := captureGuards(frame, context.Background(), path, ProducerIngest{Identity: "worker", Env: env})
 		if err != nil || !strings.Contains(reason, "testlog capture unreadable") {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
 	})
 	t.Run("ingestion failure folds to incomplete", func(t *testing.T) {
-		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{
+		_, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, ""), ProducerIngest{
 			Identity:          "worker",
 			Env:               env,
 			ScratchNamespaces: []ScratchNamespace{{Dir: "x", Pattern: "a/b"}},
@@ -171,13 +192,13 @@ func TestProducerFacadeFailsClosed(t *testing.T) {
 		}
 	})
 	t.Run("missing PWD", func(t *testing.T) {
-		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: []string{"HOME=/home/x"}})
+		_, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: []string{"HOME=/home/x"}})
 		if err != nil || !strings.Contains(reason, "no PWD") {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
 	})
 	t.Run("parent-inherited PWD", func(t *testing.T) {
-		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: []string{"PWD=" + root}})
+		_, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: []string{"PWD=" + root}})
 		if err != nil || !strings.Contains(reason, "does not name the package directory") {
 			t.Fatalf("reason = %q, err %v", reason, err)
 		}
@@ -195,11 +216,11 @@ func TestProducerFacadeAssemblesDeclarations(t *testing.T) {
 	scratch := t.TempDir()
 	logPath := writeTestlog(t, "open "+filepath.Join(scratch, "sub", "x")+"\n")
 	env := producerEnv(pkgDir, "TMPDIR="+t.TempDir())
-	with, reason, err := frame.Observe(context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env, ScratchRoot: scratch})
+	with, reason, err := captureGuards(frame, context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env, ScratchRoot: scratch})
 	if err != nil || reason != "" {
 		t.Fatalf("observe = reason %q, err %v", reason, err)
 	}
-	without, _, err := frame.Observe(context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env})
+	without, _, err := captureGuards(frame, context.Background(), logPath, ProducerIngest{Identity: "worker", Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +263,7 @@ func TestProducerFrameResolvesSymlinkedRoot(t *testing.T) {
 	// A producer that spawned under the unresolved link pins the link
 	// path as PWD; the frame accepts it because both names resolve to
 	// the same directory.
-	_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{
+	_, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, ""), ProducerIngest{
 		Identity: "worker",
 		Env:      []string{"PWD=" + filepath.Join(link, "pkg")},
 	})
@@ -278,7 +299,7 @@ func producerEnv(pkgDir string, overrides ...string) []string {
 // completed manifest, failing the test on any incomplete shape.
 func manifestOf(t *testing.T, frame ProducerFrame, env []string, logText string) string {
 	t.Helper()
-	observation, reason, err := frame.Observe(context.Background(), writeTestlog(t, logText), ProducerIngest{Identity: "worker", Env: env})
+	observation, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, logText), ProducerIngest{Identity: "worker", Env: env})
 	if err != nil || reason != "" {
 		t.Fatalf("observe = reason %q, err %v", reason, err)
 	}
@@ -373,7 +394,7 @@ func TestProducerFacadeReportsCancellationAsTheCallersError(t *testing.T) {
 	defer func() { producerTestHooks.beforeRoots = nil }()
 	// An environment the memo has never seen, so the resolution spawns
 	// under the cancelled context.
-	_, reason, err = frame.Observe(ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir, "GOFLAGS=-tags=cancelled")})
+	_, reason, err = captureGuards(frame, ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir, "GOFLAGS=-tags=cancelled")})
 	if err == nil || reason != "" {
 		t.Fatalf("mid-observation cancellation: reason %q, err %v; want the context error", reason, err)
 	}
@@ -409,7 +430,7 @@ func TestProducerFacadeResolvesTheTempRootFromTheEnvironment(t *testing.T) {
 	if _, err := (gotool.Runner{}).Run(context.Background(), pkgDir, broken, "env", "GOROOT"); err == nil {
 		t.Skip("the toolchain answers under an invalid GOTOOLCHAIN; no failing environment to pin")
 	}
-	_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: broken})
+	_, reason, err := captureGuards(frame, context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: broken})
 	if err != nil || !strings.Contains(reason, "classification roots unresolved") {
 		t.Fatalf("reason = %q, err %v", reason, err)
 	}

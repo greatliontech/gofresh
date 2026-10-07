@@ -1,10 +1,9 @@
-# Observation completion lacks an outcome-evidence premise
+# Producer migration to execution-bound outcome evidence
 
-`REQ-inputs-completed-observation` and `WithCompletedProcess` require normal
-termination and agreement between behavior-affecting operation outcomes and
-guarded values. `ProducerIngest` carries health, identity, environment, brackets,
-and declarations; `ProducerFrame.Observe` supplies `WithCompletedProcess` without
-an independent outcome-evidence input.
+`REQ-inputs-completed-observation` requires normal termination and independently
+established operation-outcome agreement. The shared facade now accepts a
+completion receipt and analysis-issued support bound to the same frame, process
+and environment. The fleet adapters must adopt that boundary and the v2 manifest.
 
 The static observability proof establishes which effects can be represented.
 Testlog identities and pre/post value brackets do not establish returned values,
@@ -19,13 +18,11 @@ checks, without independent operation-outcome evidence. Pew currently selects
 no observation-based freshness lift; its proposed adoption needs this premise
 settled first.
 
-The repair requires a coherent shared claim model and producer adapters, rather
-than another automatically populated assertion. Distinguish verified facts,
-explicit caller assertions, and missing evidence. Existing observed records need
-an explicit compatibility judgment when producer construction and evidence
-representation are repaired; previously asserted completion must not silently
-become verified outcome evidence.
-Execution is held for this contract work because changing one consumer alone
-would leave the shared construction claim inconsistent.
+The adapter migration must prepare support before the actual contributing
+execution, over its complete subject set and exact inherited environment.
+Mutated or otherwise transformed executables need support for their actual
+operation model, not a borrowed baseline proof. Unsupported executions carry
+honest incomplete evidence. Legacy manifests regenerate; asserted historical
+completion never becomes verified outcome evidence through a dependency bump.
 
 Lands: pew performance-evidence plan chunk 6 (shared producer migration after the outcome-support capability in chunk 5).

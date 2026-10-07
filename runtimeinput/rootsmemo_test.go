@@ -113,7 +113,9 @@ func TestProducerIngestReadsItsRootsMemo(t *testing.T) {
 	}
 	observe := func(memo *Roots) {
 		t.Helper()
-		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: env, Roots: memo})
+		in := supportedIngest(t, frame, "worker", env)
+		in.Roots = memo
+		_, reason, err := frame.Observe(context.Background(), writeTestlog(t, ""), in)
 		if err != nil || reason != "" {
 			t.Fatalf("observe = reason %q, err %v", reason, err)
 		}

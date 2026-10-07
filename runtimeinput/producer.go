@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
 // testlogHeader is the first line the testing runtime writes on opening
@@ -38,6 +41,7 @@ type ProducerFrame struct {
 	// bracket is nil exactly when reason is non-empty.
 	bracket *Bracket
 	reason  string
+	span    *outcome.Span
 }
 
 // Reason reports why the frame carries no bracket - empty exactly when
@@ -85,7 +89,7 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 	if err != nil {
 		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
 	}
-	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket}
+	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket, span: new(outcome.Span)}
 }
 
 // producerTestHooks lets tests land a cancellation between the facade's
@@ -105,8 +109,8 @@ type ScratchNamespace struct {
 // ProducerIngest carries one process's ingest inputs: the caller owns
 // the identity, the process env verbatim (a rebuilt env loses fidelity
 // the classification depends on - PWD included), its own
-// process-health verdict, and the declaration vocabulary; the facade
-// owns everything else.
+// independently supplied completion receipt, analysis-issued outcome support,
+// and declaration vocabulary. The facade checks their common execution binding.
 type ProducerIngest struct {
 	Identity string
 	Env      []string
@@ -121,9 +125,11 @@ type ProducerIngest struct {
 	// and environment across every run that judged run ingests. Nil
 	// resolves unmemoized — every run pays its probe.
 	Roots *Roots
-	// IncompleteReason is the caller's process-health verdict: empty
-	// exactly when the process provably completed and flushed its log.
-	IncompleteReason string
+	// Completion and Outcome are independent premises bound to this process,
+	// environment and frame. Neither the receipt nor the capture supplies the
+	// other's missing evidence.
+	Completion CompletionReceipt
+	Outcome    OutcomeSupport
 	// ScratchRoot declares a per-run scratch root the producer minted
 	// for the process and keeps out of the environment it ingests (an
 	// environment read of it would record per-run noise); it stands in
@@ -145,40 +151,122 @@ type ProducerIngest struct {
 // non-completing shape fails closed to an incomplete observation
 // carrying its reason - a lost read must never masquerade as the
 // "no runtime inputs observed" assertion - in one canonical order: the
-// caller's incompleteness verdict, an unattached, unreadable or missing
-// capture, a headerless capture, a frame with no bracket, an
+// missing or mismatched completion, abnormal completion, missing or mismatched
+// outcome support, an unattached, unreadable or missing capture, a headerless
+// capture, a log contradicting the supported operation model, a frame with no bracket, an
 // environment whose PWD does not name the package directory (all three
 // producers spawn in the package directory; a parent-inherited PWD
 // would silently misclassify every cwd-anchored read), an environment
 // under which the toolchain cannot answer for the classification
-// roots, and an ingestion failure. A provably flushed log ingests as the completed
-// observation under the assembled option set. The returned reason is
+// roots, and an ingestion failure. A supported flushed log ingests with its
+// method and subject identities bound into the manifest. The returned reason is
 // the process's effective incompleteness, empty exactly when the
 // observation completed (REQ-inputs-producer-facade).
 func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in ProducerIngest) (Observation, string, error) {
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	incomplete := func(reason string) (Observation, string, error) {
-		observation, err := Incomplete(f.Root, in.Identity, reason, in.Env)
+	// Bind and finalize from one owned environment, even when a runner hook
+	// updates the caller's configuration while resolving classification roots.
+	in.Env = slices.Clone(in.Env)
+	if reason := f.outcomePremise(in); reason != "" {
+		return f.incomplete(ctx, in, reason)
+	}
+	log, reason, err := readProducerLog(ctx, testlogPath)
+	if err != nil {
+		return Observation{}, "", err
+	}
+	if reason != "" {
+		return f.incomplete(ctx, in, reason)
+	}
+	allowed, err := environmentLog(ctx, log)
+	if err != nil {
+		return Observation{}, "", err
+	}
+	if !allowed {
+		return f.incomplete(ctx, in, "operation-outcome support does not cover the captured operations")
+	}
+	observation, reason, err := f.captureBytes(ctx, log, in)
+	if err != nil || reason != "" {
 		return observation, reason, err
 	}
-	if in.IncompleteReason != "" {
-		return incomplete(in.IncompleteReason)
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	return observation, "", nil
+}
+
+func (f ProducerFrame) incomplete(ctx context.Context, in ProducerIngest, reason string) (Observation, string, error) {
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	observation, err := Incomplete(f.Root, in.Identity, reason, in.Env)
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	return observation, reason, err
+}
+
+func readProducerLog(ctx context.Context, testlogPath string) ([]byte, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
 	}
 	if testlogPath == "" {
-		return incomplete("testlog capture unavailable: no capture file was attached to the process")
+		return nil, "testlog capture unavailable: no capture file was attached to the process", nil
 	}
-	log, err := os.ReadFile(testlogPath)
+	file, err := os.Open(testlogPath)
+	if file != nil {
+		defer file.Close()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	if os.IsNotExist(err) {
-		return incomplete("test process produced no runtime-input log")
+		return nil, "test process produced no runtime-input log", nil
 	}
 	if err != nil {
-		return incomplete(fmt.Sprintf("testlog capture unreadable: %v", err))
+		return nil, fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
+	}
+	log, err := io.ReadAll(captureReader{ctx: ctx, Reader: file})
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	if err != nil {
+		return nil, fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
 	}
 	if !bytes.HasPrefix(log, testlogHeader) {
-		return incomplete("capture file carries no test-log header; the test binary never opened it")
+		return nil, "capture file carries no test-log header; the test binary never opened it", nil
 	}
+	return log, "", nil
+}
+
+// captureReader checks the caller's context on both sides of each read, so a
+// cancellation concurrent with EOF or an I/O failure cannot become stored data.
+type captureReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r captureReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.Reader.Read(p)
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return n, err
+}
+
+// captureBytes constructs the identity guard with the subject keys Observe has
+// already validated against the execution premises and raw operation model.
+// With no supplied keys it constructs identity-only evidence. Classification
+// itself never authorizes an outcome-support marker.
+func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in ProducerIngest) (Observation, string, error) {
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	incomplete := func(reason string) (Observation, string, error) { return f.incomplete(ctx, in, reason) }
 	if f.bracket == nil {
 		reason := f.reason
 		if reason == "" {
@@ -218,6 +306,7 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 		WithCompletedProcess(in.Identity),
 		WithBracket(*f.bracket),
 		WithExcludedPaths(append([]string{".", ".git"}, in.ExcludedPaths...)...),
+		func(cfg *testLogConfig) { cfg.outcomeSubjects = in.Outcome.Subjects() },
 	}
 	if roots.toolchain != "" {
 		opts = append(opts, withToolchainRoot(roots.toolchain))
@@ -234,7 +323,10 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 	for _, namespace := range in.ScratchNamespaces {
 		opts = append(opts, WithScratchNamespace(namespace.Dir, namespace.Pattern))
 	}
-	observation, err := FromTestLog(log, f.Root, f.PkgDir, in.Env, opts...)
+	observation, err := fromTestLog(ctx, log, f.Root, f.PkgDir, in.Env, opts...)
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
 	if err != nil {
 		return incomplete(fmt.Sprintf("testlog ingestion failed: %v", err))
 	}

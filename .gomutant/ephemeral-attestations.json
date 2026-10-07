@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "attestations": [
+    {
+      "editDigest": "3894dc9a38358a1d132eced5e9f7fa142c5a94cca588ec2befa41fb9e0c74511",
+      "rawEditDigest": "3894dc9a38358a1d132eced5e9f7fa142c5a94cca588ec2befa41fb9e0c74511",
+      "files": [
+        "outcome.go"
+      ],
+      "testPkg": "github.com/greatliontech/gofresh",
+      "run": "^TestOutcomeSupportBindsActualExecutionAndRecordedSubject$",
+      "reason": "Replacing the first-unsupported-member preference with the last unsupported member cannot grant outcome support: every selected member is still examined and any unsupported inventory leaves a nonempty, attributable refusal. The contract requires an actual unsupported contributor to be named, not a priority among multiple such contributors. Subjects and execution binding are unchanged, and recorded refusal text is rehashed verbatim rather than reselected at check time.",
+      "commit": "33616457f17ded5621b770e9ba508691725b4ff8",
+      "dirty": true
+    }
+  ]
+}

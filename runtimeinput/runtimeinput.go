@@ -1,7 +1,7 @@
 // Package runtimeinput records and re-hashes non-source inputs observed by a
 // measured process through Go's testlog channel (spec REQ-inputs-guard).
 //
-// Completed observations bind observed values through an observation bracket
+// Input-identity observations bind guarded values through an observation bracket
 // (REQ-inputs-value-binding): a fingerprint over caller-declared candidate
 // roots, captured before the producing process starts and revalidated
 // strictly after the manifest digest's last input read. Capture over declared
@@ -17,8 +17,9 @@
 // because a link outside every root is invisible to the fingerprint and could
 // be retargeted between two in-root objects mid-span without moving it.
 //
-// A completed observation of newly read values exists only as a live sealed
-// value from the bracket-gated constructor. Observation's provenance fields
+// A finalized observation of newly read identities exists only as a live sealed
+// value from the bracket-gated constructor. Outcome support additionally requires
+// the producer facade's independently bound premises. Observation's provenance fields
 // are unexported; the manifest string in State is the only wire form, and
 // merge, absolute conversion, and dirty inspection each refuse a value whose
 // seal construction did not produce. The one re-entry from the wire form is
@@ -55,9 +56,10 @@ import (
 
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
-const manifestVersion = 1
+const manifestVersion = 2
 
 const (
 	pathRel = "rel"
@@ -76,8 +78,11 @@ type State struct {
 }
 
 // Observation is producer-constructed runtime-input evidence. Its private process
-// provenance distinguishes completion-gated evidence from a State recomputed by a
-// checker, while the embedded State remains the persisted manifest and digest.
+// provenance distinguishes finalized producer evidence from a State recomputed by
+// a checker. Finalization alone supplies no outcome support: the canonical
+// manifest retains the supported method and subjects only after the producer
+// facade checks the independent execution premises. The embedded State describes
+// the input guard, not the entire observation-based reuse conjunction.
 // Attribution is the observation that produced the classification
 // refusal the state's reason names — the operation, its quoted name,
 // and the producing process's own directory, the attribution alone
@@ -108,8 +113,10 @@ type processObservation struct {
 	view    string
 }
 
-// CompletedState returns the persisted state from a sealed observation backed by
-// at least one contributing process. Zero-process merge evidence is refused.
+// CompletedState returns finalized input-guard state from a sealed observation
+// backed by at least one contributing process. It accepts explicitly incomplete
+// evidence too; callers judge outcome support separately. Zero-process merge
+// evidence is refused.
 func CompletedState(observation Observation) (State, error) {
 	if err := validateObservation(observation, false); err != nil {
 		return State{}, err
@@ -122,6 +129,8 @@ func CompletedState(observation Observation) (State, error) {
 
 type manifest struct {
 	Version      int         `json:"v"`
+	Outcome      string      `json:"outcome,omitempty"`
+	Subjects     []string    `json:"subjects,omitempty"`
 	Env          []envInput  `json:"env,omitempty"`
 	Paths        []pathInput `json:"paths,omitempty"`
 	Unverifiable []string    `json:"unverifiable,omitempty"`
@@ -411,8 +420,11 @@ type testLogConfig struct {
 	// reads provably inside record nothing (REQ-inputs-static-inputs).
 	staticRoots []string
 	process     string
-	bracket     *Bracket
-	err         error
+	// outcomeSubjects is set only by the facade after validating the separate
+	// execution premises. Public identity-only options cannot construct it.
+	outcomeSubjects []string
+	bracket         *Bracket
+	err             error
 }
 
 // scratchNamespace is one declared run-scratch namespace: the direct
@@ -480,10 +492,10 @@ type guardRootDecl struct {
 	excludeSub string
 }
 
-// WithCompletedProcess asserts that process terminated normally and every
-// behavior-affecting observed-operation outcome agreed with its guarded value.
+// WithCompletedProcess asserts that process terminated normally. It supplies
+// identity evidence only, never independently established operation outcomes.
 // Process must identify that contributing process uniquely and consistently across
-// every observation in a merge. A caller lacking either fact must use Incomplete.
+// every observation in a merge. A caller lacking normal completion uses Incomplete.
 func WithCompletedProcess(process string) TestLogOption {
 	return func(c *testLogConfig) {
 		if c.process != "" {
@@ -789,7 +801,17 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 // FromTestLog builds a runtime-input manifest from a Go testlog stream and
 // computes its digest against the current filesystem and env, the
 // complete process environment the producing process ran under.
+// The result is identity evidence only. No outcome support is inferred from the
+// normal-process assertion or bracket; the producer facade supplies that separate
+// premise from its execution-bound capability.
 func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
+	return fromTestLog(context.Background(), log, moduleDir, packageDir, env, opts...)
+}
+
+func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
 	cfg, err := applyTestLogOptions(opts)
 	if err != nil {
 		return Observation{}, err
@@ -820,6 +842,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 	}
 
 	m := manifest{Version: manifestVersion}
+	if len(cfg.outcomeSubjects) != 0 {
+		m.Outcome, m.Subjects = outcome.Method, cfg.outcomeSubjects
+	}
 	envSeen := map[string]bool{}
 	pathIndex := map[pathID]int{}
 	unverifiableSeen := map[string]bool{}
@@ -898,6 +923,9 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 		lines = lines[:len(lines)-1]
 	}
 	for _, raw := range lines {
+		if err := ctx.Err(); err != nil {
+			return Observation{}, err
+		}
 		line := string(raw)
 		if line == "# test log" {
 			continue
@@ -1124,7 +1152,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 		}
 	}
 	sortManifest(&m)
-	st, err := stateFromManifest(context.Background(), m, moduleDir, normalized)
+	st, err := stateFromManifest(ctx, m, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -1136,7 +1164,7 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 	// reason enters the persisted manifest, so the recomputed state is the
 	// one every later revalidation reproduces; the bracket only ever adds
 	// unverifiable reasons, never removes one.
-	unchanged, reason, err := cfg.bracket.revalidate(context.Background(), moduleDir)
+	unchanged, reason, err := cfg.bracket.revalidate(ctx, moduleDir)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -1155,11 +1183,15 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 		}
 		addUnverifiable(&m, unverifiableSeen, reason)
 		sortManifest(&m)
-		if st, err = stateFromManifest(context.Background(), m, moduleDir, normalized); err != nil {
+		if st, err = stateFromManifest(ctx, m, moduleDir, normalized); err != nil {
 			return Observation{}, err
 		}
 	}
-	observation := newObservation(st, cfg.process, "complete")
+	origin := "identity-only"
+	if m.Outcome != "" {
+		origin = "outcome-supported"
+	}
+	observation := newObservation(st, cfg.process, origin)
 	// The attribution is the one of the reason the state names — the
 	// first clause of the sorted manifest; a reason the hashing pass
 	// raised carries its own attribution, in the reason itself.
@@ -1275,6 +1307,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		return Observation{}, err
 	}
 	merged := manifest{Version: manifestVersion}
+	supported := true
 	envSeen := map[string]bool{}
 	pathIndex := map[pathID]int{}
 	unverifiableSeen := map[string]bool{}
@@ -1304,6 +1337,10 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
+		if len(observation.processes) > 0 {
+			supported = supported && m.Outcome == outcome.Method
+			merged.Subjects = append(merged.Subjects, m.Subjects...)
+		}
 		for _, entry := range m.Env {
 			if !envSeen[entry.Name] {
 				envSeen[entry.Name] = true
@@ -1316,6 +1353,11 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		for _, reason := range m.Unverifiable {
 			addUnverifiable(&merged, unverifiableSeen, reason)
 		}
+	}
+	if supported && len(merged.Subjects) > 0 {
+		merged.Outcome = outcome.Method
+	} else {
+		merged.Subjects = nil
 	}
 	result, err := encode(merged)
 	if err != nil {
@@ -1417,15 +1459,12 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 	if err != nil {
 		return State{}, err
 	}
-	h := sha256.New()
-	fprintf(h, "version %d\n", m.Version)
 	for i, entry := range m.Env {
 		if err := ctx.Err(); err != nil {
 			return State{OK: false}, err
 		}
 		d := envEntryDigest(env, entry.Name)
 		m.Env[i].Digest = d
-		fprintf(h, "env %s %s\n", entry.Name, d)
 	}
 	unverifiable := len(m.Unverifiable) > 0
 	reason := firstReason(m.Unverifiable)
@@ -1445,16 +1484,12 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 			return State{}, err
 		}
 		m.Paths[i].Digest = d
-		fprintf(h, "path %s %s %s\n", entry.Kind, entry.Path, d)
 		if pathUnverifiable {
 			unverifiable = true
 			if reason == "" {
 				reason = pathReason
 			}
 		}
-	}
-	for _, r := range m.Unverifiable {
-		fprintf(h, "unverifiable %s\n", r)
 	}
 	if err := ctx.Err(); err != nil {
 		return State{OK: false}, err
@@ -1463,14 +1498,34 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 	if err != nil {
 		return State{}, err
 	}
-	sum := h.Sum(nil)
 	return State{
 		Manifest:     encoded,
-		Digest:       hex.EncodeToString(sum)[:32],
+		Digest:       manifestDigest(m),
 		Unverifiable: unverifiable,
 		Reason:       reason,
 		OK:           true,
 	}, nil
+}
+
+func manifestDigest(m manifest) string {
+	h := sha256.New()
+	fprintf(h, "version %d\n", m.Version)
+	if m.Outcome != "" {
+		fprintf(h, "outcome %s\n", m.Outcome)
+		for _, subject := range m.Subjects {
+			fprintf(h, "subject %s\n", subject)
+		}
+	}
+	for _, entry := range m.Env {
+		fprintf(h, "env %s %s\n", entry.Name, entry.Digest)
+	}
+	for _, entry := range m.Paths {
+		fprintf(h, "path %s %s %s\n", entry.Kind, entry.Path, entry.Digest)
+	}
+	for _, reason := range m.Unverifiable {
+		fprintf(h, "unverifiable %s\n", reason)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // guardRootPair carries a declared guard-covered root in both its lexical and
@@ -2520,6 +2575,8 @@ func firstReason(reasons []string) string {
 }
 
 func sortManifest(m *manifest) {
+	sort.Strings(m.Subjects)
+	m.Subjects = compact(m.Subjects)
 	sort.Slice(m.Env, func(i, j int) bool { return m.Env[i].Name < m.Env[j].Name })
 	m.Env = compact(m.Env)
 	sort.Slice(m.Paths, func(i, j int) bool {
@@ -2709,9 +2766,6 @@ func decode(s string) (manifest, error) {
 	if err := requireJSONEnd(dec); err != nil {
 		return manifest{}, err
 	}
-	if m.Version != manifestVersion {
-		return manifest{}, fmt.Errorf("runtimeinputs: unsupported manifest version %d", m.Version)
-	}
 	if err := validateManifest(m); err != nil {
 		return manifest{}, err
 	}
@@ -2741,6 +2795,20 @@ func validEntryDigest(d string) bool {
 }
 
 func validateManifest(m manifest) error {
+	if m.Version != manifestVersion {
+		return fmt.Errorf("runtimeinputs: unsupported manifest version %d", m.Version)
+	}
+	if (m.Outcome == "") != (len(m.Subjects) == 0) || m.Outcome != "" && m.Outcome != outcome.Method {
+		return errors.New("runtimeinputs: unsupported or incomplete outcome evidence")
+	}
+	if m.Outcome == outcome.Method && len(m.Paths) != 0 {
+		return errors.New("runtimeinputs: immutable-environment support carries path inputs")
+	}
+	for _, subject := range m.Subjects {
+		if len(subject) != 64 || !validEntryDigest(subject[:32]) || !validEntryDigest(subject[32:]) {
+			return errors.New("runtimeinputs: invalid outcome subject identity")
+		}
+	}
 	for i, entry := range m.Env {
 		name := entry.Name
 		if name == "" || !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n") {

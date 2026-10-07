@@ -1223,8 +1223,8 @@ func TestMergeRejectsChildThatMovedBeforeUnion(t *testing.T) {
 func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	for _, raw := range []string{
-		`{"v":1,"future":true}`,
-		`{"v":2}`,
+		`{"v":2,"future":true}`,
+		`{"v":1}`,
 	} {
 		state := State{
 			Manifest: base64.RawURLEncoding.EncodeToString([]byte(raw)),
@@ -1250,7 +1250,7 @@ func TestManifestEncodingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantJSON := `{"v":1,"env":[{"n":"A","d":"00000000000000000000000000000000"},{"n":"B","d":"00000000000000000000000000000000"}],"paths":[{"k":"rel","p":"z","d":"00000000000000000000000000000000"}],"unverifiable":["a","z"]}`
+	wantJSON := `{"v":2,"env":[{"n":"A","d":"00000000000000000000000000000000"},{"n":"B","d":"00000000000000000000000000000000"}],"paths":[{"k":"rel","p":"z","d":"00000000000000000000000000000000"}],"unverifiable":["a","z"]}`
 	want := base64.RawURLEncoding.EncodeToString([]byte(wantJSON))
 	if got != want {
 		decoded, _ := base64.RawURLEncoding.DecodeString(got)
@@ -1261,14 +1261,14 @@ func TestManifestEncodingIsCanonical(t *testing.T) {
 func TestManifestDecoderRejectsUnknownAndTrailingData(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	for _, raw := range []string{
-		`{"v":1,"future":true}`,
-		`{"v":1} {"v":1}`,
-		`{"v":1,"paths":[{"k":"rel","p":"tracked"}],"paths":[]}`,
-		`{"V":1}`,
+		`{"v":2,"future":true}`,
+		`{"v":2} {"v":2}`,
+		`{"v":2,"paths":[{"k":"rel","p":"tracked"}],"paths":[]}`,
+		`{"V":2}`,
 	} {
 		encoded := base64.RawURLEncoding.EncodeToString([]byte(raw))
 		if _, err := ambientCurrent(encoded, moduleDir); err == nil {
-			t.Fatalf("Current accepted non-v1 manifest %s", raw)
+			t.Fatalf("Current accepted non-canonical manifest %s", raw)
 		}
 	}
 }

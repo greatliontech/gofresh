@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-inputs-producer-premises"
-reason: "The current facade can mint completion-bearing observations from health and identity/bracket data without independently established outcome support; existing observations do not carry the repaired compatibility judgment. Enforcement and consumer migration land in performance-evidence chunks 5 and 6."
+reason: "Shared execution-bound construction and v2 support preservation are implemented; complete cross-consumer coverage still requires the actual producer adapters to migrate and remeasure under this protocol in performance-evidence chunk 6."
 content_hash: "4c095a23fd7aca769dd1d8ecf8048f56b067ab9d831b0e4eb98753e254b8b8aa"
 source_hash: "4be39b682152ac6ba9f790fde52c1ab9cb46abf760ec99786d9edf42bd8f984e"
-lands { manual { condition: "The versioned outcome-support gate, historical-evidence compatibility judgment and all affected producer adapters are implemented and verified." contradicted: true } }
+lands { manual { condition: "The versioned outcome-support gate, historical-evidence compatibility judgment and all affected producer adapters are implemented and verified." } }

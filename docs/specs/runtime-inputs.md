@@ -19,7 +19,8 @@ at check time to detect a change and to name which input moved.
 
 **runtime-input manifest encoding** (term): the one canonical encoding is the unpadded
 base64url encoding of a compact JSON object whose keys, in order, are `v`, optional
-`env`, optional `paths`, and optional `unverifiable`; `v` is `1`, `unverifiable` is an
+`outcome`, optional `subjects`, optional `env`, optional `paths`, and optional
+`unverifiable`; `v` is `2`, `unverifiable` is an
 array of strings, `env` is an array of objects with keys `n` (the variable name) and
 `d`, and `paths` is an array of objects with keys `k`, `p`, `d`, and optionally `m`,
 where `k` is
@@ -53,6 +54,34 @@ malformed or duplicate identities, malformed digests, duplicate or unknown field
 invalid UTF-8, alternate ordering or escaping, trailing data, and unsupported
 versions rather than silently dropping evidence — exactly one schema is ever
 readable, and an encoding produced by an older tool fails validation and regenerates.
+
+`outcome` and `subjects` occur together: the former is the recognized method
+`gofresh/immutable-environment@1`, the latter a non-empty lexically sorted set of
+subject-support identities. Absence retains input-identity evidence without
+operation-outcome support; it is never interpreted as a supported empty execution.
+The immutable-environment method carries no path entries.
+Each subject-support identity is 64 lowercase hexadecimal SHA-256 characters over
+the UTF-8 JSON encoding of the string array containing, in order, the method,
+subject package, subject symbol, maximal closure, test-variant closure, toolchain
+guard, build guard and observation-proof strategy.
+All strings use the manifest's canonical JSON escaping. The support fields
+participate in the combined digest before input entries. They are preserved by
+identity conversion and adoption; merge retains them only when every contributing
+process has supported evidence, unioning the subject identities. A zero-process
+merge is neutral when merged with process-backed evidence, but cannot supply a
+process receipt or supported subject by itself.
+An applicability transformation checks support against the original recorded
+fingerprint before applying its independently justified change; it does not
+rewrite the support identity to claim a different producing test variant.
+
+The combined digest is the first 32 lowercase hexadecimal characters of SHA-256
+over these UTF-8 lines in order, each ending with LF: `version V`; when support
+is present, `outcome METHOD` followed by one `subject ID` per subject identity;
+one `env NAME DIGEST` per environment entry; one `path KIND PATH DIGEST` per path
+entry; and one `unverifiable REASON` per refusal. Uppercase words here denote the
+corresponding values, inserted verbatim; fields are separated by single ASCII
+spaces and sets use canonical manifest order. Identity and refusal validation
+excludes line-framing bytes, and entry digests have fixed width.
 
 **dirty recording** (term): a recording whose source or inputs are not faithfully
 reproducible from its recorded commit, usable for working-tree reuse but barred as a
@@ -119,7 +148,7 @@ checking process; ambient convenience operations use the ambient environment at 
 operation. Mixing an explicitly configured process with ambient environment hashing
 is not coherent evidence.
 
-**REQ-inputs-context** (behavior): Context-aware current checks MUST observe
+**REQ-inputs-context** (behavior): Context-aware producer finalization and current checks MUST observe
 caller cancellation before and between environment identities, path identities,
 directory members, and file-read chunks, returning the context error without a
 partial state. Context-free checks retain identical hashing semantics under an
@@ -284,16 +313,42 @@ diagnostic execution does not repair missing evidence about the original process
 Unsupported operation classes remain incomplete rather than inheriting the
 semantics of a supported class.
 
-These premises govern the producer facade as well as lower-level construction.
+These premises govern the producer facade as well as any lower-level construction
+that grants completion-bearing outcome support.
 The facade owns assembly and validation of the conjunction, not invention of a
 premise absent from its inputs. Process health describes execution completion;
 it is not an alias for operation-outcome support. Empty effect sets and supported
 deterministic operations can have sound outcome derivations, but the derivation
 must be established by the admitted method, never guessed from an empty log.
 
+Identity-only finalization is a separate operation: it retains observed input
+identities, guarded values and classification refusals without claiming outcome
+agreement. Its manifest has no outcome-support fields. A usable input guard,
+absence of input-classification refusals, and finalized process provenance are
+not observation completion. This data remains useful for detecting input drift,
+but cannot authorize observation-based reuse; conversion, adoption and merge do
+not promote it. A producer requesting completion-bearing evidence without a
+required premise receives explicitly incomplete evidence naming that premise.
+
 Explicit purity remains the separate caller-responsible override in the freshness
 contract. It may affect the final verdict without relabeling an incomplete
 observation as complete or an assertion as verified evidence.
+
+**REQ-inputs-bound-outcomes** (invariant): Supported observation construction MUST
+match independently prepared outcome support and a normal-completion receipt to
+the same captured process frame, process identity and complete normalized
+environment; copying a frame preserves its identity, while an independently
+captured frame cannot borrow its support. A receipt asserts harness completion
+only, including an ordinarily completed failing test; it supplies no outcome
+derivation. Support is prepared before execution from the complete contributing
+subject set under one analysis view and requires every member's admitted static
+outcome inventory. Missing, unsupported or mismatched evidence finalizes as
+attributable incomplete evidence. The immutable-environment method rejects any
+non-environment operation in the actual log before exclusions or classifications
+could hide that contradiction. The caller owns the exact executed subject set,
+normal-completion determination, pre-execution capture ordering and exclusion of
+environment mutation; no later analysis, read or diagnostic run repairs an
+omitted producing premise.
 
 **REQ-inputs-observable-read-set** (invariant): The read-only observability proof
 MUST model the Go test observation producer as exposing exactly the operation names
@@ -343,9 +398,11 @@ admitted-operation outcome agreed with the guarded value, and an observation bra
 satisfying REQ-inputs-value-binding. EOF, including EOF exactly at a line boundary,
 is neither termination nor outcome evidence. Exactly one completed
 or incomplete observation is required for every process contributing to the result. A
-process without every gate is represented through the incomplete-observation
-constructor; merge refuses a state that claims completion without them, and one
-incomplete child keeps the deterministic union unverifiable.
+producer requesting that completion claim without every gate is represented
+through the incomplete-observation constructor. Identity-only guard data carries
+no such claim; merge cannot supply its missing outcome support. Merge refuses
+unfinalized or inconsistent producer evidence, and an explicitly incomplete child
+keeps the deterministic union unverifiable.
 
 **REQ-inputs-value-binding** (invariant): A completed observation of newly read
 values — one whose evidence originates from a producing process's testlog rather
@@ -738,15 +795,18 @@ completed-process, bracket, exclusion, classification-root, and
 scratch-namespace options, and ingests the process environment
 verbatim (a rebuilt environment loses fidelity the classification
 depends on). Every non-completing shape fails closed to an incomplete
-observation carrying its reason in one canonical order - the caller's
-process-health verdict, an unattached, unreadable or missing capture,
-a headerless capture, a bracketless frame, a PWD that does not name
+observation carrying its reason in one canonical order - a missing or mismatched
+completion receipt, its abnormal-completion disposition, missing or mismatched
+outcome support, an unattached, unreadable or missing capture,
+a headerless capture, captured operations outside the supported model,
+a bracketless frame, a PWD that does not name
 the package directory, an environment under which the toolchain
 cannot answer, an ingestion failure - never a lost observation. The
-caller owns identity, environment, health, and the declaration
-vocabulary — exclusions, scratch namespaces, a minted scratch root;
-the facade owns everything else, so the next producer is correct by
-construction.
+caller owns identity, environment, the terminal harness judgment and the
+declaration vocabulary — exclusions, scratch namespaces, a minted scratch root.
+The analysis view supplies the independent outcome derivation for the complete
+contributing subject set; the facade matches both premises to the captured
+execution before constructing supported evidence.
 
 **REQ-inputs-null-sink** (behavior): Opens and stats of exactly `/dev/null` —
 the unix contentless sink device; on platforms whose sink is not an absolute

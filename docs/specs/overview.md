@@ -226,6 +226,17 @@ observation identity even when an explicit purity override previously made the
 record's final verdict valid; the observation's refusal and the override remain
 distinct facts. Re-keying compatibility is not completion compatibility.
 
+**REQ-fresh-outcome-attachment** (invariant): Observation-based reuse MUST require
+recognized persisted outcome support for the recorded subject's support identity
+in addition to the observation conjunction. Preparation derives those identities
+from the captured subject and code guards, before the contributing execution;
+the analysis view retains the selected proof-validation obligation. Support for
+another subject or another closure/build cannot qualify a recording, and a
+manifest without support fields cannot be upgraded through attachment, adoption,
+conversion or merging with a supported process. Ordinary input guards remain
+available for evidence without outcome support, while explicit purity remains
+the separate caller-responsible override.
+
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime

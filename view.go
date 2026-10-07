@@ -75,6 +75,9 @@ type View struct {
 	// one view while another is live, which a package-global hook cannot
 	// attribute.
 	beforePreciseAnalysis func()
+	// beforeOutcomeIssue lets lifecycle tests intervene after capture has
+	// released its lock and before preparation checks the transaction seal.
+	beforeOutcomeIssue func()
 }
 
 // NewView observes subjects and moduleDir as one code-result analysis view
@@ -808,7 +811,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 			continue
 		}
 		pending[subject] = rec
-		positives[subject] = compatibleObservationProof(rec.ObservationProof, rec.ObservationAssertion, subject, rec.MaximalClosure) && rec.ObservationProof.Observable
+		positives[subject] = compatibleObservationProof(rec.ObservationProof, rec.ObservationAssertion, subject, rec.MaximalClosure) && rec.ObservationProof.Observable && runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject))
 	}
 	hasRuntimeInputs := false
 	for _, fingerprint := range pending {

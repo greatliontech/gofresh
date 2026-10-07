@@ -327,7 +327,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	dir := writeObservedViewModule(t)
+	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -351,10 +351,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if withoutManifest.Status != Unverifiable {
 		t.Fatalf("proof without completed manifest = %+v, want unverifiable", withoutManifest)
 	}
-	observation, err := riFromTestLog([]byte("# test log\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	observation := supportedObservation(t, producer, dir, dir, "worker", "getenv OUTCOME_VALUE\n")
 	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
@@ -394,10 +391,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if verdict.Status != Unverifiable {
 		t.Fatalf("tampered proof = %+v, want unverifiable", verdict)
 	}
-	malformed, err := riFromTestLog([]byte("# test log\n\nopen fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker-malformed"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	malformed := supportedObservation(t, current, dir, dir, "worker-malformed", "\ngetenv OUTCOME_VALUE\n")
 	malformedState, err := runtimeinput.CompletedState(malformed)
 	if err != nil {
 		t.Fatal(err)
@@ -412,10 +406,18 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if verdict.Status != Unverifiable {
 		t.Fatalf("manifest unverifiability was suppressed: %+v", verdict)
 	}
+	// Unsupported file outcomes still retain their input guard: a proven
+	// input change must stale even a recording whose observation cannot lift.
+	fileObservation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("file-identity"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileGuarded := fingerprint
+	fileGuarded.RuntimeInputs, fileGuarded.RuntimeDigest = fileObservation.Manifest, fileObservation.Digest
 	if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = current.CheckObserved(context.Background(), fingerprint, subject)
+	verdict, err = current.CheckObserved(context.Background(), fileGuarded, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2936,7 +2938,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	dir := writeObservedViewModule(t)
+	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	engine, err := New(WithDir(dir))
 	if err != nil {
@@ -2950,10 +2952,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	observation := supportedObservation(t, producer, dir, dir, "worker", "getenv OUTCOME_VALUE\n")
 	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
@@ -2992,7 +2991,7 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		"go.mod":             "module example.com/batch\n\ngo 1.26\n",
 		"a/a.go":             "package a\n\nfunc F() int { return 1 }\n",
 		"b/b.go":             "package b\n\nfunc H() int { return 2 }\n",
-		"b/observed_test.go": "package b\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _, _ = os.ReadFile(\"fixture\") }\n",
+		"b/observed_test.go": "package b\n\nimport (\"os\"; \"testing\")\n\nfunc TestRead(*testing.T) { _ = os.Getenv(\"OUTCOME_VALUE\") }\n",
 		"b/fixture":          "one",
 	} {
 		path := filepath.Join(dir, name)
@@ -3023,10 +3022,11 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		}
 		captured[subject] = fingerprint
 	}
-	state, err := riFromTestLog([]byte("open fixture\n"), filepath.Join(dir, "b"), dir, runtimeinput.WithCompletedProcess("b test"), runtimeinput.WithBracket(testObservationBracket(t, filepath.Join(dir, "b"), ".", filepath.Join(dir, "fixture"))))
+	processView, err := producer.Sibling([]Subject{bRead})
 	if err != nil {
 		t.Fatal(err)
 	}
+	state := supportedObservation(t, processView, dir, filepath.Join(dir, "b"), "b test", "getenv OUTCOME_VALUE\n")
 	withRuntime := captured[bRead]
 	withRuntime.RuntimeInputs = state.Manifest
 	withRuntime.RuntimeDigest = state.Digest
