@@ -1681,7 +1681,10 @@ in their repos.
       TestHeartbeatCarriesTheReadingInTheFleetsWords (60 ms against a 5
       ms cadence; its second arm wants one beat) — beats observed, never
       clocked, 323's rule; git maintenance off in the one fixture home
-      (336's setting) for every writer this chunk touches.
+      for every writer this chunk touches — gitfixture.Command and Init
+      (336: the hermetic git command and the repository's own
+      no-maintenance rule and identity) are the seed the 21 runGit
+      closures fold onto.
 - [ ] 220. gomutant: the named smalls — the ephemeral option tuple onto
       EphemeralRequest; longestBaselineFor reading the bank key through
       its composer; PackageSkip.Dark carrying the whole skip-radius
@@ -3554,7 +3557,7 @@ in their repos.
       record stores (332's A1); the four gofresh gaps citing their
       plan's chunks; §5/§7.8's contradictions (their 7.1/6.2). The lane
       re-sequenced below; the audit count is ZERO.
-- [ ] 336. gomutant: the gate is red at HEAD —
+- [x] 336. gomutant: the gate is red at HEAD —
       TestDiffNamesEveryMovedMember's walk met the runner's git auto-
       maintenance (.git/objects/maintenance.lock vanishing mid-walk: CI
       run 37582009896 and Next 37582009834 on 065dc4d, the release
