@@ -193,6 +193,39 @@ re-establishes every selected tier against the post-execution view. Historical
 recordings cannot be upgraded to observability evidence without rerunning the
 subject.
 
+**REQ-fresh-evidence-support** (invariant, refines REQ-fresh-observation-conjunction):
+Observation-based reuse MUST retain the distinction between verified evidence,
+explicit caller assertions and missing support through construction, attachment,
+conversion, merge, persistence and checking; an attribution string or integrity
+seal cannot supply an unestablished producer premise. Re-admission of existing
+records preserves their established support class or refuses reuse, and a change
+to the completion construction or its compatibility rules requires a distinguishable
+versioned judgment before older observations can qualify under the new rules.
+An explicit purity override remains identified as that override and does not
+change the observation's support class.
+
+**REQ-fresh-applicability-transform** (invariant): A change to a recording's
+derived applicability MUST rest on an explicit admissible transformation and a
+recheck of every remaining guard, without changing the historical result or
+inventing producer facts; the inert test-variant extension is one such
+transformation, while missing past observation evidence cannot be supplied by
+decoding, rehashing, or a later execution. A transformed applicability judgment
+retains the declared model's strength and does not certify identical future
+timings or identical profile addresses.
+
+Process completion and operation-outcome support are separate premises of the
+observation conjunction, as defined by REQ-inputs-producer-premises and
+REQ-inputs-outcome-method in [runtime-inputs.md](runtime-inputs.md). Completion
+under a result owner's harness establishes that the result is finished; outcome
+support establishes the additional observation claim. Neither a successful
+result nor a matching input digest substitutes for the other premise.
+
+A representation-only re-key, including a refusal's path spelling or diagnostic
+attribution placement, confers no additional support. Such a change can move an
+observation identity even when an explicit purity override previously made the
+record's final verdict valid; the observation's refusal and the override remain
+distinct facts. Re-keying compatibility is not completion compatibility.
+
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime

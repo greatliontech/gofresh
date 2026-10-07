@@ -249,6 +249,52 @@ reaching an unobserved unverifiable dependence stays unverifiable.
 
 ## Observation completeness
 
+**process completion receipt** (term): evidence identifying a result-contributing
+process and its terminal disposition under the producing harness. Normal
+completion is distinct from the result's verdict: an ordinarily completed failing
+test can have a completion receipt, whereas a killed or crashed process cannot
+be inferred complete from the output prefix it left. The result owner supplies
+the harness-specific completion criterion.
+
+**operation-outcome support** (term): evidence, admitted under a named versioned
+method, that the behavior-affecting values, counts and errors returned by admitted
+operations during the identified execution agreed with the corresponding guarded
+values. Direct observations or a sound derivation can establish this support;
+operation identities and process completion alone cannot. A method's admitted
+operation set, environmental assumptions and unsupported cases are part of its
+contract. A caller assertion is an assertion, not verified operation-outcome support.
+
+**REQ-inputs-producer-premises** (invariant, refines REQ-inputs-completed-observation):
+Construction of completion-bearing observation evidence MUST require the process
+completion receipt and operation-outcome support as distinct premises tied to the
+same contributing execution, environment and observation span; a healthy terminal
+status, expected sample counts, an initialized or flushed identity log, a stable
+bracket, or agreement of later hashes is insufficient by itself to establish
+outcome support. Absence, partiality, incompatibility or failure of either premise
+produces incomplete evidence with the missing premise named, not an automatically
+supplied completion assertion.
+
+**REQ-inputs-outcome-method** (invariant, refines REQ-inputs-producer-premises):
+An outcome-support method MUST establish its claim independently of the
+completion label it authorizes, under an explicit versioned operation model and
+declared assumptions, attributing its support to the actual result-contributing
+execution; exceptional or partial outcomes not established as agreeing with the
+guarded value remain unsupported. A successful later read or a separate
+diagnostic execution does not repair missing evidence about the original process.
+Unsupported operation classes remain incomplete rather than inheriting the
+semantics of a supported class.
+
+These premises govern the producer facade as well as lower-level construction.
+The facade owns assembly and validation of the conjunction, not invention of a
+premise absent from its inputs. Process health describes execution completion;
+it is not an alias for operation-outcome support. Empty effect sets and supported
+deterministic operations can have sound outcome derivations, but the derivation
+must be established by the admitted method, never guessed from an empty log.
+
+Explicit purity remains the separate caller-responsible override in the freshness
+contract. It may affect the final verdict without relabeling an incomplete
+observation as complete or an assertion as verified evidence.
+
 **REQ-inputs-observable-read-set** (invariant): The read-only observability proof
 MUST model the Go test observation producer as exposing exactly the operation names
 `getenv`, `open`, `stat`, and `chdir`, starting after package initialization when user

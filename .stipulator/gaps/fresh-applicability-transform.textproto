@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-applicability-transform"
+reason: "Cross-consumer applicability transformation coverage is deferred to performance-evidence chunk 8; existing inert-growth behavior is retained, not claimed as a complete witness for this shared contract."
+content_hash: "f45bd3a5f9d506e173f85b77399d7f062bed2af113bed225cbacbffecf775a10"
+source_hash: "8ea212d9567cfa86209d00e61d441b8b7e54e23cb6d1984c52b1278c6efa01d6"
+lands { manual { condition: "The shared admission path and justified applicability transformations are verified without changing historical measurements or inventing producer evidence." } }

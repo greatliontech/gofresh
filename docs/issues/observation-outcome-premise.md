@@ -28,4 +28,4 @@ become verified outcome evidence.
 Execution is held for this contract work because changing one consumer alone
 would leave the shared construction claim inconsistent.
 
-Lands: pew performance-evidence plan chunk 4.2, after 4.1 settles the shared evidence contract.
+Lands: pew performance-evidence plan chunk 6 (shared producer migration after the outcome-support capability in chunk 5).
