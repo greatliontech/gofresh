@@ -13,7 +13,17 @@ the budget 4 GiB, and a consumer admitting against it admits four
 floor-sized processes on a host with 2 GiB to give (stipulator's
 290.2b review reproduced it). The measure needs the physical bound —
 min(the budget less the children's held set, the host's available
-memory) — stated in the clause's consumer obligation, or the
-derivation itself needs room − max(the ceiling, the pass's own held
-set). stipulator's admission takes the min at 290.2b; gomutant's oracle
-bound (chunks 214/322) reads the same clause.
+memory) — or the derivation itself needs room − max(the ceiling, the
+pass's own held set). The mirror shape under-admits: the pass's
+ceiling is a collection target, not a need, so a pass holding a
+fraction of its half (an execution-phase parent at 150 MiB; a host
+with 1.5 GiB available, whose 1 GiB floor leaves a 640 MiB budget)
+leaves the children half the room idle, and the floored host refuses
+every package where the available memory held one. A spawn admission
+on a physical host is therefore the host's available memory less the
+pass's own room to grow back — stipulator's admission takes exactly
+that at 290.2b, reading no budget — and the clause's "a spawn
+admission's memory term" sentence should name that measure or be
+struck; the budget remains an oracle tree's bound (gomutant's
+GOMEMLIMIT for the processes it spawns, chunks 214/322), where a
+target, not a need, is what is handed down.
