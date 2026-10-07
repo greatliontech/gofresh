@@ -2602,9 +2602,9 @@ in their repos.
       this change set verbatim (bracket.go:216–230's bracket grammar
       unrecognised by attributionWellFormed, runtimeinput.go:1853);
       gomutant's second strip deletes at the same bump as the re-key.
-- [ ] 293. stipulator: a gap's excuse is judged over every red class a
-      row carries (stipulator
-      docs/issues/gap-excuse-judges-the-winning-bucket-only.md —
+- [x] 293. stipulator: a gap's excuse is judged over every red class a
+      row carries (stipulator, resolved at 293 — `git log --all --
+      docs/issues/gap-excuse-judges-the-winning-bucket-only.md` —
       derived 2026-09-29: a gap excuses exactly the
       classes it declares; a red the gap does not name stands, so a
       stale-class red behind an excused broken bucket is an undeclared
