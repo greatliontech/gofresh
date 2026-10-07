@@ -616,13 +616,14 @@ func (d *Document) Orientation() string {
 
 // Registered is one registered verb on a surface: its served
 // parameter or flag names, each mapped to whether its default is
-// non-zero on the CLI — the flags a flag library prints a default for,
-// so the coverage judgment holds the one default form the usage
-// rendering strips to exactly the knobs where a second spelling would
-// print twice (REQ-guidance-render). One map, so a default fact can
-// name only a registered knob; the value is read on the CLI surface
-// alone and ignored on the MCP, so one registration per verb serves
-// both faces.
+// non-zero on the CLI — the flags a flag library prints a default for
+// (PrintsDefault is the rule) — so the coverage judgment holds the one
+// default form the usage rendering strips to exactly the knobs where a
+// second spelling would print twice, and refuses that form on the
+// knobs where it would reach no reader (REQ-guidance-render). One map,
+// so a default fact can name only a registered knob; the value is read
+// on the CLI surface alone and ignored on the MCP, so one registration
+// per verb serves both faces.
 type Registered map[string]bool
 
 // Coverage judges the document against one surface's registered
@@ -631,7 +632,8 @@ type Registered map[string]bool
 // order: registered verbs sorted; per verb the registered knobs
 // undocumented, sorted by name, then the documented knobs in document
 // order, each contributing its not-registered row and, on the CLI for
-// a knob registered with a non-zero default, its default-spelling row
+// a registered knob, its default-spelling row — the other spellings on
+// a non-zero default, the dropped form on a zero one
 // (REQ-guidance-render); unregistered sections last in document order
 // (REQ-guidance-coverage). An unknown surface is the caller's error,
 // distinct from the defect list; an empty defect list is the drift
@@ -674,13 +676,12 @@ func (d *Document) Coverage(surface string, registered map[string]Registered) ([
 			if _, ok := nonZero[kn.spelling]; !ok {
 				defects = append(defects, fmt.Sprintf("verb %q: documented knob %q not registered", verb, kn.spelling))
 			}
-			// The usage grammar strips one default form; a flag library
-			// prints a non-zero default itself, so on such a flag a default
-			// spelled any other way in the first clause prints twice — the
-			// CLI coverage refuses it (REQ-guidance-render). A zero default
-			// prints nothing, and its clause may say what zero means.
-			if surface == "cli" && nonZero[kn.spelling] && spellsDefaultOutsideTheForm(kn.Clause()) {
-				defects = append(defects, fmt.Sprintf("verb %q: knob %q spells a default outside the (default X) form in its first clause", verb, kn.spelling))
+			if surface == "cli" {
+				if printed, registered := nonZero[kn.spelling]; registered {
+					if defect := defaultSpellingDefect(printed, kn.Clause()); defect != "" {
+						defects = append(defects, fmt.Sprintf("verb %q: knob %q %s", verb, kn.spelling, defect))
+					}
+				}
 			}
 		}
 	}
@@ -817,8 +818,8 @@ type Registration struct {
 	// Description is the one-line purpose (a command's Short, a tool's
 	// description).
 	Description string
-	// Help is the knobless long rendering — a surface rendering its own
-	// knob list (a CLI's flag help) sets it as the long help.
+	// Help is the knobless long rendering — the body of LongHelp, for a
+	// surface rendering its own knob list (a CLI's flag help).
 	Help string
 	// Long is the whole section — the guidance verb's answer.
 	Long string
@@ -833,6 +834,12 @@ type Registration struct {
 	// MCP spelling. Empty on a Document's own projection, which knows
 	// no tool name; Embedded's carries it.
 	ProsePointer string
+	// LongHelp is the CLI's long help: the help, a blank line, the
+	// prose pointer — on a Document's own projection the help alone,
+	// since it carries no pointer; empty on the MCP, which has no long
+	// help (its description is Description, the guidance tool's answer
+	// Long).
+	LongHelp string
 }
 
 // KnobUsage is one knob's served forms on a surface.
@@ -854,6 +861,9 @@ func (e *Embedded) Registration(surface, verb string) (Registration, error) {
 		return Registration{}, err
 	}
 	r.ProsePointer = e.prosePointer(surface, r.Verb)
+	if surface == "cli" {
+		r.LongHelp = r.Help + "\n\n" + r.ProsePointer
+	}
 	return r, nil
 }
 
@@ -881,6 +891,9 @@ func (d *Document) Registration(surface, verb string) (Registration, error) {
 	}
 	spelling, _ := on(v.Surfaces, v.Name, surface)
 	r := Registration{Verb: spelling, Description: v.Does, Help: helpOf(v), Long: longOf(v, surface)}
+	if surface == "cli" {
+		r.LongHelp = r.Help
+	}
 	for _, kn := range knobsOn(v, surface) {
 		usage := ""
 		if surface == "cli" {
@@ -901,9 +914,13 @@ func (d *Document) Registration(surface, verb string) (Registration, error) {
 // prints twice. The document's rule for a knob whose CLI default is
 // non-zero: spell the default as "(default X)" — the one form this
 // grammar strips — and no other default, in any spelling of the word,
-// in the first clause; the coverage judgment on the CLI surface, told
-// which flags carry a non-zero default, refuses any other spelling
-// there (REQ-guidance-render, REQ-guidance-coverage).
+// in the first clause; for a knob whose CLI default is zero: no
+// "(default X)" form at all, since the strip would leave nothing
+// printed in its place (a derived default is spelled in prose); the
+// coverage judgment on the CLI surface, told which flags carry a
+// non-zero default, refuses the other spellings on the former and the
+// dropped form on the latter (defaultSpellingDefect;
+// REQ-guidance-render, REQ-guidance-coverage).
 func (k Knob) Usage() string {
 	return strings.ReplaceAll(strings.TrimSpace(stripDefault(k.Clause())), "`", "")
 }
@@ -913,9 +930,13 @@ func (k Knob) Usage() string {
 // is left as it stands — the clause renders unchanged, its "default"
 // word intact, so on a non-zero-default flag the coverage judgment
 // refuses it rather than a mangled usage being served.
+// defaultForm opens the one default parenthetical the usage rendering
+// strips and the CLI coverage judges (REQ-guidance-render).
+const defaultForm = "(default "
+
 func stripDefault(clause string) string {
 	for {
-		start := strings.Index(clause, "(default ")
+		start := strings.Index(clause, defaultForm)
 		if start < 0 {
 			return clause
 		}
@@ -1025,4 +1046,105 @@ func (d *Document) describe(surface, verb string, node SchemaNode, visited map[s
 		return d.describe(surface, verb, items, visited)
 	}
 	return nil
+}
+
+// opensTheDefaultForm reports whether a clause opens the "(default X)"
+// parenthetical the usage rendering strips — closed or not: an
+// unclosed one renders its stub, which names a default just the same.
+func opensTheDefaultForm(clause string) bool {
+	return strings.Contains(clause, defaultForm)
+}
+
+// PrintsDefault is the flag library's own rule for whether it prints a
+// flag's default beside its usage — the fact a CLI registration hands
+// Coverage per knob — over the two strings every pflag registration
+// exposes, the flag's type name and its default's spelling, so a
+// consumer derives the fact from one fleet home with no flag-library
+// dependency here (REQ-guidance-coverage). The rule is the library's
+// over its own value types; a wrapped standard-library flag or a
+// custom value answering IsBoolFlag is dispatched by the library on
+// its concrete type, which a name cannot carry — a consumer
+// registering such a flag answers the fact itself. The table is
+// pflag's defaultIsZeroValue keyed by Value.Type(): a boolean flag's
+// zero is "false" or ""; a duration's "0" or "0s"; the integer and float
+// family's "0"; a string's ""; the IP family's "<nil>"; the slice
+// family's "[]"; every other type answers through pflag's fallback set
+// — "false", "<nil>", "", "0" — int16 among them, which pflag's own
+// case list omits and the fallback answers the same for.
+func PrintsDefault(flagType, defValue string) bool {
+	switch flagType {
+	case "bool", "boolfunc":
+		return defValue != "false" && defValue != ""
+	case "duration":
+		return defValue != "0" && defValue != "0s"
+	case "int", "int8", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "count", "float32", "float64":
+		return defValue != "0"
+	case "string":
+		return defValue != ""
+	case "ip", "ipMask", "ipNet":
+		return defValue != "<nil>"
+	case "intSlice", "stringSlice", "stringArray":
+		return defValue != "[]"
+	}
+	switch defValue {
+	case "false", "<nil>", "", "0":
+		return false
+	}
+	return true
+}
+
+// Served is the served-bytes judgment a consuming tool's drift binding
+// reads: given a surface, a verb spelled on it, and the strings the
+// tool serves per knob (a CLI flag's usage, an MCP property's
+// description), it reports in name order every served knob the
+// document does not carry on the surface and every served string that
+// is not the knob's projection — the usage rendering on the CLI, the
+// terse clause on the MCP — so the consumer compares served bytes with
+// the projection and never re-derives the grammar
+// (REQ-guidance-single-source, REQ-guidance-coverage). An unknown
+// surface or verb is the caller's error, distinct from the defect list.
+func (d *Document) Served(surface, verb string, served map[string]string) ([]string, error) {
+	if _, err := d.resolve(surface, verb); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(served))
+	for name := range served {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var defects []string
+	for _, name := range names {
+		k, err := d.Knob(surface, verb, name)
+		if err != nil {
+			defects = append(defects, fmt.Sprintf("verb %q: served knob %q is not documented on the %s surface", verb, name, surface))
+			continue
+		}
+		want := k.Clause()
+		if surface == "cli" {
+			want = k.Usage()
+		}
+		if served[name] != want {
+			defects = append(defects, fmt.Sprintf("verb %q: knob %q served %q where the document renders %q", verb, name, served[name], want))
+		}
+	}
+	return defects, nil
+}
+
+// defaultSpellingDefect is the CLI coverage's one per-knob default
+// judgment over a registered knob's first clause. The usage grammar
+// strips one default form; a flag library prints a non-zero default
+// itself, so on such a flag a default spelled any other way prints
+// twice; a zero default prints nothing, so on such a flag the stripped
+// form vanishes from the served help with nothing in its place — the
+// one way a stated default reaches no reader (the clause may still say
+// what zero means, or spell a derived default in prose). The answer is
+// the defect's text after the knob's name, or "" (REQ-guidance-render).
+func defaultSpellingDefect(printed bool, clause string) string {
+	if printed && spellsDefaultOutsideTheForm(clause) {
+		return "spells a default outside the (default X) form in its first clause"
+	}
+	if !printed && opensTheDefaultForm(clause) {
+		return "spells a (default X) form in its first clause on a flag the library prints no default for"
+	}
+	return ""
 }

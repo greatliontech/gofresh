@@ -85,16 +85,19 @@ func TestKnobUsageIsThePflagGrammar(t *testing.T) {
 	// caller names as carrying a non-zero default (the library prints
 	// that one itself): a colon form, a prose default, "defaults to", or
 	// an unclosed parenthetical (rendered unchanged by Usage) in the
-	// first clause is a defect there — never on a zero-default flag,
-	// whose clause may say what zero means, and never on the MCP, whose
-	// schema serves the clause whole.
+	// first clause is a defect there; on a zero-default flag the
+	// stripped form itself is the defect (the library prints nothing in
+	// its place, so the fact reaches no reader) — the unclosed form on
+	// both — while a prose default or what zero means passes there; and
+	// never on the MCP, whose schema serves the clause whole.
 	nonZero := map[string]Registered{"run": {"budget-cli": true}, "version": {}}
 	zero := map[string]Registered{"run": knobs("budget-cli"), "version": {}}
-	for _, clause := range []string{
-		"candidates per symbol (default: 3), the default unlimited",
-		"candidates per symbol, defaults to 3",
-		"candidates per symbol (Default: 3)",
-		"candidates per symbol (default 5 per symbol",
+	const zeroDefect = `knob "budget-cli" spells a (default X) form in its first clause on a flag the library prints no default for`
+	for clause, onZero := range map[string]int{
+		"candidates per symbol (default: 3), the default unlimited": 0,
+		"candidates per symbol, defaults to 3":                      0,
+		"candidates per symbol (Default: 3)":                        0,
+		"candidates per symbol (default 5 per symbol":               1,
 	} {
 		linted, err := Parse([]byte(strings.Replace(projectionSource, "candidates per symbol (default 0) (0 means exhaustive)", clause, 1)))
 		if err != nil {
@@ -107,8 +110,8 @@ func TestKnobUsageIsThePflagGrammar(t *testing.T) {
 		if len(defects) != 1 || !strings.Contains(defects[0], `knob "budget-cli" spells a default outside the (default X) form`) {
 			t.Fatalf("cli coverage over %q = %v", clause, defects)
 		}
-		if defects, err := linted.Coverage("cli", zero); err != nil || len(defects) != 0 {
-			t.Fatalf("a zero-default flag linted over %q: %v, %v", clause, defects, err)
+		if defects, err := linted.Coverage("cli", zero); err != nil || len(defects) != onZero || (onZero == 1 && !strings.Contains(defects[0], zeroDefect)) {
+			t.Fatalf("a zero-default flag linted over %q: %v, %v (want %d)", clause, defects, err, onZero)
 		}
 		// The MCP judgment never lints, even handed the CLI's default
 		// facts: the schema serves the clause whole.
@@ -118,6 +121,30 @@ func TestKnobUsageIsThePflagGrammar(t *testing.T) {
 	}
 	if defects, err := doc.Coverage("cli", nonZero); err != nil || len(defects) != 0 {
 		t.Fatalf("the well-formed default is a defect: %v, %v", defects, err)
+	}
+	// The same well-formed form on a zero-default flag is the dropped
+	// form: a defect naming the knob; a derived default spelled in prose
+	// passes, and so does what zero means.
+	if defects, err := doc.Coverage("cli", zero); err != nil || len(defects) != 1 || !strings.Contains(defects[0], zeroDefect) {
+		t.Fatalf("the dropped form on a zero-default flag: %v, %v", defects, err)
+	}
+	// A knob the caller never registered carries no default fact at
+	// all: its one row is the not-registered one, never a default
+	// spelling the author is told to delete.
+	if defects, err := doc.Coverage("cli", map[string]Registered{"run": {}, "version": {}}); err != nil || len(defects) != 1 || !strings.Contains(defects[0], `documented knob "budget-cli" not registered`) {
+		t.Fatalf("an unregistered knob's rows: %v, %v", defects, err)
+	}
+	for _, clause := range []string{
+		"the module's benchmarks directory unless given (0 means exhaustive)",
+		"candidates per symbol; the default is unbounded",
+	} {
+		prose, err := Parse([]byte(strings.Replace(projectionSource, "candidates per symbol (default 0) (0 means exhaustive)", clause, 1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if defects, err := prose.Coverage("cli", zero); err != nil || len(defects) != 0 {
+			t.Fatalf("a prose default on a zero-default flag linted over %q: %v, %v", clause, defects, err)
+		}
 	}
 	// The unclosed parenthetical renders as it stands — the fail-safe
 	// the lint above relies on.
@@ -252,6 +279,7 @@ func TestRegistrationIsTheFaceNeutralProjection(t *testing.T) {
 		Verb: "run", Description: "Measure the tree.", Help: help, Long: long,
 		Knobs:        []KnobUsage{{Name: "budget-cli", Clause: "candidates per symbol (default 0) (0 means exhaustive)", Usage: "candidates per symbol (0 means exhaustive)"}},
 		ProsePointer: "The knobs' whole prose: tool guidance run.",
+		LongHelp:     help + "\n\nThe knobs' whole prose: tool guidance run.",
 	}
 	if !reflect.DeepEqual(r, want) {
 		t.Fatalf("registration = %+v, want %+v", r, want)
@@ -265,7 +293,7 @@ func TestRegistrationIsTheFaceNeutralProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Verb != "run_mcp" || m.ProsePointer != "The knobs' whole prose: the guidance tool, verb run_mcp." || len(m.Knobs) != 3 || m.Knobs[0].Name != "budget" || m.Knobs[1].Name != "edits" || m.Knobs[2].Name != "file" || m.Knobs[0].Usage != "" {
+	if m.Verb != "run_mcp" || m.ProsePointer != "The knobs' whole prose: the guidance tool, verb run_mcp." || len(m.Knobs) != 3 || m.Knobs[0].Name != "budget" || m.Knobs[1].Name != "edits" || m.Knobs[2].Name != "file" || m.Knobs[0].Usage != "" || m.LongHelp != "" {
 		t.Fatalf("mcp registration = %+v", m)
 	}
 	// A CLI spelling with a space is quoted in the pointer, so the
@@ -286,14 +314,14 @@ func TestRegistrationIsTheFaceNeutralProjection(t *testing.T) {
 		t.Fatalf("tabbed pointer = %q", tabbed.ProsePointer)
 	}
 	bare, err := doc.Registration("cli", "run")
-	if err != nil || bare.ProsePointer != "" || bare.Verb != "run" {
+	if err != nil || bare.ProsePointer != "" || bare.Verb != "run" || bare.LongHelp != help {
 		t.Fatalf("document registration = %+v, %v", bare, err)
 	}
 	if _, err := e.Registration("mcp", "run"); err == nil {
 		t.Fatal("the canonical name addressed the verb on a surface that spells it otherwise")
 	}
 	v, err := e.Registration("cli", "version")
-	if err != nil || len(v.Knobs) != 0 || v.ProsePointer != "The knobs' whole prose: tool guidance version." {
+	if err != nil || len(v.Knobs) != 0 || v.ProsePointer != "The knobs' whole prose: tool guidance version." || v.LongHelp != v.Help+"\n\nThe knobs' whole prose: tool guidance version." {
 		t.Fatalf("knobless registration = %+v, %v", v, err)
 	}
 	if _, err := e.Registration("cli", "nope"); err == nil {
@@ -343,5 +371,103 @@ func TestMustRefusalsNameTheTool(t *testing.T) {
 	}
 	if r := e.MustRegistration("cli", "run"); r.ProsePointer != "The knobs' whole prose: tool guidance run." {
 		t.Fatalf("MustRegistration's pointer = %q", r.ProsePointer)
+	}
+}
+
+// TestPrintsDefaultIsPflagsRuleAtEveryCliff pins the fleet's one
+// printed-default rule at every type's cliff — pflag's
+// defaultIsZeroValue by type name: the boolean family's "false" and "",
+// a duration's "0" and "0s", the integer and float family's "0", a
+// string's "", the IP family's "<nil>", the slice family's "[]", and the
+// fallback set for every other type (int16 among them, pflag's own case
+// list omitting it) — the registration's fact a consumer hands
+// Coverage with no flag-library dependency here
+// (REQ-guidance-coverage).
+//
+//gofresh:pure
+func TestPrintsDefaultIsPflagsRuleAtEveryCliff(t *testing.T) {
+	zero := map[string][]string{
+		"bool": {"false", ""}, "boolfunc": {"false", ""},
+		"duration": {"0", "0s"},
+		"int":      {"0"}, "int8": {"0"}, "int32": {"0"}, "int64": {"0"}, "uint": {"0"}, "uint8": {"0"}, "uint16": {"0"}, "uint32": {"0"}, "uint64": {"0"}, "count": {"0"}, "float32": {"0"}, "float64": {"0"},
+		"string": {""},
+		"ip":     {"<nil>"}, "ipMask": {"<nil>"}, "ipNet": {"<nil>"},
+		"intSlice": {"[]"}, "stringSlice": {"[]"}, "stringArray": {"[]"},
+		// pflag's fallback set, for a type its case list does not name.
+		"int16": {"false", "<nil>", "", "0"}, "custom": {"false", "<nil>", "", "0"}, "func": {"false", "<nil>", "", "0"},
+	}
+	printed := map[string][]string{
+		"bool": {"true", "0"}, "boolfunc": {"true"},
+		"duration": {"1s", "0ms", ""},
+		"int":      {"1", "", "-1"}, "int64": {"00"}, "count": {"1"}, "float64": {"0.0", "1"},
+		"string": {"0", "false", "<nil>", "[]", " "},
+		"ip":     {"", "0", "1.2.3.4"}, "ipNet": {"10.0.0.0/8"},
+		"intSlice": {"", "0", "[0]"}, "stringSlice": {"[a]"}, "stringArray": {"[]x"},
+		"int16": {"1", "[]", "0s"}, "custom": {"x", "[]", "0s", "true"},
+	}
+	for flagType, values := range zero {
+		for _, v := range values {
+			if PrintsDefault(flagType, v) {
+				t.Errorf("PrintsDefault(%q, %q) = true, want false: the library prints no zero", flagType, v)
+			}
+		}
+	}
+	for flagType, values := range printed {
+		for _, v := range values {
+			if !PrintsDefault(flagType, v) {
+				t.Errorf("PrintsDefault(%q, %q) = false, want true: the library prints a non-zero default", flagType, v)
+			}
+		}
+	}
+}
+
+// TestServedJudgmentComparesBytesWithTheProjection pins the served-bytes
+// judgment: the usage on the CLI, the clause on the MCP, a served knob
+// the document does not carry named, defects in name order, an unknown
+// verb or surface the caller's error (REQ-guidance-coverage,
+// REQ-guidance-single-source).
+//
+//gofresh:pure
+func TestServedJudgmentComparesBytesWithTheProjection(t *testing.T) {
+	doc, err := Parse([]byte(projectionSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := "candidates per symbol (0 means exhaustive)"
+	clause := "candidates per symbol (default 0) (0 means exhaustive)"
+	if defects, err := doc.Served("cli", "run", map[string]string{"budget-cli": usage}); err != nil || len(defects) != 0 {
+		t.Fatalf("the projection served on the cli: %v, %v", defects, err)
+	}
+	if defects, err := doc.Served("mcp", "run_mcp", map[string]string{"budget": clause, "edits": "the edit batch"}); err != nil || len(defects) != 0 {
+		t.Fatalf("the projection served on the mcp: %v, %v", defects, err)
+	}
+	// The MCP serves the clause, never the usage; the CLI the usage,
+	// never the clause — each face's divergence names both strings.
+	defects, err := doc.Served("cli", "run", map[string]string{"budget-cli": clause})
+	if err != nil || len(defects) != 1 || defects[0] != `verb "run": knob "budget-cli" served "candidates per symbol (default 0) (0 means exhaustive)" where the document renders "candidates per symbol (0 means exhaustive)"` {
+		t.Fatalf("the clause served on the cli: %v, %v", defects, err)
+	}
+	defects, err = doc.Served("mcp", "run_mcp", map[string]string{"budget": usage})
+	if err != nil || len(defects) != 1 || !strings.HasSuffix(defects[0], `where the document renders "candidates per symbol (default 0) (0 means exhaustive)"`) {
+		t.Fatalf("the usage served on the mcp: %v, %v", defects, err)
+	}
+	// Name order over a mixed set: an undocumented knob first by name,
+	// the divergence second; a knob the verb documents on the other
+	// surface only is undocumented here.
+	defects, err = doc.Served("cli", "run", map[string]string{"zeta": usage, "budget-cli": "x", "budget": usage})
+	if err != nil || len(defects) != 3 ||
+		defects[0] != `verb "run": served knob "budget" is not documented on the cli surface` ||
+		!strings.HasPrefix(defects[1], `verb "run": knob "budget-cli" served "x" where`) ||
+		defects[2] != `verb "run": served knob "zeta" is not documented on the cli surface` {
+		t.Fatalf("mixed served set: %v, %v", defects, err)
+	}
+	if _, err := doc.Served("cli", "nope", nil); err == nil {
+		t.Fatal("an unknown verb judged")
+	}
+	if _, err := doc.Served("web", "run", nil); err == nil {
+		t.Fatal("an unknown surface judged")
+	}
+	if defects, err := doc.Served("cli", "version", map[string]string{}); err != nil || len(defects) != 0 {
+		t.Fatalf("a knobless verb with nothing served: %v, %v", defects, err)
 	}
 }

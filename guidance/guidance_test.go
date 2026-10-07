@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -498,14 +499,30 @@ func TestCoverageIsExactPerSurface(t *testing.T) {
 func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	proseRunes := []rune("abcdefghij ,;=~/.()-XYZ")
-	prose := func() string {
+	proseFrom := func(runes []rune) string {
 		n := 1 + rng.Intn(50)
 		r := make([]rune, n)
 		for i := range r {
-			r[i] = proseRunes[rng.Intn(len(proseRunes))]
+			r[i] = runes[rng.Intn(len(runes))]
 		}
 		return "A" + strings.TrimSpace(string(r)) + "z"
 	}
+	prose := func() string { return proseFrom(proseRunes) }
+	// The prose alphabet cannot spell "default", so a knob's default
+	// spelling is drawn apart and spliced at the head of its text —
+	// inside the first clause whatever the prose's own separators do:
+	// none; the one form the usage rendering strips; the word in
+	// prose; the form unclosed (over a prose without parentheses, so
+	// the prose cannot close it). With the registered printed fact
+	// drawn per knob, the CLI coverage's row is predicted from the two
+	// draws alone (REQ-guidance-coverage).
+	const drawNone, drawForm, drawProse, drawUnclosed = 0, 1, 2, 3
+	type knobDraw struct {
+		shape   int
+		printed bool
+		omitted bool // left out of the registration: its one row the not-registered one
+	}
+	draws := map[string]knobDraw{}
 	for iter := 0; iter < 250; iter++ {
 		var b strings.Builder
 		b.WriteString("# t\n\n## verbs\n")
@@ -535,6 +552,16 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 			}
 			for ki := 0; ki < rng.Intn(4); ki++ {
 				k := Knob{Name: fmt.Sprintf("k%d", ki), Text: prose()}
+				draw := knobDraw{shape: rng.Intn(4), printed: rng.Intn(2) == 0, omitted: rng.Intn(6) == 0}
+				switch draw.shape {
+				case drawForm:
+					k.Text = "(default 3) " + k.Text
+				case drawProse:
+					k.Text = "default is 3 " + k.Text
+				case drawUnclosed:
+					k.Text = "(default 3 " + proseFrom([]rune("abcdefghij ,;=~/.-XYZ"))
+				}
+				draws[name+"\x00"+k.Name] = draw
 				if rng.Intn(3) == 0 {
 					// Spellings resolve at parse: the no-alias mcp
 					// entry carries the canonical name.
@@ -584,6 +611,7 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 			t.Fatalf("iter %d: verbs = %d, want %d", iter, len(doc.Verbs), len(models))
 		}
 		registered := map[string]map[string]Registered{"mcp": {}, "cli": {}}
+		expected := map[string][]string{}
 		for name, m := range models {
 			effective := m.surfaces
 			if len(effective) == 0 {
@@ -594,10 +622,23 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 				if err != nil || got != m.does {
 					t.Fatalf("iter %d: Description(%s, %s) = %q, %v; want %q", iter, s.Surface, s.Name, got, err, m.does)
 				}
-				var params []string
+				reg := Registered{}
 				for _, k := range m.knobs {
 					if spelling, exists := on(k.Surfaces, k.Name, s.Surface); exists {
-						params = append(params, spelling)
+						draw := draws[name+"\x00"+k.Name]
+						if draw.omitted {
+							expected[s.Surface] = append(expected[s.Surface], fmt.Sprintf("verb %q: documented knob %q not registered", s.Name, spelling))
+						} else {
+							reg[spelling] = draw.printed
+						}
+						if s.Surface == "cli" && !draw.omitted {
+							switch {
+							case draw.printed && (draw.shape == drawProse || draw.shape == drawUnclosed):
+								expected["cli"] = append(expected["cli"], fmt.Sprintf("verb %q: knob %q spells a default outside the (default X) form in its first clause", s.Name, spelling))
+							case !draw.printed && (draw.shape == drawForm || draw.shape == drawUnclosed):
+								expected["cli"] = append(expected["cli"], fmt.Sprintf("verb %q: knob %q spells a (default X) form in its first clause on a flag the library prints no default for", s.Name, spelling))
+							}
+						}
 						// The knob projection over every generated knob: its
 						// spelling on this surface resolves to the knob verbatim.
 						if kn, err := doc.Knob(s.Surface, s.Name, spelling); err != nil || !reflect.DeepEqual(kn, k) {
@@ -605,7 +646,7 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 						}
 					}
 				}
-				registered[s.Surface][s.Name] = knobs(params...)
+				registered[s.Surface][s.Name] = reg
 			}
 			vi := -1
 			for i := range doc.Verbs {
@@ -626,10 +667,20 @@ func TestParseReconstructsGeneratedDocuments(t *testing.T) {
 				t.Fatalf("iter %d: %s when/example = %q/%q, want %q/%q", iter, name, v.When, v.Example, m.when, m.ex)
 			}
 		}
+		// Each surface's rows are the predicted set — a knob left out of
+		// the registration its not-registered row and nothing else, the
+		// MCP never a default row, the CLI's default rows from the two
+		// draws (the order is the example pins' concern).
 		for _, surface := range []string{"mcp", "cli"} {
 			defects, err := doc.Coverage(surface, registered[surface])
-			if err != nil || len(defects) != 0 {
-				t.Fatalf("iter %d: exact %s surface: defects=%v err=%v", iter, surface, defects, err)
+			if err != nil {
+				t.Fatalf("iter %d: %s coverage: %v", iter, surface, err)
+			}
+			sort.Strings(defects)
+			want := append([]string(nil), expected[surface]...)
+			sort.Strings(want)
+			if !reflect.DeepEqual(defects, want) {
+				t.Fatalf("iter %d: %s rows = %v, want %v\n%s", iter, surface, defects, want, b.String())
 			}
 		}
 	}

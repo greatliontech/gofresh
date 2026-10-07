@@ -24,7 +24,11 @@ prose instead (pew's shape: "`<module>/benchmarks` unless given").
 Invariants preserved: the lint's fact is still the registration's;
 a non-zero default's form keeps being dropped and printed once.
 
-Lands: cross-tool train chunk 300 (audit 285, 2026-09-29: the guidance lint's
-gofresh half — stipulator 184's own parenthetical says the document half is
-gofresh's; the pflag-typed switch is refused on the dependency boundary and
-lands as a name-keyed table).
+The gofresh half landed at cross-tool train chunk 300 (2026-10-07):
+Coverage's CLI judgment refuses the "(default X)" form in the first
+clause of a knob registered with a zero default (the unclosed form
+too); a derived default is spelled in prose.
+
+Lands: the consumer bumps reading gofresh's 300 release — stipulator
+290r, gomutant 324, pew 320 — where each coverage binding runs the
+amended judgment over its document.

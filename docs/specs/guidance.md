@@ -106,32 +106,38 @@ parenthetical goes, matched by parenthesis depth so a default naming a
 call keeps its own parentheses inside (the library prints a non-zero
 default itself), so a knob whose CLI default is non-zero spells it as
 "(default X)" and no other default, in any spelling of the word, in its
-first clause — the CLI coverage judgment, told which flags carry a
-non-zero default, reports any other spelling there as a defect
-(REQ-guidance-coverage), a parenthetical that never closes rendering
-unchanged and counting as one such spelling; the schema rendering
-describes every property of a served input schema at every depth — a
-nested object's properties and an array's items alike — with the verb's
-knob of the property's own name, its terse clause, refusing by name a
-property the document does not knob (the first in the walk's order —
-each node's names sorted, its properties before its items), a named
-property without a node still requiring its knob and taking no
-description, a nil root describing nothing, and it answers the sorted
-names it visited — the one enumeration a consumer's coverage judgment
-reads, so descriptions and coverage never walk at two depths; and the
-registration rendering of a verb on a surface is its spelling, its
-purpose, its help, its long rendering, every knob on the surface with
-its clause and, on the CLI, its usage (the MCP serves the clause; its
-usage is empty there), and the pointer to the knobs' whole prose in the
-surface's own form — on the CLI the guidance command under the verb's
-CLI spelling, quoted where it carries whitespace ("The knobs' whole
-prose: <tool> guidance <verb>."), on the MCP the guidance tool under the
-verb's MCP spelling ("The knobs' whole prose: the guidance tool, verb
-<verb>.") — the one shape a face registers a command or a tool from. A
-requested surface or name the document does not carry is an error, never
-an empty rendering; a face's construction refuses such a request naming
-the tool once ("<tool>: guidance: <cause>"), and a malformed document
-with the embedded form's own refusal.
+first clause, and a knob whose CLI default is zero spells no "(default
+X)" form there at all (the rendering drops it and the library prints
+nothing, so the fact would reach no reader — a derived default is
+spelled in the clause's prose) — the CLI coverage judgment, told which
+flags carry a non-zero default, reports any other spelling on the former
+and the dropped form on the latter as a defect (REQ-guidance-coverage),
+a parenthetical that never closes rendering unchanged and counting as
+one such spelling on either; the schema rendering describes every
+property of a served input schema at every depth — a nested object's
+properties and an array's items alike — with the verb's knob of the
+property's own name, its terse clause, refusing by name a property the
+document does not knob (the first in the walk's order — each node's
+names sorted, its properties before its items), a named property without
+a node still requiring its knob and taking no description, a nil root
+describing nothing, and it answers the sorted names it visited — the one
+enumeration a consumer's coverage judgment reads, so descriptions and
+coverage never walk at two depths; and the registration rendering of a
+verb on a surface is its spelling, its purpose, its help, its long
+rendering, every knob on the surface with its clause and, on the CLI,
+its usage (the MCP serves the clause; its usage is empty there), on the
+CLI its long help — the help, a blank line, the pointer; the help alone
+on a Document's own projection, which knows no tool; empty on the MCP,
+which has no long help — and the pointer to the knobs' whole prose in
+the surface's own form — on the CLI the guidance command under the
+verb's CLI spelling, quoted where it carries whitespace ("The knobs'
+whole prose: <tool> guidance <verb>."), on the MCP the guidance tool
+under the verb's MCP spelling ("The knobs' whole prose: the guidance
+tool, verb <verb>.") — the one shape a face registers a command or a
+tool from. A requested surface or name the document does not carry is an
+error, never an empty rendering; a face's construction refuses such a
+request naming the tool once ("<tool>: guidance: <cause>"), and a
+malformed document with the embedded form's own refusal.
 
 **REQ-guidance-coverage** (behavior): The package MUST provide the
 per-surface coverage judgment a consuming tool's drift binding enforces:
@@ -144,9 +150,20 @@ knob on that surface naming no registered parameter or flag, and every
 section on that surface naming no registered verb, and — on the CLI
 surface, for the registered flags the caller names as carrying a
 non-zero default — every knob whose first clause spells a default
-outside the "(default X)" form the usage rendering strips
-(REQ-guidance-render); a surface the format does not define is the
-caller's error, distinct from the defect list. Coverage is exact in both
+outside the "(default X)" form the usage rendering strips, and — for the
+flags the caller names as carrying a zero default — every knob whose
+first clause opens that form (REQ-guidance-render); a surface the format
+does not define is the caller's error, distinct from the defect list.
+The package also provides the flag library's own rule the caller derives
+that fact by — PrintsDefault, over a flag's type name and its default's
+spelling, pflag's per-type zero as a name-keyed table, for the library's
+own value types (a wrapped standard-library flag or a custom value
+answering IsBoolFlag is dispatched by the library on its concrete type,
+which a name cannot carry) — and the served-bytes judgment: given a
+surface, a verb and the strings the tool serves per knob, every served
+knob the document does not carry on the surface and every served string
+that is not the knob's projection (the usage rendering on the CLI, the
+terse clause on the MCP), in name order. Coverage is exact in both
 directions per surface; a knob the wire does not carry is a document
 defect, not a tolerated extra.
 
@@ -163,17 +180,17 @@ knob's own prose owns its per-surface spellings.
 tool-level served prose MUST be read from the parsed document at
 initialization — never a second literal. Per-parameter schema and flag
 usage strings are the document's knob prose rendered by the package's
-own projections — the schema rendering and the usage rendering over
-the registration rendering, never a second literal and never a grammar
-of the consuming tool's own —
-and the coverage judgment, bound per surface in the consuming repo,
-keeps them enumerated by the document. The drift guard is structural —
-name coverage plus served-bytes identity, the consuming repo's binding
-comparing each served knob string with the projection; prose accuracy
-against the consuming repo's own spec is review's to hold, not a
-mechanical judgment. The package provides the embedded form the tool
-reads: its source parsed once, every face answering the one parse, and
-a malformed document refused loudly at construction, naming the tool.
-Enforced in each consuming repo by its guidance requirement and
-binding; in this repo the format and projections are enforced by the
-package's own tests.
+own projections — the schema rendering and the usage rendering over the
+registration rendering, never a second literal and never a grammar of
+the consuming tool's own — and the coverage judgment, bound per surface
+in the consuming repo, keeps them enumerated by the document. The drift
+guard is structural — name coverage plus served-bytes identity, the
+consuming repo's binding comparing each served knob string with the
+projection — the package's served-bytes judgment its form — never
+through a grammar of its own; prose accuracy against the consuming
+repo's own spec is review's to hold, not a mechanical judgment. The
+package provides the embedded form the tool reads: its source parsed
+once, every face answering the one parse, and a malformed document
+refused loudly at construction, naming the tool. Enforced in each
+consuming repo by its guidance requirement and binding; in this repo the
+format and projections are enforced by the package's own tests.

@@ -12,7 +12,9 @@ to the call's)` on nil string arrays, found at stipulator 272's projection
 fold; both reworded there). The rule the served string needs: a
 `(default …)` form belongs only on a flag whose registration prints one.
 
-Lands: cross-tool train chunk 300 (audit 285, 2026-09-29: the guidance lint's
-gofresh half — stipulator 184's own parenthetical says the document half is
-gofresh's; the pflag-typed switch is refused on the dependency boundary and
-lands as a name-keyed table).
+The gofresh half landed at cross-tool train chunk 300 (2026-10-07):
+the rule the served string needs is Coverage's zero-default arm.
+
+Lands: the consumer bumps reading gofresh's 300 release — stipulator
+290r, gomutant 324, pew 320 — where each coverage binding runs the
+amended judgment over its document.
