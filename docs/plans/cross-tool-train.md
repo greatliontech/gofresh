@@ -2575,9 +2575,9 @@ in their repos.
       any GOVERSION parse folds onto
       gotool.LanguageSeries/ParseGoVersion.
       Dissolved (2026-10-06, audit 319): lands as pew's performance-evidence plan chunk 2 on the other machine; its riders in pew docs/issues/train-riders-for-the-performance-evidence-plan.md.
-- [ ] 292. gofresh: an in-module refused path's clause spelled
-      module-relative (gofresh
-      docs/issues/refused-in-module-path-spelled-absolute.md — derived
+- [x] 292. gofresh: an in-module refused path's clause spelled
+      module-relative (gofresh `git log --all --
+      docs/issues/refused-in-module-path-spelled-absolute.md` — derived
       at the 2026-09-29 replan: checkout
       independence is the property 279 set out to give the attribution
       limb, and the refused path's own absolute spelling is the one
@@ -2597,7 +2597,8 @@ in their repos.
       neither Observation.Attribution nor either split): decide here
       whether the engine's verdict path carries it — checkout
       independence is this chunk's property; (b)
-      bracket-move-attribution-unsplit folds here — its Lands names
+      bracket-move-attribution-unsplit (gofresh `git log --all --
+      docs/issues/bracket-move-attribution-unsplit.md`) folds here — its Lands names
       this change set verbatim (bracket.go:216–230's bracket grammar
       unrecognised by attributionWellFormed, runtimeinput.go:1853);
       gomutant's second strip deletes at the same bump as the re-key.
