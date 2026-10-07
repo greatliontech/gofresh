@@ -2730,7 +2730,7 @@ in their repos.
       enforcement: name the clause written or amended and correct the
       proto comment in the same chunk.
       Rider (2026-10-06, audit 318): follows 290.2b and compares the policy pin against the one toolchain read (the snapshot's GOVERSION) — never a fourth sample.
-- [ ] 300. gofresh: the guidance lint's gofresh half (audit 285 A9 —
+- [x] 300. gofresh: the guidance lint's gofresh half (audit 285 A9 —
       four gofresh guidance issues parked on stipulator 184, whose own
       parenthetical says 266 owns the document half, and 266 landed
       without them): the default-spelling rules — a knob's derived
