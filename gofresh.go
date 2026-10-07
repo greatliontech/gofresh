@@ -411,7 +411,9 @@ const ClosureStrategy = closure.IdentityStrategy
 // — and their same-named Value members at the walk tiers, reflect now
 // a symbol table like its peers (effect-scan@21 carries the same for
 // the fold).
-const ObservationRTA = "gofresh/observation-rta@40"
+// @41 carries an independent static outcome inventory beside observation
+// admission; missing older inventories never gain a supported derivation.
+const ObservationRTA = "gofresh/observation-rta@41"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

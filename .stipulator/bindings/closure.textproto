@@ -1760,3 +1760,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "3510f73fcb108e09d69085ac20bc74ce72a79a749194325c33fc384b931dcd85"
 }
+
+bindings {
+  requirement_id: "REQ-closure-outcome-inventory"
+  content_hash: "fb575f2ade2e431acb9b32e3643c99f261e3338551464d520d11b187118500fe"
+  source_hash: "916d674246134a157a73d46ea6aa19970331a233faeab2e280fcee5aedb09460"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.Hasher.observabilityFromReachability"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "62a631abc58159944ef87c1d3786655a13c1ff48d0128102ee689801151d2270"
+}
+
+bindings {
+  requirement_id: "REQ-closure-outcome-inventory"
+  content_hash: "fb575f2ade2e431acb9b32e3643c99f261e3338551464d520d11b187118500fe"
+  source_hash: "916d674246134a157a73d46ea6aa19970331a233faeab2e280fcee5aedb09460"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestOutcomeInventorySeparatesAdmissionFromDerivation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ddcd9adf2154503673e106128b55a712f3f59cb2494684dc10b74128273cd7b"
+}
+
+bindings {
+  requirement_id: "REQ-closure-outcome-inventory"
+  content_hash: "fb575f2ade2e431acb9b32e3643c99f261e3338551464d520d11b187118500fe"
+  source_hash: "916d674246134a157a73d46ea6aa19970331a233faeab2e280fcee5aedb09460"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
+}

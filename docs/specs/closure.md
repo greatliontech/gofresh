@@ -1310,6 +1310,29 @@ backstop scopes its admission to the syntactic `TestMain(*testing.M)`
 declaration, the conservative direction for text the scan cannot
 attribute to flow.
 
+**REQ-closure-outcome-inventory** (invariant): Analysis MUST distinguish an
+observable effect set from a set whose operation outcomes have an admitted
+derivation. The `gofresh/immutable-environment@1` derivation is available only
+under an audited Linux toolchain selection when the observability proof succeeds
+and every external input effect in subject and user test-main flow is an admitted
+`os.Getenv` or `os.LookupEnv` operation, including the empty effect set. Audited
+harness logging, benchmark pacing and closed subtest execution retain their
+existing protocol meaning; they do not introduce an external input outcome, and
+their user callbacks remain subject to the same complete effect judgment.
+Initialization effects, unclosed reachability, unavailable analysis, and every
+ordinary observability refusal preclude the derivation. Filesystem operations,
+fresh scratch operations and other admitted effects confer no support under this
+method. The inventory is a static prerequisite, not a process receipt or evidence
+that the analyzed subjects actually executed under the supplied environment;
+construction still owes those premises and the complete contributing-subject set.
+The derivation assumes the complete inherited environment is held unchanged for
+the contributing execution, including initialization, cleanup and concurrent
+contributors; the return value and presence bit then follow from the audited
+process-local lookup semantics. A positive observation admission alone, an empty
+identity log, a purity assertion, or a missing cached inventory cannot supply
+the derivation. Warm and cold analysis report the same inventory, and its method
+identity participates in analysis compatibility.
+
 **REQ-closure-observability-cause-order** (invariant): Every reachable call and effect MUST be classified to the observability walk's
 (REQ-closure-observability-analysis) end; the preferred
 human diagnostic is derived afterward and can never select which facts

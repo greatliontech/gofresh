@@ -90,11 +90,13 @@ semantics. Unknown platform/toolchain behavior remains unsupported until audited
 
 ## Consequences for shared evidence construction
 
-The current closure observability result reports admission as a boolean and a
-reason. It admits filesystem operations conditionally on the caller's outcome
-premise; that boolean does not distinguish an environment-only effect inventory
-from an inventory needing direct filesystem outcome evidence. Reusing it as an
-outcome-support token would repeat the original circular inference.
+The closure observability boolean reports admission, with a reason on refusal.
+It admits filesystem operations conditionally on the producer's outcome premise;
+that boolean does not distinguish an environment-only effect inventory from an
+inventory needing direct filesystem outcome evidence. The separate outcome
+inventory identifies the admitted derivation, without claiming it has been tied
+to an actual execution. Reusing the admission boolean as an outcome-support token
+would repeat the original circular inference.
 
 A sound derivation therefore needs an independently established, versioned
 effect inventory over the result-contributing execution, bound to its selected

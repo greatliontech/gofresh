@@ -83,7 +83,17 @@ type Subject struct {
 type Observability struct {
 	Observable bool
 	Reason     string
+	// OutcomeMethod names a static outcome derivation admitted for this
+	// effect inventory. Empty means unsupported, even when Observable is
+	// true. Execution completion and environment fidelity are separate
+	// producer premises; this field does not certify an execution.
+	OutcomeMethod string
 }
+
+// ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
+// set or admitted environment lookups under an unchanged complete inherited
+// environment. Its implementation semantics are audited for Linux only.
+const ImmutableEnvironmentOutcomes = "gofresh/immutable-environment@1"
 
 // maxAttributedSubjects bounds one attributed-RTA slice: a package's
 // subjects are proven in slices of this width, each slice a walk over
@@ -330,10 +340,12 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// dispatch discipline: it is the one flow here that can dispatch a
 	// test-planted value after the harness run
 	// (REQ-closure-observability-analysis).
+	var testMainEffects []externalEffect
 	if len(reach.testMainFunctions) > 0 {
 		testMainReach := reach
 		testMainReach.functions = nonStandardFunctions(base, reach.testMainFunctions)
 		testMainResult := testMainObservedEffects(base, testMainReach)
+		testMainEffects = testMainResult.effects
 		if testMainResult.widen {
 			reason := testMainResult.widenReason
 			if reason == "" {
@@ -412,7 +424,29 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	if blocking != nil {
 		return Observability{Reason: blocking.reason}, nil
 	}
-	return Observability{Observable: true}, nil
+	method := ""
+	if h.SelectionAudited() && h.snapshot != nil && h.snapshot.Value("GOOS") == "linux" {
+		method = immutableEnvironmentMethod(subjectResult.effects, testMainEffects)
+	}
+	return Observability{Observable: true, OutcomeMethod: method}, nil
+}
+
+// immutableEnvironmentMethod consumes the complete classified effect sets,
+// never the preferred diagnostic: an admitted file read can follow an admitted
+// environment lookup and still veto the derivation. Ordinary observability
+// refusals have already returned before this projection is consulted.
+func immutableEnvironmentMethod(sets ...[]externalEffect) string {
+	for _, effects := range sets {
+		for _, effect := range effects {
+			if effect.observable && effect.kind == externalEffectTestRuntime && (auditedHarnessLogging(true, effect.packagePath, effect.symbol) || auditedHarnessPacing(true, effect.packagePath, effect.symbol) || effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "B.N")) {
+				continue
+			}
+			if !effect.observable || effect.packagePath != "os" || (effect.symbol != "Getenv" && effect.symbol != "LookupEnv") {
+				return ""
+			}
+		}
+	}
+	return ImmutableEnvironmentOutcomes
 }
 
 // testMainObservedEffects classifies user test-main flow within

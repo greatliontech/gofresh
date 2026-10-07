@@ -204,8 +204,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@40" {
-		t.Fatalf("ObservationRTA = %q, want reflect's descriptor-view surface admitted over time's receiver-qualified methods", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@41" {
+		t.Fatalf("ObservationRTA = %q, want the independent static outcome inventory", ObservationRTA)
 	}
 }
 
