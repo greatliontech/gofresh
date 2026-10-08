@@ -133,7 +133,7 @@ register.
   lifecycles and observed-reuse admission behind its rederivation (pew
   docs/notes/evidence-model.md, gofresh
   docs/specs/runtime-inputs.md, pew
-  docs/issues/fingerprint-encoding-ownership.md — reviewed proposals;
+  docs/specs/spec.md §5 — the native fingerprint envelope;
   the canonical specs stay authoritative). A train chunk crossing that
   boundary is REPORTED to that agent before it is implemented (a
   report, not an approval gate — the user's ruling 2026-10-07), its
