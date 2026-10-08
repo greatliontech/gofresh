@@ -272,6 +272,31 @@ func TestIdentityFacadeDistinguishesCaptureFailureFromUnguardedIdentity(t *testi
 	}
 }
 
+func TestScratchRootDeclarationPreservesEnvironmentValues(t *testing.T) {
+	root, dir := producerModule(t)
+	scratch := t.TempDir()
+	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})
+	env := producerEnv(dir, "TMPDIR="+scratch)
+	in := supportedIngest(t, frame, "worker", env)
+	in.ScratchRoot = scratch
+	obs, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "getenv TMPDIR\nstat "+scratch+"\n"), in)
+	if err != nil || reason != "" || obs.Unverifiable {
+		t.Fatalf("scratch capture = %+v %q %v", obs, reason, err)
+	}
+	paths, err := Paths(obs.Manifest, root)
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("declared root recorded a filesystem identity: %v %v", paths, err)
+	}
+	unchanged, err := Current(context.Background(), obs.Manifest, root, env)
+	if err != nil || unchanged.Unverifiable || unchanged.Digest != obs.Digest {
+		t.Fatalf("scratch capture did not bind the delivered environment: %+v %v", unchanged, err)
+	}
+	changed, err := Current(context.Background(), obs.Manifest, root, producerEnv(dir, "TMPDIR="+t.TempDir()))
+	if err != nil || changed.Digest == obs.Digest {
+		t.Fatalf("root declaration erased the logged environment value: %+v %v", changed, err)
+	}
+}
+
 func TestProducerKeepsOneEnvironmentSnapshot(t *testing.T) {
 	root, dir := producerModule(t)
 	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})

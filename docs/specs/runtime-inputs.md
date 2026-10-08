@@ -633,10 +633,10 @@ cached dependencies — so re-observing it adds no protection and forfeits reuse
 subject depending on a covered tree's *metadata* beyond what the covering guard pins
 is outside the collapse and outside the admitted observation set alike. The caller's
 soundness inputs are exactly two, and their blast radius is stated: the environment
-it ingests must be the one the run resolved its roots under — a producer that
-withholds a setting the resolution reads (a minted scratch TMPDIR kept out of the
-recorded environment) declares the resulting root instead, and any other divergence
-silently vacates observation for everything beneath a root the run never used — and
+it ingests must be the one the run resolved its roots under — a producer may
+declare a minted scratch root, but the declaration does not permit withholding or
+substituting a logged environment-variable value; divergence silently vacates
+observation for everything beneath a root the run never used — and
 the resolution's own inputs (the toolchain the environment's PATH names, its
 configuration file, the module and workspace files that select a toolchain) together
 with the roots' link topology ride the same hold-still span
@@ -685,8 +685,9 @@ test-harness log MUST classify under the producing environment's ephemeral temp
 roots — what the run's own temp-directory resolution named: TMPDIR when set, the
 platform default otherwise, resolved by the producer facade from the process
 environment the ingest carries, or the per-run scratch root a producer minted for
-the process and keeps out of the environment it ingests (an environment read of it
-would record per-run noise), which it declares instead; and the go command's own
+the process and declares explicitly; declaring the filesystem root ephemeral does
+not erase an environment-variable read or replace the value returned by it, even
+when that value is a per-run name; and the go command's own
 temp root where one is set, GOTMPDIR as `go env` answers it (the environment's,
 else the go env file's), under which the testing package mints its per-test
 directories and the command its per-invocation work trees (the process temp root

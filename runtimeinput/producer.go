@@ -131,10 +131,9 @@ type ProducerIngest struct {
 	Completion CompletionReceipt
 	Outcome    OutcomeSupport
 	// ScratchRoot declares a per-run scratch root the producer minted
-	// for the process and keeps out of the environment it ingests (an
-	// environment read of it would record per-run noise); it stands in
-	// for the temp root the environment's TMPDIR would otherwise
-	// resolve. Every other classification root — the toolchain, the
+	// for the process. This declares a filesystem-root admission, never an
+	// environment projection: Env still carries the value actually delivered
+	// to the process. Every other classification root — the toolchain, the
 	// module cache, the build cache, the go command's own temp root
 	// (GOTMPDIR), and the temp root itself when this is empty — is
 	// resolved from the environment, never declared.
