@@ -341,6 +341,11 @@ classifications, bracket and cancellation rules. This operation preserves
 observed identities for drift detection without claiming outcome agreement and
 never emits outcome-support fields, even if a caller supplies a capability.
 Missing, mismatched or abnormal completion remains explicitly incomplete.
+The facade returns the capture's incompleteness reason separately from finalized
+guard state: an unguardable observed identity and a failed capture may both be
+unverifiable, but only the latter reports capture incompleteness. A consumer can
+preserve this distinction without parsing diagnostic text or reconstructing the
+facade's capture checks.
 
 **REQ-inputs-bound-outcomes** (invariant): Supported observation construction MUST
 match independently prepared outcome support and a normal-completion receipt to

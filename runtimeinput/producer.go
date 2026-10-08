@@ -170,10 +170,11 @@ func (f ProducerFrame) Observe(ctx context.Context, testlogPath string, in Produ
 // process. It preserves the facade's frame, environment, classification and
 // cancellation rules, but never emits outcome support, even when supplied.
 // It is not a request for completion-bearing observation evidence and cannot
-// authorize observation-based reuse.
-func (f ProducerFrame) ObserveInputs(ctx context.Context, testlogPath string, in ProducerIngest) (Observation, error) {
-	observation, _, err := f.observe(ctx, testlogPath, in, false)
-	return observation, err
+// authorize observation-based reuse. The returned reason distinguishes an
+// incomplete capture from finalized guards, which may themselves be unverifiable
+// because an observed identity could not be guarded.
+func (f ProducerFrame) ObserveInputs(ctx context.Context, testlogPath string, in ProducerIngest) (Observation, string, error) {
+	return f.observe(ctx, testlogPath, in, false)
 }
 
 func (f ProducerFrame) observe(ctx context.Context, testlogPath string, in ProducerIngest, requireOutcomes bool) (Observation, string, error) {

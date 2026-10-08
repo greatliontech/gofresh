@@ -179,12 +179,12 @@ func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
 	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})
 	env := producerEnv(dir)
 	in := supportedIngest(t, frame, "worker", env)
-	empty, err := frame.ObserveInputs(context.Background(), writeTestlog(t, ""), in)
-	if err != nil || !empty.OK || empty.Manifest == "" || empty.Unverifiable || HasOutcomeSupport(empty.Manifest, supportedSubject) {
+	empty, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, ""), in)
+	if err != nil || reason != "" || !empty.OK || empty.Manifest == "" || empty.Unverifiable || HasOutcomeSupport(empty.Manifest, supportedSubject) {
 		t.Fatalf("identity-only empty capture: %+v %v", empty, err)
 	}
-	observation, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), in)
-	if err != nil || observation.Unverifiable {
+	observation, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), in)
+	if err != nil || reason != "" || observation.Unverifiable {
 		t.Fatalf("identity capture: %+v %v", observation, err)
 	}
 	paths, err := ModuleRelPaths(observation.Manifest)
@@ -201,8 +201,8 @@ func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
 	for _, support := range []OutcomeSupport{{}, outcome.Prepare(binding, []string{supportedSubject}, "unsupported file inventory")} {
 		withoutSupport := in
 		withoutSupport.Outcome = support
-		got, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), withoutSupport)
-		if err != nil || !got.OK || got.Unverifiable || got.State != observation.State || HasOutcomeSupport(got.Manifest, supportedSubject) {
+		got, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), withoutSupport)
+		if err != nil || reason != "" || !got.OK || got.Unverifiable || got.State != observation.State || HasOutcomeSupport(got.Manifest, supportedSubject) {
 			t.Fatalf("unavailable outcomes lost identity guards: %+v %v", got, err)
 		}
 	}
@@ -226,8 +226,8 @@ func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
 	} {
 		bad := in
 		modify(&bad)
-		obs, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), bad)
-		if err != nil || !obs.Unverifiable {
+		obs, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), bad)
+		if err != nil || reason == "" || !obs.Unverifiable {
 			t.Fatalf("invalid completion yielded identity evidence: %+v %v", obs, err)
 		}
 		paths, err := ModuleRelPaths(obs.Manifest)
@@ -237,8 +237,38 @@ func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if obs, err := frame.ObserveInputs(ctx, writeTestlog(t, ""), in); !errors.Is(err, context.Canceled) || obs.OK {
+	if obs, _, err := frame.ObserveInputs(ctx, writeTestlog(t, ""), in); !errors.Is(err, context.Canceled) || obs.OK {
 		t.Fatalf("cancelled identity capture=%+v %v", obs, err)
+	}
+}
+
+func TestIdentityFacadeDistinguishesCaptureFailureFromUnguardedIdentity(t *testing.T) {
+	root, dir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})
+	in := supportedIngest(t, frame, "worker", producerEnv(dir))
+	for _, path := range []string{"", filepath.Join(t.TempDir(), "missing"), t.TempDir()} {
+		obs, reason, err := frame.ObserveInputs(context.Background(), path, in)
+		if err != nil || reason == "" || !obs.Unverifiable {
+			t.Fatalf("capture failure lost its disposition: %+v %q %v", obs, reason, err)
+		}
+	}
+	headerless := filepath.Join(t.TempDir(), "headerless")
+	if err := os.WriteFile(headerless, []byte("getenv HOME\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, err := frame.ObserveInputs(context.Background(), headerless, in); err != nil || !strings.Contains(reason, "header") {
+		t.Fatalf("headerless capture=%q %v", reason, err)
+	}
+	// A captured read outside the bracket is a finalized, unguarded identity,
+	// not a failed capture. Both forms are unverifiable; only one has a reason
+	// in the facade's completion-disposition channel.
+	outside := filepath.Join(t.TempDir(), "external")
+	if err := os.WriteFile(outside, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	obs, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open "+outside+"\n"), in)
+	if err != nil || reason != "" || !obs.Unverifiable || obs.Reason == "" {
+		t.Fatalf("unguarded identity confused with capture failure: %+v %q %v", obs, reason, err)
 	}
 }
 
