@@ -2683,7 +2683,7 @@ in their repos.
       bound bodies read — never a blanket — and any row still red after
       it treated as the regression it is. Soundness first: directly
       after 277 in the lane, before the band.
-- [ ] 290. stipulator: the bump behind gofresh 279, 281 (and whatever
+- [x] 290. stipulator: the bump behind gofresh 279, 281 (and whatever
       the remote's latest tag carries at open; v0.107.0 today) —
       stipulator gofresh-corpus-pin-lag (closed at 290.2a; `git log --all
       -- docs/issues/gofresh-corpus-pin-lag.md`, stipulator); the containment

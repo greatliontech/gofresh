@@ -23,5 +23,5 @@ independence belt stipulator 169 established — the grammars delete.
 gomutant needs nothing: its direct comparison is the property; Served
 is available to it, not owed.
 
-Lands: the consumer bumps behind gofresh 300 — stipulator 290r and pew
-320, where the grammars delete.
+Lands: pew's bump behind gofresh 300 — pew 320, where its grammars
+delete (stipulator's deleted at 290r).
