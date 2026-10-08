@@ -3407,9 +3407,11 @@ in their repos.
       does not depend on program retention); the test log is the
       completed observation stream — reported to the evidence-model
       owner before implementing (after their plan's chunk 5.2).
-- [ ] 331. stipulator: the memory term's estimate attributed and
+- [x] 331. stipulator: the memory term's estimate attributed and
       bounded to a package's run (the bldc field report
-      cold-package-estimate-invocation-timeout, 2026-10-07: a 7.3 GiB
+      cold-package-estimate-invocation-timeout — `git log --all --
+      docs/issues/cold-package-estimate-invocation-timeout.md` in
+      stipulator, 2026-10-07: a 7.3 GiB
       per-package estimate held three packages past a 25-minute
       execution budget after a 43-minute cold discovery whose own peak
       was 7.3 GiB; the warm retry passed in 12 minutes). Derived at
