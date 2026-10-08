@@ -2032,7 +2032,12 @@ in their repos.
       REQ-policy-cancellation's unit of persistence and
       REQ-evidence-freshness-degrade; coverage.Evaluate (349 lines) and
       compile.resolve (331 lines) decomposed likewise. After 226 has
-      thinned the package.
+      thinned the package. 337 filed the executed-reason account and
+      the resolution notices as unclassed string vocabularies beside the
+      typed uncacheable face (stipulator
+      executed-and-resolution-reason-faces-unclassed): one table shape
+      per face, explain's answer a clause question — runWitnesses holds
+      both accounts.
       (263: grows — check.Run repeats verifyrun's capture → symbols →
       served-backend ladder and hand-builds the backend map (the one site
       247.C's BackendSet did not reach) — check-pass-shares-the-verification-
@@ -3569,7 +3574,7 @@ in their repos.
       its reason), the pin gaining a concurrent-writer arm. Heads
       gomutant and the lane: a release-blocking red (the 2026-10-02
       doctrine's gate). Audit 333.
-- [ ] 337. stipulator: conformance — three contract violations audit 334
+- [x] 337. stipulator: conformance — three contract violations audit 334
       found: (1) the gofresh roots probe spawns outside the owned runner
       — observe.go's ProducerIngest carries no Runner and no Roots, so
       `go env -json` runs under a zero gotool.Runner (no boundary, no
@@ -3864,6 +3869,11 @@ in their repos.
       are two now); the fourth go.work reader (toolchainRequirement's
       line read) joins the census. Before the evidence-model plan's 6.1
       opens or after its stipulator migration, never concurrently (D3).
+      337.A surfaced one per-operation query holder: the capture's
+      toolchain sampler lives in its held discovery, its roots memo on
+      the Capture, the probe runners as package vars — one holder minted
+      at CapturePolicy (sampler, roots, runner) puts the operation's
+      queries on one life and one site.
 - [x] 227. stipulator: the vestigial sweep — three build-tagged
       atomicReplace declarations with no call site (the Windows arm
       dragging kernel32), the legacy .stipulator/cache removal on every
