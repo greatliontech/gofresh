@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/digest"
@@ -132,7 +133,7 @@ func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[st
 				// their granularity, but the header is the whole content,
 				// marked Embedded — an edit anywhere in the file moves the
 				// bytes some unchanged declaration reads.
-				header = testvariant.TestVariantFileHeader{File: f, Hash: contentDigest, Embedded: true}
+				header.Hash, header.Embedded = contentDigest, true
 			}
 			ledger.FileHeaders = append(ledger.FileHeaders, header)
 			continue
@@ -158,6 +159,57 @@ func ComputeIdentity(dir string, files []string, compiledGo, embeddedData map[st
 		dir:    dir,
 		Files:  files,
 	}, nil
+}
+
+// AddBaseBindings completes the ledger's binding context using the same source
+// observation as the core fold. Default import names come from go list, never
+// from a path basename. Parse memo entries remain pure functions of source bytes.
+func AddBaseBindings(identity *Identity, baseGo []string, importNames map[string]string, source Source, memo ParseMemo) error {
+	for _, name := range baseGo {
+		content, sum, err := source.ReadFile(filepath.Join(identity.dir, name))
+		if err != nil {
+			return err
+		}
+		d := digest.FromSum(sum)
+		var declarations []testvariant.TestVariantDeclaration
+		var header testvariant.TestVariantFileHeader
+		served := false
+		if memo != nil {
+			declarations, header, served = memo.Parsed(name, d)
+		}
+		if !served {
+			declarations, header, err = parseTestVariantFile(name, content)
+			if err != nil {
+				return err
+			}
+			if memo != nil {
+				memo.Record(name, d, declarations, header)
+			}
+		}
+		// The core already guards base content using its canonical fold.
+		// Retaining a raw header hash here would make comment-only base edits
+		// move the ledger under an unchanged core and compartment.
+		header.Hash = ""
+		identity.Ledger.BaseFiles = append(identity.Ledger.BaseFiles, header)
+	}
+	// Resolution must not mutate the shared parse memo.
+	identity.Ledger = identity.Ledger.Clone()
+	for _, headers := range [][]testvariant.TestVariantFileHeader{identity.Ledger.BaseFiles, identity.Ledger.FileHeaders} {
+		for _, header := range headers {
+			b := header.Bindings
+			if b == nil {
+				continue
+			}
+			for i := range b.Imports {
+				if b.Imports[i].Name == "" {
+					b.Imports[i].Name = importNames[b.Imports[i].Path]
+				}
+			}
+		}
+	}
+	sort.Slice(identity.Ledger.BaseFiles, func(i, j int) bool { return identity.Ledger.BaseFiles[i].File < identity.Ledger.BaseFiles[j].File })
+	identity.Ledger.BindingStrategy = testvariant.BindingStrategy
+	return nil
 }
 
 // positionalDigest folds a position Go gives semantics into a declaration's
@@ -384,5 +436,27 @@ func parseTestVariantFile(name string, content []byte) ([]testvariant.TestVarian
 		remainder.Write(content[previous:])
 	}
 	header := testvariant.TestVariantFileHeader{File: name, Hash: hex.EncodeToString(remainder.Sum(nil))[:32]}
+	header.Bindings = &testvariant.TestVariantFileBindings{Package: file.Name.Name}
+	for _, d := range declarations {
+		header.Bindings.References = mergedNames(header.Bindings.References, d.References)
+	}
+	for _, imp := range file.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return nil, testvariant.TestVariantFileHeader{}, err
+		}
+		local := ""
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		header.Bindings.Imports = append(header.Bindings.Imports, testvariant.TestVariantImport{Name: local, Path: path})
+	}
+	sort.Slice(header.Bindings.Imports, func(i, j int) bool {
+		a, b := header.Bindings.Imports[i], header.Bindings.Imports[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.Path < b.Path
+	})
 	return declarations, header, nil
 }

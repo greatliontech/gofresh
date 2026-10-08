@@ -13,8 +13,8 @@ func TestVariantLedgerTypesAreExportedData(t *testing.T) {
 	// Inert, the one Go-semantics judgment), so their field shapes are pinned
 	// by reflection rather than the method-free ExportedData contract.
 	for typeOf, want := range map[reflect.Type][]string{
-		reflect.TypeFor[TestVariantLedger](): {"Declarations", "FileHeaders"},
-		reflect.TypeFor[TestVariantDelta]():  {"Added", "Changed", "Removed", "HeaderChanges"},
+		reflect.TypeFor[TestVariantLedger](): {"BindingStrategy", "BaseFiles", "Declarations", "FileHeaders"},
+		reflect.TypeFor[TestVariantDelta]():  {"BindingsPreserved", "Added", "Changed", "Removed", "HeaderChanges"},
 	} {
 		if typeOf.NumField() != len(want) {
 			t.Fatalf("%s has %d fields, want %d", typeOf, typeOf.NumField(), len(want))
@@ -38,6 +38,16 @@ func TestVariantLedgerTypesAreExportedData(t *testing.T) {
 		structural.FieldOf[string]("File"),
 		structural.FieldOf[string]("Hash"),
 		structural.FieldOf[bool]("Embedded"),
+		structural.FieldOf[*TestVariantFileBindings]("Bindings"),
+	)
+	structural.ExportedData[TestVariantFileBindings](t,
+		structural.FieldOf[string]("Package"),
+		structural.FieldOf[[]string]("References"),
+		structural.FieldOf[[]TestVariantImport]("Imports"),
+	)
+	structural.ExportedData[TestVariantImport](t,
+		structural.FieldOf[string]("Name"),
+		structural.FieldOf[string]("Path"),
 	)
 	structural.ExportedData[TestVariantDeclarationChange](t,
 		structural.FieldOf[TestVariantDeclaration]("Before"),

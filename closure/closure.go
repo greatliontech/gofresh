@@ -410,9 +410,14 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	// whole, test-recompiled variants of dependencies included, so a test
 	// import pulling a NEW package still moves the core.
 	baseFiles := map[string]bool{}
+	var baseGo []string
+	importNames := map[string]string{}
 	compartmentDir := ""
 	for _, p := range pkgs {
+		importNames[p.ImportPath] = p.Name
 		if p.ImportPath == pkgPath && p.ForTest == "" {
+			baseGo = append(baseGo, p.GoFiles...)
+			baseGo = append(baseGo, p.CgoFiles...)
 			for _, f := range p.SourceFiles() {
 				baseFiles[f] = true
 			}
@@ -484,6 +489,9 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 		var err error
 		identity, err = compartment.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath})
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := compartment.AddBaseBindings(&identity, baseGo, importNames, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath}); err != nil {
 			return nil, nil, err
 		}
 		h.flushFileMemos()

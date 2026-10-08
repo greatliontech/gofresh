@@ -77,7 +77,7 @@ func TestFileMemosServeEveryParseOnAWarmPass(t *testing.T) {
 	if want := []string{"helper.go", "p.go", "p_test.go"}; !reflect.DeepEqual(parsed, want) {
 		t.Fatalf("cold pass parsed %v, want %v", parsed, want)
 	}
-	if want := []string{"p_test.go"}; !reflect.DeepEqual(derived, want) {
+	if want := []string{"helper.go", "p.go", "p_test.go"}; !reflect.DeepEqual(derived, want) {
 		t.Fatalf("cold pass derived %v, want %v", derived, want)
 	}
 	if !reflect.DeepEqual(cold, reference) {
@@ -96,7 +96,7 @@ func TestFileMemosServeEveryParseOnAWarmPass(t *testing.T) {
 }
 
 // An edit misses exactly the edited file: its scan re-parses, its
-// derivation re-derives when it is a compartment member, every other
+// binding derivation re-derives for base and compartment members, every other
 // file still serves, and the fold equals an unmemoized one; a corrupt
 // entry recomputes.
 func TestFileMemosMissOnlyTheEditedFile(t *testing.T) {
@@ -120,7 +120,7 @@ func TestFileMemosMissOnlyTheEditedFile(t *testing.T) {
 	edit("helper.go")
 	reference, _, _ := foldOnce(t, dir, false)
 	got, parsed, derived := foldOnce(t, dir, true)
-	if !reflect.DeepEqual(parsed, []string{"helper.go"}) || len(derived) != 0 {
+	if !reflect.DeepEqual(parsed, []string{"helper.go"}) || !reflect.DeepEqual(derived, []string{"helper.go"}) {
 		t.Fatalf("after a plain-file edit: parsed %v, derived %v", parsed, derived)
 	}
 	if !reflect.DeepEqual(got, reference) {
@@ -147,7 +147,7 @@ func TestFileMemosMissOnlyTheEditedFile(t *testing.T) {
 		}
 	}
 	got, parsed, derived = foldOnce(t, dir, true)
-	if len(parsed) != 3 || len(derived) != 1 {
+	if len(parsed) != 3 || len(derived) != 3 {
 		t.Fatalf("after corruption: parsed %v, derived %v", parsed, derived)
 	}
 	if !reflect.DeepEqual(got, reference) {
@@ -213,8 +213,9 @@ func TestCompartmentParsesServeOnTheScanKeyPath(t *testing.T) {
 	if keys[0] != keys[1] {
 		t.Fatalf("scan keys differ over an unchanged tree: %s vs %s", keys[0], keys[1])
 	}
-	if !reflect.DeepEqual(derived, []string{"p_test.go"}) {
-		t.Fatalf("derivations = %v, want the first pass's one", derived)
+	sort.Strings(derived)
+	if !reflect.DeepEqual(derived, []string{"helper.go", "p.go", "p_test.go"}) {
+		t.Fatalf("derivations = %v, want each base and test file once", derived)
 	}
 }
 

@@ -35,7 +35,7 @@ const (
 // ledger entry bumps it, so persisted parses from the prior
 // interpretation refuse instead of serving — and IdentityStrategy
 // (closure.go) moves with it.
-const variantParseStrategy = "gofresh/variant-parse@1"
+const variantParseStrategy = "gofresh/variant-parse@2"
 
 // variantParseScope is the parse memo's scope: the strategy and the
 // analyzing frontend's version, whose parser produced the syntax.

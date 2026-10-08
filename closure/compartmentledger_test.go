@@ -64,6 +64,13 @@ func genCompartment(r *rand.Rand) (members, nonMembers map[string]string) {
 		for j, k := 0, r.Intn(3); j <= k; j++ {
 			body += fmt.Sprintf("func Test%d_%d(t *testing.T) { if %s != 1 { t.Fatal(%d) } }\n\n", i, j, call, r.Intn(1000))
 		}
+		// Exercise both implicit and explicit file-local imports, and
+		// predeclared references in the binding surface beside named calls.
+		if r.Intn(2) == 0 {
+			body = strings.ReplaceAll(body, `"testing"`, `check "testing"`)
+			body = strings.ReplaceAll(body, "testing.T", "check.T")
+		}
+		body += fmt.Sprintf("func helper%d() int { if true { return len([]int{1}) }; return 0 }\n", i)
 		members[name] = body
 	}
 	return members, nonMembers
@@ -80,11 +87,12 @@ func union(a, b map[string]string) map[string]string {
 	return out
 }
 
-// Under one listing configuration the compartment ledger is a function
-// of the compartment hash: twins that share every member's bytes and
+// Under one listing configuration the compartment declarations and headers
+// are a function of the compartment hash: twins that share every member's bytes and
 // differ in every non-member — the base file's body, an extra base file,
-// an unembedded data file — give equal hashes and equal ledgers, and one
-// member's edit moves the hash (REQ-closure-test-variant-hash).
+// an unembedded data file — give equal hashes and equal compartment entries,
+// but distinct base binding evidence. A member's edit moves the hash
+// (REQ-closure-test-variant-hash).
 func TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists generated modules through the toolchain")
@@ -108,8 +116,11 @@ func TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration(t *te
 		}
 		la, filesA := ledgerUnder(t, a, nil, nil, pkg)
 		lb, _ := ledgerUnder(t, b, nil, nil, pkg)
-		if !reflect.DeepEqual(la, lb) {
-			t.Fatalf("draw %d: equal hashes, differing ledgers:\n%+v\n%+v", i, la, lb)
+		if !reflect.DeepEqual(la.Declarations, lb.Declarations) || !reflect.DeepEqual(la.FileHeaders, lb.FileHeaders) {
+			t.Fatalf("draw %d: equal hashes, differing compartment entries:\n%+v\n%+v", i, la, lb)
+		}
+		if reflect.DeepEqual(la.BaseFiles, lb.BaseFiles) {
+			t.Fatalf("draw %d: differing base source lost from binding context", i)
 		}
 		// One member's edit moves the hash: a member the listing itself
 		// names, so a constrained-out file is never the one edited.

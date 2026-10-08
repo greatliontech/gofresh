@@ -47,6 +47,8 @@ type (
 	TestVariantLedger            = testvariant.TestVariantLedger
 	TestVariantDeclaration       = testvariant.TestVariantDeclaration
 	TestVariantFileHeader        = testvariant.TestVariantFileHeader
+	TestVariantFileBindings      = testvariant.TestVariantFileBindings
+	TestVariantImport            = testvariant.TestVariantImport
 	TestVariantDelta             = testvariant.TestVariantDelta
 	TestVariantDeclarationChange = testvariant.TestVariantDeclarationChange
 	TestVariantHeaderChange      = testvariant.TestVariantHeaderChange

@@ -17,7 +17,7 @@ func parseLedger(t *testing.T, name, src string) testvariant.TestVariantLedger {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledger := testvariant.TestVariantLedger{Declarations: declarations, FileHeaders: []testvariant.TestVariantFileHeader{header}}
+	ledger := testvariant.TestVariantLedger{BindingStrategy: testvariant.BindingStrategy, Declarations: declarations, FileHeaders: []testvariant.TestVariantFileHeader{header}}
 	sort.Slice(ledger.Declarations, func(i, j int) bool {
 		return testvariant.LessDeclaration(ledger.Declarations[i], ledger.Declarations[j])
 	})
@@ -73,20 +73,22 @@ func TestInitAndVarReordersReadAsChanged(t *testing.T) {
 }
 
 // The classified ledger diff carries gofresh's one Go-semantics judgment: an
-// added plain function, const, or type is inert for unchanged code; an added
+// added plain function, const, or type is inert when complete binding evidence
+// proves existing bindings preserved; an added
 // var, init, TestMain, or method is not — each has a mechanism reaching
 // unchanged declarations — and any changed or removed declaration defeats
-// inertness outright. Go-file header-only changes never defeat it; a non-Go
-// compartment file's movement always does
+// inertness outright. Go-file header-only changes also require preserved
+// bindings; an embedded compartment file's movement always defeats inertness
 // (REQ-closure-test-variant-inertness).
 func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 	base := testvariant.TestVariantLedger{
+		BindingStrategy: testvariant.BindingStrategy,
 		Declarations: []testvariant.TestVariantDeclaration{
 			{File: "a_test.go", Kind: "func", Name: "TestA", Hash: "h1"},
 			{File: "a_test.go", Kind: "var", Name: "fixtures", Hash: "h2"},
 		},
 		FileHeaders: []testvariant.TestVariantFileHeader{
-			{File: "a_test.go", Hash: "header1"},
+			{File: "a_test.go", Hash: "header1", Bindings: &testvariant.TestVariantFileBindings{}},
 			{File: "testdata.json", Hash: "data1", Embedded: true},
 		},
 	}
@@ -150,6 +152,14 @@ func TestLedgerDeltaClassifiesInertness(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// These synthetic entries model an empty binding surface; the
+			// source-derived binding cases are exercised separately below.
+			tc.after.BindingStrategy = testvariant.BindingStrategy
+			for i := range tc.after.FileHeaders {
+				if !tc.after.FileHeaders[i].Embedded {
+					tc.after.FileHeaders[i].Bindings = &testvariant.TestVariantFileBindings{}
+				}
+			}
 			delta := testvariant.DiffTestVariantLedgers(base, tc.after)
 			if delta.Inert() != tc.inert {
 				t.Fatalf("Inert() = %v, want %v (delta %+v)", delta.Inert(), tc.inert, delta)
@@ -213,11 +223,17 @@ func TestLedgerDeltaIsDeterministicAndClassifiesMembership(t *testing.T) {
 	}
 
 	// An Embedded flip alone — same file, same hash — is a header change and
-	// fails closed: the member's bytes changed roles, not content.
-	flipped := testvariant.DiffTestVariantLedgers(
-		testvariant.TestVariantLedger{FileHeaders: []testvariant.TestVariantFileHeader{{File: "x_test.go", Hash: "h"}}},
-		testvariant.TestVariantLedger{FileHeaders: []testvariant.TestVariantFileHeader{{File: "x_test.go", Hash: "h", Embedded: true}}},
-	)
+	// fails closed even with preserved bindings: the bytes changed roles.
+	compiled := parseLedger(t, "x_test.go", "package p\nfunc F() {}\n")
+	embedded := compiled.Clone()
+	embedded.FileHeaders[0].Embedded = true
+	flipped := testvariant.DiffTestVariantLedgers(compiled, embedded)
+	if !flipped.BindingsPreserved || len(flipped.Added)+len(flipped.Changed)+len(flipped.Removed) != 0 {
+		t.Fatalf("embedded flip lost binding proof or changed declarations: %+v", flipped)
+	}
+	if !testvariant.DiffTestVariantLedgers(compiled, compiled.Clone()).Inert() {
+		t.Fatal("unchanged compiled control is not inert")
+	}
 	if flipped.Inert() || len(flipped.HeaderChanges) != 1 || !flipped.HeaderChanges[0].Embedded {
 		t.Fatalf("embedded flip delta = %+v (inert=%v), want one non-inert embedded header change", flipped, flipped.Inert())
 	}

@@ -6,8 +6,14 @@
 package testvariant
 
 import (
+	"reflect"
 	"sort"
 )
+
+// BindingStrategy identifies the complete syntax-derived binding evidence.
+// A missing or unknown strategy cannot establish inertness; old evidence must
+// be recaptured, never upgraded by filling in this value.
+const BindingStrategy = "gofresh/test-variant-bindings@1"
 
 // EmptyTestVariantClosure is the test-variant compartment identity of a package
 // with no test files: the empty-file-set hash under the same name\x00sha256
@@ -21,10 +27,17 @@ const EmptyTestVariantClosure = "e3b0c44298fc1c149afbf4c8996fb924"
 // TestVariantLedger is the declaration-level read surface over a package's
 // test-variant compartment: every top-level declaration in the compartment's Go
 // files and a per-file header identity over each file's non-declaration
-// remainder. It is data for a consumer to persist at capture and diff at check;
+// remainder, plus binding evidence for compiled test and base files. Complete
+// ledger keys include the core identity, compartment, configuration and strategy.
+// It is data for a consumer to persist at capture and diff at check;
 // gofresh renders no judgment about which deltas are benign
 // (REQ-closure-test-variant-ledger).
 type TestVariantLedger struct {
+	BindingStrategy string
+	// BaseFiles carries binding evidence for production Go files recompiled
+	// with the in-package tests. Its bytes belong to the core, not the compartment.
+	// Only File and Bindings are populated; Hash is empty and Embedded false.
+	BaseFiles []TestVariantFileHeader
 	// Declarations is sorted by (File, Kind, Receiver, Name, Hash).
 	Declarations []TestVariantDeclaration
 	// FileHeaders is sorted by File and carries one entry per compartment
@@ -99,7 +112,25 @@ type TestVariantFileHeader struct {
 	File     string // relative to the package directory
 	Hash     string
 	Embedded bool
+	// Bindings is syntax-derived scope evidence for a compiled member. Nil
+	// means no evidence, not an empty reference surface.
+	Bindings *TestVariantFileBindings
 }
+
+// TestVariantFileBindings describes names that unchanged code can resolve.
+// References conservatively includes local names and selector members, like
+// declaration References. Imports records effective local names and import
+// paths; blank imports cannot bind names, and dot imports expose an unknown
+// set of names. An empty import Name is unresolved and defeats inertness.
+type TestVariantFileBindings struct {
+	Package    string
+	References []string
+	Imports    []TestVariantImport
+}
+
+// TestVariantImport is one file-scoped import binding. Name is the effective
+// local name (including "_" and "."), not the path's last component.
+type TestVariantImport struct{ Name, Path string }
 
 // TestVariantDelta is the classified difference between two compartment
 // ledgers — a recorded one and a current one. Added, Changed, and Removed are
@@ -108,9 +139,12 @@ type TestVariantFileHeader struct {
 // change the behavior of any unchanged declaration, and nothing about what a
 // consumer should do with that fact (REQ-closure-test-variant-inertness).
 type TestVariantDelta struct {
-	Added   []TestVariantDeclaration
-	Changed []TestVariantDeclarationChange
-	Removed []TestVariantDeclaration
+	// BindingsPreserved is proof from recognized complete ledgers, including
+	// production files. A zero or manually assembled delta carries no proof.
+	BindingsPreserved bool
+	Added             []TestVariantDeclaration
+	Changed           []TestVariantDeclarationChange
+	Removed           []TestVariantDeclaration
 	// HeaderChanges carries every file whose header identity moved: an empty
 	// Before is a file new to the compartment, an empty After a file that
 	// left it.
@@ -136,24 +170,27 @@ type TestVariantHeaderChange struct {
 
 // Inert reports whether this delta is behavior-inert for unchanged code: no
 // declaration changed or was removed, and every added declaration is one no
-// unchanged declaration can observe — a plain function (no receiver, not init,
-// not TestMain), a const, or a type (an accompanying method would be its own
-// added "method" entry and defeat inertness). The rejected kinds each name a
+// unchanged declaration can observe under the conservative binding checks — a
+// plain function (no receiver, not init, not TestMain), a const, or a type (an
+// accompanying method would be its own added "method" entry and defeat
+// inertness). The rejected kinds each name a
 // mechanism reaching unchanged code: a package var's initializer runs during
 // test-binary initialization; an init function likewise; TestMain replaces
 // the harness entry wrapping every unchanged test; a method can flip
 // interface satisfaction observed by unchanged type assertions and dispatch.
-// Additions that shift what an existing declaration means are not silent
-// adds: positional semantics — a const's ordinal in its group, a var's or an
+// Position-shifting additions are not silent adds: positional semantics —
+// a const's ordinal in its group, a var's or an
 // init's ordinal in its file — are folded into declaration hashes (see
 // TestVariantDeclaration), so an insertion that shifts iota siblings or a
 // reorder of initialization surfaces as Changed and defeats inertness here.
-// Go-file header-only changes — imports, build-constraint text, comments
-// outside declarations — do not defeat inertness: this is the one place the
-// judgment leans on the partition rule, because test-only dependency NODES
-// stay in the core closure, so the core equality under which a consumer sees
-// this delta already proves no new dependency package entered the test
-// binary, making an import edit among already-present packages init-benign.
+// Complete versioned binding evidence covers compiled test and base files:
+// added package names must not intersect existing same-package reference
+// surfaces, and used import names must retain their bindings. The reference
+// over-approximation may refuse a local/selector-name collision. Dot-import
+// changes refuse whenever a file has references. Comments and build constraints
+// remain benign under unchanged membership and declarations. Core equality is
+// still a consumer precondition: it guards dependency initialization, but cannot
+// by itself prove import-alias stability.
 // Compiler and linker directives are NOT header content: they are ledgered
 // as their own "directive" entries wherever they sit (see
 // TestVariantDeclaration), and the unknown-kind default below fails closed
@@ -163,6 +200,9 @@ type TestVariantHeaderChange struct {
 // unchanged declarations that read it, and its whole content is its header,
 // so a header move IS a content move.
 func (d TestVariantDelta) Inert() bool {
+	if !d.BindingsPreserved {
+		return false
+	}
 	if len(d.Changed) != 0 || len(d.Removed) != 0 {
 		return false
 	}
@@ -253,6 +293,7 @@ func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 			delta.Added = append(delta.Added, current[key]...)
 		}
 	}
+	delta.BindingsPreserved = bindingsPreserved(before, after, delta.Added)
 	headers := func(ledger TestVariantLedger) map[string]TestVariantFileHeader {
 		byFile := make(map[string]TestVariantFileHeader, len(ledger.FileHeaders))
 		for _, header := range ledger.FileHeaders {
@@ -311,7 +352,96 @@ func (l TestVariantLedger) Clone() TestVariantLedger {
 		declarations[i].References = append([]string(nil), declarations[i].References...)
 	}
 	return TestVariantLedger{
-		Declarations: declarations,
-		FileHeaders:  append([]TestVariantFileHeader(nil), l.FileHeaders...),
+		BindingStrategy: l.BindingStrategy,
+		BaseFiles:       cloneHeaders(l.BaseFiles),
+		Declarations:    declarations,
+		FileHeaders:     cloneHeaders(l.FileHeaders),
 	}
+}
+
+func cloneHeaders(headers []TestVariantFileHeader) []TestVariantFileHeader {
+	result := append([]TestVariantFileHeader(nil), headers...)
+	for i := range result {
+		if b := result[i].Bindings; b != nil {
+			copy := *b
+			copy.References = append([]string(nil), b.References...)
+			copy.Imports = append([]TestVariantImport(nil), b.Imports...)
+			result[i].Bindings = &copy
+		}
+	}
+	return result
+}
+
+func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDeclaration) bool {
+	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
+		return false
+	}
+	// The caller guards the core, but the evidence must also describe the
+	// same base files. Never accept a truncated or mixed-generation ledger.
+	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
+		return false
+	}
+	files := func(l TestVariantLedger) (map[string]*TestVariantFileBindings, bool) {
+		m := map[string]*TestVariantFileBindings{}
+		for _, group := range [][]TestVariantFileHeader{l.BaseFiles, l.FileHeaders} {
+			for _, h := range group {
+				if h.Bindings == nil && h.Embedded {
+					continue
+				}
+				if h.Bindings == nil {
+					return nil, false
+				}
+				for _, imp := range h.Bindings.Imports {
+					if imp.Name == "" {
+						return nil, false
+					}
+				}
+				m[h.File] = h.Bindings
+			}
+		}
+		for _, declaration := range l.Declarations {
+			if b := m[declaration.File]; b == nil || b.Package != declaration.Package {
+				return nil, false
+			}
+		}
+		return m, true
+	}
+	old, ok := files(before)
+	if !ok {
+		return false
+	}
+	now, ok := files(after)
+	if !ok {
+		return false
+	}
+	imports := func(b *TestVariantFileBindings) map[string]string {
+		m := map[string]string{}
+		for _, i := range b.Imports {
+			if i.Name != "_" {
+				m[i.Name] += i.Path + "\x00"
+			}
+		}
+		return m
+	}
+	for file, b := range old {
+		n := now[file]
+		if n == nil || n.Package != b.Package {
+			return false
+		}
+		was, next := imports(b), imports(n)
+		if len(b.References) != 0 && was["."] != next["."] {
+			return false
+		}
+		for _, ref := range b.References {
+			if was[ref] != next[ref] {
+				return false
+			}
+			for _, a := range added {
+				if a.Name != "_" && a.Package == b.Package && a.Name == ref {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }

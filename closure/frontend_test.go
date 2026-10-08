@@ -44,7 +44,7 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	if strings.Contains(IdentityStrategy, frontend) {
 		t.Fatalf("the identity strategy %q composes the analyzing frontend", IdentityStrategy)
 	}
-	if want := "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@1"; IdentityStrategy != want {
+	if want := "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@2"; IdentityStrategy != want {
 		t.Fatalf("the identity strategy is %q, want the composed %q — a derivation moved, or a bump was reverted; update the golden consciously", IdentityStrategy, want)
 	}
 	allowed := map[string]bool{"AnalyzingFrontend": true, "resolveSelection": true, "toolchainSourceScope": true, "NewAt": true}

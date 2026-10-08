@@ -23,8 +23,9 @@ set — recorded beside the maximal closure so a sibling-test edit is
 distinguishable from every other drift.
 
 **declaration ledger** (term): the deterministic, syntax-derived list of the
-compartment's top-level declarations and per-file header identities, exposed as
-data for a consumer to persist at capture and diff at check.
+compartment's top-level declarations and per-file header identities, together
+with binding evidence over its compiled files and the base package's Go files,
+exposed as data for a consumer to persist at capture and diff at check.
 
 **pinned dependency** (term): a reachable module dependency whose resolved source is
 immutable under the module cache, identified by its module path and version rather
@@ -87,15 +88,17 @@ that describes the package. Under one listing configuration — the build
 selection, the platform and cgo environment the listing runs under, and the
 toolchain — and one identity strategy (REQ-closure-identity-strategy, which
 excludes the analyzing frontend by design), equal
-compartment hashes carry equal ledgers (the ledger surface is
-REQ-closure-test-variant-ledger): the ledger is a function of the bytes
+compartment hashes carry equal compartment declarations and raw header identities
+(the ledger surface is REQ-closure-test-variant-ledger): those entries are a function of the bytes
 the hash folds, of that configuration, and of that strategy alone — a member's
 kind as the toolchain lists it follows its own name and constraints and its
 siblings' embed directives, which the hash folds, under the configuration —
 while the hash is unsalted by any of them, so a ledger is a fact of the hash,
 the configuration, and the strategy together, never of the hash alone.
-Consumer obligation: a consumer keying ledgers per compartment hash keys per
-listing configuration and identity strategy too. Enforced by
+The complete ledger additionally describes base-file bindings and effective
+import names, so its identity also depends on the core closure. Consumer
+obligation: a consumer keying complete ledgers per compartment hash keys per
+core identity, listing configuration and identity strategy too. Enforced by
 `TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration`
 and
 `TestCompartmentHashIsUnsaltedByTheListingConfigurationAndTheLedgerIsNot`.
@@ -186,7 +189,26 @@ The kinds are not a partition: a member both compiled and embedded (a
 sibling test file names it in a go:embed directive) keeps its parsed
 declarations while carrying the embedded whole-content header, so any
 movement in its bytes — which unchanged code reads as data — defeats
-inertness fail-closed. The ledger is deterministically sorted.
+inertness fail-closed. Beside each compiled file's header, the ledger carries
+its package clause, sorted syntax-reference union over its declarations, and
+deterministically ordered import bindings (effective local name and import path). Default import
+names come from the selected package listing, never from path basenames;
+an unresolved name makes the evidence incomplete. Binding evidence also
+covers every base Go file, including cgo source, because in-package
+test additions can rebind identifiers in production code recompiled with tests.
+Base entries carry only the file name and binding evidence, no raw header hash:
+the canonical core guards their source, and ordinary base comments do not move
+the binding evidence. Base-file evidence and listing-resolved import names do
+not enter the compartment hash. Parse memos retain
+unresolved syntactic import spellings; listing-derived names are resolved only
+in the observation's caller-owned ledger.
+Binding evidence carries the recognized strategy `gofresh/test-variant-bindings@1`.
+Missing or unknown strategy, missing compiled-file binding evidence, or an
+incomplete import-name resolution cannot establish inertness. Consumer obligation:
+persist the strategy, base-file evidence, and per-file binding evidence with
+the recorded ledger. A historical ledger cannot be upgraded by filling these
+fields from the current tree; a new producing capture is required. The ledger
+is deterministically sorted; cloning it shares no mutable binding storage.
 
 **REQ-closure-test-variant-inertness** (behavior): The inertness judgment is rendered
 modulo position metadata: any header edit shifts unchanged declarations'
@@ -194,26 +216,38 @@ source positions, and a line directive remaps them — positions are
 diagnostics, not behavior, for this judgment. Two ledgers
 diff into a classified delta — added, changed, and removed declarations plus
 per-file header changes, deterministic for any pair — carrying gofresh's one
-Go-semantics judgment: the delta MUST be judged inert exactly when no declaration changed
-or was removed and every added declaration is one no unchanged declaration can
-observe — a plain function (no receiver, not init, not TestMain), a const, or
-a type, whose accompanying methods would surface as their own added entries.
-The positional folding above is what keeps that whitelist honest: a const
+Go-semantics judgment: the delta MUST be judged inert exactly when both ledgers
+carry recognized complete binding evidence, their base-file evidence agrees,
+no declaration changed or was removed, every added declaration is a plain
+function (no receiver, not init, not TestMain), a const, or a type, and the
+binding checks below hold. Accompanying methods surface as their own added
+entries. The positional folding above guards that whitelist: a const
 inserted mid-group or a reordered var or init reads as changed sibling
-declarations, so only additions that leave every existing declaration's
-meaning intact classify as added. Directive entries are outside the
+declarations. Additions can still shadow identifiers resolved by unchanged
+code, so positional folding alone does not prove inertness. Directive entries are outside the
 whitelist, so any directive movement — added, changed, or removed — defeats
 inertness; header benignity below covers only the directive-free remainder.
 Each rejected kind names the mechanism that reaches unchanged code: a package
 var's initializer runs during test-binary initialization; an init function
 likewise; TestMain replaces the harness entry wrapping every unchanged test; a
 method can flip interface satisfaction observed by unchanged type assertions
-and dispatch. Go-file header-only changes — imports, build-constraint text,
-comments outside declarations — never defeat inertness: this is where the
-judgment leans on the partition rule, because test-only dependency nodes stay
-in the core, so the core equality under which a consumer reads this delta
-already proves no new dependency package entered the test binary, and an
-import edit among already-present packages is init-benign. An embedded
+and dispatch. Binding checks cover every previously compiled file, base files
+included, within its own package: an added nonblank declaration name must not
+intersect that file's recorded reference surface, and every import binding
+whose local name is in that surface must retain its import path. Blank imports
+bind nothing. A dot-import path-set change defeats the check whenever that
+file has references. A previously compiled file must retain its package and
+binding evidence. These checks deliberately use a syntax over-approximation:
+local names and selector members can cause conservative refusals, never an
+optimistic acceptance. Additions whose names are absent from existing surfaces,
+and imports used only by new code, remain admissible. Missing binding proof in
+a manually assembled delta is not inertness evidence.
+Go-file comments and build-constraint text may move without defeating
+inertness when the declaration, membership, and binding checks hold. Import
+edits must pass the binding checks even when dependencies stay the same:
+core equality establishes dependency membership, not file-local name binding.
+The judgment still relies on core equality because new dependency packages'
+initialization is guarded there. An embedded
 member's header movement defeats inertness fail-closed — whatever the file's
 name: test-only embedded bytes feed unchanged declarations that read them.
 Inertness is
