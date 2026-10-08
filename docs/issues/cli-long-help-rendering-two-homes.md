@@ -12,6 +12,6 @@ The gofresh half landed at cross-tool train chunk 300 (2026-10-07):
 Registration.LongHelp is the one rendering (the help, a blank line,
 the prose pointer; the help alone on a Document's own projection).
 
-Lands: the consumer bumps reading gofresh's 300 release — stipulator
-290r, pew 320 (gomutant's arm landed at 324) — where each CLI renderer and its pin read
-LongHelp and the join deletes.
+Lands: pew's bump reading gofresh's 300 release — pew 320 (gomutant's
+arm landed at 324, stipulator's at 290r) — where its CLI renderer and
+its pin read LongHelp and the join deletes.
