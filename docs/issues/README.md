@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [moved-bracket-root-spelled-like-a-member-list](moved-bracket-root-spelled-like-a-member-list.md) | the moved-bracket split is prefix-first and the root is spelled unquoted, so a bracket root named like a labelled member list collides with the root before the segment (asymmetric: the real root's entry refused, the sibling's accepted) — quote the root as members are | cross-tool train chunk 315 (a rider) |
 | [outcome-mutation-oracle-evidence](outcome-mutation-oracle-evidence.md) | older mutation tooling and deliberate negative-path observations prevent reusable campaign evidence; retain kills without promoting unjudged survivors | pew performance-evidence plan chunk 6 |
 | [observation-outcome-premise](observation-outcome-premise.md) | migrate fleet adapters to independently bound completion and outcome support for their actual executions | pew performance-evidence plan chunk 6, after the shared capability at 5 |
 | [cold-analysis-pass-program-retention](cold-analysis-pass-program-retention.md) | a cold pass keeps every program it loaded for its life (0.54 GB warm vs 3.47 GB cold for one gomutant target; 8.4 GB at campaign scale) — the live set bounded by the current subject's need | cross-tool train chunk 314 (a release, after 313) |
