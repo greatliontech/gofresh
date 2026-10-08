@@ -22,4 +22,9 @@ framing quoted, as members are (one quoting rule over the root and the
 members), so the split never reads a root's own segment as the list;
 the clause's residual sentence then covers the root by the same rule.
 A pin: a root named `fix [added: x]` moved → the clause keeps the
-root whole; the sibling root's clause differs.
+root whole; the sibling root's clause differs; and the whole-reason
+form — the split reads the segment WITH what follows it to the
+reason's end, so `fix [added: x` and `fix [added: x] y` stay whole
+alone but collide once the member list follows (`… fix [added: x
+[added: a.txt]`, `… fix [added: x] y [added: a.txt]` both split to
+`… fix`) — the same quoting covers every shape carrying ` [`.
