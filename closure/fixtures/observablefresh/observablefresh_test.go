@@ -274,11 +274,19 @@ func TestFreshPathHelperLeak(t *testing.T) {
 	leakHelper(t.TempDir())
 }
 
+func writeReadCleanupAndSignalHelper(dir string, done chan<- struct{}) {
+	defer close(done)
+	writeReadCleanupHelper(dir)
+}
+
 // A direct go-statement call site refuses: concurrent consumption of
 // the capability is outside the graph even with a fresh argument.
+// Joining owns the directory's lifetime without admitting the crossing.
 func TestFreshPathHelperDirectGo(t *testing.T) {
 	dir := t.TempDir()
-	go writeReadCleanupHelper(dir)
+	done := make(chan struct{})
+	go writeReadCleanupAndSignalHelper(dir, done)
+	<-done
 }
 
 // A call site inside a loop refuses: multiplicity is outside the
