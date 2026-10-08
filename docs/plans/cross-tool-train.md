@@ -3615,7 +3615,7 @@ in their repos.
       selection" premise corrected (303 closed by verdict at 310).
       Heads gomutant's order.
 
-- [ ] 324. gomutant: the 281 adoption (audit 317; moved out of 302):
+- [x] 324. gomutant: the 281 adoption (audit 317; moved out of 302):
       Runner.List for buildset's linked-set listing; Runner.Program-
       contained git (one runner below the root, 258's fold); one
       runtimeinput.Roots and one Sampler per judged run on every

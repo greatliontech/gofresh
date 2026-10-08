@@ -22,7 +22,7 @@ guidance.PrintsDefault(flagType, defValue) is the table, pinned at
 every type's cliff.
 
 Lands: the consumer bumps reading gofresh's 300 release — stipulator
-290r, gomutant 324, pew 320 — where each registration walk reads
+290r, pew 320 (gomutant's arm landed at 324) — where each registration walk reads
 PrintsDefault and the three type switches delete.
 
 Rider (audit 332): guidance.PrintsDefault mirrors pflag v1.0.9 with no oracle in gofresh (no pflag dependency; the pin compares literals) — each consumer's bump pins PrintsDefault against pflag's own rendering for every flag type it registers, so a pflag move reds at the consumer.

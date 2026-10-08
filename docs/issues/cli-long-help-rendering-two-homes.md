@@ -13,5 +13,5 @@ Registration.LongHelp is the one rendering (the help, a blank line,
 the prose pointer; the help alone on a Document's own projection).
 
 Lands: the consumer bumps reading gofresh's 300 release — stipulator
-290r, gomutant 324, pew 320 — where each CLI renderer and its pin read
+290r, pew 320 (gomutant's arm landed at 324) — where each CLI renderer and its pin read
 LongHelp and the join deletes.

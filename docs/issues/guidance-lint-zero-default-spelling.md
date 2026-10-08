@@ -30,7 +30,7 @@ clause of a knob registered with a zero default (the unclosed form
 too); a derived default is spelled in prose.
 
 Lands: the consumer bumps reading gofresh's 300 release — stipulator
-290r, gomutant 324, pew 320 — where each coverage binding runs the
+290r, pew 320 (gomutant's arm landed at 324) — where each coverage binding runs the
 amended judgment over its document.
 
 Audit 332 (2026-10-07) merged coverage-lint-default-on-zero-default-flag into this doc: both stated one rule — a `(default X)` form on a zero-default flag is refused by the lint and dropped by the projection; the consumers' bumps (stipulator 290r, gomutant 324, pew 320) carry it as a rider.
