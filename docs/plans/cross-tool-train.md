@@ -132,7 +132,7 @@ register.
   completion, fingerprint serialization, attachment/validation
   lifecycles and observed-reuse admission behind its rederivation (pew
   docs/notes/evidence-model.md, gofresh
-  docs/issues/observation-outcome-premise.md, pew
+  docs/specs/runtime-inputs.md, pew
   docs/issues/fingerprint-encoding-ownership.md — reviewed proposals;
   the canonical specs stay authoritative). A train chunk crossing that
   boundary is REPORTED to that agent before it is implemented (a

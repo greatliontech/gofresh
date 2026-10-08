@@ -1880,3 +1880,63 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "83769eb1cec5d5fe8c7ef76aa39712fd09cc3b55904f56dc7ac7956388dbc77b"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-context"
+  content_hash: "ac2f9d569b0eb40c3356bded1ee69700b723c38beb048d0b18a6cee410f86b47"
+  source_hash: "33726630dece46daa894a30f9acc6f95957df9d06ea58cec4f543043fb6fe105"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestIncompleteCaptureHonorsCancellationAtBothBoundaries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cff5c012f97e59d98f4f4b3811ceb1d6f6b7c9de5ad5c2f3457b8ff62e3bf566"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-context"
+  content_hash: "ac2f9d569b0eb40c3356bded1ee69700b723c38beb048d0b18a6cee410f86b47"
+  source_hash: "33726630dece46daa894a30f9acc6f95957df9d06ea58cec4f543043fb6fe105"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestIncompleteCaptureSkipsAmbientRootLookupWhenCancelled"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9b2fee6d6b05cf2cd4ca1d3354b7b8a2c712dc5c15cba744b821413044deb84c"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-context"
+  content_hash: "ac2f9d569b0eb40c3356bded1ee69700b723c38beb048d0b18a6cee410f86b47"
+  source_hash: "33726630dece46daa894a30f9acc6f95957df9d06ea58cec4f543043fb6fe105"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestCaptureReaderDoesNotReadAfterCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bcb4018974f3e67fbc00ac402002750005143b9717a49cc3b7d3251ba516a577"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-context"
+  content_hash: "ac2f9d569b0eb40c3356bded1ee69700b723c38beb048d0b18a6cee410f86b47"
+  source_hash: "33726630dece46daa894a30f9acc6f95957df9d06ea58cec4f543043fb6fe105"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEnvironmentLogChecksCancellationBeforeScreening"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6324e2c884eb6140282c634e78b8150d69109b407b7c67b82dbdf1963d2e41a5"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "49eb989754f01a1e9769dbc0680dd4b4ff65ffbbd21fa6f4745c01e053551491"
+  source_hash: "5c32a52f425762ff98b8d3865e90d09f4e57490a42136e397ca0693ac4718a00"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestReadProducerLogRetainsCaptureFailureAndCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a3002a9f53fd987fddb7e5bae71607fd280d7504d2e79e655122bcfa9efc6bf8"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-facade"
+  content_hash: "49eb989754f01a1e9769dbc0680dd4b4ff65ffbbd21fa6f4745c01e053551491"
+  source_hash: "5c32a52f425762ff98b8d3865e90d09f4e57490a42136e397ca0693ac4718a00"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestReadProducerLogClosesItsFile"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "55482f2058897f64e3021a2eccc3860bfec2bcfbb0ddbbe982c7a709d8272a72"
+}
