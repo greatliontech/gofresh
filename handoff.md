@@ -38,20 +38,17 @@ here — the durable record is the commits, the plan
 
 ## In flight: godst 338, the release
 
-On greatliontech/godst, commit 6a6db7c is pushed. The `matrix` workflow
-(the fork's release gate, run 37949379157) and the push's `ci`
-(37949347772) were in progress at the handoff. Then, per
-docs/dst/releases.md "Cutting a release":
+On greatliontech/godst: the matrix (run 37949379157) and ci on 6a6db7c
+went GREEN at 15:32 UTC (every leg, both architectures); the release
+commit a91cc85 (`chore(dst): VERSION go1.27.1-dst.14`, time
+2026-10-09T15:32:42Z) and the annotated tag `go1.27.1-dst.14` are
+pushed; the `release` workflow on the tag was running at the handoff
+(~7 min; the release exists when its assets — the src and
+linux-amd64/arm64 tarballs, the toolchain module files, SHA256SUMS — are
+attached: `gh release view go1.27.1-dst.14 -R greatliontech/godst`). A
+failed workflow is not a release: fix forward on main, cut dst.15.
+Then:
 
-1. A green matrix on 6a6db7c. A red leg blocks: fix forward on main,
-   never retag.
-2. The release commit on top of it, changing only `VERSION`:
-   line 1 `go1.27.1-dst.14`, line 2 `time <RFC 3339 of the cut>`;
-   subject `chore(dst): VERSION go1.27.1-dst.14`. (14 = 1 + the max dst
-   counter over every tag; the latest is go1.27.1-dst.13.)
-3. `git tag -a go1.27.1-dst.14 -m "go1.27.1-dst.14"`; push main and the
-   tag. The `release` workflow (~7 min) attaches the assets; a failed
-   workflow is not a release — fix forward, cut 15.
 4. Install it as the running build on every machine that runs the fleet:
    `task install` from the clone at the release commit (or
    `task install TARBALL=<the linux-amd64 asset>`); it flips
