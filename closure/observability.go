@@ -89,6 +89,10 @@ type Observability struct {
 	// true. Execution completion and environment fidelity are separate
 	// producer premises; this field does not certify an execution.
 	OutcomeMethod string
+	// CoverageLocal is the empty-external-effect projection, with only audited
+	// process-local harness operations admitted. It is not outcome support or
+	// a claim that coverage narrowing preserves compilation or verdicts.
+	CoverageLocal bool
 }
 
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
@@ -426,10 +430,30 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		return Observability{Reason: blocking.reason}, nil
 	}
 	method := ""
+	local := false
 	if h.SelectionAudited() && h.snapshot != nil && h.snapshot.Value("GOOS") == "linux" {
 		method = immutableEnvironmentMethod(subjectResult.effects, testMainEffects)
+		local = coverageLocalInventory(startupResult.effects, subjectResult.effects, testMainEffects)
 	}
-	return Observability{Observable: true, OutcomeMethod: method}, nil
+	return Observability{Observable: true, OutcomeMethod: method, CoverageLocal: local}, nil
+}
+
+func coverageLocalInventory(sets ...[]externalEffect) bool {
+	for _, effects := range sets {
+		for _, effect := range effects {
+			if !processLocalHarnessEffect(effect) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// These operations' audited implementations use process-local harness state.
+// Selection auditing and the platform premise are checked by the caller before
+// either inventory projection; callbacks remain independently classified.
+func processLocalHarnessEffect(effect externalEffect) bool {
+	return effect.observable && effect.kind == externalEffectTestRuntime && (auditedHarnessLogging(true, effect.packagePath, effect.symbol) || auditedHarnessPacing(true, effect.packagePath, effect.symbol) || effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "B.N"))
 }
 
 // immutableEnvironmentMethod consumes the complete classified effect sets,
@@ -439,7 +463,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 	for _, effects := range sets {
 		for _, effect := range effects {
-			if effect.observable && effect.kind == externalEffectTestRuntime && (auditedHarnessLogging(true, effect.packagePath, effect.symbol) || auditedHarnessPacing(true, effect.packagePath, effect.symbol) || effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "B.N")) {
+			if processLocalHarnessEffect(effect) {
 				continue
 			}
 			if !effect.observable || effect.packagePath != "os" || (effect.symbol != "Getenv" && effect.symbol != "LookupEnv") {

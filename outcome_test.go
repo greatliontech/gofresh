@@ -244,6 +244,10 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 			if err := json.Unmarshal(data, &stored); err != nil || stored != fp {
 				t.Fatalf("record roundtrip=%v", err)
 			}
+			supportCheck := ValidateRecordedObservationSupport(stored, subject)
+			if (supportCheck.Status == RecordedSupportNative) != tc.supported {
+				t.Fatalf("native producer record support = %+v; supported=%t", supportCheck, tc.supported)
+			}
 			current, err := engine.NewView(ctx, []Subject{subject}, dir)
 			if err != nil {
 				t.Fatal(err)

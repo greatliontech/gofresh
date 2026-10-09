@@ -60,6 +60,27 @@ func HasOutcomeSupport(encoded, subject string) bool {
 	return err == nil && slices.Contains(m.Subjects, subject)
 }
 
+// ValidateRecordedSupport checks only caller-trusted persisted manifest evidence.
+// It decodes canonically and folds the recorded entry digests, without reading
+// files or environment. Success means internal consistency for the original
+// producing subject identity, never current freshness or authenticity.
+func ValidateRecordedSupport(encoded, digest, subject string) error {
+	m, err := decode(encoded)
+	if err != nil {
+		return err
+	}
+	if m.Outcome != outcome.Method || !slices.Contains(m.Subjects, subject) {
+		return fmt.Errorf("runtimeinput: recorded outcome support missing for subject")
+	}
+	if len(m.Unverifiable) != 0 {
+		return fmt.Errorf("runtimeinput: recorded observation is unverifiable: %s", m.Unverifiable[0])
+	}
+	if manifestDigest(m) != digest {
+		return fmt.Errorf("runtimeinput: recorded aggregate digest mismatch")
+	}
+	return nil
+}
+
 func (f ProducerFrame) completionPremise(in ProducerIngest) (outcome.Binding, string) {
 	if in.Completion.binding.Process == "" {
 		return outcome.Binding{}, "process completion receipt unavailable"

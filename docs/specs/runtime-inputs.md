@@ -87,6 +87,15 @@ corresponding values, inserted verbatim; fields are separated by single ASCII
 spaces and sets use canonical manifest order. Identity and refusal validation
 excludes line-framing bytes, and entry digests have fixed width.
 
+**REQ-inputs-recorded-support** (behavior): Record-only support validation MUST
+use the canonical manifest decoder and the manifest owner's aggregate digest fold
+over recorded entries, without re-reading any represented input. It requires the
+recognized outcome method, membership of the exact expected producing support
+identity, no unverifiable reasons, and agreement with the supplied aggregate
+digest. Missing, malformed, unsupported or partial evidence refuses. This is an
+internal consistency check of caller-trusted persisted evidence, not adoption,
+current-state validation, an execution receipt or provenance authentication.
+
 **dirty recording** (term): a recording whose source or inputs are not faithfully
 reproducible from its recorded commit, usable for working-tree reuse but barred as a
 baseline.

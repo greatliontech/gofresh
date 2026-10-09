@@ -205,8 +205,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@41" {
-		t.Fatalf("ObservationRTA = %q, want the independent static outcome inventory", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@42" {
+		t.Fatalf("ObservationRTA = %q, want the coverage-locality inventory projection", ObservationRTA)
 	}
 }
 

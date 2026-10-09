@@ -10535,6 +10535,18 @@ func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
 	if siblingFP != fingerprint {
 		t.Fatalf("sibling fingerprint diverged from the union's:\n  union   %+v\n  sibling %+v", fingerprint, siblingFP)
 	}
+	for _, selected := range []*View{view, sibling} {
+		locality, err := selected.CaptureCoverageLocality(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if proof := selected.observable[subject]; !proof.Observable || !proof.CoverageLocal {
+			t.Fatalf("fixture must otherwise admit locality: %+v", proof)
+		}
+		if got := locality[subject]; got.Status != CoverageLocalityRefused || !strings.Contains(got.Reason, "caller-discharge") {
+			t.Fatalf("package-process discharge granted locality: %+v", got)
+		}
+	}
 }
 
 // A recorded fingerprint computed under another dynamic-state strategy

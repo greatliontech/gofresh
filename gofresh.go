@@ -415,7 +415,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // the fold).
 // @41 carries an independent static outcome inventory beside observation
 // admission; missing older inventories never gain a supported derivation.
-const ObservationRTA = "gofresh/observation-rta@41"
+const ObservationRTA = "gofresh/observation-rta@42"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

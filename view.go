@@ -58,6 +58,7 @@ type View struct {
 	facts                *observationFacts
 	observable           map[Subject]closure.Observability
 	capturedObserved     map[Subject]bool
+	coverageSelected     bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
 	applicabilityChecks  []applicabilityCheck
@@ -1087,6 +1088,7 @@ func (v *View) Validate(ctx context.Context) (opErr error) {
 	v.sealed = true
 	hasObserved := len(v.capturedObserved) != 0
 	hasApplicability := len(v.applicabilityChecks) != 0
+	hasCoverage := v.coverageSelected
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
@@ -1098,9 +1100,9 @@ func (v *View) Validate(ctx context.Context) (opErr error) {
 	// in the observed arm, and a maximal-only producer the base
 	// comparison - the engine owns the dispatch exactly as it owns the
 	// capture strategy.
-	if hasObserved || hasApplicability {
+	if hasObserved || hasApplicability || hasCoverage {
 		var unavailable error
-		if hasObserved {
+		if hasObserved || hasCoverage {
 			if err := deferValidationUnavailability(v.validateObserved(ctx), &unavailable); err != nil {
 				return err
 			}
@@ -1288,6 +1290,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		},
 		observable:           observable,
 		capturedObserved:     capturedObserved,
+		coverageSelected:     v.coverageSelected,
 		applicabilityChecks:  applicabilityChecks,
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 		runtimeCurrent:       v.runtimeCurrent,
@@ -1329,8 +1332,9 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 	return current, nil
 }
 
-// validateObserved re-establishes every captured observation proof and
-// attached runtime state.
+// validateObserved prepares and re-establishes the union of selected coverage
+// and observation proofs in one current view. Only observation capture requires
+// attachment; its runtime state brackets the shared analysis as before.
 func (v *View) validateObserved(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
@@ -1349,10 +1353,14 @@ func (v *View) validateObserved(ctx context.Context) error {
 	subjects := make([]Subject, 0, len(v.capturedObserved))
 	expected := make(map[Subject]closure.Observability, len(v.capturedObserved))
 	attached := make(map[Subject]runtimeinput.State, len(v.capturedObserved))
+	var observedSubjects []Subject
 	for _, subject := range v.subjects {
-		if v.capturedObserved[subject] {
+		if v.capturedObserved[subject] || v.coverageSelected {
 			subjects = append(subjects, subject)
 			expected[subject] = v.observable[subject]
+		}
+		if v.capturedObserved[subject] {
+			observedSubjects = append(observedSubjects, subject)
 			attached[subject] = v.attachedObservations[subject]
 		}
 	}
@@ -1360,14 +1368,14 @@ func (v *View) validateObserved(ctx context.Context) error {
 	if len(subjects) == 0 {
 		return errors.New("gofresh: no captured observation proof")
 	}
-	if err := requireCompletedAttachments(attached, subjects); err != nil {
+	if err := requireCompletedAttachments(attached, observedSubjects); err != nil {
 		return err
 	}
 	current, err := v.newSeededValidationView(ctx)
 	if err != nil {
 		return err
 	}
-	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
+	if err := v.compareAttachedObservations(ctx, attached, observedSubjects); err != nil {
 		return err
 	}
 	if err := current.ensureObservable(ctx, subjects); err != nil {
@@ -1400,7 +1408,7 @@ func (v *View) validateObserved(ctx context.Context) error {
 		}
 	}
 	current.mu.RUnlock()
-	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
+	if err := v.compareAttachedObservations(ctx, attached, observedSubjects); err != nil {
 		return err
 	}
 	// The held cut-explained unavailability — the seeded view's

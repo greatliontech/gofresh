@@ -27,6 +27,12 @@ func TestOutcomeInventorySeparatesAdmissionFromDerivation(t *testing.T) {
 func TestSubject(t *testing.T) { if 1 + 1 != 2 { t.Fatal("arithmetic") } }`, true, true},
 		{"pure", `import "testing"
 func TestSubject(t *testing.T) {}`, true, true},
+		{"coverenv", `import ("os"; "testing")
+func TestSubject(t *testing.T) { if os.Getenv("GOCOVERDIR") != "" { t.Fatal("scored process") } }`, true, true},
+		{"child", `import ("os/exec"; "testing")
+func TestSubject(t *testing.T) { _ = exec.Command("true").Run() }`, false, false},
+		{"opaque", `import ("os"; "testing")
+func TestSubject(t *testing.T) { _ = os.Environ() }`, false, false},
 		{"getenv", `import ("os"; "testing")
 func TestSubject(t *testing.T) { _ = os.Getenv("OUTCOME_VALUE") }`, true, true},
 		{"lookup", `import ("os"; "testing")
@@ -96,6 +102,9 @@ func TestSubject(t *testing.T) { t.Cleanup(func() { _, _ = os.ReadFile("input.tx
 		if proof.Observable != tc.observable || proof.OutcomeMethod != wantMethod {
 			t.Errorf("%s = %+v; want observable=%t method=%q", tc.name, proof, tc.observable, wantMethod)
 		}
+		if want := tc.name == "empty" || tc.name == "pure"; proof.CoverageLocal != want {
+			t.Errorf("%s locality = %t; want %t", tc.name, proof.CoverageLocal, want)
+		}
 	}
 	warmHasher, err := newAt(dir)
 	if err != nil {
@@ -126,7 +135,7 @@ func TestSubject(t *testing.T) { t.Cleanup(func() { _, _ = os.ReadFile("input.tx
 		t.Fatal(err)
 	}
 	for subject, proof := range proofs {
-		if proof.OutcomeMethod != "" {
+		if proof.OutcomeMethod != "" || proof.CoverageLocal {
 			t.Errorf("unaudited outcome platform granted %s: %+v", subject.Symbol, proof)
 		}
 	}
@@ -143,7 +152,7 @@ func TestSubject(t *testing.T) { t.Cleanup(func() { _, _ = os.ReadFile("input.tx
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proof := unsupported[pure]; !proof.Observable || proof.OutcomeMethod != "" {
+	if proof := unsupported[pure]; !proof.Observable || proof.OutcomeMethod != "" || proof.CoverageLocal {
 		t.Fatalf("empty effects under unaudited Linux selection = %+v; want observable without outcome support", proof)
 	}
 }
@@ -158,20 +167,25 @@ func FuzzOutcomeInventoryRejectsUnsupportedEffects(f *testing.F) {
 	f.Fuzz(func(t *testing.T, grammar []byte) {
 		var effects []externalEffect
 		want := ImmutableEnvironmentOutcomes
+		wantLocal := true
 		for _, b := range grammar {
 			var effect externalEffect
 			switch b % 8 {
 			case 0:
+				wantLocal = false
 				effect, _ = classBEffect("os", "Getenv")
 				effect.observable = true
 			case 1:
+				wantLocal = false
 				effect, _ = classBEffect("os", "LookupEnv")
 				effect.observable = true
 			case 2:
+				wantLocal = false
 				effect, _ = classBEffect("os", "ReadFile")
 				effect.observable = true
 				want = ""
 			case 3:
+				wantLocal = false
 				effect, _ = classBEffect("os", "Getenv")
 				want = ""
 			case 4:
@@ -182,6 +196,7 @@ func FuzzOutcomeInventoryRejectsUnsupportedEffects(f *testing.F) {
 			case 6:
 				effect = harnessSubtestDriverEffect()
 			case 7:
+				wantLocal = false
 				effect, _ = classBEffect("testing", "TempDir")
 				effect.observable = true
 				want = ""
@@ -189,6 +204,9 @@ func FuzzOutcomeInventoryRejectsUnsupportedEffects(f *testing.F) {
 			effects = append(effects, effect)
 		}
 		for split := 0; split <= len(effects); split++ {
+			if got := coverageLocalInventory(effects[:split], effects[split:]); got != wantLocal {
+				t.Fatalf("locality partition %d of %v gave %t; want %t", split, grammar, got, wantLocal)
+			}
 			if got := immutableEnvironmentMethod(effects[:split], effects[split:]); got != want {
 				t.Fatalf("partition %d of %v gave %q; want %q", split, grammar, got, want)
 			}

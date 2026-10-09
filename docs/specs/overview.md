@@ -263,6 +263,36 @@ conversion or merging with a supported process. Ordinary input guards remain
 available for evidence without outcome support, while explicit purity remains
 the separate caller-responsible override.
 
+**REQ-fresh-recorded-observation-support** (behavior): A record-only judgment MUST
+accept native observation support only for the expected nonempty subject, a valid
+fingerprint with nonempty producing code identities and currently recognized
+closure, dynamic-state and observation strategies, a compatible positive native
+observation proof and its original assertion, and a canonical supported runtime
+manifest whose recorded aggregate digest equals the fingerprint's runtime digest.
+Support must name the exact original producing subject-support identity, never an
+applicability endpoint, and carry no incomplete or refusal disposition. The
+judgment returns a typed supported/refused status and diagnostic reason. It reads
+no current files or environment, performs no capture, adoption, upgrade or
+applicability transformation, and asserts neither current freshness nor
+authenticity: the persistence provenance remains caller-trusted. Purity supplies
+no native support. This judgment adds no fingerprint fields or encoding changes;
+older records remain readable, but missing or unrecognized support refuses.
+
+**REQ-fresh-coverage-locality** (behavior): An analysis view MUST expose a
+separately versioned admitted/refused coverage-locality projection for every
+selected subject, bound to its source core, test variant, toolchain, build and
+analysis strategies. Selecting it retains a proof-validation obligation on that
+same immutable view, inherited by subset siblings and re-established by validation
+without requiring runtime-input attachment. Missing or cut analysis refuses.
+No purity assertion, vouch, execution-completion assertion or profile assertion
+supplies the proof. The caller owns the actual batch/root selection, must include
+every contributing subject, and must independently establish normally completed
+coverage under the pinned audited harness and selection. The projection is only
+one conjunction component: locality alone does not establish verdict-preserving
+coverage narrowing, compilation equivalence, or any mutant outcome. Compile-time
+influence (including constant-controlled goto validity) requires an independent
+consumer rule even when the runtime effect inventory is empty.
+
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
 measurement — so a benchmark measurement is guarded against machine and runtime

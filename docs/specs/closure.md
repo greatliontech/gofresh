@@ -1958,6 +1958,23 @@ discarded incrementally rather than growing with every subject in the view.
 
 ## Cross-module dependencies
 
+**REQ-closure-coverage-locality** (behavior): Coverage locality MUST project the
+complete existing static inventory, including package initialization, user
+TestMain, subject flow and callbacks, under the same closed-reachability and
+selection-audit obligations as observability. Its initial admitted subset has no
+external effects, except the audited test/benchmark logging, pacing and run
+harness operations whose implementation is process-local under the audited Linux
+selection. Every environment read, including `GOCOVERDIR`, refuses: coverage
+instrumentation can deterministically distinguish the scored process. Filesystem,
+child-process, opaque and unknown effects refuse, as do missing, unsupported
+platform or budget-cut proofs. The harness premise excludes subject-visible
+external inputs; it is not inferred from normal completion or an empty profile.
+The locality strategy is `gofresh/coverage-locality@1`, separate from native
+observation support. Its cached projection requires a changed proof-memo identity
+whenever its rules change. While the memo identity is also the persisted
+observation strategy, that identity must change too; a separate public locality
+version alone cannot invalidate cached inventory projections.
+
 **REQ-closure-observability-memo** (behavior): Observability proofs MAY be
 served from a persistent memo because the proof is a pure function of its
 key's complete input identity: the caller-supplied scope (the proof-strategy
