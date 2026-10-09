@@ -2880,7 +2880,9 @@ in their repos.
 - [x] 297. gofresh: the dst-selection walk for the toolchain-audit key
       (gofresh docs/issues/walk-dst-selection-for-audit-key.md, whose
       trigger fired 2026-09-29 — the field report
-      dst-selection-walk-trigger-fired-tugboat in gofresh's index:
+      dst-selection-walk-trigger-fired-tugboat, folded at 315 into
+      godst-testlog-writer-swallows-write-errors.md (recover with
+      `git log --all -- docs/issues/dst-selection-walk-trigger-fired-tugboat.md`):
       tugboat's first judged run over `dst` and
       `dst,race` under go1.27.0-dst.14 re-executes ~1,070 subjects per
       leg with no proof to serve, the loud refusal chunk 126's two-axis
@@ -3287,7 +3289,7 @@ in their repos.
       Audit 6 (2026-10-07): loses children-budget-bounded-by-available
       (→ 240: the own-set derivation and the budget are 326's, landed);
       stands as program retention, held by the evidence-model owner.
-- [ ] 315. gofresh: the toolchain-source audit's second half — the walk
+- [x] 315. gofresh: the toolchain-source audit's second half — the walk
       the machine can do (310's charter, deferred at 310's open to its
       own measurement; a release). The content key names the keys that
       moved; a human walk still judges every moved key against the
@@ -3313,7 +3315,8 @@ in their repos.
       MB in one root test) read on every Hasher construction memoized
       per judged run under MemoKey + the stamps (never across runs; a
       stale stamp refuses); the suite-runtime note's unfiled deferral
-      filed as source-traversal-cancellation-gaps (Lands here); the
+      filed as source-traversal-cancellation-gaps (resolved at 315.B;
+      `git log --all -- docs/issues/source-traversal-cancellation-gaps.md`); the
       charter's own 'After 314' struck — Before 314, as 316 grew it.
 - [ ] 338. godst (thegrumpylion/go, dst branch): the testing harness's
       test-log writer propagates a write error — testing/dst_hostio.go's
