@@ -2407,7 +2407,7 @@ in their repos.
       corrupt stream as an executed verdict (soundness); its 'complete
       stream' predicate is the completion receipt's raw material:
       reported to the evidence-model owner at open.
-- [ ] 270. stipulator: the corpus's mega-requirements decomposed into
+- [x] 270. stipulator: the corpus's mega-requirements decomposed into
       per-sub-contract ids on gofresh 200's mechanics (263 A1) —
       REQ-evidence-witness-freshness (one 306-line paragraph, ~20
       contracts, 99 of 1,051 bindings), REQ-check-verdict,
@@ -3928,6 +3928,13 @@ in their repos.
       coverage.satisfied/requiredEvidence never see ANALYZER_PROOF or
       PROPERTY; gapRowCap, ledgerVersion).
       Grown (2026-10-06, audit 318): freshness_test.go's process-global runtime.GOMAXPROCS(4) where siblings set SpawnBound explicitly; the 287 census unchanged (eight go build sites with no sync.Once, four neutralAmbient copies, firstClause/repoWith/untouchable/compileFiles duplicated).
+      (270: grows — witnesscache's TestLoadUnreadableIsEmpty carries a
+      rule-per-arm tamper table that witnesses three sub-contracts at
+      once (REQ-evidence-witness-cache-format-validation,
+      -proof-and-outcomes, -version's refusals); split it into
+      per-sub-id subtests so each witness is separable, and bind the
+      version chain's literal and bump rule — the one gap 270 left —
+      from the split.)
 
 ## Band J — pew under the emergent shape (chartered by audit 197)
       (263: grows — enumeration pins blind to a new member: progress.Word's
