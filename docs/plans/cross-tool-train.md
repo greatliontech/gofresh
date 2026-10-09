@@ -637,7 +637,8 @@ verdict, and records the measured wall against the audit's baseline.
       extend the file and never remove (no `--no-vouch`); the
       residue sweep is ownership-scoped (this repository's, or an
       empty mint) after review; the vouch-globals and row-decode
-      collapse filed as pew docs/issues/verdict-path-consolidation.md.
+      collapse is governed by `../pew/docs/specs/spec.md` §7's
+      invocation-owned admission and package-batch judgment.
 - [x] 142. stipulator: clause-granular binding claims (bldc report
       2026-09-03; stipulator
       docs/issues/clause-granular-binding-claims.md) — a binding
@@ -1067,7 +1068,8 @@ in their repos.
       column; the root command's hand-written Short outside
       visitLeafVerbs) is 232's.
 - [x] 174. pew: `ab --out` per package and one verdict path (pew
-      docs/issues/ab-out-multi-package.md, verdict-path-consolidation.md)
+      docs/issues/ab-out-multi-package.md; verdict contract:
+      `../pew/docs/specs/spec.md` §7)
       — one artifact per package under a derived path, its encoding
       (pew-ab: 1, dirty, pkg, pew-ab-ref, pew-ab-side) stated in §12;
       stat's working-tree arm adopts the batched per-package check
@@ -1076,8 +1078,8 @@ in their repos.
       caller); pew's vouch grammar and file reader deleted for gofresh's
       ReadVouchFile and ParseVouchEntry with the four process-wide vouch
       globals a threaded value; one recording-row decode feeds admission,
-      the fingerprint, the closed set, and --explain; after 229; two docs
-      delete at close.
+      the fingerprint, the closed set, and --explain; after 229; the
+      remaining A/B issue doc deletes at its close.
       (237: NARROWED — the vouch grammar and reader clause LANDED at
       229; what remains: one verdict path (checkPackage vs verdictForRecs
       + inertGrownRecheck — a whole-program view per benchmark on stat's
@@ -1093,23 +1095,11 @@ in their repos.
       constructor" prevents — the vouch safety is positional today; the ab
       artifact's four pew- keys through the registry's namespace. The vouch
       GRAMMAR half is 275's; 174 owns the threading.)
-      Rider (tugboat field report 2026-09-29, pew docs/issues/strategy-stale-arms-flipped-valid-without-rerecord.md): 46 arms flipped `stale (dynamic-state strategy)` → `valid` between the v0.101.3 and v0.102.0 pew builds with the store untouched — the ladder's strategy handling stated once (audit or validity, per 229's ruling) and the flip explained under both builds; the wrong verdict is a defect fixed here, the false-valid direction voiding stat verdicts.
-      Audit 288 (2026-09-29): the strategy-flip rider REFRAMED — no
-      verdict was wrong: the rung (admission.go:61) and its operands
-      are byte-identical at both builds, gofresh.DynamicStateStrategy
-      is @38 at v0.101.3 and v0.102.0 alike, and the format rung
-      (RecordingFormat 2→3 at 230) sits strictly above it, so a
-      rebuild can only move recordings DOWN into stale (format); a
-      `valid` arm on 09-21 carries pew-format: 3, which only a
-      post-230 pew writes — the store moved (the whole-store
-      re-record) or the sweep misreported; checkable by grep over
-      tugboat's store. The work: the recorded-vs-current operands on
-      the stale line and an explain row for EVERY validity key
-      (explainRecordAgainstCurrent lays out the closure strategy and
-      never the dynamic-state one — a stale (dynamic-state strategy)
-      verdict is unexplainable by pew's own --explain), the rung
-      stated once; admission reads the registry's validity? column
-      (232 adds it). Heads pew's tail after the bump.
+      The current contract is `../pew/docs/specs/spec.md` §5
+      (dynamic-state strategy is a freshness key), §7 (one
+      invocation-owned current-tree judgment), §7.8 (explicit observed
+      policy), and §7.9 (applicability extension preserves producing
+      evidence).
       Delegated: the verdict path, row decode, vouch threading and explain row per validity key → performance-evidence chunk 8, after the canonical record at 7; `ab --out` per package and the artifact's keys → chunk 11 (the handoff doc).
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
       requirements are refused by default (stipulator docs/issues/
@@ -4121,22 +4111,16 @@ in their repos.
       Audit 6 (2026-10-07): Fingerprint gaining SlicedClosure is
       fingerprint serialization — reported to the evidence-model owner
       before implementing, after their plan's chunk 5.3.
-- [x] 127. pew: observed-fingerprint recording path (pew
-      docs/issues/observed-fingerprint-recording-path.md) —
-      plain-Capture recordings leave every true-external-effect
-      benchmark permanently unverifiable; adopt CaptureObserved per
-      arm and retire §7.8's no-proof sentence; a spec-level
-      verdict-model change derived 2026-09-29: the observed-evidence
-      substitution is gofresh's own gate, already the reuse verdict of
-      the other two consumers, and pew's single-subject execution gives
-      every arm its own completed observation — adopting a proven gate
-      is not a fork; doc deletes at close.
-      Audit 288 (2026-09-29): scope sharpened — the exemption at
-      cmd/pew/fingerprint_roundtrip_test.go:43
-      (ObservationAssertion/ObservationProof, the two record fields §5
-      has no rows for, exempted 'recomputed at judge time, never
-      served' — §7.8's retiring sentence): two omittable rows + the
-      format bump + that exemption flipped.
+- [x] 127. pew: observed-fingerprint recording path — governed by
+      `../pew/docs/specs/spec.md` §7.8: each measurement invocation
+      owns its observation, and current-tree judgments explicitly
+      select observed policy. Normal process completion alone does
+      not establish outcome support; unsupported inventories retain
+      identity-only guards, never an observation-based freshness lift.
+      The native fingerprint contract (§5) preserves historical
+      evidence as recorded, and inert growth (§7.9) advances only the
+      checked applicability endpoint and paired ledger while retaining
+      the original producing fields and support.
       Delegated: → performance-evidence chunk 8, after the shared completion capability/adapters at 5/6 and the canonical fingerprint boundary at 7. Process health alone supplies no outcome support, and old observation assertions are not upgraded by the format cutover.
 
 - [ ] 175. gofresh: subject-scoped closure identity (design — derived
