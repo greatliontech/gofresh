@@ -132,7 +132,8 @@ Nothing needs a self-host run. Irreducible executions (single-subject process is
 - **`verdict-ladder-shared-admissibility`** — `status` and `stat` hand-order the same admissibility ladder twice; both read only `recs[0]`. *Lands: the next chunk extending the ladder.*
 - **`repo-level-vouch-source`** — vouch set exists only as flags, hand-mirrored; the unsafe drift direction is silent. *Lands: chunk 115.*
 - **`gofresh-corpus-pin-lag`** — pew pins gofresh v0.91.0 against v0.92.0. *Lands: chunk 115.*
-- **`profile-capture-attribution`**, **`derived-state-recompute-invariance-witness`**, **`spec-wide-requirement-forming`**, **`remote-bench-execution`** — as filed.
+- **Profile companions and comparison** — `../pew/docs/specs/spec.md` §§6.2/10.2.
+- **`derived-state-recompute-invariance-witness`**, **`spec-wide-requirement-forming`**, **`remote-bench-execution`** — as filed.
 
 ## 8. Cross-cutting shape
 

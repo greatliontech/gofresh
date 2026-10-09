@@ -1067,11 +1067,10 @@ in their repos.
       the doc it cited was deleted at 275); the residue (§12's purpose
       column; the root command's hand-written Short outside
       visitLeafVerbs) is 232's.
-- [x] 174. pew: `ab --out` per package and one verdict path (pew
-      docs/issues/ab-out-multi-package.md; verdict contract:
-      `../pew/docs/specs/spec.md` §7)
-      — one artifact per package under a derived path, its encoding
-      (pew-ab: 1, dirty, pkg, pew-ab-ref, pew-ab-side) stated in §12;
+- [x] 174. pew: invocation-wide `ab --out` and one verdict path
+      (`../pew/docs/specs/spec.md` §10.2 and §7)
+      — one benchmark-format artifact preserving every package and
+      completed pair, with separately owned diagnostic companions;
       stat's working-tree arm adopts the batched per-package check
       (today verdictForRecs builds a whole-program view per benchmark and
       a second on the inert-growth rider; checkOne has no production
@@ -4092,18 +4091,14 @@ in their repos.
       reasons.go: post-run validation, observation sealed, observation
       proof refused). Held by the evidence-model owner.
 - [x] 15. pew: profile capture and attribution as recording
-      companions (pew docs/issues/profile-capture-attribution.md and
-      per-arm-noise-floors.md) — --profile captures per-arm cpu (and
-      mem where B/op is claimed) evidence under the recording's
-      provenance conjunction; status gains the attribution verdict,
-      stat the profile-diff view; the noise-floor lineage keys on
-      chunk 102's sliced closures. Design derived 2026-09-29 from the
-      two issue docs' directions (top-N attribution stored beside the
-      recording under its provenance; the arm floor derived from the
-      lineage's same-closure recordings, the bar named per row); 102
-      lands inside this chunk's arc, after gofresh 175.
-      Audit 288 (2026-09-29): stands (after gofresh 175/102).
-      Delegated: profiles → performance-evidence chunks 10/11, per-arm noise floors → 12.1 (sound on the package closure today; gofresh 102 only refines them).
+      companions (`../pew/docs/specs/spec.md` §§6.2/10.2; noise floors:
+      pew docs/issues/per-arm-noise-floors.md) — explicit CPU/allocation
+      diagnostics own their execution evidence independently of timed
+      samples. Full immutable profiles retain unresolved attribution;
+      status separates integrity, freshness and relation, and historical
+      comparison reads companions from each selected ref. Per-arm noise
+      floors remain delegated to performance-evidence 12.1, sound on
+      package closures; gofresh 102 only refines lineage precision.
 - [ ] 102. gofresh: per-subject sliced closures — Fingerprint gains
       SlicedClosure (declaration-level hash over the subject's
       attributed-reachable set; widens to the maximal hash where
