@@ -42,16 +42,30 @@ On greatliontech/godst: the matrix (run 37949379157) and ci on 6a6db7c
 went GREEN at 15:32 UTC (every leg, both architectures); the release
 commit a91cc85 (`chore(dst): VERSION go1.27.1-dst.14`, time
 2026-10-09T15:32:42Z) and the annotated tag `go1.27.1-dst.14` are
-pushed; the `release` workflow on the tag was running at the handoff
-(~7 min; the release exists when its assets — the src and
-linux-amd64/arm64 tarballs, the toolchain module files, SHA256SUMS — are
-attached: `gh release view go1.27.1-dst.14 -R greatliontech/godst`). A
-failed workflow is not a release: fix forward on main, cut dst.15.
-Then:
+pushed; the `release` workflow on the tag (run 37952542400) was
+REFUSED by the fork's own stale-base gate: upstream has go1.27.2 and
+the line's base is go1.27.1 — releases.md's Patch cadence: "the port
+lands before, or as, the line's next release". So go1.27.1-dst.14 is a
+dead tag (the counter consumed, no release), the VERSION commit is
+reverted on main (b1db1f1e6: VERSION reads go1.27.1-dst.13 again, as the
+contract requires between releases), and the fix stays on main
+unreleased. The tagwatch workflow's standing failure on main is the
+same signal (the observability half of the stale-base check).
 
-4. Install it as the running build on every machine that runs the fleet:
-   `task install` from the clone at the release commit (or
-   `task install TARBALL=<the linux-amd64 asset>`); it flips
+BLOCKER → the next step is a PORT of main to go1.27.2 per releases.md
+"Porting procedure" (`task port BASE=go1.27.2`, then `port:verify`,
+`port:audit`, `port:check`; a merge commit whose tree is the new base
+plus the dst delta; reviewed as a change set, upstream's diff over the
+intercepted surface included; the matrix on the port commit), and only
+then the release commit `VERSION go1.27.1-dst.15`? — no: the base
+moves, so the release is `go1.27.2-dst.15` (N global-monotonic: 15 =
+1 + max over every *-dst.* tag incl. the dead 14). This is a fork
+chunk of its own (hours: the port, its review, the matrix); it was NOT
+started at the handoff — whoever picks it up owns it. Then:
+
+4. Install the release (go1.27.2-dst.15) as the running build on every
+   machine that runs the fleet: `task install` from the clone at the
+   release commit (or `task install TARBALL=<the linux-amd64 asset>`); it flips
    `~/.local/godst/current` and rewrites `~/.local/bin/go`. Every gofresh
    pin that reads the host's build re-measures: the canary refuses until
    the new toolchain's rows are listed — do step 5 at once, before any
@@ -61,7 +75,7 @@ Then:
 
 Design in handoff/design338.md. Under the new build:
 
-- Print the new toolchain's rows with the canary: a throwaway worktree
+- Print the new toolchain's rows with the canary (a go1.27.2 base moves MANY keys off the dst.13 chains — the whole root row is new, and stock go1.27.2 needs its own rows too: list it as 281 listed go1.27.1): a throwaway worktree
   with `TestAuditedToolchainCoversRunningToolchain`'s `t.Fatalf` turned
   into `t.Errorf`, run `go test -run TestAuditedToolchainCoversRunningToolchain ./closure/`
   on the host (its four listed selections), then with
@@ -74,8 +88,9 @@ Design in handoff/design338.md. Under the new build:
   least), its race / plan9/amd64 / cgo0 deltas, and `go1.27.1-dst.14 dst`
   (Base the root) / `go1.27.1-dst.14 dst race` (Base the race row).
 - Apply handoff/edit338g.py from the gofresh root (anchors dry-checked
-  against db4dd31): `listedSelection.Since` — the two dst entries carry
-  `Since: "go1.27.1-dst.14"`; `demandedOf`/`godstCounter`; the canary
+  against db4dd31) AFTER editing its three `go1.27.1-dst.14` literals to
+  the real release (`go1.27.2-dst.15`): `listedSelection.Since` — the two
+  dst entries carry `Since: "<that release>"`; `demandedOf`/`godstCounter`; the canary
   skips a selection the running build is not asked to list (an older
   godst build; a stock build runs every selection); the pin
   TestDstSelectionIsJudgedByContentNeverByTag's godst arm: on a listed
