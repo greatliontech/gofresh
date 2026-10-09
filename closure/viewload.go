@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
-	"golang.org/x/tools/go/packages"
 )
 
 // ViewLoad is one typed load of an analysis view's packages: syntax, types,

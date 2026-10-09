@@ -19,10 +19,10 @@ import (
 // the bytes each pass keeps the passes independent witnesses).
 // The count is taken at the go-command boundary: every typed load drives
 // exactly one `go list … -json=<fields> …` invocation. That one-call-per-Load
-// shape is golang.org/x/tools/go/packages driver behavior, not a gofresh
-// property — if an x/tools upgrade changes how many list calls one Load
-// issues, this count moves without any sharing regression; recalibrate the
-// expected count against a single packages.Load before suspecting the code.
+// shape is github.com/greatliontech/go-x-tools/go/packages driver behavior,
+// not a gofresh property — if a go-x-tools upgrade changes how many list calls
+// one Load issues, this count moves without any sharing regression; recalibrate
+// the expected count against a single packages.Load before suspecting the code.
 func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

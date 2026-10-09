@@ -3,7 +3,9 @@ package closure
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -18,14 +20,10 @@ import (
 // file, so the selection moves no key and is admitted by the same chain
 // that admits the selection without the tag — the default row for the
 // plain form, the race row under the detector — with nothing to list;
-// on a godst build the tag swaps the fork's stub files for its hook
-// files and the selection moves keys off every listed chain, so both
-// forms refuse naming the moved keys, testing among them — the fork's
-// testing harness being the reason no row lists them (a listing asserts
-// the harness's write-propagation premise beside the admissions, and the
-// fork's test-log writer drops a failed write inside a simulation
-// bubble: docs/issues/godst-testlog-writer-swallows-write-errors.md).
-// The dst selection's refusal on a godst toolchain is pinned here alone.
+// on a repaired godst build the selection admits through its own measured
+// content chain. Earlier builds remain refused: their in-bubble test-log
+// writer discarded host errors, violating the harness premise. The minimum
+// canary build never grants admission without matching source content.
 // The host's own build decides which arm the pin exercises; the other
 // is logged.
 func TestDstSelectionIsJudgedByContentNeverByTag(t *testing.T) {
@@ -61,12 +59,18 @@ func TestDstSelectionIsJudgedByContentNeverByTag(t *testing.T) {
 			t.Fatal(err)
 		}
 		if godst == nil {
+			moved, _ := movedKeys(h.source, auditedToolchainSources)
+			if (listedSelection{Since: "go1.27.2-dst.15"}).demandedOf(snapshot.Value("GOVERSION")) {
+				if !h.SelectionAudited() || len(moved) != 0 {
+					t.Fatalf("repaired godst selection %q refused: %v; %s", sel.suffix, moved, h.SelectionNotice())
+				}
+				continue
+			}
 			// A godst build: the hook files move keys; no chain lists
 			// them while the fork's harness premise fails. The refusal
 			// names the moved keys under its bound, and testing — the
 			// premise's own key — sorts past it under the race
 			// detector, so its membership is read from the moved set.
-			moved, _ := movedKeys(h.source, auditedToolchainSources)
 			if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") || !slices.Contains(moved, "testing") {
 				t.Fatalf("the %q selection on a godst build: audited=%v, moved %v, attribution %q, want a refusal with testing among the moved keys — the harness premise's key did not move: re-walk where the fork's test-log writer lives", sel.suffix, h.SelectionAudited(), moved, h.SelectionAttribution())
 			}
@@ -88,6 +92,68 @@ func TestDstSelectionIsJudgedByContentNeverByTag(t *testing.T) {
 			t.Fatalf("the %q selection on a stock toolchain moved %v, admitted by %q, want nothing moved and %q, the selection's own chain without the tag", sel.suffix, moved, closest, want)
 		}
 		t.Logf("stock toolchain: the %q selection moves no key and admits by %q", sel.suffix, want)
+	}
+}
+
+func TestGodstCanaryRequirementDoesNotGrantAdmission(t *testing.T) {
+	selection := listedSelection{Since: "go1.27.2-dst.15"}
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"go1.27.1-dst.13", false},
+		{"go1.27.1-dst.14", false},
+		{"go1.27.2-dst.15", true},
+		{"go1.28.0-dst.16", true},
+		{"go1.27.2", true},
+		{"not-go-dst.1", true},
+		{"go1.27.2-dst.bad", true},
+		{"go1.27.2-dst.999999999999999999999", true},
+	} {
+		if got := selection.demandedOf(tc.version); got != tc.want {
+			t.Errorf("demandedOf(%q)=%v, want %v", tc.version, got, tc.want)
+		}
+		if !(listedSelection{}).demandedOf(tc.version) {
+			t.Errorf("ordinary selection not demanded of %q", tc.version)
+		}
+	}
+	if !(listedSelection{Since: "invalid"}).demandedOf("go1.27.1-dst.13") {
+		t.Fatal("malformed canary boundary silently skipped a selection")
+	}
+	for _, version := range []string{"go1.27.1-dst.13", "go1.27.2-dst.15", "go1.28.0-dst.99"} {
+		d := sourceDigests{Packages: map[string]string{"testing": "unlisted-content"}}
+		if toolchainSourceDegradation(version, d, nil).audited() {
+			t.Fatalf("version %q admitted unlisted harness content", version)
+		}
+	}
+}
+
+func canarySelection(ctx context.Context, h *Hasher, sel listedSelection) (string, bool, error) {
+	snapshot, err := h.PassReader().Snapshot(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	version := snapshot.Value("GOVERSION")
+	return version, sel.demandedOf(version), nil
+}
+
+// The inspected compiler need not be the one that built the test binary.
+func TestCanaryUsesTheInspectedToolchainVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell snapshot fixture")
+	}
+	for _, tc := range []struct {
+		version  string
+		demanded bool
+	}{{"go1.27.1-dst.13", false}, {"go1.27.2-dst.15", true}} {
+		h := &Hasher{env: os.Environ(), runner: gotool.Runner{Prepare: func(cmd *exec.Cmd) {
+			cmd.Path = "/bin/sh"
+			cmd.Args = []string{"sh", "-c", `printf '%s' '{"GOVERSION":"` + tc.version + `"}'`}
+		}}}
+		version, demanded, err := canarySelection(t.Context(), h, listedSelection{Since: "go1.27.2-dst.15"})
+		if err != nil || version != tc.version || demanded != tc.demanded {
+			t.Fatalf("inspect %s: version=%q demanded=%v err=%v", tc.version, version, demanded, err)
+		}
 	}
 }
 

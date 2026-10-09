@@ -3,8 +3,8 @@ package closure
 import (
 	"go/types"
 
+	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"golang.org/x/tools/go/ssa"
 )
 
 type externalEffectKind uint8

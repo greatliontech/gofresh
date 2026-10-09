@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // ComputeMaximalBatch returns the maximal sound closure for every subject. All

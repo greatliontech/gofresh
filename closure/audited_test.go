@@ -8,14 +8,13 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 // The audited-pure widening: subjects reaching pure standard
@@ -1259,9 +1258,17 @@ func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		version, demanded, err := canarySelection(context.Background(), h, sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !demanded {
+			t.Logf("selection %q requires godst %s or later; inspecting %s", sel.Suffix, sel.Since, version)
+			continue
+		}
 		if !h.SelectionAudited() {
 			moved, closest := movedKeys(h.source, auditedToolchainSources)
-			t.Fatalf("running toolchain %q under %v %v is not listed in auditedToolchainSources — %s. %s\n%s", runtime.Version(), sel.Env, sel.Flags, h.SelectionNotice(), listingInstruction(moved), h.source.rowLiteral(runtime.Version()+sel.Suffix, closest, moved))
+			t.Fatalf("inspected toolchain %q under %v %v is not listed in auditedToolchainSources — %s. %s\n%s", version, sel.Env, sel.Flags, h.SelectionNotice(), listingInstruction(moved), h.source.rowLiteral(version+sel.Suffix, closest, moved))
 		}
 	}
 }

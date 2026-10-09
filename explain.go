@@ -10,9 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/gotool"
-	"golang.org/x/tools/go/packages"
 )
 
 // explainMu serializes explain re-derivations - the observation hooks

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/go-x-tools/go/ssa"
 	arta "github.com/greatliontech/gofresh/closure/internal/rta"
-	"golang.org/x/tools/go/ssa"
 )
 
 func writeGenericFixture(t *testing.T, body string) string {

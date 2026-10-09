@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/tools/go/callgraph/rta"
+	"github.com/greatliontech/go-x-tools/go/callgraph/rta"
 
+	"github.com/greatliontech/go-x-tools/go/ssa"
 	arta "github.com/greatliontech/gofresh/closure/internal/rta"
-	"golang.org/x/tools/go/ssa"
 )
 
 const batchIsolationPackage = "github.com/greatliontech/gofresh/closure/fixtures/batchisolation"

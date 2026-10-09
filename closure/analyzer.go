@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
 type tier2Result struct {
@@ -1155,6 +1155,9 @@ func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit 
 			return
 		}
 		t = types.Unalias(t)
+		if ssaOpaqueHandle(t) {
+			return
+		}
 		if seen[t] {
 			return
 		}
@@ -1195,6 +1198,18 @@ func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit 
 		}
 	}
 	walk(t)
+}
+
+// ssaOpaqueHandle recognizes only the builder's two internal tokens. The
+// synthetic package path cannot occur in a source import, and neither token
+// represents a source pointer operation. Their operands and callbacks remain
+// independently scanned. Unknown synthetic names retain the ordinary judgment.
+func ssaOpaqueHandle(t types.Type) bool {
+	n, ok := t.(*types.Named)
+	if !ok || n.Obj().Pkg() == nil || n.Obj().Pkg().Path() != "$ssa" || n.Underlying() != types.Typ[types.UnsafePointer] {
+		return false
+	}
+	return n.Obj().Name() == "rangeIter" || n.Obj().Name() == "deferStack"
 }
 
 // addValueType walks one SSA value's type and widens on a reachable

@@ -205,14 +205,14 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@41" {
-		t.Fatalf("ObservationRTA = %q, want the independent static outcome inventory", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@43" {
+		t.Fatalf("ObservationRTA = %q, want the corrected SSA derivation", ObservationRTA)
 	}
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@38" {
-		t.Fatalf("DynamicStateStrategy = %q, want the data memo over the closed-field exported dispatch", DynamicStateStrategy)
+	if DynamicStateStrategy != "gofresh/dynamic-state@39" {
+		t.Fatalf("DynamicStateStrategy = %q, want the corrected SSA reachability derivation", DynamicStateStrategy)
 	}
 }
 

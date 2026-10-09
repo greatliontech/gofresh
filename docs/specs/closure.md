@@ -1410,7 +1410,9 @@ operator-grammar fixture, a low-level helper file) no longer blocks a
 clean subject's proof; the package's other operations (unsafe.Slice,
 unsafe.String, and kin) keep the scan block, because their call sites
 carry no unsafe-typed value the walk can price and a fabricated slice
-or string is a testlog-invisible read.
+or string is a testlog-invisible read. The SSA builder's internal iterator
+and deferred-call stack handles are lowering tokens, not source unsafe
+values; their source operands and callbacks remain independently judged.
 
 **REQ-closure-observability-audited-set** (invariant): The audited-pure standard set — packages and named
 operations through which every ambient effect MUST enter via a flagged
@@ -1700,8 +1702,12 @@ harness (REQ-inputs-identity-facade and REQ-inputs-producer-premises'
 observation-completeness terms; the result owner supplies the harness's
 completion criterion) — every test-log write the harness attempts lands
 or fails the binary — so a selection whose harness drops a failed write
-is unlistable until a build propagates it, whatever its hook files admit,
-and the packages implementing the premise (testing and its test-log
+is unlistable until a build propagates it, whatever its hook files admit.
+The listing canary exercises the dst selections on stock toolchains and
+on godst releases from go1.27.2-dst.15 onward; earlier godst builds retain
+only their separately audited non-dst selections. This canary boundary
+grants no admission without matching content. The packages implementing
+the premise (testing and its test-log
 dependency testing/internal/testdeps, which only the generated test main
 imports) are surface seeds, so a build moving either moves a key; a
 listing whose labels

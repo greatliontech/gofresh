@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
+	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 
 	prog "github.com/greatliontech/gofresh/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/outcome"

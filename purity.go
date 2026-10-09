@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"golang.org/x/tools/go/packages"
 )
 
 // ScanPureDirectives loads pkgPaths from dir ("" = the current directory)

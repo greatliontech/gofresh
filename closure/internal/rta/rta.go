@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// This file is adapted from golang.org/x/tools/go/callgraph/rta v0.46.0.
+// This file is adapted from golang.org/x/tools/go/callgraph/rta v0.46.0,
+// with the v0.50 runtime-type signature traversal and alias normalization.
 // It preserves RTA's reachability semantics while attributing every fact to
 // the subjects that discovered it. Call graphs are intentionally omitted.
 package rta
@@ -13,8 +14,8 @@ import (
 	"go/types"
 	"hash/crc32"
 
-	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/types/typeutil"
+	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/types/typeutil"
 )
 
 type Result struct {
@@ -506,7 +507,7 @@ func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	if _, ok := T.Underlying().(*types.Interface); !ok {
 		for i, n := 0, mset.Len(); i < n; i++ {
 			sel := mset.At(i)
-			if sel.Obj().Exported() {
+			if sel.Obj().Exported() && sel.Obj().Type().(*types.Signature).TypeParams() == nil {
 				r.addReachable(r.prog.MethodValue(sel), delta)
 			}
 		}
@@ -522,20 +523,9 @@ func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 		}
 	}
 
-	var n *types.Named
-	switch T := types.Unalias(T).(type) {
-	case *types.Named:
-		n = T
-	case *types.Pointer:
-		n, _ = types.Unalias(T.Elem()).(*types.Named)
-	}
-	if n != nil && n.Obj().Pkg() == nil {
-		return
-	}
-
 	for method := range mset.Methods() {
-		if method.Obj().Exported() {
-			sig := method.Type().(*types.Signature)
+		sig := method.Type().(*types.Signature)
+		if sig.TypeParams() == nil {
 			r.addRuntimeType(sig.Params(), delta, true)
 			r.addRuntimeType(sig.Results(), delta, true)
 		}

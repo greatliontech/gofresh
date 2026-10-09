@@ -4,7 +4,7 @@ import (
 	"go/types"
 	"sort"
 
-	"golang.org/x/tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
 // freshParamAnalysis carries fresh-path capabilities across static

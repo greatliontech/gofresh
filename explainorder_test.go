@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // The chain's link order is the derivation's own: the registration

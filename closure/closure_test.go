@@ -15,10 +15,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/closure/internal/rta"
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/go/ssa"
 )
 
 func TestPropHashFilesSensitive(t *testing.T) {

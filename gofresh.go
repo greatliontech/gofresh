@@ -123,7 +123,7 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // stale-entry residue grounded on the syscalls' own observability
 // refusal): the discharge is the engine's own verdict in any
 // execution model — the memoization set's class, no evidence record —
-// exactly for the audited x/sys versions (v0.8.0-v0.47.0 as
+// exactly for the audited x/sys versions (v0.8.0-v0.48.0 as
 // enumerated at the discharge), an unaudited version refusing
 // fail-closed. @33 extends the reachability scoping two ways: nested
 // function literals' and go statements' marks attribute to their
@@ -199,7 +199,9 @@ func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 // Store, or LoadOrStore with carrier-free key and value static types —
 // an interface-typed parameter resolving through its direct call sites
 // — holds no dynamic carrier and marks nothing: the data memo.
-const DynamicStateStrategy = "gofresh/dynamic-state@38"
+// The current derivation uses the SSA builder's corrected generic receiver
+// instantiation and range-over-function control flow.
+const DynamicStateStrategy = "gofresh/dynamic-state@39"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the
@@ -415,7 +417,9 @@ const ClosureStrategy = closure.IdentityStrategy
 // the fold).
 // @41 carries an independent static outcome inventory beside observation
 // admission; missing older inventories never gain a supported derivation.
-const ObservationRTA = "gofresh/observation-rta@41"
+// The current derivation uses corrected generic receiver/range control flow
+// and treats the SSA builder's internal iterator/defer tokens as opaque.
+const ObservationRTA = "gofresh/observation-rta@43"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

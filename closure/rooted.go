@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
 // rootedFunctionKey names one reachable function in the attributed

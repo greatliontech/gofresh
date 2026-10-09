@@ -7,7 +7,7 @@ import (
 	"go/types"
 	"testing"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // The receiver-naming grammar reduces every legal receiver form,

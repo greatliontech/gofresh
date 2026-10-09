@@ -3,6 +3,8 @@ package closure
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/greatliontech/gofresh/gotool"
 )
@@ -96,6 +98,8 @@ var listedSelections = []listedSelection{
 	{Suffix: " race", Flags: []string{"-race"}},
 	{Suffix: " plan9/amd64", Env: []string{"GOOS=plan9", "GOARCH=amd64"}},
 	{Suffix: " cgo0", Env: []string{"CGO_ENABLED=0"}},
+	{Suffix: " dst", Flags: []string{"-tags", "dst"}, Since: "go1.27.2-dst.15"},
+	{Suffix: " dst race", Flags: []string{"-tags", "dst", "-race"}, Since: "go1.27.2-dst.15"},
 }
 
 // listedSelection is one selection the listing hosts list: the label
@@ -106,6 +110,28 @@ type listedSelection struct {
 	Suffix string
 	Env    []string
 	Flags  []string
+	// Since bounds the canary's obligation on old godst builds whose
+	// harness did not propagate failed test-log writes. It never grants
+	// admission: the source digests decide that independently.
+	Since string
+}
+
+func (s listedSelection) demandedOf(version string) bool {
+	if s.Since == "" {
+		return true
+	}
+	have, haveOK := godstCounter(version)
+	first, firstOK := godstCounter(s.Since)
+	return !haveOK || !firstOK || have >= first
+}
+
+func godstCounter(version string) (int, bool) {
+	base, counter, found := strings.Cut(version, "-dst.")
+	if !found || gotool.LanguageSeries(base) == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(counter)
+	return n, err == nil && n > 0
 }
 
 var auditedToolchainSources = []toolchainSourceRow{
@@ -597,6 +623,169 @@ var auditedToolchainSources = []toolchainSourceRow{
 		Packages: map[string]string{
 			"net":    "24ff91ed9c0e683918309399ba24d80c9edf432de3240537d4daaf3763255c1b",
 			"plugin": "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
+		},
+	},
+	// Go 1.27.2 keeps the audited value and descriptor operations closed:
+	// JSON/flate/template fixes transform supplied values; HTTP/TLS and
+	// the new range-limit GODEBUG remain outside the pure admissions.
+	// Runtime itab deduplication preserves descriptor identity. The
+	// harness keeps failed test-log writes fatal and escapes diagnostic
+	// framing only in its JSON mode.
+	{
+		Label: "go1.27.2",
+		Base:  "go1.27.1",
+		Packages: map[string]string{
+			"compress/flate":                "49ba38547a8744dbec4ad963d2af020ecaf985e5ff024213e39ad2600e08362d",
+			"crypto/internal/fips140/mlkem": "ec8a11c2b67ac5be9230ff71a7b66f8ae77f89ec7aa593c082232e21fce99597",
+			"crypto/tls":                    "6c7719835ce0f2ccb49ad96c6cd50c53e6858aee827ab6ea7dbf0398efb5eb19",
+			"encoding/json":                 "2913283d6caf96104f107f858be872ee9659af95ad6c8f1369c55fb284270ccb",
+			"encoding/json/internal":        "60c2411409d978525f9c78bed819455dfc3813e89c7b42e5204957efa74d0131",
+			"encoding/json/v2":              "fd15a7415e6520ea4e4e507b9beb72e0e2f8dbf542f0b22c4562092e86409026",
+			"html/template":                 "0c3e0a0c737d647d72c7a8f8571131882c17f72a78c0a62568c6bd873a21f5ab",
+			"internal/godebugs":             "e37bd6284b69a14411325e2cb52d1f7b8bbb3be24d7e684dc894e32f53185e59",
+			"mime/multipart":                "3255c2ab43d62a15ce19cc0494edcd61f4375666c4393304b31c70d63a7810f6",
+			"net/http":                      "3083c50b258b99e1b26ef5ceb4379bc4f702a773351c2a748df7fdb6bcfabea7",
+			"net/http/internal/http2":       "f3fe08a1e8bb0425f1da0231bd046626d33d781ee00ceb172aec76f51dedba29",
+			"net/textproto":                 "3be0df3fdbd14806727a6f55f1100b9edc953cd6c3ed0aaddf0793d2ca48c369",
+			"os":                            "9d9276a1bde36da055e18058486ed58da251ef9dd25c6dc9d78dfc09441f6e79",
+			"runtime":                       "424e69dcfe315fa231c794e0c97f6ecaea656bc2997770c53d11725e73e824c3",
+			"testing":                       "71fabe8486856ffb5c701678da11de9ca9fc6e38f91f38cfb58c4bec241f199f",
+		},
+	},
+	{
+		Label: "go1.27.2 race",
+		Base:  "go1.27.2",
+		Packages: map[string]string{
+			"internal/race":        "e80429a1ec958b17e616e45f07b6b6f6cd205a925896d2268f95cb19da585dc5",
+			"internal/runtime/sys": "508268ec7dd881dad867d5d8ccfe777ee12c3b68de5e5c19051311eea63251bc",
+			"runtime":              "89533012b8e485a40370ce1d736aee6b3f4c9a5169de895e370208cfc8e1f46f",
+			"runtime/race":         "286c7e1ff0150cf2df8713e402d61c6a93c0f5f938bc3f220a6e35026782043c",
+			"sync/atomic":          "6f499cf4f7d682fbdf6ac4ded188a15d21c48854a80a04aaf5c08939f2c717e0",
+		},
+	},
+	{
+		Label: "go1.27.2 plan9/amd64",
+		Base:  "go1.27.1 plan9/amd64",
+		Packages: map[string]string{
+			"compress/flate":                "49ba38547a8744dbec4ad963d2af020ecaf985e5ff024213e39ad2600e08362d",
+			"crypto/internal/fips140/mlkem": "ec8a11c2b67ac5be9230ff71a7b66f8ae77f89ec7aa593c082232e21fce99597",
+			"crypto/tls":                    "6c7719835ce0f2ccb49ad96c6cd50c53e6858aee827ab6ea7dbf0398efb5eb19",
+			"encoding/json":                 "2913283d6caf96104f107f858be872ee9659af95ad6c8f1369c55fb284270ccb",
+			"encoding/json/internal":        "60c2411409d978525f9c78bed819455dfc3813e89c7b42e5204957efa74d0131",
+			"encoding/json/v2":              "fd15a7415e6520ea4e4e507b9beb72e0e2f8dbf542f0b22c4562092e86409026",
+			"html/template":                 "0c3e0a0c737d647d72c7a8f8571131882c17f72a78c0a62568c6bd873a21f5ab",
+			"internal/godebugs":             "e37bd6284b69a14411325e2cb52d1f7b8bbb3be24d7e684dc894e32f53185e59",
+			"mime/multipart":                "3255c2ab43d62a15ce19cc0494edcd61f4375666c4393304b31c70d63a7810f6",
+			"net/http":                      "3083c50b258b99e1b26ef5ceb4379bc4f702a773351c2a748df7fdb6bcfabea7",
+			"net/http/internal/http2":       "f3fe08a1e8bb0425f1da0231bd046626d33d781ee00ceb172aec76f51dedba29",
+			"net/textproto":                 "3be0df3fdbd14806727a6f55f1100b9edc953cd6c3ed0aaddf0793d2ca48c369",
+			"runtime":                       "c957f836c2d3aab2e1be5e44fbc003161beb64777cdce57149ee5f8a5212be77",
+			"testing":                       "71fabe8486856ffb5c701678da11de9ca9fc6e38f91f38cfb58c4bec241f199f",
+		},
+	},
+	{
+		Label: "go1.27.2 cgo0",
+		Base:  "go1.27.2",
+		Packages: map[string]string{
+			"net":    "24ff91ed9c0e683918309399ba24d80c9edf432de3240537d4daaf3763255c1b",
+			"plugin": "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
+		},
+	},
+	// The repaired godst harness returns every test-log write failure to
+	// the buffered logger, whose flush fails the process. Its free-function
+	// printer/stat helpers preserve observation routing; finalizer scratch
+	// remains private to each driver. The dst changes below keep entropy,
+	// network and syscall effects outside pure admissions; filesystem
+	// operations stay host-isolated, time fences exclude ambient locations,
+	// and synchronization hooks change scheduling rather than input values.
+	{
+		Label: "go1.27.2-dst.15",
+		Base:  "go1.27.1-dst.13",
+		Packages: map[string]string{
+			"compress/flate":                "49ba38547a8744dbec4ad963d2af020ecaf985e5ff024213e39ad2600e08362d",
+			"crypto/internal/fips140/mlkem": "ec8a11c2b67ac5be9230ff71a7b66f8ae77f89ec7aa593c082232e21fce99597",
+			"crypto/tls":                    "6c7719835ce0f2ccb49ad96c6cd50c53e6858aee827ab6ea7dbf0398efb5eb19",
+			"encoding/json":                 "2913283d6caf96104f107f858be872ee9659af95ad6c8f1369c55fb284270ccb",
+			"encoding/json/internal":        "60c2411409d978525f9c78bed819455dfc3813e89c7b42e5204957efa74d0131",
+			"encoding/json/v2":              "fd15a7415e6520ea4e4e507b9beb72e0e2f8dbf542f0b22c4562092e86409026",
+			"html/template":                 "0c3e0a0c737d647d72c7a8f8571131882c17f72a78c0a62568c6bd873a21f5ab",
+			"internal/godebugs":             "e37bd6284b69a14411325e2cb52d1f7b8bbb3be24d7e684dc894e32f53185e59",
+			"mime/multipart":                "3255c2ab43d62a15ce19cc0494edcd61f4375666c4393304b31c70d63a7810f6",
+			"net/http":                      "3083c50b258b99e1b26ef5ceb4379bc4f702a773351c2a748df7fdb6bcfabea7",
+			"net/http/internal/http2":       "f3fe08a1e8bb0425f1da0231bd046626d33d781ee00ceb172aec76f51dedba29",
+			"net/textproto":                 "3be0df3fdbd14806727a6f55f1100b9edc953cd6c3ed0aaddf0793d2ca48c369",
+			"os":                            "6fcb35528633479014875dcb58546a1ba912f2672bfc0339af556324c80a951b",
+			"runtime":                       "28aa07d108afaa90f748307e04f3dfebef6852a4985a651ba56df7defdd87cc0",
+			"testing":                       "628e2d844a514bc924f1a5f3da6cfa1e0a2b92e6c89ae30abcab54bd6ae7526c",
+		},
+	},
+	{
+		Label: "go1.27.2-dst.15 race",
+		Base:  "go1.27.2-dst.15",
+		Packages: map[string]string{
+			"internal/race":        "e80429a1ec958b17e616e45f07b6b6f6cd205a925896d2268f95cb19da585dc5",
+			"internal/runtime/sys": "508268ec7dd881dad867d5d8ccfe777ee12c3b68de5e5c19051311eea63251bc",
+			"runtime":              "401093aec564b86dd5ce75aab8e4082b020f386ff144d263e0e5f621796ca3c1",
+			"runtime/race":         "286c7e1ff0150cf2df8713e402d61c6a93c0f5f938bc3f220a6e35026782043c",
+			"sync/atomic":          "6f499cf4f7d682fbdf6ac4ded188a15d21c48854a80a04aaf5c08939f2c717e0",
+		},
+	},
+	{
+		Label: "go1.27.2-dst.15 plan9/amd64",
+		Base:  "go1.27.1-dst.13 plan9/amd64",
+		Packages: map[string]string{
+			"compress/flate":                "49ba38547a8744dbec4ad963d2af020ecaf985e5ff024213e39ad2600e08362d",
+			"crypto/internal/fips140/mlkem": "ec8a11c2b67ac5be9230ff71a7b66f8ae77f89ec7aa593c082232e21fce99597",
+			"crypto/tls":                    "6c7719835ce0f2ccb49ad96c6cd50c53e6858aee827ab6ea7dbf0398efb5eb19",
+			"encoding/json":                 "2913283d6caf96104f107f858be872ee9659af95ad6c8f1369c55fb284270ccb",
+			"encoding/json/internal":        "60c2411409d978525f9c78bed819455dfc3813e89c7b42e5204957efa74d0131",
+			"encoding/json/v2":              "fd15a7415e6520ea4e4e507b9beb72e0e2f8dbf542f0b22c4562092e86409026",
+			"html/template":                 "0c3e0a0c737d647d72c7a8f8571131882c17f72a78c0a62568c6bd873a21f5ab",
+			"internal/godebugs":             "e37bd6284b69a14411325e2cb52d1f7b8bbb3be24d7e684dc894e32f53185e59",
+			"mime/multipart":                "3255c2ab43d62a15ce19cc0494edcd61f4375666c4393304b31c70d63a7810f6",
+			"net/http":                      "3083c50b258b99e1b26ef5ceb4379bc4f702a773351c2a748df7fdb6bcfabea7",
+			"net/http/internal/http2":       "f3fe08a1e8bb0425f1da0231bd046626d33d781ee00ceb172aec76f51dedba29",
+			"net/textproto":                 "3be0df3fdbd14806727a6f55f1100b9edc953cd6c3ed0aaddf0793d2ca48c369",
+			"os":                            "3e5fdacb612562c884fbde8a0fd4bde7859075b312827d8c6a9c727930c7dc87",
+			"runtime":                       "429200df8a5604412eab8537fe8181c063b98acfaac5f9e3d4d706a868e9bb4c",
+			"testing":                       "628e2d844a514bc924f1a5f3da6cfa1e0a2b92e6c89ae30abcab54bd6ae7526c",
+		},
+	},
+	{
+		Label: "go1.27.2-dst.15 cgo0",
+		Base:  "go1.27.2-dst.15",
+		Packages: map[string]string{
+			"net":    "c80c61d75dd2dcd5aabe9241df9e929fea7d826edc702ef6157b0d47d50900bb",
+			"plugin": "a7621873f1d13b052288814d5e0c517f88d748c857168f080aa5e51e8c29a921",
+		},
+	},
+	{
+		Label: "go1.27.2-dst.15 dst",
+		Base:  "go1.27.2-dst.15",
+		Packages: map[string]string{
+			"crypto/internal/sysrand": "40f004f1405bd100aa2ba80cf760273b219d4ed917ef6ab8e5c916de5369f18e",
+			"internal/runtime/maps":   "c1ad78efb177dfc5cab631c5200dae7445c58f3bd1fec1c6c7c24f7c948a832b",
+			"internal/sync":           "068a9611d8af122a69baf9935a6bcde725954b6bf2487e6e9c0c828d92866a95",
+			"net":                     "f56f472bcfc20b44959c14dd2296ed4a302acbd402631f2115cf629c63996754",
+			"os":                      "8f3fb408d62215a303eec58fde46fedf4bac09781326df8fa7529537c91b1eca",
+			"os/signal":               "675fe77339e1fb6936ff10e593910db58e9e0af7d9868f930ca9180c6fcee521",
+			"runtime":                 "7fff93ed0dda4d0497d5b255fcc1bf45a311496098182d16b75b5d3ba6f6bae5",
+			"syscall":                 "acddbae294709beb040bd65c3384214f8153535d1d8af3169dbd32c2581e488d",
+			"testing":                 "2448a3af5e68c5f844e450d8bcc8dfdb8b458ecb00168b11b04954f318ef0c79",
+			"time":                    "057b80e75745c0f88423489a53959220ef1078ae732e8dd5fdbf802d4cbec53b",
+		},
+	},
+	{
+		Label: "go1.27.2-dst.15 dst race",
+		Base:  "go1.27.2-dst.15 dst",
+		Packages: map[string]string{
+			"internal/race":        "e80429a1ec958b17e616e45f07b6b6f6cd205a925896d2268f95cb19da585dc5",
+			"internal/runtime/sys": "508268ec7dd881dad867d5d8ccfe777ee12c3b68de5e5c19051311eea63251bc",
+			"internal/sync":        "3d70c31393537e325cdfda20117ffcc25d46c5bcf376caf3ec042212571fcccf",
+			"runtime":              "ceddc25691af5c52e20541104d49ed292510b43a3c66e19e04e5378281ca91f4",
+			"runtime/race":         "286c7e1ff0150cf2df8713e402d61c6a93c0f5f938bc3f220a6e35026782043c",
+			"sync":                 "49313795240ce33d2176080d525f23378006f7c72607a523c32a164cf304a4f4",
+			"sync/atomic":          "6f499cf4f7d682fbdf6ac4ded188a15d21c48854a80a04aaf5c08939f2c717e0",
 		},
 	},
 }

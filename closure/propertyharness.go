@@ -3,8 +3,8 @@ package closure
 import (
 	"go/types"
 
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 )

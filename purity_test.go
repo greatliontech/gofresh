@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // TestScanPureDirectives pins REQ-purity-directive: the scanner marks exactly the

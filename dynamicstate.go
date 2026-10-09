@@ -14,10 +14,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/generatedmark"
-	"golang.org/x/tools/go/packages"
 )
 
 // dynamicStateFact is one package's contribution to the shared-dynamic-state
@@ -913,6 +913,7 @@ var auditedSourceListing = auditset.VersionListing{
 		"golang.org/x/sys@v0.33.0", "golang.org/x/sys@v0.40.0",
 		"golang.org/x/sys@v0.43.0", "golang.org/x/sys@v0.45.0",
 		"golang.org/x/sys@v0.46.0", "golang.org/x/sys@v0.47.0",
+		"golang.org/x/sys@v0.48.0",
 	},
 	"gopkg.in/yaml.v3\x00gopkg.in/yaml.v3.structMap": {"gopkg.in/yaml.v3@v3.0.0", "gopkg.in/yaml.v3@v3.0.1"},
 }

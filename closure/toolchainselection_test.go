@@ -351,6 +351,8 @@ func TestListedSelectionsAreTheStatedSet(t *testing.T) {
 		{Suffix: " race", Flags: []string{"-race"}},
 		{Suffix: " plan9/amd64", Env: []string{"GOOS=plan9", "GOARCH=amd64"}},
 		{Suffix: " cgo0", Env: []string{"CGO_ENABLED=0"}},
+		{Suffix: " dst", Flags: []string{"-tags", "dst"}, Since: "go1.27.2-dst.15"},
+		{Suffix: " dst race", Flags: []string{"-tags", "dst", "-race"}, Since: "go1.27.2-dst.15"},
 	}
 	if !reflect.DeepEqual(listedSelections, want) {
 		t.Fatalf("listedSelections = %+v, want the stated set %+v", listedSelections, want)

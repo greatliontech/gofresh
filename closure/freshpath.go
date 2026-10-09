@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
 func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {

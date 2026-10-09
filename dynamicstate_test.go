@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"golang.org/x/tools/go/packages"
 )
 
 // writePinnedDepModule writes a module depending on golang.org/x/sync at the
