@@ -1303,8 +1303,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestClassificationRefusalNamesItsObservation"
   role: BINDING_ROLE_TESTS
@@ -1313,8 +1313,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRefusalClauseSurvivesSeparatorsInNames"
   role: BINDING_ROLE_TESTS
@@ -1323,8 +1323,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestAttributionIsOutsideTheInputsIdentity"
   role: BINDING_ROLE_TESTS
@@ -1343,8 +1343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestRefusalAttributionIsTheClauseSplitsComplement"
   role: BINDING_ROLE_TESTS
@@ -1353,8 +1353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.RefusalAttribution"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1363,8 +1363,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestConvertAttributionDirRewritesOnlyTheOperationForm"
   role: BINDING_ROLE_TESTS
@@ -1423,8 +1423,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestInModuleRefusedPathSpellsModuleRelative"
   role: BINDING_ROLE_TESTS
@@ -1433,8 +1433,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestEscapingLinkSpellsRelativeUnderASymlinkedPrefix"
   role: BINDING_ROLE_TESTS
@@ -1443,8 +1443,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMovedBracketMemberListIsTheAttribution"
   role: BINDING_ROLE_TESTS
@@ -1453,8 +1453,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-refusal-attribution"
-  content_hash: "52384b9e2e2018df9b8ed6e114abb865a8e7ea18627b90a38503486c662903a7"
-  source_hash: "a2eff0b21031d056d7a9a71c8bfe728fd9b709b4599ad7cbd9debc1f6629e4be"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestUnhashableInModuleMembersSpellModuleRelative"
   role: BINDING_ROLE_TESTS
@@ -1939,4 +1939,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestReadProducerLogClosesItsFile"
   role: BINDING_ROLE_TESTS
   shape_hash: "55482f2058897f64e3021a2eccc3860bfec2bcfbb0ddbbe982c7a709d8272a72"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-refusal-attribution"
+  content_hash: "a8a1c638ed2b199904426876f749656fd4be6cba47c39b8892c6f8d29f94075e"
+  source_hash: "a02807f703147c5442eade862331cbe8bc885935ff94a160d9cfd2464a005a4f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestMovedBracketRootSpelledLikeAMemberList"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9575a1726769d02082811c05934b86515159ddfaf4012aedbf1707f252b4f0ef"
 }

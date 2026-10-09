@@ -550,3 +550,109 @@ func TestMovedBracketMemberListIsTheAttribution(t *testing.T) {
 		}
 	}
 }
+
+// TestMovedBracketRootSpelledLikeAMemberList pins the root's quoting
+// (REQ-inputs-refusal-attribution): a bracket root whose own name
+// carries the member list's framing travels quoted, as a member does,
+// so the clause keeps the root whole — the split consumes the quoted
+// root and reads the list after it — and a sibling root's clause
+// differs; the whole-reason forms that collided unquoted (`fix [added:
+// x` and `fix [added: x] y` before a member list) split at the list.
+func TestMovedBracketRootSpelledLikeAMemberList(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	for _, root := range []string{"fix", "fix [added: x]", "fix [added: x", "fix [added: x] y", `a"b`, "a]b", "a; b", `"x"`} {
+		if err := os.MkdirAll(filepath.Join(moduleDir, root), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(moduleDir, root, "a.txt"), []byte("a"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, root := range []string{"fix [added: x]", "fix [added: x", "fix [added: x] y", `a"b`, "a]b", "a; b", `"x"`} {
+		bracket := testBracket(t, moduleDir, root)
+		if err := os.WriteFile(filepath.Join(moduleDir, root, "b.txt"), []byte("b"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		state, err := FromTestLog([]byte("open ../"+root+"/a.txt\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "observation bracket moved: " + strconv.Quote(root)
+		if state.Reason != want || state.Attribution != "added: b.txt" {
+			t.Fatalf("root %q: reason %q attributed %q, want %q and the member list", root, state.Reason, state.Attribution, want)
+		}
+		clause, attribution, ok := splitBracketAttribution(state.Reason + " [" + state.Attribution + "]")
+		if !ok || clause != want || attribution != "added: b.txt" {
+			t.Fatalf("root %q: the whole reason split to %q / %q (%v), want the quoted root whole", root, clause, attribution, ok)
+		}
+		if clause == "observation bracket moved: fix" {
+			t.Fatalf("root %q collided with the sibling root fix", root)
+		}
+		// The quoted root's list must be a well-formed attribution:
+		// an unterminated or unlabelled list after the root refuses
+		// the split whole, never yielding a garbage attribution.
+		for _, malformed := range []string{want + " [added: b.txt", want + " [junk]", want + " []"} {
+			if c, a, ok := splitBracketAttribution(malformed); ok || c != malformed || a != "" {
+				t.Fatalf("root %q: the malformed %q split to %q / %q (%v), want refused whole", root, malformed, c, a, ok)
+			}
+		}
+	}
+	// A reason composed before roots were quoted — a bare root beginning
+	// with a quote the quoted-root arm cannot parse — splits by the bare
+	// scan, the pre-quoting answer; one whose bare root BEGINS with a
+	// valid quoted literal followed by more name is refused whole (the
+	// recorded choice: falling through would let a quoted root followed
+	// by a malformed list mis-split).
+	if c, a, ok := splitBracketAttribution(`observation bracket moved: "a [added: b]`); !ok || c != `observation bracket moved: "a` || a != "added: b" {
+		t.Fatalf("a pre-quoting reason with a stray quote split to %q / %q (%v), want the bare scan's answer", c, a, ok)
+	}
+	if legacy := `observation bracket moved: "x" y [added: b]`; true {
+		if c, a, ok := splitBracketAttribution(legacy); ok || c != legacy || a != "" {
+			t.Fatalf("a pre-quoting reason whose root begins with a quoted literal split to %q / %q (%v), want refused whole", c, a, ok)
+		}
+	}
+	// The exported spelling is the composer's: a plain root bare, a
+	// framing-bearing one quoted — a consumer's re-key reads it.
+	if MovedBracketClause("fix") != "observation bracket moved: fix" || MovedBracketClause("fix [added: x]") != `observation bracket moved: "fix [added: x]"` {
+		t.Fatalf("MovedBracketClause spells %q / %q", MovedBracketClause("fix"), MovedBracketClause("fix [added: x]"))
+	}
+	// The re-key is idempotent: a pre-quoting bare key of a
+	// framing-bearing root re-keys to the quoted spelling; a canonical
+	// quoted key and a plain root's key come back unchanged, however
+	// often applied; a foreign clause is untouched; the recorded
+	// ambiguity — a bare root that is itself a quoted literal of a
+	// framing-bearing name — reads as canonical.
+	for _, tc := range []struct{ stored, want string }{
+		{"observation bracket moved: fix [added: x]", `observation bracket moved: "fix [added: x]"`},
+		{`observation bracket moved: "fix [added: x]"`, `observation bracket moved: "fix [added: x]"`},
+		{"observation bracket moved: fix", "observation bracket moved: fix"},
+		{"observation bracket moved: a; b", `observation bracket moved: "a; b"`},
+		{"observation bracket moved", "observation bracket moved"},
+		// A stored bare root literally named with quotes around a plain
+		// name is not canonical (the spelling would not quote `fix`), so
+		// it re-keys to the quoted spelling of its own quoted name.
+		{`observation bracket moved: "fix"`, `observation bracket moved: "\"fix\""`},
+		{"open /etc/passwd: outside the module", "open /etc/passwd: outside the module"},
+		// The recorded ambiguity: a legacy bare root literally named
+		// `"fix [added: x]"` is the same text as the canonical key of
+		// `fix [added: x]`, so it reads as canonical and is not re-keyed.
+		{`observation bracket moved: "fix [added: x]"`, `observation bracket moved: "fix [added: x]"`},
+	} {
+		got := CanonicalMovedBracketClause(tc.stored)
+		if got != tc.want || CanonicalMovedBracketClause(got) != got {
+			t.Fatalf("CanonicalMovedBracketClause(%q) = %q (again %q), want %q and a fixed point", tc.stored, got, CanonicalMovedBracketClause(got), tc.want)
+		}
+	}
+	// The sibling root's own clause, unquoted: a plain name travels bare.
+	bracket := testBracket(t, moduleDir, "fix")
+	if err := os.WriteFile(filepath.Join(moduleDir, "fix", "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, err := FromTestLog([]byte("open ../fix/a.txt\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Reason != "observation bracket moved: fix" {
+		t.Fatalf("the plain root's clause %q, want it bare", state.Reason)
+	}
+}

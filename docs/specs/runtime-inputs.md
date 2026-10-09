@@ -955,14 +955,16 @@ reason's class phrase after a ` — ` separator, as does an attribution a
 consumer pastes after a clause, and a moved-bracket refusal's, where a
 consumer meets it whole, follows its root after a ` [` as the bracketed
 member list running to the reason's end (a member whose name carries
-the list's own framing travels quoted);
+the list's own framing travels quoted, and so does the root — one
+quoting rule, so a root's own segment is never read as the list);
 the split recognises the one well-formed suffix — the operation, its
 quoted name, and its quoted directory, or `recorded path`, its quoted
 spelling, and its quoted target, running to the reason's end, or the
-member list's labelled parts inside one bracket pair, read from the
-first ` [` whose suffix parses (a member whose own name carries the
-form garbles the clause from that member on, the same on both sides
-of a consumer's match — recorded); a quoted
+member list's labelled parts inside one bracket pair read after the
+root — a root beginning with a quote is read as quoted exactly when it
+parses as one Go quoted string, consumed whole; a bare root up to the
+first ` [` whose suffix is the list — running to the reason's end, so
+no root's or member's own segment is read as the list; a quoted
 string carries no unescaped quote, so a separator inside a quoted name
 or directory, or inside the refused path of an attributed reason, never
 parses as the suffix — the one residual of the text channel is an
@@ -971,7 +973,12 @@ shape (a path deliberately named with a quote), whose clause is then the
 truncated one and whose attribution the fake tail, recorded and
 accepted. The library exposes the split as `RefusalClause` and its
 complement `RefusalAttribution` (the suffix without its separator,
-empty where no well-formed suffix follows a separator), the one
+empty where no well-formed suffix follows a separator), the
+moved-bracket clause's composer `MovedBracketClause` and the idempotent
+re-key `CanonicalMovedBracketClause` a consumer applies to a stored
+clause composed before roots were quoted (a bare root whose own name is
+a valid Go quoted literal of a framing-bearing name reads as canonical
+— recorded), the one
 implementation a consumer keying on the clause — an exemption record, a
 disposition table — or recording the attribution beside it reads so it
 keeps matching; and such a consumer refuses a record that names a

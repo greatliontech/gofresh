@@ -213,7 +213,7 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 	}
 	for i, root := range b.roots {
 		if current.roots[i].digest != root.digest {
-			return false, movedBracketClause + ": " + root.id.displayPath() + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
+			return false, MovedBracketClause(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
 		}
 	}
 	return false, movedBracketClause, nil
@@ -290,12 +290,52 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 // reason carrying framing bytes or invalid UTF-8 would fail manifest
 // validation — turning an attributable refusal into a hard error, the
 // wrong direction for advisory text — so an unrepresentable name
-// travels quoted.
+// travels quoted. This is the reason-safety rule; memberListName is
+// the list-framing rule — two predicates by design, never one.
 func representableReasonName(name string) string {
 	if utf8.ValidString(name) && !strings.ContainsAny(name, "\x00\r\n") {
 		return name
 	}
 	return strconv.Quote(name)
+}
+
+// MovedBracketClause is the clause of the refusal a moved observation
+// bracket raises for the root named by its display path (a
+// module-relative slash path, or an absolute host path's own clean
+// spelling): the root travels under the members' quoting rule
+// (memberListName) — a root whose own name carries the list's framing
+// is a Go quoted string, which splitBracketAttribution's quoted-root
+// arm consumes whole, so the split never reads a root's segment as the
+// list — and a plain root travels bare. A consumer keying records on
+// the clause (RefusalClause) re-keys a stored clause through
+// CanonicalMovedBracketClause, never through this composer over the
+// stored root text — a quoted key would be quoted again
+// (REQ-inputs-refusal-attribution).
+func MovedBracketClause(root string) string {
+	return movedBracketClause + ": " + memberListName(root)
+}
+
+// CanonicalMovedBracketClause is the re-key a consumer applies to a
+// stored moved-bracket clause composed before roots were quoted: a
+// clause whose root text parses whole as a Go quoted literal of a name
+// this spelling quotes is already canonical and comes back unchanged
+// (the rule is idempotent); any other root text is composed afresh,
+// so a bare root carrying the list's framing re-keys to its quoted
+// spelling and a plain root stays. A clause not of the moved-bracket
+// form comes back unchanged. The one shape the text cannot resolve —
+// a bare root whose own name is a valid Go quoted literal of a
+// framing-bearing name — reads as canonical and is not re-keyed, so
+// its exemption stops matching the quoted spelling the producer now
+// emits: recorded, the text channel's residual class.
+func CanonicalMovedBracketClause(clause string) string {
+	root, found := strings.CutPrefix(clause, movedBracketClause+": ")
+	if !found {
+		return clause
+	}
+	if name, err := strconv.Unquote(root); err == nil && memberListName(name) == root {
+		return clause
+	}
+	return MovedBracketClause(root)
 }
 
 // memberListName renders one member of a moved-bracket attribution's
@@ -304,7 +344,9 @@ func representableReasonName(name string) string {
 // would pair with a later quoted member's — so an unquoted member
 // never contains a byte the split reads, and every quoted one is a Go
 // quoted string the split consumes whole
-// (REQ-inputs-refusal-attribution).
+// (REQ-inputs-refusal-attribution). The moved-bracket root travels
+// under this rule too; representableReasonName is the separate
+// reason-safety rule.
 func memberListName(name string) string {
 	if !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n[]\"") || strings.Contains(name, "; ") {
 		return strconv.Quote(name)

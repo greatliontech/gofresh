@@ -1997,15 +1997,32 @@ func bracketAttributionParts(inner string) []string {
 }
 
 // splitBracketAttribution is the split for the moved-bracket reason:
-// the clause before the FIRST " [" whose suffix is one well-formed
-// member list, the suffix without its brackets. The split reads from the
-// prefix, never from the last bracket, so a member whose own name
-// carries the form garbles the clause from that member on — the
-// recorded residual (REQ-inputs-refusal-attribution), the same both
-// sides of a consumer's match see.
+// the clause is the root — a quoted root (memberListName quoted it:
+// its own name carries the list's framing) consumed whole as one Go
+// quoted string, a bare root up to the first " [" whose suffix is one
+// well-formed member list — and the attribution the list without its
+// brackets (REQ-inputs-refusal-attribution). A root quote the arm
+// cannot parse as a Go quoted string falls through to the bare scan,
+// the member arm's own tolerance of a stray quote; a bare root composed
+// before roots were quoted that BEGINS with a valid quoted literal
+// followed by more name is refused whole — recorded, since falling
+// through there would let a quoted root followed by a malformed list
+// mis-split.
 func splitBracketAttribution(reason string) (clause, attribution string, ok bool) {
 	if !strings.HasPrefix(reason, movedBracketClause) {
 		return reason, "", false
+	}
+	// A quoted root (its own name carries the list's framing) is one
+	// Go quoted string after the clause's prefix: the split consumes it
+	// whole and reads the list after it, never a " [" inside it.
+	if rest, found := strings.CutPrefix(reason, movedBracketClause+": \""); found {
+		if root, err := strconv.QuotedPrefix("\"" + rest); err == nil {
+			clause = movedBracketClause + ": " + root
+			if suffix := reason[len(clause):]; strings.HasPrefix(suffix, " [") && bracketAttributionWellFormed(suffix[1:]) {
+				return clause, suffix[2 : len(suffix)-1], true
+			}
+			return reason, "", false
+		}
 	}
 	for i := strings.Index(reason, " ["); i >= 0; {
 		if suffix := reason[i+1:]; bracketAttributionWellFormed(suffix) {
