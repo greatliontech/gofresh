@@ -2014,6 +2014,14 @@ in their repos.
       reductions with caps 5 and 8 and different remainders: one rule, a
       per-reader bound) and the "not a stipulator repository" message ×4
       re-deriving manifest absence; 225 and 248 land together.)
+      (270: grows — the decomposition's editorial residue, stipulator
+      docs/issues/decomposition-editorial-pass.md: the dangling
+      antecedents across the splits, a base reading as an exceptionless
+      universal, paragraphs holding several obligations under one
+      keyword (further splits with their witnesses already distinct),
+      a duplication across sub-paragraphs, the loader prose against its
+      gap's reason, six bindings pinning a rule no sentence of their
+      family states; the doc deletes at close.)
       Audit 287 (2026-09-29): grows — evidence.md:549–565 narrates the
       version chain (process record in the spec); the cap census is
       ten across six packages (execute.go:40, envreport.go:48/:55,
