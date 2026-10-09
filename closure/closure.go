@@ -636,7 +636,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 			return "", nil, fmt.Errorf("closure: cgo include root outside package dir: %s", root)
 		}
 		var err error
-		files, err = allPackageFiles(p.Dir)
+		files, err = allPackageFiles(h.contextErr, p.Dir)
 		if err != nil {
 			return "", nil, err
 		}
@@ -653,7 +653,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		// downgrade arm; the subject is unverifiable regardless via the
 		// package's non-standard-assembly effect).
 		var err error
-		files, err = allPackageFiles(p.Dir)
+		files, err = allPackageFiles(h.contextErr, p.Dir)
 		if err != nil {
 			return "", nil, err
 		}
@@ -733,11 +733,24 @@ func memberKinds(p listPkg) (compiled, embedded, canonical map[string]bool) {
 	return compiled, embedded, canonical
 }
 
-func allPackageFiles(dir string) ([]string, error) {
+// walkEntryForTest, when set, sees every entry the package-file walk
+// visits after its check — the seam a cancellation pin cancels from.
+var walkEntryForTest func(path string)
+
+func allPackageFiles(check func() error, dir string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		// The check point: the package's own cancellation check
+		// (Hasher.contextErr) before every entry, so a cancelled walk
+		// ends at the next entry answering the cancellation.
+		if err := check(); err != nil {
+			return err
+		}
+		if walkEntryForTest != nil {
+			walkEntryForTest(path)
 		}
 		if d.IsDir() {
 			return nil

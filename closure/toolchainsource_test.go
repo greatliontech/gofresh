@@ -34,31 +34,31 @@ func TestDigestFilesFollowsNamesAndBytes(t *testing.T) {
 	write("a.go", "package p\n")
 	write("b.go", "package p\n\nfunc B() {}\n")
 	write("c.s", "TEXT ·x(SB),0,$0\n")
-	base, err := digestFiles(dir, []string{"a.go", "b.go", "c.s"})
+	base, err := digestFiles(context.Background(), dir, []string{"a.go", "b.go", "c.s"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := digestFiles(dir, []string{"a.go", "b.go", "c.s"}); again != base {
+	if again, _ := digestFiles(context.Background(), dir, []string{"a.go", "b.go", "c.s"}); again != base {
 		t.Fatal("the digest is not a function of the files")
 	}
-	if reordered, _ := digestFiles(dir, []string{"c.s", "a.go", "b.go"}); reordered == base {
+	if reordered, _ := digestFiles(context.Background(), dir, []string{"c.s", "a.go", "b.go"}); reordered == base {
 		t.Fatal("file order is part of the digest; the caller sorts, so a reordering must move it")
 	}
-	if fewer, _ := digestFiles(dir, []string{"a.go", "b.go"}); fewer == base {
+	if fewer, _ := digestFiles(context.Background(), dir, []string{"a.go", "b.go"}); fewer == base {
 		t.Fatal("dropping a file left the digest unchanged")
 	}
 	write("b.go", "package p\n\nfunc B() int { return 1 }\n")
-	if edited, _ := digestFiles(dir, []string{"a.go", "b.go", "c.s"}); edited == base {
+	if edited, _ := digestFiles(context.Background(), dir, []string{"a.go", "b.go", "c.s"}); edited == base {
 		t.Fatal("editing a file left the digest unchanged")
 	}
-	if _, err := digestFiles(dir, []string{"a.go", "missing.go"}); err == nil {
+	if _, err := digestFiles(context.Background(), dir, []string{"a.go", "missing.go"}); err == nil {
 		t.Fatal("an unreadable file digested instead of refusing")
 	}
 	// The name is part of the content: a file renamed with the same
 	// bytes moves the digest (the walk reads names).
 	write("d.go", "package p\n")
-	one, _ := digestFiles(dir, []string{"a.go"})
-	other, _ := digestFiles(dir, []string{"d.go"})
+	one, _ := digestFiles(context.Background(), dir, []string{"a.go"})
+	other, _ := digestFiles(context.Background(), dir, []string{"d.go"})
 	if one == other {
 		t.Fatal("two files of identical bytes under different names digest alike")
 	}
@@ -359,7 +359,7 @@ func TestListingErrorsRefuseByNameAndTheEmptySelectionDigests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want, _ := digestFiles(empty, nil); d.Packages["plugin"] != want {
+	if want, _ := digestFiles(ctx, empty, nil); d.Packages["plugin"] != want {
 		t.Fatalf("the empty selection digests %q, want the empty sequence %q", d.Packages["plugin"], want)
 	}
 }
@@ -599,7 +599,7 @@ func TestToolchainSourceMemoRelistsAMovedTree(t *testing.T) {
 		return d
 	}
 	first := read()
-	if want, _ := digestFiles(pkgDir, []string{"strings.go"}); first.Packages["strings"] != want || listings != 1 {
+	if want, _ := digestFiles(ctx, pkgDir, []string{"strings.go"}); first.Packages["strings"] != want || listings != 1 {
 		t.Fatalf("first read: digest %q (want %q), %d listings", first.Packages["strings"], want, listings)
 	}
 	wantListings := 1
@@ -620,14 +620,14 @@ func TestToolchainSourceMemoRelistsAMovedTree(t *testing.T) {
 	if listings != wantListings+1 {
 		t.Fatalf("a moved tree served the stale listing (%d listings)", listings)
 	}
-	if want, _ := digestFiles(pkgDir, []string{"other.go", "strings.go"}); third.Packages["strings"] != want || third.Packages["strings"] == first.Packages["strings"] {
+	if want, _ := digestFiles(ctx, pkgDir, []string{"other.go", "strings.go"}); third.Packages["strings"] != want || third.Packages["strings"] == first.Packages["strings"] {
 		t.Fatalf("the digest did not follow the moved tree: %q, want %q", third.Packages["strings"], want)
 	}
 	// A selected file edited in place: its stamp re-lists (the same
 	// files selected) and the digest follows the new bytes.
 	write("strings.go", "package strings\n\nfunc Edited() {}\n")
 	fourth := read()
-	if want, _ := digestFiles(pkgDir, []string{"other.go", "strings.go"}); fourth.Packages["strings"] != want || fourth.Packages["strings"] == third.Packages["strings"] {
+	if want, _ := digestFiles(ctx, pkgDir, []string{"other.go", "strings.go"}); fourth.Packages["strings"] != want || fourth.Packages["strings"] == third.Packages["strings"] {
 		t.Fatalf("an edited selected file left the digest: %q, want %q", fourth.Packages["strings"], want)
 	}
 }

@@ -51,6 +51,11 @@ performance claims.
 
 Repeated content hashing is required by the
 source-audit contract and cannot be replaced by metadata-only reuse. Live heap
-retention is not established by an allocation profile. Cancellation gaps in
-source hashing/index traversal are separate from these background-context tests
-and need their own causal verification before a production change.
+retention is not established by an allocation profile. Cancellation in
+source hashing and index traversal is separate from these background-context
+tests: the digest traversal checks its context before every file read and
+the package-file walk at every entry
+(REQ-closure-observability-toolchain-key; closure/toolchainsource_cancel_test.go
+pins the exits), so a construction cancelled during either ends at the next
+boundary; the memo's stamp walks — judging a record, writing one — are
+unchecked, each bounded by one walk of the listed directories.

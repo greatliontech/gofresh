@@ -266,14 +266,29 @@ func stampsCurrent(l surfaceListing) bool {
 	return true
 }
 
+// digestReadForTest, when set, sees every file the digest traversal is
+// about to read — the seam a cancellation pin cancels from.
+var digestReadForTest func(name string)
+
 // digestFiles digests the named files of dir in name order: each
 // contributes its name, NUL, its bytes, NUL — so a renamed, reordered,
 // or re-split file moves the digest as a changed one does. An
 // unreadable file is an error, never a skipped one: a reading short one
-// file would admit source the walk never read.
-func digestFiles(dir string, files []string) (string, error) {
+// file would admit source the walk never read. The context is checked
+// before every file read (a read in progress is never interrupted —
+// the bound is one file), so a cancelled construction ends at the next
+// file boundary answering the cancellation.
+func digestFiles(ctx context.Context, dir string, files []string) (string, error) {
 	h := sha256.New()
 	for _, name := range files {
+		// The check point: a cancelled traversal exits at the next file
+		// boundary, reading no further file.
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if digestReadForTest != nil {
+			digestReadForTest(name)
+		}
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return "", err
@@ -314,10 +329,10 @@ func listSurface(std []listing.Package) (surfaceListing, error) {
 
 // digestListing reads and digests every listed package's selected
 // files; an unreadable file refuses naming the package.
-func digestListing(l surfaceListing) (sourceDigests, error) {
+func digestListing(ctx context.Context, l surfaceListing) (sourceDigests, error) {
 	d := sourceDigests{Packages: map[string]string{}}
 	for _, p := range l.Packages {
-		digest, err := digestFiles(p.Dir, p.Files)
+		digest, err := digestFiles(ctx, p.Dir, p.Files)
 		if err != nil {
 			return sourceDigests{}, fmt.Errorf("%s: %w", p.ImportPath, err)
 		}
@@ -374,7 +389,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		}
 		cachefile.Store(sourceDigestsDirName, scope, "listing", l)
 	}
-	return digestListing(l)
+	return digestListing(ctx, l)
 }
 
 // toolchainSourceRow is one listing: the label names the toolchain and

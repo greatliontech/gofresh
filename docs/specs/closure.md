@@ -1743,13 +1743,23 @@ they do under the default selection), and the listing hosts list a stated
 selection set — their own default, the race seams, cgo off, and the
 platforms the fleet analyzes for from another host. The listing is memoized
 per
-selection scope — the explicit flags and the pass snapshot's identity —
-and a record serves only while every listed directory — a package's and
-every subdirectory an embedded file lives in — still carries exactly the
+selection scope — the record's version, the explicit flags, the pass
+snapshot's identity and the surface seeds' digest, so a rule whose seeds
+moved misses every record written before it — and a record serves only
+while every listed directory — a package's and every subdirectory an
+embedded file lives in — still carries exactly the
 entries it was listed over, each with its recorded size, modification time
 and change time (a platform whose stat carries no change time never serves
 the memo): a tree moved under a scope re-lists, and the digests themselves
-are read from the files on every construction, never served. The recording
+are read from the files on every construction, never served; the digest
+traversal checks its context before every file read, so a construction
+cancelled during it ends at the next file boundary — the file the
+cancellation lands on is the last one read; a read in progress is never
+interrupted — answering the cancellation, and the package-file walk the
+member hashing and the analyzer share runs the package's cancellation
+check at every entry the same way; the stamp walks — the one that judges
+a memo record and the one that writes it — are unchecked, each bounded
+by one walk of the listed directories. The recording
 skew identity (REQ-fresh-toolchain-skew) stays by version: a measurement's
 cache key, not an admission. The verdict's rendering is additionally served
 to consumers as one owned notice — the refusing axis named (the moved keys

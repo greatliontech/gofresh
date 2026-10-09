@@ -1290,7 +1290,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				// The blindspot's bytes ride the maximal hash; the
 				// analyzer keeps only the escape checks — error
 				// conditions — and the widen.
-				all, err := allPackageFiles(idx.meta.Dir)
+				all, err := allPackageFiles(a.contextErr, idx.meta.Dir)
 				if err != nil {
 					return err
 				}
