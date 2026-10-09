@@ -12,8 +12,8 @@ import (
 	"github.com/greatliontech/gofresh/guard"
 )
 
-// fullFingerprint is a code-result fingerprint with every optional key
-// present.
+// fullFingerprint is a code-result fingerprint with every pre-applicability
+// optional key present, pinning the existing record's unchanged bytes.
 func fullFingerprint() Fingerprint {
 	return Fingerprint{
 		MaximalClosure:       "0123456789abcdef0123456789abcdef",
@@ -98,6 +98,7 @@ func TestFingerprintRecordIsTheFleetForm(t *testing.T) {
 	shape(reflect.TypeFor[guard.Guards](), "Toolchain string", "BuildConfig string", "Machine string", "RuntimeConfig string")
 	shape(reflect.TypeFor[ObservationProof](), "Strategy string", "Subject gofresh.Subject", "Observable bool", "Reason string", "Evidence string")
 	shape(reflect.TypeFor[Subject](), "Package string", "Symbol string")
+	shape(reflect.TypeFor[InertTestVariantApplicability](), "Strategy string", "TestVariantClosure string")
 	// The form owns its escaping: a parent encoder's escaping setting
 	// leaves the bytes — and the value read back — unchanged.
 	escaped := fullFingerprint()
@@ -157,6 +158,9 @@ func genFingerprint(r *rand.Rand) Fingerprint {
 		}
 		f.ObservationProof = ObservationProof{Strategy: pick(ObservationRTA, "s"), Subject: Subject{Package: pick("p", ""), Symbol: pick("s", "")}, Observable: observable, Reason: reason, Evidence: pick("", "e")}
 	}
+	if r.Intn(2) == 0 {
+		f.InertTestVariantApplicability = InertTestVariantApplicability{pick(InertTestVariantExtension, "future", "a<&\u2028"), pick("v1", "v2", "b<&\u2029")}
+	}
 	return f
 }
 
@@ -168,7 +172,8 @@ func genFingerprint(r *rand.Rand) Fingerprint {
 func TestFingerprintRecordRoundTrips(t *testing.T) {
 	r := rand.New(rand.NewSource(274))
 	optional := map[string]func(Fingerprint) string{
-		"machine": func(f Fingerprint) string { return f.Guards.Machine }, "runtimeConfig": func(f Fingerprint) string { return f.Guards.RuntimeConfig },
+		"inertTestVariantApplicability": func(f Fingerprint) string { return f.InertTestVariantApplicability.Strategy },
+		"machine":                       func(f Fingerprint) string { return f.Guards.Machine }, "runtimeConfig": func(f Fingerprint) string { return f.Guards.RuntimeConfig },
 		"observationAssertion": func(f Fingerprint) string { return f.ObservationAssertion }, "purityAssertion": func(f Fingerprint) string { return f.PurityAssertion },
 		"dynamicStateVouches": func(f Fingerprint) string { return f.DynamicStateVouches }, "singleSubjectDischarges": func(f Fingerprint) string { return f.SingleSubjectDischarges },
 		"packageProcessDischarges": func(f Fingerprint) string { return f.PackageProcessDischarges }, "dynamicStateStrategy": func(f Fingerprint) string { return f.DynamicStateStrategy },

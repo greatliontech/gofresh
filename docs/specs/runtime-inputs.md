@@ -73,6 +73,10 @@ process receipt or supported subject by itself.
 An applicability transformation checks support against the original recorded
 fingerprint before applying its independently justified change; it does not
 rewrite the support identity to claim a different producing test variant.
+Repeated inert extensions retain that same original fingerprint and manifest;
+the independently licensed effective compartment never enters the producing
+subject-support identity. The method identity and manifest version remain
+unchanged by such an extension.
 
 The combined digest is the first 32 lowercase hexadecimal characters of SHA-256
 over these UTF-8 lines in order, each ending with LF: `version V`; when support

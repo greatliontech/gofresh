@@ -162,8 +162,8 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 
 // TestFingerprintDataShape pins the fingerprint as exported data — every
 // constituent an exported field of the stated type, in order — whose
-// only behaviour is its record form: the encoder and the validity
-// ladder on the value, the decoder on the pointer, nothing else
+// behaviour is its record form and explicit effective-compartment accessor:
+// the encoder and validity ladder on the value, the decoder on the pointer
 // (REQ-fresh-fingerprint-data, REQ-fresh-fingerprint-record).
 func TestFingerprintDataShape(t *testing.T) {
 	typeOf := reflect.TypeFor[Fingerprint]()
@@ -172,6 +172,7 @@ func TestFingerprintDataShape(t *testing.T) {
 		typ  reflect.Type
 	}{
 		{"MaximalClosure", reflect.TypeFor[string]()}, {"TestVariantClosure", reflect.TypeFor[string]()},
+		{"InertTestVariantApplicability", reflect.TypeFor[InertTestVariantApplicability]()},
 		{"ObservationAssertion", reflect.TypeFor[string]()}, {"ObservationProof", reflect.TypeFor[ObservationProof]()},
 		{"Guards", reflect.TypeFor[guard.Guards]()}, {"PurityAssertion", reflect.TypeFor[string]()},
 		{"DynamicStateVouches", reflect.TypeFor[string]()}, {"SingleSubjectDischarges", reflect.TypeFor[string]()},
@@ -195,11 +196,11 @@ func TestFingerprintDataShape(t *testing.T) {
 		}
 		return names
 	}
-	if got := methods(typeOf); !reflect.DeepEqual(got, []string{"MarshalJSON", "Validate"}) {
-		t.Fatalf("Fingerprint value methods = %v, want the record form alone", got)
+	if got := methods(typeOf); !reflect.DeepEqual(got, []string{"EffectiveTestVariantClosure", "MarshalJSON", "Validate"}) {
+		t.Fatalf("Fingerprint value methods = %v, want record form and effective compartment", got)
 	}
-	if got := methods(reflect.PointerTo(typeOf)); !reflect.DeepEqual(got, []string{"MarshalJSON", "UnmarshalJSON", "Validate"}) {
-		t.Fatalf("Fingerprint pointer methods = %v, want the record form alone", got)
+	if got := methods(reflect.PointerTo(typeOf)); !reflect.DeepEqual(got, []string{"EffectiveTestVariantClosure", "MarshalJSON", "UnmarshalJSON", "Validate"}) {
+		t.Fatalf("Fingerprint pointer methods = %v, want record form and effective compartment", got)
 	}
 }
 

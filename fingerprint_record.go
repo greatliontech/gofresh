@@ -19,23 +19,24 @@ import (
 // key set and its order are contract — a consumer derives record names
 // from these bytes.
 type fingerprintRecord struct {
-	MaximalClosure           string                  `json:"maximalClosure"`
-	TestVariantClosure       string                  `json:"testVariantClosure"`
-	Toolchain                string                  `json:"toolchain"`
-	BuildConfig              string                  `json:"buildConfig"`
-	Machine                  string                  `json:"machine,omitempty"`
-	RuntimeConfig            string                  `json:"runtimeConfig,omitempty"`
-	ObservationAssertion     string                  `json:"observationAssertion,omitempty"`
-	ObservationProof         *observationProofRecord `json:"observationProof,omitempty"`
-	PurityAssertion          string                  `json:"purityAssertion,omitempty"`
-	DynamicStateVouches      string                  `json:"dynamicStateVouches,omitempty"`
-	SingleSubjectDischarges  string                  `json:"singleSubjectDischarges,omitempty"`
-	PackageProcessDischarges string                  `json:"packageProcessDischarges,omitempty"`
-	DynamicStateStrategy     string                  `json:"dynamicStateStrategy,omitempty"`
-	ClosureStrategy          string                  `json:"closureStrategy,omitempty"`
-	RuntimeInputs            string                  `json:"runtimeInputs,omitempty"`
-	RuntimeDigest            string                  `json:"runtimeDigest,omitempty"`
-	ResultKind               Kind                    `json:"resultKind"`
+	MaximalClosure                string                               `json:"maximalClosure"`
+	TestVariantClosure            string                               `json:"testVariantClosure"`
+	Toolchain                     string                               `json:"toolchain"`
+	BuildConfig                   string                               `json:"buildConfig"`
+	Machine                       string                               `json:"machine,omitempty"`
+	RuntimeConfig                 string                               `json:"runtimeConfig,omitempty"`
+	ObservationAssertion          string                               `json:"observationAssertion,omitempty"`
+	ObservationProof              *observationProofRecord              `json:"observationProof,omitempty"`
+	PurityAssertion               string                               `json:"purityAssertion,omitempty"`
+	DynamicStateVouches           string                               `json:"dynamicStateVouches,omitempty"`
+	SingleSubjectDischarges       string                               `json:"singleSubjectDischarges,omitempty"`
+	PackageProcessDischarges      string                               `json:"packageProcessDischarges,omitempty"`
+	DynamicStateStrategy          string                               `json:"dynamicStateStrategy,omitempty"`
+	ClosureStrategy               string                               `json:"closureStrategy,omitempty"`
+	RuntimeInputs                 string                               `json:"runtimeInputs,omitempty"`
+	RuntimeDigest                 string                               `json:"runtimeDigest,omitempty"`
+	InertTestVariantApplicability *inertTestVariantApplicabilityRecord `json:"inertTestVariantApplicability,omitempty"`
+	ResultKind                    Kind                                 `json:"resultKind"`
 }
 
 // observationProofRecord is the proof's record form: the subject
@@ -55,8 +56,13 @@ type observationProofRecord struct {
 // two kinds (zero is a recording written without one), and a code-result
 // fingerprint carries no measurement guard (a machine or
 // runtime-configuration value on a code-result recording is internally
-// inconsistent, REQ-guard-selective-capture). A refusal names the fault.
+// inconsistent, REQ-guard-selective-capture). A non-zero applicability endpoint
+// carries both required values; unknown non-empty strategies remain readable.
+// A refusal names the fault.
 func (f Fingerprint) Validate() error {
+	if a := f.InertTestVariantApplicability; a != (InertTestVariantApplicability{}) && (a.Strategy == "" || a.TestVariantClosure == "") {
+		return errors.New("gofresh: inert test-variant applicability requires strategy and testVariantClosure")
+	}
 	return validateRecordedKind(f)
 }
 
@@ -95,6 +101,9 @@ func (f Fingerprint) MarshalJSON() ([]byte, error) {
 			Reason:     p.Reason,
 			Evidence:   p.Evidence,
 		}
+	}
+	if a := f.InertTestVariantApplicability; a != (InertTestVariantApplicability{}) {
+		rec.InertTestVariantApplicability = &inertTestVariantApplicabilityRecord{a.Strategy, a.TestVariantClosure}
 	}
 	return json.Marshal(rec)
 }
@@ -153,6 +162,9 @@ func (f *Fingerprint) UnmarshalJSON(data []byte) error {
 			Reason:     p.Reason,
 			Evidence:   p.Evidence,
 		}
+	}
+	if a := rec.InertTestVariantApplicability; a != nil {
+		decoded.InertTestVariantApplicability = InertTestVariantApplicability{a.Strategy, a.TestVariantClosure}
 	}
 	if err := decoded.Validate(); err != nil {
 		return err
@@ -260,4 +272,34 @@ func uniqueObjectFields(object string, data []byte) (map[string]json.RawMessage,
 
 func isJSONNull(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
+}
+
+type inertTestVariantApplicabilityRecord struct {
+	Strategy           string `json:"strategy"`
+	TestVariantClosure string `json:"testVariantClosure"`
+}
+
+func (a *inertTestVariantApplicabilityRecord) UnmarshalJSON(data []byte) error {
+	const object = "inert test-variant applicability"
+	fields, err := uniqueObjectFields(object, data)
+	if err != nil {
+		return err
+	}
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return fmt.Errorf("gofresh: %s field %q is null", object, name)
+		}
+	}
+	type plain inertTestVariantApplicabilityRecord
+	var decoded plain
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return recordFault(object, err)
+	}
+	if decoded.Strategy == "" || decoded.TestVariantClosure == "" {
+		return fmt.Errorf("gofresh: %s requires strategy and testVariantClosure", object)
+	}
+	*a = inertTestVariantApplicabilityRecord(decoded)
+	return nil
 }

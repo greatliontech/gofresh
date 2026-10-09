@@ -60,6 +60,7 @@ type View struct {
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
+	applicabilityChecks  []applicabilityCheck
 	// cutUnavailable holds a comparison's unavailability that a budget
 	// cut alone explains (compareFactsContext): never returned where it
 	// arose — a capture keeps the view's fail-closed facts, a validation
@@ -739,7 +740,7 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 	if _, ok := v.facts.maximal[subject]; !ok {
 		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	verdicts, err := v.checkBatch(ctx, map[Subject]Fingerprint{subject: recorded})
+	verdicts, err := v.checkBatch(ctx, map[Subject]Fingerprint{subject: recorded}, v.engine != nil && v.engine.deferredCheckClose)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -751,11 +752,13 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 // engine the verdicts are provisional until the view validates
 // (WithDeferredCheckClose).
 func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-	return v.checkBatch(ctx, recorded)
+	return v.checkBatch(ctx, recorded, v.engine != nil && v.engine.deferredCheckClose)
 }
 
 // CheckObserved explicitly checks a fingerprint under its recorded observation
 // assertion and proof. Ordinary Check never infers this policy from evidence.
+// A persisted inert endpoint retains original support and requires the current
+// proof and outcome inventory when observation is needed to establish validity.
 // It is the single-record form of CheckObservedBatch, so both share one window
 // semantics: a runtime input moving mid-check stales a record whose verdict is
 // not already stale, and demonstrated staleness is preferred over
@@ -783,6 +786,14 @@ func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject 
 // deferred-close engine the verdicts are provisional until the view
 // validates (WithDeferredCheckClose).
 func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
+	return v.checkObservedBatch(ctx, recorded, v.engine != nil && v.engine.deferredCheckClose, nil)
+}
+
+// unavailable attributes only the current proofs this call actually selected.
+// Validation uses that per-record attribution to distinguish a missing proof
+// from an independently unguardable manifest, even when another record of the
+// same subject already populated the view's proof cache.
+func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint, deferClose bool, unavailable map[Subject]error) (verdicts map[Subject]Verdict, opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
@@ -835,7 +846,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		if err != nil {
 			return nil, err
 		}
-		if err := v.closeCheckWindow(ctx, hasRuntimeInputs); err != nil {
+		if err := v.closeCheckWindow(ctx, hasRuntimeInputs, deferClose); err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
@@ -843,11 +854,54 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		}
 		return finished, nil
 	}
+	var currentProofs []Subject
 	for subject, rec := range pending {
 		cl := v.facts.maximal[subject]
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, v.purityMatches(rec, subject), positives[subject] && rec.RuntimeInputs != ""), rec)
+		pure := v.purityMatches(rec, subject)
+		ordinary := decideAfterClosure(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure)
+		positive := positives[subject] && rec.RuntimeInputs != ""
+		if ordinary.Status == Unverifiable && positive && rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) {
+			// A proof cannot cure a manifest refusal, an external directive or
+			// shared dynamic state. Analyze only records it could actually lift.
+			if decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, true).Status == Valid {
+				currentProofs = append(currentProofs, subject)
+			}
+		}
 	}
-	return finish()
+	if err := v.ensureObservable(ctx, currentProofs); err != nil {
+		return nil, err
+	}
+	lifted := make(map[Subject]bool, len(currentProofs))
+	for _, subject := range currentProofs {
+		positives[subject] = v.currentApplicabilityObservable(subject)
+		lifted[subject] = positives[subject]
+		if unavailable != nil && !positives[subject] {
+			v.mu.RLock()
+			proof := v.observable[subject]
+			v.mu.RUnlock()
+			if analysisUnavailable(proof.Reason) {
+				unavailable[subject] = fmt.Errorf("%w: applicability for %s.%s: %s", ErrAnalysisUnavailable, subject.Package, subject.Symbol, proof.Reason)
+			}
+		}
+	}
+	for subject, rec := range pending {
+		cl := v.facts.maximal[subject]
+		pure := v.purityMatches(rec, subject)
+		positive := positives[subject] && rec.RuntimeInputs != ""
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, positive), rec)
+	}
+	finished, err := finish()
+	if err != nil {
+		return nil, err
+	}
+	for subject := range lifted {
+		if lifted[subject] && finished[subject].Status == Valid {
+			if err := v.retainApplicabilityCheck(ctx, pending[subject], subject, true); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return finished, nil
 }
 
 // prepareRecorded is the preparation pass every check surface runs
@@ -860,7 +914,7 @@ func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fing
 func (v *View) prepareRecorded(recorded map[Subject]Fingerprint) (map[Subject]closure.Closure, error) {
 	closures := make(map[Subject]closure.Closure, len(recorded))
 	for subject, rec := range recorded {
-		if err := validateRecordedKind(rec); err != nil {
+		if err := rec.Validate(); err != nil {
 			return nil, err
 		}
 		if rec.ResultKind != v.kind {
@@ -875,7 +929,7 @@ func (v *View) prepareRecorded(recorded map[Subject]Fingerprint) (map[Subject]cl
 	return closures, nil
 }
 
-func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
+func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint, deferClose bool) (verdicts map[Subject]Verdict, opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
@@ -925,7 +979,7 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 		if err != nil {
 			return nil, err
 		}
-		if err := v.closeCheckWindow(ctx, hasRuntimeInputs); err != nil {
+		if err := v.closeCheckWindow(ctx, hasRuntimeInputs, deferClose); err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
@@ -1023,13 +1077,16 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 // Validate re-observes the View's complete subject set under the caller's
 // context and reports ErrViewChanged when any source closure, guard, or purity
 // assertion moved. A producer calls it after execution before persisting
-// results (REQ-fresh-producer-view).
+// results (REQ-fresh-producer-view). Selected applicability checks are also
+// re-established, including their historical runtime evidence and any current
+// proof needed for an observation lift; they require no new process receipt.
 func (v *View) Validate(ctx context.Context) (opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	v.mu.Lock()
 	v.sealed = true
 	hasObserved := len(v.capturedObserved) != 0
+	hasApplicability := len(v.applicabilityChecks) != 0
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
@@ -1041,8 +1098,22 @@ func (v *View) Validate(ctx context.Context) (opErr error) {
 	// in the observed arm, and a maximal-only producer the base
 	// comparison - the engine owns the dispatch exactly as it owns the
 	// capture strategy.
-	if hasObserved {
-		return v.validateObserved(ctx)
+	if hasObserved || hasApplicability {
+		var unavailable error
+		if hasObserved {
+			if err := deferValidationUnavailability(v.validateObserved(ctx), &unavailable); err != nil {
+				return err
+			}
+		}
+		if hasApplicability {
+			if err := deferValidationUnavailability(v.validateApplicabilityChecks(ctx), &unavailable); err != nil {
+				return err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return unavailable
 	}
 	// A comparison-only observation reads once: these facts are never
 	// recorded, so a torn read can only compare unequal and refuse - the
@@ -1122,6 +1193,8 @@ func sortedUniqueUnion(groups [][]string) []string {
 // construction-time either way. Inherited captured-proof flags commit
 // the sibling to the observed validation arm: a sibling of an observed
 // parent validates through attachment, exactly as the parent would.
+// Applicability checks for the subset are inherited as separate validation
+// obligations over historical records, never as producing attachments.
 func (v *View) Sibling(subjects []Subject) (*View, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -1186,6 +1259,12 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 			ledgers[pkg] = ledger
 		}
 	}
+	var applicabilityChecks []applicabilityCheck
+	for _, check := range v.applicabilityChecks {
+		if _, ok := maximal[check.subject]; ok {
+			applicabilityChecks = append(applicabilityChecks, check)
+		}
+	}
 	return &View{
 		engine:    v.engine,
 		subjects:  unique,
@@ -1209,6 +1288,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		},
 		observable:           observable,
 		capturedObserved:     capturedObserved,
+		applicabilityChecks:  applicabilityChecks,
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
 		runtimeCurrent:       v.runtimeCurrent,
 	}, nil
@@ -1598,8 +1678,8 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 // close for every deferred interval (REQ-fresh-coherent-view's deferred
 // close) — and a window that read no runtime inputs has nothing to
 // close.
-func (v *View) closeCheckWindow(ctx context.Context, hasRuntimeInputs bool) error {
-	if hasRuntimeInputs && !v.engine.deferredCheckClose {
+func (v *View) closeCheckWindow(ctx context.Context, hasRuntimeInputs, deferClose bool) error {
+	if hasRuntimeInputs && !deferClose {
 		return v.reobserveBase(ctx)
 	}
 	return nil

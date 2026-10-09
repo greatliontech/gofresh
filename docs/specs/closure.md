@@ -111,8 +111,10 @@ identifies a recording that predates the compartment and fails closed to stale
 with reason "test variants". Verdicts order the comparison after the core: an unchanged
 core with a drifted compartment is stale with the stable reason
 "test variants" — the one verdict reason a consumer may discriminate on — and
-no observation evidence rescues it, because gofresh renders
-no judgment about which test-variant deltas are benign. A drifted core is
+no observation evidence alone rescues it. The effective compartment is the
+producing compartment unless an explicit consumer-selected inert extension
+established a recognized applicability endpoint
+(REQ-fresh-applicability-transform in [overview.md](overview.md)). A drifted core is
 stale on the closure. Both unchanged keep the prior semantics
 exactly. A subject declared in a test file has its own body in the
 compartment, so an edited recorded test moves the compartment — that is the
@@ -254,6 +256,9 @@ Inertness is
 Go-semantics data — it claims the delta cannot change the behavior of any
 unchanged declaration and nothing more; what inertness licenses is the
 consumer's policy, never gofresh's.
+The consumer may select the explicit extension check to license reuse under
+this judgment. Ordinary checking never implicitly licenses a new delta; it
+only recognizes an already recorded endpoint.
 
 ## Blind spots
 

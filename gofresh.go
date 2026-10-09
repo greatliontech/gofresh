@@ -448,11 +448,14 @@ type Fingerprint struct {
 	// (testvariant.EmptyTestVariantClosure); an empty value identifies a
 	// recording that predates the partition and fails closed to stale
 	// (REQ-closure-test-variant-hash).
-	TestVariantClosure   string
-	ObservationAssertion string
-	ObservationProof     ObservationProof
-	Guards               guard.Guards
-	PurityAssertion      string // attributable assertion used to override unverifiability; empty means none
+	TestVariantClosure string
+	// InertTestVariantApplicability is an explicitly licensed effective
+	// endpoint. The producing fields, including TestVariantClosure, stay intact.
+	InertTestVariantApplicability InertTestVariantApplicability
+	ObservationAssertion          string
+	ObservationProof              ObservationProof
+	Guards                        guard.Guards
+	PurityAssertion               string // attributable assertion used to override unverifiability; empty means none
 	// DynamicStateVouches names the caller vouches that discharged
 	// shared-dynamic-state culprits reachable from this subject at capture:
 	// sorted canonical "<import path>.<Variable>" identities, comma-joined.
@@ -1160,7 +1163,7 @@ func (e *Engine) CaptureFor(ctx context.Context, subject Subject, moduleDir stri
 // (never reconstructing a historical build — REQ-guard-recompute) and, when the
 // recording carries a runtime-input manifest, re-hashes it, then decides.
 func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := validateRecordedKind(recorded); err != nil {
+	if err := recorded.Validate(); err != nil {
 		return Verdict{}, err
 	}
 	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
@@ -1173,7 +1176,7 @@ func (e *Engine) Check(ctx context.Context, recorded Fingerprint, subject Subjec
 // CheckObserved checks a caller-selected observation proof under ctx. It never
 // infers observation policy for ordinary Check calls.
 func (e *Engine) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := validateRecordedKind(recorded); err != nil {
+	if err := recorded.Validate(); err != nil {
 		return Verdict{}, err
 	}
 	view, err := e.NewViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
@@ -1235,7 +1238,7 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 	if rec.MaximalClosure == "" {
 		return Verdict{Stale, "closure"}, true
 	}
-	if rec.MaximalClosure == current.Hash && compartmentStale(rec.TestVariantClosure, current.TestVariants) {
+	if rec.MaximalClosure == current.Hash && (!rec.recognizedApplicability() || compartmentStale(rec.EffectiveTestVariantClosure(), current.TestVariants)) {
 		return Verdict{Stale, ReasonTestVariants}, true
 	}
 	if rec.MaximalClosure != current.Hash {
@@ -1247,6 +1250,9 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 		// this engine's — re-measure, never serve. The structural twin
 		// of the observation-strategy refusal.
 		return Verdict{Stale, "dynamic-state strategy"}, true
+	}
+	if rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) && rec.ClosureStrategy != ClosureStrategy {
+		return Verdict{Stale, "closure strategy"}, true
 	}
 	return Verdict{}, false
 }

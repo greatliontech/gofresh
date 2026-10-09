@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-applicability-transform"
-reason: "Cross-consumer applicability transformation coverage is deferred to performance-evidence chunk 8; existing inert-growth behavior is retained, not claimed as a complete witness for this shared contract."
-content_hash: "f45bd3a5f9d506e173f85b77399d7f062bed2af113bed225cbacbffecf775a10"
-source_hash: "8ea212d9567cfa86209d00e61d441b8b7e54e23cb6d1984c52b1278c6efa01d6"
+reason: "Cross-consumer applicability transformation coverage remains deferred to performance-evidence chunk 8. Local witnesses cover actual observed execution, repeated persisted inert endpoints checked in a separate process, guard and support refusals, current-proof validation, validation refusal precedence, batch sharing and seal exclusion. A deterministic generated test preserves historical-record multiplicity and policy partitioning through batching; it does not prove the full applicability invariant. Cross-consumer coverage remains outstanding."
+content_hash: "5ab8cc25070470f12a72faaadc50f614f2663d8929b988662786d7d9bf660cfb"
+source_hash: "0c3ca3aa688c69c7266784edeacb6f1eb49a7110aef6706d63489bc80d5cc782"
 lands { manual { condition: "The shared admission path and justified applicability transformations are verified without changing historical measurements or inventing producer evidence." } }

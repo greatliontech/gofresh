@@ -106,7 +106,9 @@ subject's maximal source-closure hash, its package's test-variant compartment
 hash, optional
 attributable observation-completeness assertion and observability proof evidence, any
 attributable purity assertion used to override unverifiability, the result kind
-selecting its applicable guards, and the value of every applicable guard.
+selecting its applicable guards, the value of every applicable guard, and an
+optional explicitly licensed applicability endpoint distinct from the producing
+compartment.
 
 **observation-completeness assertion** (term): an attributable caller declaration
 that every process contributing to a subject's result ran under the recognized
@@ -212,6 +214,30 @@ transformation, while missing past observation evidence cannot be supplied by
 decoding, rehashing, or a later execution. A transformed applicability judgment
 retains the declared model's strength and does not certify identical future
 timings or identical profile addresses.
+
+The producing fingerprint constituents remain unchanged. An optional, versioned
+inert-test-variant applicability endpoint names the effective compartment instead
+of the producing compartment. Extension is an explicit consumer-selected check,
+never an automatic consequence of a ledger diff. It accepts the recording and
+its paired prior effective ledger, derives the current ledger from the checking
+view, requires unchanged core, listing/build configuration, toolchain and
+derivations, an inert delta, and every remaining applicable guard. Only a valid
+check returns a complete replacement fingerprint and companion ledger. Under
+deferred check closing, that result is provisional until successful validation
+of the same view. Validation re-establishes selected applicability checks,
+including their current observation proof and outcome inventory when needed;
+registration cannot race past the validation seal.
+
+The historical ledger's pairing and provenance are caller-trusted persisted
+evidence, just as the recorded fingerprint is. No hash authenticates that
+provenance and no historical proof chain is required. Repeated extension retains
+the original producing constituents and manifest while replacing only the
+effective endpoint and its companion ledger. It cannot backfill missing support.
+Ordinary checking and explicit purity remain independently available without
+outcome support. Observation-based checking validates support against the original
+producing identity and, at a transformed endpoint, additionally requires the
+current recognized observability proof and supported outcome inventory. Failure
+or unavailability of that proof cannot lift closure unverifiability.
 
 Process completion and operation-outcome support are separate premises of the
 observation conjunction, as defined by REQ-inputs-producer-premises and
@@ -431,7 +457,8 @@ one JSON object, encoded and decoded by the fingerprint itself: the keys
 `runtimeConfig` (the measurement guards), `observationAssertion`,
 `observationProof`, `purityAssertion`, `dynamicStateVouches`,
 `singleSubjectDischarges`, `packageProcessDischarges`, `dynamicStateStrategy`,
-`closureStrategy`, `runtimeInputs`, and `runtimeDigest` each present exactly
+`closureStrategy`, `runtimeInputs`, `runtimeDigest`, and
+`inertTestVariantApplicability` each present exactly
 when its value is non-empty, in the order listed between `buildConfig` and
 `resultKind`; the guards flattened to their four keys; the observation proof an
 object of `strategy`, `package`, `symbol`, `observable`, `reason` (present
@@ -461,6 +488,15 @@ confers no proof (REQ-fresh-observation-data) but is not a decoding refusal — 
 stored record stays readable. Enforced by TestFingerprintRecordIsTheFleetForm,
 TestFingerprintRecordRoundTrips, TestFingerprintRecordRefusals.
 
+The optional `inertTestVariantApplicability` is a nested object with required
+non-empty string fields `strategy` and `testVariantClosure`, in that order.
+Its zero value is omitted, preserving the bytes of existing records. The nested
+object obeys the same unknown-field, duplicate, null and canonicality rules.
+The recognized strategy is `gofresh/inert-test-variant-extension@1`. Unknown
+non-empty strategies remain readable but fail closed in every check, even when
+the producing compartment matches the current one. Producing capture emits no
+applicability endpoint; a new execution is never represented by an extension.
+
 > Compatibility posture of the test-variant partition: every recording captured
 > before the compartment existed is stale exactly once against a partitioned
 > check — a package with test files no longer folds them into its recomputed
@@ -473,11 +509,15 @@ TestFingerprintRecordRoundTrips, TestFingerprintRecordRefusals.
 > happen.
 
 **REQ-fresh-hierarchical-check** (behavior): A check MUST compare the maximal closure
-first. When the maximal hash is unchanged, the test-variant compartment is
+first. When the maximal hash is unchanged, the effective test-variant compartment is
 compared next: a drifted or absent recorded compartment is stale with reason
 "test variants" (REQ-closure-test-variant-identity). When the maximal hash
 changed, the recording is stale. Guards other than the source closure still
 apply normally after source equivalence is established.
+Without an applicability endpoint the producing compartment is effective. A
+recognized endpoint is compared instead; an unrecognized endpoint fails closed.
+Only the explicit inert-extension operation may establish a new endpoint after
+the comparisons and proof obligations of REQ-fresh-applicability-transform.
 
 **REQ-fresh-coherent-view** (invariant): Every closure, guard, selected source file,
 purity assertion, package listing, syntax tree, SSA program, and reachability fact
@@ -536,7 +576,11 @@ execution-span exclusion that producer validation states
 subjects MUST persist fingerprints captured before execution, with runtime-input
 evidence attached afterward, only when their shared producer analysis view still
 validates against the source, build inputs, guards, purity assertions, and every
-closure tier captured after execution. The caller owns execution and excludes source or build-input mutation while
+closure tier captured after execution. An applicability extension is instead a
+check of an existing result: validation retains its historical evidence and
+rechecks its current applicability obligations without requiring or inventing a
+new execution receipt. Subset sibling views inherit those obligations for their
+subjects. The caller owns execution and excludes source or build-input mutation while
 the view is constructed and the producing build is read; validation detects ordinary
 drift but cannot prove the absence of a change-and-restore interval the caller
 allowed. Beside the caller's context error (REQ-fresh-context), a validation
