@@ -1261,7 +1261,7 @@ func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
 		}
 		if !h.SelectionAudited() {
 			moved, closest := movedKeys(h.source, auditedToolchainSources)
-			t.Fatalf("running toolchain %q under %v %v is not listed in auditedToolchainSources — %s. Walk the moved keys' delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family, the linkname floor) and list this row in closure/toolchainaudit.go:\n%s", runtime.Version(), sel.Env, sel.Flags, h.SelectionNotice(), h.source.rowLiteral(runtime.Version()+sel.Suffix, closest, moved))
+			t.Fatalf("running toolchain %q under %v %v is not listed in auditedToolchainSources — %s. %s\n%s", runtime.Version(), sel.Env, sel.Flags, h.SelectionNotice(), listingInstruction(moved), h.source.rowLiteral(runtime.Version()+sel.Suffix, closest, moved))
 		}
 	}
 }

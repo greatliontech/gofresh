@@ -516,23 +516,23 @@ func TestToolchainSourceScopeDiscriminatesEveryAxis(t *testing.T) {
 		return s
 	}
 	base := snapshot()
-	if got, want := toolchainSourceScope(base, nil), toolchainSourceScope(snapshot(), nil); got != want {
+	if got, want := toolchainSourceScope(base, nil, surfaceSeeds()), toolchainSourceScope(snapshot(), nil, surfaceSeeds()); got != want {
 		t.Errorf("one environment, two scopes: %q vs %q", got, want)
 	}
-	if got, same := toolchainSourceScope(base, []string{"-tags=netgo"}), toolchainSourceScope(base, nil); got == same {
+	if got, same := toolchainSourceScope(base, []string{"-tags=netgo"}, surfaceSeeds()), toolchainSourceScope(base, nil, surfaceSeeds()); got == same {
 		t.Errorf("the explicit flags do not key the scope: %q", got)
 	}
 	for _, axis := range []string{"GOFLAGS=-tags=netgo", "GOEXPERIMENT=fieldtrack", "GOOS=plan9", "GOARCH=arm64", "CGO_ENABLED=0", "GOFIPS140=latest"} {
-		if got, same := toolchainSourceScope(snapshot(axis), nil), toolchainSourceScope(base, nil); got == same {
+		if got, same := toolchainSourceScope(snapshot(axis), nil, surfaceSeeds()), toolchainSourceScope(base, nil, surfaceSeeds()); got == same {
 			t.Errorf("%s does not key the scope: %q", axis, got)
 		}
 	}
-	if got := toolchainSourceScope(base, nil); !strings.Contains(got, "GOVERSION="+base.Value("GOVERSION")) || !strings.Contains(got, "GOROOT="+base.Value("GOROOT")) {
+	if got := toolchainSourceScope(base, nil, surfaceSeeds()); !strings.Contains(got, "GOVERSION="+base.Value("GOVERSION")) || !strings.Contains(got, "GOROOT="+base.Value("GOROOT")) {
 		t.Errorf("the scope names neither the version nor the GOROOT: %q", got)
 	}
 	// An explicit flag over GOFLAGS is the go command's merge, not the
 	// scope's: the two shapes are two scopes whatever they select.
-	if a, b := toolchainSourceScope(snapshot("GOFLAGS=-tags=netgo"), []string{"-tags=dup"}), toolchainSourceScope(base, []string{"-tags=dup,netgo"}); a == b {
+	if a, b := toolchainSourceScope(snapshot("GOFLAGS=-tags=netgo"), []string{"-tags=dup"}, surfaceSeeds()), toolchainSourceScope(base, []string{"-tags=dup,netgo"}, surfaceSeeds()); a == b {
 		t.Error("an explicit flag over GOFLAGS shares a scope with their union")
 	}
 }

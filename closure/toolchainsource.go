@@ -37,9 +37,17 @@ import (
 // (sync, reflect, time), the class-B operations' packages, the atomic
 // transparency, the harness channels, and the linkname-target floor's
 // packages (runtime, syscall) — so a table can never be added without
-// its package joining the key. Sorted, deduplicated.
+// its package joining the key — and the harness premise's own
+// implementation (harnessPremisePackages: a listing asserts every
+// test-log write the harness attempts lands or fails the binary, and
+// the buffered writes with StopTestLog's flush error live in
+// testing/internal/testdeps, which only the generated test main imports,
+// so no table's dependencies reach it). Sorted, deduplicated.
 func auditedSurfaceTables() []string {
-	set := map[string]bool{"sync/atomic": true, "testing": true}
+	set := map[string]bool{"sync/atomic": true}
+	for _, p := range harnessPremisePackages {
+		set[p] = true
+	}
 	for _, p := range auditset.PurePackages() {
 		set[p] = true
 	}
@@ -90,7 +98,7 @@ func auditedSurface(std []listing.Package) []string {
 	}
 	set := map[string]bool{}
 	var queue []string
-	for _, p := range append(auditedSurfaceTables(), implicitLinkPackages...) {
+	for _, p := range surfaceSeeds() {
 		if _, ok := byPath[p]; ok && !set[p] {
 			set[p] = true
 			queue = append(queue, p)
@@ -169,8 +177,22 @@ type entryStamp struct {
 }
 
 // sourceDigestsVersion versions the memoized listing record's shape
-// and derivation: the surface rule, the file classes, the stamp.
+// and derivation: the walk over the seeds (auditedSurface's edge rule
+// — which listing edges it follows, how a seed missing from std is
+// treated), the file classes (selectedFiles), the stamp. An edit to
+// any of those bumps it, or a warm record derived by the old rule is
+// served until its stamps move. The surface rule's SEEDS ride the
+// record's scope instead (toolchainSourceScope), so a seed edit keys
+// its own records with no bump.
 const sourceDigestsVersion = 3
+
+// surfaceSeeds are the audited surface's roots — every admission
+// table's packages (auditedSurfaceTables) and the link-time packages
+// — the listing's dependency walk closes over; the listing memo's
+// scope carries their digest.
+func surfaceSeeds() []string {
+	return append(auditedSurfaceTables(), implicitLinkPackages...)
+}
 
 const sourceDigestsDirName = "toolchain-source"
 
@@ -314,9 +336,12 @@ func digestListing(l surfaceListing) (sourceDigests, error) {
 // re-derived here. The identity carries the module-dependent settings
 // too (GOMOD, GOWORK), so records are per module of one toolchain: a
 // cost in cache space, never in soundness. The tree's contents are the
-// record's stamps, not the scope's.
-func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string) string {
-	return fmt.Sprintf("%d|%s|%s", sourceDigestsVersion, strings.Join(buildFlags, "\x00"), snapshot.Identity())
+// record's stamps, not the scope's. The surface seeds' digest is the
+// scope's last limb: the record lists the packages the rule derived
+// when it was written, so a rule whose seeds moved must miss it.
+func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string, seeds []string) string {
+	seedDigest := sha256.Sum256([]byte(strings.Join(seeds, "\n")))
+	return fmt.Sprintf("%d|%s|%s|%x", sourceDigestsVersion, strings.Join(buildFlags, "\x00"), snapshot.Identity(), seedDigest[:8])
 }
 
 // toolchainSourceDigests lists the standard library under the effective
@@ -328,7 +353,7 @@ func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string) str
 // themselves. A listing failure or an unreadable file is an error: the
 // admission then refuses, naming it.
 func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags []string) (sourceDigests, error) {
-	scope := toolchainSourceScope(snapshot, buildFlags)
+	scope := toolchainSourceScope(snapshot, buildFlags, surfaceSeeds())
 	var l surfaceListing
 	if !(cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && stampsCurrent(l)) {
 		args := append([]string{"-json", "-e"}, buildFlags...)
@@ -466,4 +491,26 @@ func (d sourceDigests) rowLiteral(label, base string, keys []string) string {
 	}
 	b.WriteString("\t\t},\n\t},\n")
 	return b.String()
+}
+
+// harnessPremisePackages hold the testing harness's test-log writer —
+// the premise a listing asserts beside the admissions
+// (REQ-closure-observability-toolchain-key): testing wraps the file
+// the harness writes, testing/internal/testdeps buffers the records
+// and returns StopTestLog's flush error, which fails the binary. Both
+// are surface seeds; a key of theirs moving names the premise in the
+// listing instruction.
+var harnessPremisePackages = []string{"testing", "testing/internal/testdeps"}
+
+// listingInstruction is the listing procedure the canary prints for an
+// unlisted running toolchain: the walk of the moved keys' delta against
+// every admission, and — a harness premise package among the moved
+// keys — the harness's write-propagation premise a listing asserts
+// beside the admissions (REQ-closure-observability-toolchain-key).
+func listingInstruction(moved []string) string {
+	text := "Walk the moved keys' delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family, the linkname floor)"
+	if slices.ContainsFunc(moved, func(key string) bool { return slices.Contains(harnessPremisePackages, key) }) {
+		text += ", and — the harness among the moved keys — the harness's write-propagation premise the listing asserts (every test-log write the harness attempts lands or fails the binary)"
+	}
+	return text + ", then list this row in closure/toolchainaudit.go:"
 }

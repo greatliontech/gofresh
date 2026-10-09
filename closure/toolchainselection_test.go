@@ -18,11 +18,10 @@ import (
 // selections admit — the race selection selects the same audited files
 // (the recorded fact, now enforced by equality); a tag no audited file
 // is constrained on selects the same files and admits BY CONTENT (the
-// selection axis dissolved); an unclassifiable flag set refuses; and a
-// tag that selects different audited bytes — the dst hook tag on a
-// godst toolchain, whose dst-tagged files sit in the surface — refuses
-// naming the packages that moved
-// (REQ-closure-observability-toolchain-key).
+// selection axis dissolved); and an unclassifiable flag set refuses
+// (REQ-closure-observability-toolchain-key). A tag that selects different
+// audited bytes — the dst hook tag on a godst toolchain — is
+// TestDstSelectionIsJudgedByContentNeverByTag's.
 func TestSelectionsAdmitByContent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library under several selections")
@@ -109,18 +108,6 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 		t.Fatal(err)
 	} else if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") {
 		t.Errorf("an unlisted platform: audited=%v attribution %q, want the moved keys named", h.SelectionAudited(), h.SelectionAttribution())
-	}
-	// A tag that selects different audited bytes refuses: the godst
-	// hook tag where the running GOROOT carries dst-tagged files in an
-	// audited package (time's dst_tz.go); elsewhere the arm is
-	// unreachable and skipped — the planted-listing pin below carries
-	// the refusal's shape on every host.
-	if _, err := os.Stat(filepath.Join(snapshot.Value("GOROOT"), "src", "time", "dst_tz.go")); err != nil {
-		t.Skip("no dst-tagged audited file in the running GOROOT; the dst arm needs a godst toolchain")
-	}
-	h := hasher("-tags=dst")
-	if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") || !strings.Contains(h.SelectionAttribution(), "time") {
-		t.Errorf("dst selection: audited=%v attribution %q, want the moved packages named with time among them", h.SelectionAudited(), h.SelectionAttribution())
 	}
 }
 

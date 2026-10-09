@@ -1693,7 +1693,18 @@ sys delegate's and runtime/race's race files — judged inert; one row per
 toolchain over its own chain, since the runtime's race file is each
 toolchain's own) — and no key of one chain admits beside another chain's: a
 tree mixing two listed releases' packages, one release's race runtime over
-the other's files included, is no listed toolchain; a listing whose labels
+the other's files included, is no listed toolchain; a listed selection's
+rows assert, beside the admissions, the premise identity finalization and
+a process completion receipt rest on, over that selection's testing
+harness (REQ-inputs-identity-facade and REQ-inputs-producer-premises'
+observation-completeness terms; the result owner supplies the harness's
+completion criterion) — every test-log write the harness attempts lands
+or fails the binary — so a selection whose harness drops a failed write
+is unlistable until a build propagates it, whatever its hook files admit,
+and the packages implementing the premise (testing and its test-log
+dependency testing/internal/testdeps, which only the generated test main
+imports) are surface seeds, so a build moving either moves a key; a
+listing whose labels
 collide, whose base names no row, or whose chains cycle is refused by the
 listing's own shape test. A
 toolchain move therefore fails as one named canary (the listing enforcement
