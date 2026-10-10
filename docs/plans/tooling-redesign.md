@@ -33,7 +33,7 @@
     precedence, explicit-empty selection, diagnostic A/B trust sourcing and
     omitted/explicit auto-PGO before adopting the affected vertical. The PGO
     concern is a verification question until demonstrated, not an assumed bug.
-    - [ ] 2.4a Specify one optional request-scoped `cwd` for project-bound MCP
+    - [x] 2.4a Specify one optional request-scoped `cwd` for project-bound MCP
       verbs. Omission uses the server's configured default directory, resolved
       at startup from its launch directory; a relative value resolves against
       that same default, never a previous request.
@@ -43,7 +43,7 @@
       Bind relative paths, declarations, evidence, stores and subprocesses to
       the resolved operation context. Preserve distinct evidence-root and
       process-directory roles; no process-wide chdir or mutable active project.
-  - [ ] 2.5 Pin lifetime and closing invariants: complete contributing roster,
+  - [x] 2.5 Pin lifetime and closing invariants: complete contributing roster,
     one terminal disposition per contribution, no late admission past close,
     independent sibling transactions, and source/runtime exclusion spans
     through validation and publication or judgment consumption.

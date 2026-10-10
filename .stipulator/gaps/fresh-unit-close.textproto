@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-unit-close"
+reason: "Existing view, frame and producer checks enforce portions but do not supply the specified independently closing unit boundary. The first measured-arm vertical must establish the roster, binding, seal, exclusion and final automatic evidence-selection obligations; remaining consumer paths need adoption before complete coverage."
+content_hash: "901f9c224482ec6ab9a1f1af389acb3e9a8dadd1ba3811799c99e0dedcd9e0f0"
+source_hash: "430be46aaa9fc2ee6c348bab49b8282d684d82f9c1da52fe7e13affd696f9b7d"
+lands { manual { condition: "The shared unit boundary and affected consumer verticals pass positive and negative roster/binding, missing/late/conflicting contribution, failed/cancelled close, sibling independence, cut/drift precedence, post-success finalization, publication-failure and historical non-upgrade regressions, with property or analyzer evidence for invariants." } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-producer-view"
+reason: "Existing producer/sibling checks enforce post-execution agreement and independent attachments, but the amended unit-wide exclusion through publication/consumption and complete inherited provenance require the replacement boundary and consumer enforcement. Existing examples do not establish those added obligations."
+content_hash: "9ce4197e1a4b2944faad0b0d5679600dadf957bf62fb54a40bf56cb75ea741f2"
+source_hash: "30abcd11feec35faa47fa9169d1f84838f682ea28298b2a1f44b3264b1b3f499"
+lands { manual { condition: "The unit boundary and its consumer publication paths enforce source/build exclusion through preparation, execution and close, preserve the validated state through publication/consumption, and pass independent-sibling, budget-cut provenance and actual-drift regressions." } }
+excuses: GAP_EXCUSE_UNCOVERED

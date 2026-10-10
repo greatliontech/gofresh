@@ -2,7 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-observation-lifecycle"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "f98e81b0b52a00ba68c04ddf74efd7dde22f0b69e678188e983a0f868e6a6719"
-source_hash: "7bff156426f0918cfb7e8dbc4f2d27c4d0daad38fa1b03ccc5c3cbf954cb677f"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Existing invariant property coverage is incomplete, and the current API explicitly selects ordinary versus observed checking at multiple stages. The amended contract keeps producing-time preparation while requiring final selection of admissible established evidence under the declared model."
+content_hash: "72ce6b8a7da738ba2d62445dc8771f06667aa789cca4c13d912a9b64007d891b"
+source_hash: "04734c02d8605ac5c1ac032151eb375217e8006258288bd006163a099719b627"
+lands { manual { condition: "A property witness or analyzer proof covers producing-time proof preparation, retained closing obligations, automatic admissible final checking, explicit assertion/transformation authorization and historical non-upgrade through the migrated unit boundary." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

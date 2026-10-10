@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-control-request-project"
+reason: "The existing Gomutant and Stipulator MCP servers remain launch-root scoped; request cwd, qualified resources/handles and bounded concurrent root-local state require implementation without partitioning shared physical resource admission or spreading trust."
+content_hash: "103a450c17dd1b3307aedc135c70d22dbcbf2088ecb225829bf0ff69e4760b33"
+source_hash: "ea10249e8a13b39e3e175a98800a6b51a49f0606525cc476e842643d01dd45d1"
+lands { manual { condition: "Both existing MCP surfaces implement request cwd, root-qualified responses/resources/handles, default-root compatibility, bounded retained state and alternating/concurrent root tests for collisions, trust, relative paths, refusals, cancellation and shared admission." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

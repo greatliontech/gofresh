@@ -192,3 +192,82 @@ a caller that lies about an execution or prove absence of mutation-and-restore
 between agreeing observations. The sampling and exclusion limits stated by
 REQ-fresh-coherent-view, REQ-fresh-producer-view and
 REQ-inputs-observation-coherence remain unchanged.
+
+## Unit obligations and closing
+
+**REQ-fresh-unit-roster** (invariant): A producing unit MUST account for the
+complete set of executions contributing to its result independently of which
+observation records arrive. Each contributor is registered with its subject
+scope, process binding, actual environment and selected obligations before
+that execution starts. Registration can be incremental while the unit is
+open; starting close fixes the roster and refuses late registration or
+attachment. Exactly one terminal disposition settles each registered
+contribution. Retransmitting the same finalized evidence can be idempotent,
+but supplies no second execution; conflicting dispositions refuse. A
+registered process that never started is named as such, not as a completed
+empty execution. A missing disposition prevents successful closing, and an
+incomplete disposition cannot contribute supported completion. The executor
+still owns the truth that no unregistered execution contributed; a missing
+record cannot define that execution out of the result.
+
+**REQ-fresh-unit-bindings** (invariant): Producing evidence MUST remain bound
+to its prepared unit, source/build identity, contributing subjects, process
+identity, frame and actual normalized environment. Evidence cannot be
+borrowed from a sibling unit, a separate diagnostic process, another subject,
+or an unlicensed transformed executable even where individual hashes agree.
+Binding does not authenticate a dishonest executor, nor does it replace any
+independently required completion, outcome, locality or attribution evidence.
+Source-derived certificates use their derivation dependencies instead of
+inventing these execution bindings.
+
+**REQ-fresh-unit-close** (invariant): A unit MUST expose reusable final evidence
+or a consumable final judgment only after all of its selected obligations and
+closing checks have succeeded. Closing is a terminal transition for that
+unit's mutable registration and attachment state, including when closing
+fails or is cancelled; a retry uses a new unit rather than reopening the old
+one. Closed or failed units do not seal a shared immutable snapshot against
+other units. A sibling selects all relevant immutable facts and provenance,
+including analysis cuts and applicability obligations, but owns independent
+contributions and closing state. A later sibling's preparation is not a
+prerequisite for closing an already complete unit. Consumer publication may
+still fail after a successful close; failure does not claim a durable write
+or discard the separately committed prefix of other units.
+
+**REQ-fresh-unit-exclusion** (invariant): The result owner MUST protect the
+relevant source and build inputs across producing preparation, execution and
+closing validation, and the relevant runtime inputs across execution,
+finalization and each composition/check interval. The validated dependencies
+remain protected until publication or consumption of the final judgment.
+These are unit-specific hold-still obligations, not a prescribed global lock.
+Endpoint re-observation detects ordinary persistent motion; it does not prove
+absence of mutation-and-restore or establish an atomic filesystem/environment
+snapshot. An owner allowing the excluded interval cannot claim the evidence
+was bound to its producing or checking span. Cancellation does not waive the
+exclusion while any permitted finalization is still observing inputs.
+
+**REQ-fresh-final-evidence-selection** (behavior): A final check MUST select
+admissible established evidence automatically within the result owner's
+declared model, without requiring the caller to repeat ordinary-versus-observed
+selection at each checking stage. Any required producing obligation is selected
+and established before its execution; checking-time analysis cannot replace
+that preparation or repair missing historical support. Authorization to use
+an assertion and authorization to attempt additional costly analysis remain
+explicit. An applicability transformation likewise needs its own license;
+automatic evidence selection does not silently extend an endpoint. Decisive
+source or guard mismatches can reject before optional refinements, while a
+request for a complete inventory still receives a complete account rather
+than a cheap refusal presented as that inventory.
+
+An ordinarily completed failing test can satisfy its completion obligation;
+its failed outcome is still the result owner's claim. A crashed or killed
+process cannot become complete from its output prefix. A static certificate,
+identity-only observation, incomplete process and supported observation have
+different permitted uses; closing preserves those distinctions rather than
+requiring every unit to claim an executed, supported success.
+
+Operation cancellation prevents new producing work. A consumer can finish
+already-paid successful work in a separately declared, bounded closing phase,
+using the context it supplies for that phase and retaining the interruption
+in the operation's account. The library does not continue a cancelled entry
+under a private uncancellable context. Closing expiry yields no final reusable
+answer from that unit; an earlier independently committed unit remains kept.

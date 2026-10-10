@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-inputs-context"
+reason: "Current context-aware finalization/check pins cover part of the contract, but adoption, conversion and merge still have context-free/background paths. Owning-unit cancellation and explicit bounded closing scopes must replace those implicit lifetimes across the migrated entry family."
+content_hash: "5669992c5cacaea2fcbd309e9e5036d59b14e2234ff5bbf4996abb8d7b8cf84c"
+source_hash: "73edd93add681f3bdd7a829d7d03f3f180a5fa3ed6fdeaffac4bfd4a7556d434"
+lands { manual { condition: "All finalization, adoption, conversion, merge and current-check entries carry their owning phase context, with cancellation before/between work, no partial result, no concealed background continuation and explicit bounded closing-phase regressions." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-control-execution-description"
+reason: "The control ledger specifies the admitted meanings and boundaries. Current consumers still contain duplicated choices, overflow/argument-identity risks and presentation-selected execution. Per-family positive/refusal regressions and migration of the affected execution paths are required before full coverage is claimed."
+content_hash: "d9979299e6980a36b39ce9deafa62122fcc96b525154695f6362e36e43cef0f8"
+source_hash: "4c3039657f728c4e6d9f33f3e31aedcf32acef05a0b42f8cb1c692d8198c9dad"
+lands { manual { condition: "The four tools admit controls through their owning operation descriptions and bind the overflow, typed/raw argument, omitted/empty selection, actual producer environment, default-consuming build-input and observer-does-not-execute regressions across the affected faces." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

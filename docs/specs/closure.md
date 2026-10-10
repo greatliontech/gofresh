@@ -1978,8 +1978,11 @@ Likewise a canonical closure hash pins the source equivalence its contract
 defines, not every raw source byte. Each memo carrying position-bearing or
 other source-spelling-sensitive output includes sufficient additional source
 identity to reproduce that payload, or derives that output outside the memo
-from the current coherent snapshot. Removing a memo does not change the
-answer, including any diagnostics the memo promises to reproduce.
+from the current coherent snapshot. When recomputation completes, removing a
+memo does not change its derived answer, including any diagnostics it promises
+to reproduce. A miss can consume an analysis budget that a hit would satisfy;
+the resulting unavailability or interruption is not a contradictory completed
+derivation and grants no additional authority.
 
 **REQ-closure-observability-memo** (behavior): Observability proofs MAY be
 served from a persistent memo because the proof is a pure function of its
@@ -1997,8 +2000,9 @@ byte-equivalent to recomputation — including recorded unrooted-subject
 dispositions — and a full-group hit skips the program load entirely. The
 memo is a cache, never a record: it lives under the user cache directory by
 default — the consumer may redirect the store root through one knob covering
-every memo class, and no knob position changes a verdict, only what is
-recomputed — writes atomically, and a missing, unreadable, corrupt, or
+every memo class, changing what is recomputed but not the authority or meaning
+of a completed derivation; a miss can leave analysis unavailable under the
+same budget — writes atomically, and a missing, unreadable, corrupt, or
 key-mismatched entry recomputes silently; no entry is
 trusted beyond its key — the key IS the freshness. Entries accumulate one per closure version and the cache is
 deletable wholesale at any time. Proofs persist as each attribution slice

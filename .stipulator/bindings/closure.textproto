@@ -383,8 +383,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "991c4932e0557430080ce13b0abb29272909096fb63f23bd717cae1c1cf5541f"
-  source_hash: "4872ddae8787584a9d7f89b16049aa02de0b44853418171dd032e2b294f76e2f"
+  content_hash: "23be9289a645dccdedcb0199249dd43e20168d45eaec3c161b6fe9a384bb057f"
+  source_hash: "62804558b0ddf457c5f4f1977542032336e55f6f1db45f9af53333ba0debc215"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoServesEquivalentProofsWithoutLoading"
   role: BINDING_ROLE_TESTS
@@ -393,8 +393,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "991c4932e0557430080ce13b0abb29272909096fb63f23bd717cae1c1cf5541f"
-  source_hash: "4872ddae8787584a9d7f89b16049aa02de0b44853418171dd032e2b294f76e2f"
+  content_hash: "23be9289a645dccdedcb0199249dd43e20168d45eaec3c161b6fe9a384bb057f"
+  source_hash: "62804558b0ddf457c5f4f1977542032336e55f6f1db45f9af53333ba0debc215"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoMissesOnScopeAndSourceChange"
   role: BINDING_ROLE_TESTS
@@ -403,8 +403,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "991c4932e0557430080ce13b0abb29272909096fb63f23bd717cae1c1cf5541f"
-  source_hash: "4872ddae8787584a9d7f89b16049aa02de0b44853418171dd032e2b294f76e2f"
+  content_hash: "23be9289a645dccdedcb0199249dd43e20168d45eaec3c161b6fe9a384bb057f"
+  source_hash: "62804558b0ddf457c5f4f1977542032336e55f6f1db45f9af53333ba0debc215"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestObservabilityMemoKeepsCompletedSlicesOnDeadline"
   role: BINDING_ROLE_TESTS
@@ -1203,8 +1203,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-memo"
-  content_hash: "991c4932e0557430080ce13b0abb29272909096fb63f23bd717cae1c1cf5541f"
-  source_hash: "4872ddae8787584a9d7f89b16049aa02de0b44853418171dd032e2b294f76e2f"
+  content_hash: "23be9289a645dccdedcb0199249dd43e20168d45eaec3c161b6fe9a384bb057f"
+  source_hash: "62804558b0ddf457c5f4f1977542032336e55f6f1db45f9af53333ba0debc215"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestBracketLiveSnapshotIsItsOwnPass"
   role: BINDING_ROLE_TESTS

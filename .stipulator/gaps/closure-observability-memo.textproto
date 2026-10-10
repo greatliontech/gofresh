@@ -3,7 +3,7 @@
 
 requirement_id: "REQ-closure-observability-memo"
 reason: "Existing memo keys and their legacy witnesses do not enforce the amended complete-dependency contract: selected toolchain content and dependent admission policy are not fully represented, and canonical closure equivalence alone does not reproduce source-position-bearing payloads. Current consent preserves existing witnesses, not a claim that these added obligations are implemented."
-content_hash: "991c4932e0557430080ce13b0abb29272909096fb63f23bd717cae1c1cf5541f"
-source_hash: "4872ddae8787584a9d7f89b16049aa02de0b44853418171dd032e2b294f76e2f"
+content_hash: "23be9289a645dccdedcb0199249dd43e20168d45eaec3c161b6fe9a384bb057f"
+source_hash: "62804558b0ddf457c5f4f1977542032336e55f6f1db45f9af53333ba0debc215"
 lands { manual { condition: "Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." contradicted: true } }
 excuses: GAP_EXCUSE_UNCOVERED

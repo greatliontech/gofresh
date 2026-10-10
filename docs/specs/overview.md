@@ -56,6 +56,7 @@ a second home would mean a second implementation.
 ## Documents
 
 - [evidence.md](evidence.md) — result models, authority and ownership.
+- [controls.md](controls.md) — control ownership and operation scope.
 - [closure.md](closure.md) — the source closure and its tiers.
 - [guards.md](guards.md) — the guards beside the closure.
 - [runtime-inputs.md](runtime-inputs.md) — observed runtime inputs.
@@ -204,12 +205,13 @@ purity, result kind, and guard values, their record form the fingerprint's
 unknown, or internally inconsistent evidence confers no proof.
 
 **REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
-explicitly by the caller for capture, checking, and producer validation. A producer
-captures the proof from the same pre-execution analysis view as its closure, attaches
-the completed runtime evidence after execution, and persists only after validation
-re-establishes every selected tier against the post-execution view. Historical
-recordings cannot be upgraded to observability evidence without rerunning the
-subject.
+as a producing obligation before execution wherever the declared model needs
+it, from the same pre-execution snapshot as the closure. The unit retains that
+obligation through runtime-evidence attachment and closing validation, which
+re-establishes every selected tier. Final checking selects already-established
+admissible evidence under REQ-fresh-final-evidence-selection rather than a
+repeated caller stage toggle. Historical recordings cannot acquire a missing
+producing proof from a later analysis; re-execution produces new evidence.
 
 **REQ-fresh-evidence-support** (invariant, refines REQ-fresh-observation-conjunction):
 Observation-based reuse MUST retain the distinction between verified evidence,
@@ -598,8 +600,10 @@ closure tier captured after execution. An applicability extension is instead a
 check of an existing result: validation retains its historical evidence and
 rechecks its current applicability obligations without requiring or inventing a
 new execution receipt. Subset sibling views inherit those obligations for their
-subjects. The caller owns execution and excludes source or build-input mutation while
-the view is constructed and the producing build is read; validation detects ordinary
+subjects. The caller owns execution and excludes source or build-input mutation
+through preparation, producing execution and closing validation, preserving
+validated dependencies through publication or judgment consumption as
+REQ-fresh-unit-exclusion requires; validation detects ordinary
 drift but cannot prove the absence of a change-and-restore interval the caller
 allowed. Beside the caller's context error (REQ-fresh-context), a validation
 has three typed refusals, each matched by identity: a
@@ -635,8 +639,11 @@ maximal and observed alike — and producer validation MUST honor caller
 cancellation before and between source, guard, runtime-input, precise-analysis,
 and comparison observations, returning the context error rather than a partial
 view, verdict, or successful validation. One operation observes one caller
-context: no observation phase of a cancelled operation continues under a private
-uncancellable context. The context bounds observation work; a producer validation
+context for each entry: no cancelled entry continues under a private
+uncancellable context. A consumer may supply an explicit, separately bounded
+closing-phase context for already-paid work, preserving interruption in its
+operation account and excluding new producing work; this is a new declared
+phase, not concealed continuation of the cancelled entry. The context bounds observation work; a producer validation
 attempt still seals its original view against later capture. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
 expressed through a caller-supplied analysis budget, never through cancellation:

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-control-trust-source"
+reason: "Standing trust sources exist but diagnostic A/B sourcing and cross-project scope are not fully explicit and independently witnessed on all affected paths. The declared source policy must survive consolidation without broadening or dropping accepted trust."
+content_hash: "c9a46c945890f6eeb32fd9ee4c263d87d4dc11394afd4e1c204b1e0dc04bc254"
+source_hash: "22c39e779ca61893ba627e326ee022bd74a990a56c2d086a62752a64b791072f"
+lands { manual { condition: "Ordinary and diagnostic A/B operations identify their selected trust sources and pass independent missing/malformed/revoked/different-side/output-placement regressions, with root-scoped server assertions witnessed under concurrent projects." } }
+excuses: GAP_EXCUSE_UNCOVERED

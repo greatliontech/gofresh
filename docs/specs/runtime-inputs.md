@@ -152,11 +152,14 @@ checking process; ambient convenience operations use the ambient environment at 
 operation. Mixing an explicitly configured process with ambient environment hashing
 is not coherent evidence.
 
-**REQ-inputs-context** (behavior): Context-aware producer finalization and current checks MUST observe
-caller cancellation before and between environment identities, path identities,
-directory members, and file-read chunks, returning the context error without a
-partial state. Context-free checks retain identical hashing semantics under an
-unbounded background context.
+**REQ-inputs-context** (behavior): Producer finalization, adoption, identity
+conversion, merge and current checks MUST observe their owning unit's supplied
+phase context before and between environment identities, path identities,
+directory members and file-read chunks, returning the context error without a
+partial state. An unbounded caller context is an explicit lifetime choice,
+never an implicit replacement for a cancelled operation. Separately bounded
+closing phases follow REQ-fresh-context without concealing the original
+interruption.
 
 **REQ-inputs-merge** (behavior): A caller combining observations from several
 processes MUST be able to merge their independently completed states as a deterministic
@@ -170,7 +173,11 @@ child appears once in the canonical result. Merge is commutative, associative, a
 idempotent; its digest is computed from the merged manifest against that current
 view. Merging zero states deliberately produces the encoded observation-free
 manifest, while an empty, malformed, or unsupported manifest supplied in a state is
-refused rather than treated as no observation.
+refused rather than treated as no observation. This set union does not prove
+that every result-contributing process supplied evidence: the independently
+established roster and terminal dispositions of REQ-fresh-unit-roster govern
+that claim. Deduplicating input identities never deduplicates distinct actual
+executions out of the unit's obligations.
 
 **REQ-inputs-incomplete** (behavior): A caller whose producing process did not
 complete normal observation finalization MUST be able to construct a canonical

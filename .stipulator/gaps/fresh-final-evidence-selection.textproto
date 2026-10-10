@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-final-evidence-selection"
+reason: "The current ordinary and observed checks require repeated caller method selection. The replacement final boundary must choose admissible established evidence without synthesizing producing support or authorizing a new assertion or applicability transformation."
+content_hash: "e4426c655042a4c42d0ec09a1d288f3f4cae3b7027d2396251038f381c0dc16d"
+source_hash: "c4c53ee4e101dc0873cfb04a6a4c6d3444bdf6c52b8e21f7eb30ad35a02d5045"
+lands { manual { condition: "The migrated final check chooses admissible established evidence under each consumer model, rejects missing producing obligations and unlicensed transformations, and preserves explicit analysis-cost policy, decisive-mismatch ordering and complete-inventory requests." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED
