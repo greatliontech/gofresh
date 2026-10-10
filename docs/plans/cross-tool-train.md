@@ -2880,8 +2880,8 @@ in their repos.
 - [x] 297. gofresh: the dst-selection walk for the toolchain-audit key
       (gofresh docs/issues/walk-dst-selection-for-audit-key.md, whose
       trigger fired 2026-09-29 — the field report
-      dst-selection-walk-trigger-fired-tugboat, folded at 315 into
-      godst-testlog-writer-swallows-write-errors.md (recover with
+      dst-selection-walk-trigger-fired-tugboat, with the admission
+      rationale maintained in closure/toolchainaudit.go (recover with
       `git log --all -- docs/issues/dst-selection-walk-trigger-fired-tugboat.md`):
       tugboat's first judged run over `dst` and
       `dst,race` under go1.27.0-dst.14 re-executes ~1,070 subjects per
@@ -3318,7 +3318,7 @@ in their repos.
       filed as source-traversal-cancellation-gaps (resolved at 315.B;
       `git log --all -- docs/issues/source-traversal-cancellation-gaps.md`); the
       charter's own 'After 314' struck — Before 314, as 316 grew it.
-- [ ] 338. godst (thegrumpylion/go, dst branch): the testing harness's
+- [ ] 338. godst (greatliontech/godst, main): the testing harness's
       test-log writer propagates a write error — testing/dst_hostio.go's
       `dstHostStreamWrite` returns the errno its `writeFull` swallows
       (EINTR/EAGAIN retried as today) and `dstTestlogWriter.Write`
@@ -3326,9 +3326,8 @@ in their repos.
       `StopTestLog` fails the binary as the stock harness does; a build
       cut from the fix and installed as the fleet's running build; then
       gofresh's canary re-lists the dst selections over that build (the
-      walk's record in
-      docs/issues/godst-testlog-writer-swallows-write-errors.md carries
-      the walked digests it covers; every other moved key re-walked), a
+      digests and admission rationale in closure/toolchainaudit.go;
+      every other moved key re-walked), a
       gofresh release. Opens by cloning the fork beside the other repos
       and measuring how its builds are cut (~/.local/godst holds builds,
       no source) — the procedure recorded for 330, which cuts the next

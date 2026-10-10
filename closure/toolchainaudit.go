@@ -692,12 +692,30 @@ var auditedToolchainSources = []toolchainSourceRow{
 		},
 	},
 	// The repaired godst harness returns every test-log write failure to
-	// the buffered logger, whose flush fails the process. Its free-function
-	// printer/stat helpers preserve observation routing; finalizer scratch
-	// remains private to each driver. The dst changes below keep entropy,
-	// network and syscall effects outside pure admissions; filesystem
-	// operations stay host-isolated, time fences exclude ambient locations,
-	// and synchronization hooks change scheduling rather than input values.
+	// the buffered logger, whose flush fails the process. A dropped block
+	// of whole records is otherwise indistinguishable from a quiet test;
+	// a completion receipt cannot recover those missing observations.
+	// The free-function printer/stat helpers preserve observation routing;
+	// finalizer scratch remains private to each driver.
+	//
+	// The dst admissions rest on the enabled branches, not just the tagged
+	// files. Simulated filesystem operations may return before stock
+	// logging sites, but the filesystem is host-isolated, simulation is
+	// process-global for the run, and simulated changes never move the host
+	// cwd. Logging a simulated path can over-pin a host path, not omit a
+	// host read. The syscall environment is per-process copy-on-write:
+	// os.Getenv logs before delegation and unmodified keys retain their
+	// host values. Raw intercepted syscalls remain outside pure admissions.
+	//
+	// Time's location and zoneinfo fences affect operations excluded from
+	// the fixed-argument admissions; the virtual clock is not admitted.
+	// Internal synchronization hooks under dst, and the additional sync
+	// hooks under dst && race, change scheduling and starvation decisions,
+	// not the audited methods' values or memo semantics. The os/signal
+	// fence panics inside an active bubble; none of its operations is a
+	// pure admission. Deterministic sysrand remains entropy-classed, map
+	// iteration grants no admission, and runtime/network hooks remain
+	// effectful.
 	{
 		Label: "go1.27.2-dst.15",
 		Base:  "go1.27.1-dst.13",
