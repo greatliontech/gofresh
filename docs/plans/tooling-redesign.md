@@ -14,7 +14,7 @@
     oracle probes, converge read-only review, release and install the repair.
 - [ ] 2. Settle the shared semantic foundation and authority ledger before
   changing public contracts or construction boundaries.
-  - [ ] 2.1 Map each retained issue, numbered charter and migration change to
+  - [x] 2.1 Map each retained issue, numbered charter and migration change to
     retain/adapt/reject, its deciding regression and its destination vertical.
     Preserve all WIP branches and dirty worktrees until accounted for.
   - [ ] 2.2 Specify conditional applicability, immutable producing evidence,
