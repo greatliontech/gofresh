@@ -1,16 +1,16 @@
-- [ ] 1. Gomutant: cut off unsupported negative-coverage authority before
+- [x] 1. Gomutant: cut off unsupported negative-coverage authority before
   relying on campaigns or releasing migrated consumers.
-  - [ ] 1.1 Reproduce mixed parent/child coverage, environment-sensitive
+  - [x] 1.1 Reproduce mixed parent/child coverage, environment-sensitive
     coverage, and compile-time candidate influence with complete deciding
     oracles; distinguish score authority from advisory positive reach.
-  - [ ] 1.2 Require the complete oracle wherever negative authority is
+  - [x] 1.2 Require the complete oracle wherever negative authority is
     unknown. Remove unsupported scheduling probes and modeled savings;
     preserve oracle identity, isolation, attribution and execution bounds.
-  - [ ] 1.3 Prevent potentially affected historical banks and findings from
+  - [x] 1.3 Prevent potentially affected historical banks and findings from
     authorizing exemptions or exact/extended/spliced reuse without sound
     remeasurement. Preserve inspectable history and demonstrably unaffected
     shaped evidence; decoding and layer movement confer no new authority.
-  - [ ] 1.4 Verify with direct regressions and independently suitable full-
+  - [x] 1.4 Verify with direct regressions and independently suitable full-
     oracle probes, converge read-only review, release and install the repair.
 - [ ] 2. Settle the shared semantic foundation and authority ledger before
   changing public contracts or construction boundaries.
