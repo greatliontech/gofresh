@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-inputs-observable-read-set"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "a9556a20d6033ef79e7da29c1cc8cf0ef1f131d02c6eab1448424ea5ce0f2604"
-source_hash: "ef432273ed0d734162930c93e70cef6b0bf60c75dfaba361bcab89e3800a1212"
+content_hash: "daf9b0b93bd147075076fd8c87d86ead8f80108e453bcdca2c32d3e37d9db181"
+source_hash: "2562bc4d9d705f3cb5826481fdc65ad10fbff8bb5b8602fdcf3e230b223436b0"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

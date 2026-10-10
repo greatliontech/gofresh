@@ -2,7 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-guard-pinned"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "db1ce203592ac0eecb53a210d100fd2376a288b86f5a74025338b8a9c75df0af"
-source_hash: "b7bfb51c06458908cc42e37462198818862609c6c262234497c6cb1933132692"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Existing examples do not establish the invariant and the current accessor/root admission relies on the former version-pins-root premise. The dependency repair must guard a behavior-relevant root value and actual covered content, or refuse, while preserving the existing receiver, startup, dynamic-reference and mutation exclusions."
+content_hash: "b6fc21663997b825d27834fdd39c8c2fe4b2fbe528178d4c1c2dba17171d37b2"
+source_hash: "43fa756013988b523c92a5aa5a8468b61f3211106f77dc488fb04dc48f7a8b2f"
+lands { manual { condition: "A property witness or analyzer proof enforces the complete guarded-accessor rule, including changed root spelling and uncovered GOROOT data under an unchanged reported version and the retained startup/dynamic/mutation exclusions." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

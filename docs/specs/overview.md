@@ -94,10 +94,12 @@ data behind a result — the source closure, the observed runtime inputs, the
 toolchain identity, and the build configuration. A code guard bears on every
 subject whatever the result's kind.
 
-**measurement guard** (term): a guard over the execution environment that can move
-a timing measurement without changing a pass/fail outcome — the machine
-fingerprint and the runtime configuration. A measurement guard bears only on a
-result that is a measurement.
+**measurement guard** (term): a guard over the execution environment used to
+protect timing measurements — the machine fingerprint and the runtime
+configuration. This guard bears only on a measurement result. Omitting it for
+a code result does not prove that every value in that environment is irrelevant
+to code behavior; relevant effects have their own evidence obligations under
+REQ-guard-runtime-relevance.
 
 **verdict** (term): the freshness answer for a subject's stored result against the
 current tree — one of valid, stale, or unverifiable.
@@ -187,8 +189,12 @@ integrity evidence. An unchanged maximal hash may retain compatible evidence; af
 maximal drift the recording is stale on its closure before any observability
 evidence is consulted (REQ-fresh-hierarchical-check), and missing,
 unrecognized, incomplete, or inconsistent evidence never suppresses
-unverifiability. Changing any proof rule that can change a disposition requires a new
-strategy/version identity even when source is unchanged.
+unverifiability. Its dependency and compatibility identities follow
+REQ-fresh-dependency-identities: a reported toolchain version alone cannot
+certify the selected content on which an admitted proof depended. Changing
+any proof rule that can change a disposition requires a distinguishable
+strategy/compatibility identity even when source is unchanged; a memo-layout
+change alone does not assert that the old proof's meaning changed.
 
 **REQ-fresh-observation-data** (invariant): The observation-completeness assertion
 attribution and observability proof strategy/version, subject, disposition, and
@@ -275,8 +281,10 @@ the separate caller-responsible override.
 
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
-measurement — so a benchmark measurement is guarded against machine and runtime
-configuration drift, while a test verdict, which neither can change, is not.
+measurement — a benchmark measurement is additionally guarded against machine
+and runtime-configuration drift. A code result omits those measurement fields,
+not its behavior-affecting dependencies: relevance is governed by
+REQ-guard-runtime-relevance, and missing required evidence is never agreement.
 
 **REQ-fresh-go-command-policy** (behavior): Every `go` command gofresh
 spawns itself MUST run through the go-command policy's runner: under one

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-inputs-absent-asserted"
+reason: "The existing bare-fingerprint decision and its tests interpret absent input fields under the former implicit no-input assertion. The unit boundary must distinguish independent no-input analysis, an explicit declaration, missing capture and supported empty execution without backfilling old records."
+content_hash: "069d3abcb547c0d034f3abc37aa3ed43722aa5ac64d46592975cc758bfce78b4"
+source_hash: "36c415a929d4dbd30c5c5c1e599267ab10288f449f6fcec80352e717871840e2"
+lands { manual { condition: "The unit-owned evidence boundary enforces missing versus explicit-none versus completed-empty authority, and historical absence never acquires a declaration, completion or outcome support; the ordinary proven-input-free positive case remains valid." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

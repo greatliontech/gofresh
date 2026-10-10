@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-inputs-guard-covered"
+reason: "The current toolchain-root omission treats all paths under GOROOT as version-covered. The dependency repair must restrict the omission to the recorded claim's actual coverage and preserve observations/refusals for uncovered data, independently of root topology and module/build-cache rules."
+content_hash: "c02b0a23a9293a3bb124c937a35b7c3d4c588f9cad4b5196a310a510e473888c"
+source_hash: "cdad9fdeb235158fb0bd17c03e1d59b43526b425a339b10f21dd19a663d64465"
+lands { manual { condition: "The runtime-input guard-covered paths enforce actual toolchain-content coverage and relevant root-value evidence, with changed covered content, uncovered arbitrary data and symlink/topology regressions while preserving module-cache and build-cache boundaries." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

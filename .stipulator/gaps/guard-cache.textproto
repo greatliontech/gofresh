@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-guard-cache"
+reason: "Existing memo keys and their legacy witnesses do not enforce the amended complete-dependency contract: selected toolchain content and dependent admission policy are not fully represented, and canonical closure equivalence alone does not reproduce source-position-bearing payloads. Current consent preserves existing witnesses, not a claim that these added obligations are implemented."
+content_hash: "7b6bafa8de71e5b83fe3b69d229f3a6ee474747d55775e7721f0b31b51056549"
+source_hash: "1007c603f24d31a0c1313f22d68a25b02796440816d6767e8790a3f347632396"
+lands { manual { condition: "Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -375,9 +375,10 @@ empty identity or one containing a newline; `open` not encoding access flags; `s
 not recording returned metadata; every operation omitting its return values, byte
 counts, and errors; and mutation and child-process operations producing no record.
 The identity-only stream does not establish the outcome part of an
-observation-completeness assertion by itself. The toolchain guard pins producer
-behavior and the observability strategy identity pins the engine's interpretation
-of it. Against that model, the base read-only proof admits only subject-time `os.Getenv`,
+observation-completeness assertion by itself. Complete toolchain-content and
+admission evidence pins the audited producer semantics, and recognized proof
+compatibility pins the engine's interpretation (REQ-fresh-dependency-identities).
+Against that model, the base read-only proof admits only subject-time `os.Getenv`,
 `os.LookupEnv`, `os.Open`, `os.ReadFile`, and
 `os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, and
 free of carriage return and newline — testlog representability; resolvability is the
@@ -554,14 +555,17 @@ handles, and probe results may not escape. Unknown flags, path transforms, alias
 ordering, or uses fail the proof closed.
 
 **REQ-inputs-absent-asserted** (behavior): A fingerprint carrying no runtime-input
-manifest MUST be read as the caller's assertion that the subject's run observed no
-runtime inputs, the guard holding vacuously — the engine never runs the subject and
-cannot see what a run observed, so the manifest is the caller's to supply exactly as
-the build inputs and the commit are, and a caller that attaches none takes
-responsibility the same way. An observation-free run still encodes as an empty
-manifest distinct from no manifest at all, so absence is always a deliberate
-assertion, never a capture accident; a caller that runs subjects through the test
-harness attaches what the testlog yields.
+manifest MUST be read as having no recorded runtime-input observation, never
+by absence alone as an assertion or proof that its producing run observed no
+inputs. A completed observation-free run has an encoded empty manifest and its
+own completion/support premises; a missing capture remains missing. An explicit
+no-additional-input declaration is caller responsibility under the result's
+model, distinct from an observed empty execution and from explicit purity.
+Where independent analysis establishes that the requested claim needs no
+runtime-input guard, absence does not create an artificial observation
+obligation. Otherwise missing evidence supplies no positive authority and
+cannot lift unverifiability. A decoder neither invents a declaration nor adds
+completion or outcome support to historical absence.
 
 **REQ-inputs-exclusions** (behavior): Observation construction from a test-harness
 log MUST accept caller-declared path exclusions — each a non-empty identity-form
@@ -577,8 +581,9 @@ content: a directory identity that remains recorded still digests everything
 its hash walks, so a caller silencing a volatile subtree excludes both the
 subtree and every recorded ancestor listing whose digest observes it. An
 exclusion is the caller's assertion that the excluded paths are not inputs of
-the subject: it carries the same soundness responsibility as attaching no
-manifest, and it is how a caller meets observation coherence for volatile
+the subject: it carries explicit, attributable soundness responsibility,
+never responsibility inferred merely from a missing manifest, and it is how
+a caller meets observation coherence for volatile
 paths it cannot hold still — a VCS bookkeeping directory mutated by unrelated
 tooling makes every digest over it environmental noise rather than evidence.
 The exclusion outranks every per-path disposition the observation could
@@ -620,7 +625,9 @@ re-observing it adds no protection, and its churn under concurrent builds
 forfeits reuse for free. The `fuzz` subtree is the counterexample and stays
 observed: a discovered corpus a `-fuzz` producing run consumes semantically,
 derivable from nothing the fingerprint pins. A cache violating Go's contract
-is outside this model's trust boundary exactly as a corrupted GOROOT is, and a
+is outside this model's trust boundary, as is a corrupted toolchain; this does
+not exempt selected standard-library source from its content-admission and
+dependency rules (REQ-fresh-dependency-identities). A
 subject reading cache objects as data rather than through the toolchain is
 outside the admitted observation set exactly as covered-tree metadata
 dependence already is. A read records neither
@@ -631,11 +638,15 @@ and every symlink the kernel walk traverses inside — a chain that leaves the r
 and re-enters is a mutable rebinding point outside every guard and stays observed,
 exactly as value-binding coverage treats bracket roots. Missing, uninspectable, or
 ambiguously resolved objects stay observed. Covered content is already pinned by
-evidence the fingerprint carries — GOROOT by the toolchain guard, extracted module
+evidence the fingerprint carries — GOROOT by the toolchain identity together
+with the selected-content dependencies required by the admitted claim, extracted module
 trees by immutable version pinning, the closure model's own collapse for stdlib and
 cached dependencies — so re-observing it adds no protection and forfeits reuse; a
 subject depending on a covered tree's *metadata* beyond what the covering guard pins
-is outside the collapse and outside the admitted observation set alike. The caller's
+is outside the collapse and outside the admitted observation set alike. Merely
+residing under GOROOT does not prove an arbitrary data read covered: content
+outside the recorded claim's coverage stays observed or unverifiable, and a
+behavior-relevant root spelling is not guarded by version equality alone. The caller's
 soundness inputs are exactly two, and their blast radius is stated: the environment
 it ingests must be the one the run resolved its roots under — a producer may
 declare a minted scratch root, but the declaration does not permit withholding or
@@ -670,8 +681,7 @@ way: declaring a root is the caller's assertion that its record pins the
 named surface for the span, and a declaration the record does not actually
 pin silently vacates observation for everything beneath it — one declared
 surface wide. The module root itself is refused outright: a whole-module
-static declaration is the attach-no-manifest assertion in disguise
-(REQ-inputs-absent-asserted) and would vacate every module-relative
+static declaration would vacate every module-relative
 observation rather than name a surface. The refusal binds in BOTH forms and
 loudly: a declared root must resolve strictly inside the module tree's
 interior — a committed symlink at the declared position pointing to the

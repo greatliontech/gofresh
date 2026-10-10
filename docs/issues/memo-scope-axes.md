@@ -16,5 +16,23 @@ composition state (the flat fact map the fixed points read) — so each
 role carries fields the other never sets. Splitting the composition
 result into its own type makes each unrepresentable.
 
-Lands: cross-tool train chunk 203 (the memo-scope rule; audit 285 repaired this
-line, which a retarget had left as a dangling half-sentence).
+## Claim-specific source dependencies
+
+Canonical closure equivalence is not raw-source identity. For example,
+`closure/observability.go`'s `flagRegistrationFacts` embeds the registration's
+line and column in its persisted refusal. Inserting a blank line before
+`register` in `closure/fixtures/flagregescape/flagregescape.go` does not move
+the canonical production closure used while analyzing `flagregdep.TestProd`,
+but changes the freshly derived diagnostic. A memo keyed only by canonical
+core plus compartment can return the older position. This is a source-level
+payload-dependency mismatch, not a reproduced verdict flip.
+
+The implementation needs sufficient source identity for such cached output,
+or it regenerates source coordinates outside the memo from the current
+coherent snapshot. Its deciding regression compares cold, warm and discarded
+memo answers across the layout-only edit, retaining the public closure's
+deliberate equivalence. The dependency repair precedes the broader mechanical
+folds so those folds cannot preserve an incomplete identity by accident.
+
+Lands: docs/plans/tooling-redesign.md 3.2a for payload dependencies; 7.8 for
+the remaining memo/read-path/derivation-result folds (retained charter 203).

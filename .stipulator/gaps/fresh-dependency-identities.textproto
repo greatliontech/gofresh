@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-dependency-identities"
+reason: "Native memo scopes and recorded-proof admission lack complete claim-specific selected-content/admission dependencies and separation of memo versus evidence compatibility. Position-bearing payloads also need dependencies beyond canonical source equivalence; no historical support is supplied by the new contract."
+content_hash: "473650eda19addfd73cf5d35c2c5250a22b8b76b5f1b0d92ac8c1015c7eaddfd"
+source_hash: "f00d91079ec5d42f4411dfee79ed5740deba4dcec31c99487231ae1302821b94"
+lands { manual { condition: "Native memo and recorded-proof paths enforce all claim-specific source, selected-toolchain-content, admission and derivation dependencies; same-version content motion and layout-only changes to position-bearing payloads pass cold/warm/historical checks, and representation-only changes do not alter evidence authority." contradicted: true } }
+excuses: GAP_EXCUSE_UNCOVERED

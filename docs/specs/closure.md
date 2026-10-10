@@ -48,10 +48,12 @@ moves the closure hash even when every function body is byte-identical.
 
 **REQ-closure-stdlib-cut** (behavior): The closure MUST exclude standard-library
 declarations from the hash while still traversing call edges through them — the
-standard library changes only when the toolchain changes, which is already a guard,
-so hashing thousands of constant-per-toolchain files is redundant, yet a callback
-from a standard-library function back into the subject's own code stays reachable and
-hashed.
+standard-library dependency is represented by toolchain evidence rather than
+duplicated in every subject's closure. A reported version alone does not
+establish source-content identity: admitted analyses obey
+REQ-fresh-dependency-identities and the selected-content audit. A callback
+from a standard-library function back into the subject's own code still stays
+reachable and hashed.
 
 ## Tiers and the sound floor
 
@@ -1933,10 +1935,12 @@ dispatch is not the demonstrated channel and stays unwidened.
 
 **REQ-closure-observability-guard-pinned** (invariant): The admitted observation set MUST include the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
-surfaces — whose value the toolchain guard already fixes, together with read-position
-uses of paths derived from it through constant-component joins: reads under the
-toolchain root are guard-covered at observation, so proving them observable claims
-nothing the record does not pin. The admission is consulted at the subject-effect
+surfaces — only when evidence guards its behavior-relevant value, together
+with read-position uses of paths derived from it through constant-component
+joins only where the read content is covered by the recorded evidence. A
+reported version does not by itself fix the root's path or every file beneath
+it. An unsupported root value or uncovered read stays unverifiable, so the
+admission claims nothing the record does not pin. The admission is consulted at the subject-effect
 stage only: startup effects remain uniformly blocking (a package initializer
 calling the accessor blocks like any other startup effect), a dynamic reference to
 the accessor stays refused, and among handle-producing opens exactly the read-only
@@ -1964,17 +1968,31 @@ discarded incrementally rather than growing with every subject in the view.
 
 ## Cross-module dependencies
 
+Every memo below follows REQ-fresh-dependency-identities. Where a derivation
+consults audited semantics, its scope includes the selected toolchain content
+and admitting policy, not merely a version or a Boolean admission verdict.
+The memo's encoding/layout identity and the compatibility of evidence it
+computes are distinct obligations. Stating a toolchain guard in a key does
+not waive the dependency evidence required by that key's actual derivation.
+Likewise a canonical closure hash pins the source equivalence its contract
+defines, not every raw source byte. Each memo carrying position-bearing or
+other source-spelling-sensitive output includes sufficient additional source
+identity to reproduce that payload, or derives that output outside the memo
+from the current coherent snapshot. Removing a memo does not change the
+answer, including any diagnostics the memo promises to reproduce.
+
 **REQ-closure-observability-memo** (behavior): Observability proofs MAY be
 served from a persistent memo because the proof is a pure function of its
-key's complete input identity: the caller-supplied scope (the proof-strategy
-version, the analyzing frontend's version, and the code guards — toolchain
-and build configuration) plus the
-package test-binary closure hash, which pins every mutable source byte the
-analyzed program is built from: the core closure hash joined with the
-test-variant compartment identity, since the compartment partition keeps
-test-only bytes out of the core while the analyzed binary compiles both
-(stdlib rides the toolchain guard, version-locked cache dependencies their
-version pins, per REQ-closure-mutable-local and REQ-closure-pinned-dep). A memo hit is
+key's complete input identity: the analysis scope (the proof derivation,
+memo representation, analyzing frontend, code guards, selected toolchain
+content and admission policy) plus the
+package test-binary closure hash, which combines the core's source equivalence
+with the test-variant compartment identity, since the compartment partition
+keeps test-only bytes out of the core while the analyzed binary compiles both
+(stdlib rides the complete toolchain evidence, version-locked cache dependencies their
+version pins, per REQ-closure-mutable-local and REQ-closure-pinned-dep), plus
+the source dependencies of any additional persisted payload such as positions.
+A memo hit is
 byte-equivalent to recomputation — including recorded unrooted-subject
 dispositions — and a full-group hit skips the program load entirely. The
 memo is a cache, never a record: it lives under the user cache directory by
@@ -1990,10 +2008,11 @@ slice's from the memo. A violation of the caller's quiescence
 obligation (REQ-fresh-producer-view) can persist through the memo until the
 key moves — the memo widens that contract-excluded window's blast radius
 from one process to the cache, never its reachability. Changing proof
-semantics — including diagnostic text, which recorded evidence binds —
-without bumping the strategy version
-was already a violation of the recorded-evidence contract; the memo adds no
-new versioning obligation.
+semantics requires a distinguishable derivation identity and, when the
+meaning of recorded proof changes, a compatibility judgment. A memo-layout
+change alone moves its memo identity, not the meaning of historical evidence.
+Diagnostic bytes that an encoding includes in its integrity evidence remain
+integrity-bound; rewriting those bytes cannot silently preserve that seal.
 
 **REQ-closure-dynamic-state-memo** (behavior): Per-package shared-dynamic-state
 facts — the dynamic-capable package-level variables a package declares, the
@@ -2001,12 +2020,13 @@ variable identities its code mutates after initialization
 (REQ-closure-shared-dynamic-state-mutation-shape), and its method-directive declarations — MAY
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
-(the fact-strategy version, the analyzing frontend's version, and the code guards — toolchain and build
-configuration — and the execution attestations, which change what a fact
+(the fact derivation and memo representation, analyzing frontend, code guards,
+dependent selected toolchain content and admission policy, and the execution
+attestations, which change what a fact
 records, so attested and unattested sessions never serve each other's
 facts) plus the module's version pin and the version signature of every
 pinned module reachable from its packages, its type environment's complete
-version surface (the standard library rides the toolchain guard). A
+version surface (the standard library rides its complete toolchain evidence). A
 mutable-local package's facts are never memoized by version — its source
 carries no version signal (REQ-closure-mutable-local) — and derive fresh
 from each observation pass's own load, or serve as part of a view
@@ -2040,11 +2060,9 @@ because that fold is a pure syntactic function of its key's complete input
 identity: the scan-strategy version and the analyzing frontend's version
 (the frontend the analyzing process scans with, a cache-miss defense
 distinct from the analyzed selection's toolchain, a guard) — joined by
-the analysis' selection-audit verdict when the build selection is not the
-audited default, since the scan's audited-set consultations answer per
-selection and an unaudited selection's scans must never serve an audited
-consumer or vice versa (the default-selection scope stays byte-identical to
-the pre-selection era's, so its memos keep serving) — plus the
+the selected toolchain content and admission-policy identity on which its
+audited-set consultations depend, for every selection including the default;
+an admission Boolean cannot distinguish different dependent content or rules — plus the
 module's version pin, the package's import path, and the identity — with
 its Go/cgo partition — of the file set the current listing selects for it.
 No type-environment signature participates, because the per-file scan reads
@@ -2072,10 +2090,12 @@ included — bumps the scan-strategy version.
 **REQ-closure-testing-scan-memo** (behavior): A package's typed
 testing-effect scan MAY be served from a persistent memo, because the scan
 is a pure function of its key's complete input identity: the scan-strategy
-version plus the code guards — toolchain and build configuration — that
-the type environment depends on, plus the analyzing frontend's version,
+version and memo representation plus the code guards, selected toolchain
+content and admission policy that the type environment and classification
+depend on, plus the analyzing frontend's version,
 plus the package test-binary closure
-hash, which pins every mutable source byte the environment is built from.
+hash, which pins the combined core and test-variant source equivalence,
+plus any additional source dependencies of its persisted payload.
 The guards come from the caller's one analysis scope, set once per
 pass, which arms every closure memo that needs them. A hit serves
 before any type-environment load; without the caller's guards the memo is
@@ -2098,12 +2118,14 @@ persistent memo, because every output is a pure function of its key's
 complete input identity — the shared-dynamic-state judgment reads the
 package's own graph and nothing of its sibling view packages
 (REQ-closure-shared-dynamic-state): the fact-strategy version, the analyzing frontend's version, and the code guards
-(toolchain and build configuration), the execution attestations, and the
+(toolchain and build configuration), dependent selected toolchain content and
+admission policy, the memo representation, the execution attestations, and the
 caller's vouch set — the scope — plus the package scan key: the maximal
 closure hash joined with the test-variant compartment identity, which
-pins every mutable-local byte of the test binary's graph and every pinned
-version it is built from (the standard library rides the toolchain
-guard). A served package takes no part in the pass's typed load, its
+pins the core and test-variant source equivalence of the test binary's graph
+and every pinned version it is built from (the standard library rides its
+complete toolchain evidence), plus any additional source dependencies of its
+persisted payload. A served package takes no part in the pass's typed load, its
 derivation, or its discharges; the load runs over the missed packages
 alone. A memo hit is output-equivalent to recomputation. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
@@ -2137,7 +2159,10 @@ the directory's ancestors, and the absence of a module
 file between the working directory and the main module root; the
 toolchain-generated test main is scaffolding outside the model;
 version-pinned modules are immutable under the pin go.sum carries, and
-the standard library rides the toolchain in the snapshot. A hit re-verifies every recorded input
+the standard library's listing dependencies ride complete selected-source
+evidence rather than the snapshot's reported version alone. The inputs that
+can change membership, imports or embedded-file discovery remain dependencies
+even when the selected version string is unchanged. A hit re-verifies every recorded input
 byte for byte — the served listing IS the listing a spawn would produce
 — and any difference, unreadable input, or unmodellable pass (a flag
 naming a module file outside the model, no main module

@@ -33,7 +33,11 @@ environments, so any difference makes the result stale.
 identity — the version string including any experiment or custom suffix that affects
 code generation — so a toolchain change, which moves the standard library and
 generated code the closure deliberately does not hash, stales every result recorded
-under the old toolchain. The identity is read from the pass's one environment
+under the old toolchain. This reported identity is not proof that selected
+standard-library source has unchanged content. Dependent analysis and recorded
+proof admission additionally obey REQ-fresh-dependency-identities; the label
+does not replace the content evidence or its compatibility judgment.
+The identity is read from the pass's one environment
 snapshot (`GOVERSION` with `GOHOSTOS/GOHOSTARCH`), byte-identical to the `go version`
 line minus its prefix, so a pass samples its toolchain once; a snapshot answering
 any of the three empty refuses the capture naming the key — a derived identity is
@@ -51,9 +55,13 @@ of the timing environment; the target platform lives here rather than in the mac
 guard precisely so it is still checked when measurement guards are off. The build
 inputs are the build-affecting parts of the invocation the engine cannot observe from
 `go env` — CLI flags passed outside `GOFLAGS` (`-tags`, `-gcflags`, `-ldflags`,
-`-pgo`) and PGO profile content — which the caller supplies as it does the commit,
-since only the caller knows how it built; a caller that passes none asserts it used
-none. Caller-supplied inputs have two disjoint forms: executable build flags select
+`-pgo`) and PGO profile content — which the caller supplies, since only the
+result owner knows the actual build description. An explicitly declared empty
+set accepts responsibility that no additional build inputs were used;
+accidentally missing information about a producing build is not that declaration.
+Toolchain defaults that consume inputs, including an applicable default PGO
+profile, remain inputs even when the caller supplied no corresponding flag.
+Caller-supplied inputs have two disjoint forms: executable build flags select
 the source and configuration used by every source-dependent analysis, including
 purity directives, and also enter the digest; opaque build evidence such as a PGO
 profile's content digest enters the digest but cannot select source. A build flag
@@ -102,6 +110,17 @@ before execution and able to move allocation and scheduling behavior with no oth
 guard moving; it bears only on a timing result, an unset `GOMAXPROCS` deferring to
 the core count the machine guard already covers.
 
+**REQ-guard-runtime-relevance** (invariant): A behavior-affecting runtime or
+machine dependency of a code result MUST be guarded by evidence applicable to
+that result, proven irrelevant under its declared model, discharged by an
+explicit assertion whose contract covers it, or left unverifiable. Omission of
+measurement-only fields supplies none of those grounds. Equality of inherited
+environment values alone does not guard an in-process mutation of the relevant
+state; an admitted method accounts for that mutation or refuses it. The
+measurement-only runtime-configuration and machine fields keep their encoding
+and result-kind rules; a code-result record cannot acquire them as a substitute
+for establishing relevance and appropriate evidence.
+
 ## Recording and recomputation
 
 **REQ-guard-recompute** (behavior): A subject's maximal closure hash for its
@@ -113,9 +132,10 @@ can share one explicitly bounded current view; a prior producer or current view 
 silently becomes the next check's current state.
 
 **REQ-guard-cache** (invariant): Persisted closure evidence MUST be treated as
-memoization keyed only by immutable inputs — the commit, the toolchain, the build
-configuration, the subject identity, and for versioned analysis evidence its
-strategy/version — never
+memoization keyed by complete dependency identities, not a commit address or
+reported toolchain label alone — source membership/content, resolved build
+configuration, subject scope, derivation and any selected-content or admission
+policy on which the fact depends (REQ-fresh-dependency-identities) — never
 as the source of truth, so recomputing or discarding it never changes source
 equivalence, and evidence that disagrees with recomputation from source can never
 make an unsound result look valid.
@@ -147,4 +167,6 @@ caller; missing or mismatched kind evidence is refused. Unavailable measurement
 support therefore cannot block a code result, and a measurement recording cannot be
 validated under code-only guards. A code-kind fingerprint carrying non-empty
 measurement guard values is internally inconsistent and refused rather than treated
-as permission to ignore them.
+as permission to ignore them. This selective capture policy does not discharge
+runtime or machine effects that can change the code result; their evidence is
+governed separately by REQ-guard-runtime-relevance.

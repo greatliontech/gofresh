@@ -21,7 +21,7 @@
     separately licensed applicability endpoints, and observed/proven/asserted/
     unknown authority. Preserve consumer-owned outcome, suite-health,
     statistical and mutation-attribution claims.
-  - [ ] 2.3 Reconcile runtime-configuration relevance, absent-input authority,
+  - [x] 2.3 Reconcile runtime-configuration relevance, absent-input authority,
     toolchain-content compatibility, static derivation certificates and
     producing versus current provenance. Missing historical support never
     becomes evidence through decoding or current analysis.
@@ -56,6 +56,9 @@
   - [ ] 3.2 Couple content, admission policy and derivation identities to all
     dependent evidence; separate logical lookup, producing identity, memo
     identity, wire version and proof/outcome compatibility.
+    - [ ] 3.2a Cover source-spelling dependencies of position-bearing memo
+      payloads without changing public canonical source equivalence; compare
+      cold, warm and discarded-cache answers after layout-only source edits.
   - [ ] 3.3 Preserve budget-cut provenance through immutable subset selection
     and sibling validation, including real-drift precedence.
   - [ ] 3.4 Release the shared correctness boundary with regression and

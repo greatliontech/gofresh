@@ -13,8 +13,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-guard-set"
-  content_hash: "3cc9f2aef254fcd0735ddacce6ab5ee9da3656c1a2dbd82c6baf65cb48343706"
-  source_hash: "25679b8fa0494fa7584de096c0741473d738063e89ee30e56e4208afc41876f3"
+  content_hash: "09d8b898a5ea7ffcd8a63b02a132bd99db97cd7a316343da4176ed8eee82ca7d"
+  source_hash: "f73ec705565469ce18038baef87e9e422eb19e3fad310dda238105cf6aa629e0"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestCompareCodeVsMeasurement"
   role: BINDING_ROLE_TESTS
@@ -93,8 +93,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-guard-set"
-  content_hash: "3cc9f2aef254fcd0735ddacce6ab5ee9da3656c1a2dbd82c6baf65cb48343706"
-  source_hash: "25679b8fa0494fa7584de096c0741473d738063e89ee30e56e4208afc41876f3"
+  content_hash: "09d8b898a5ea7ffcd8a63b02a132bd99db97cd7a316343da4176ed8eee82ca7d"
+  source_hash: "f73ec705565469ce18038baef87e9e422eb19e3fad310dda238105cf6aa629e0"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestResultKindIsBoundToFingerprint"
   role: BINDING_ROLE_TESTS
@@ -123,8 +123,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-observation-compatibility"
-  content_hash: "21fe2025b59dc8063b8b3e00069cc7ee7b50d428f67a3b0b0de5c31c62cc3326"
-  source_hash: "f8033cbee47c959f22f06b90a3c756d83d37873ad2fca26ce1ec9f2d0276d6b1"
+  content_hash: "8b1ba9d1017d7105a7d690a68245d766eb2190b44a3af01e541aa27f273c6157"
+  source_hash: "10080fca60acf5afe2b4b8ff8abff9006332a3a8f671650ae02c7f9c73063d6f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.compatibleObservationProof"
   role: BINDING_ROLE_IMPLEMENTS
@@ -203,8 +203,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-observation-compatibility"
-  content_hash: "21fe2025b59dc8063b8b3e00069cc7ee7b50d428f67a3b0b0de5c31c62cc3326"
-  source_hash: "f8033cbee47c959f22f06b90a3c756d83d37873ad2fca26ce1ec9f2d0276d6b1"
+  content_hash: "8b1ba9d1017d7105a7d690a68245d766eb2190b44a3af01e541aa27f273c6157"
+  source_hash: "10080fca60acf5afe2b4b8ff8abff9006332a3a8f671650ae02c7f9c73063d6f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestObservedRecordingStalesOnMaximalDrift"
   role: BINDING_ROLE_TESTS

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-guard-runtime-relevance"
+reason: "Current field-selection pins enforce measurement-only encoding, not the full relevance rule for code-result dependencies. The admitted operation inventory, explicit assertions and native input evidence need joint regression coverage, including in-process runtime-state changes."
+content_hash: "d35f033577a313245955f8e0ef02e097bd3d8de4f9f3ba62e2756635c576b8ff"
+source_hash: "a1d05b4b2a4e4cb8b334653ebc0b7e61777747f94d47cc342d24e7ca8c151c70"
+lands { manual { condition: "The shared dependency and first-unit work binds regressions for relevant runtime and machine values, in-process mutation refusal, explicit assertion authority and unchanged measurement-only wire-field rules." } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -114,6 +114,54 @@ from several views unless it carries those dependencies too. A logical lookup
 address is not itself this dependency evidence, and the current source of a
 fact is not a substitute for the source under which a stored fact derived.
 
+## Dependency and compatibility identities
+
+A logical record address identifies the requested result, not the evidence
+needed to serve it. A producing identity describes the inputs of the original
+production. A derivation identity identifies the rules that computed a fact;
+a memo identity additionally includes its complete dependencies and cache
+representation. A wire version determines how bytes are read. A compatibility
+identity determines whether recognized evidence still establishes the claim
+being checked. Equality on one of these axes is not equality on the others.
+
+A source-equivalence identity can intentionally ignore layout or ordinary
+comments. A cached payload that embeds source coordinates has additional
+dependencies: it needs sufficient source identity to reproduce those
+coordinates, or it derives them outside the cached payload from the current
+coherent snapshot. Public behavior equivalence does not promise byte-equal
+diagnostics across source spellings it deliberately treats as equivalent.
+
+**REQ-fresh-dependency-identities** (invariant): Every memoized or recorded
+derived claim MUST carry or identify all dependencies needed to justify its
+reuse, including selected toolchain source content and admission policy when
+the claim depends on audited standard-library semantics. Neither unchanged
+reported version nor an admitted/not-admitted Boolean substitutes for those
+dependencies. A memo representation change can require recomputation without
+invalidating semantically compatible historical evidence; a changed proof,
+outcome or admission rule that changes what evidence establishes requires a
+distinguishable compatibility judgment even when the bytes still decode. A
+recognized compatibility rule can preserve only the authority it establishes;
+missing historical dependencies cannot be supplied by reading today's tree or
+by inserting today's identity during decoding. Without sufficient recognized
+support the dependent claim is unavailable, though independent applicable
+evidence and explicit assertions retain their own specified authority.
+
+Content admission concerns the files selected by the analysis' actual build
+configuration and the policy governing them. It is separate from language
+series compatibility and the reported toolchain label. Correctness of the
+compiler/linker and integrity of toolchain-mediated caches remain the stated
+model premises; those premises do not exempt legitimate changes to the
+selected source content from the content-admission or dependency judgments.
+
+Producing and checking snapshots each establish their own present facts. A
+current content digest can reject a dependent historical claim or participate
+in an explicitly licensed compatibility check; it cannot certify which bytes
+an earlier execution used. Source/build and runtime drift retain their own
+refusal precedence, and evidence compatibility never bypasses a failing guard.
+Readable history with unsupported evidence remains history, not a current
+pass. No new wire fields or alternate encodings are implied by these identity
+roles; a published record format determines which roles it can represent.
+
 ## Ownership vocabulary
 
 The following roles identify responsibility rather than prescribe language
