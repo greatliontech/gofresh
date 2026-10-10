@@ -122,7 +122,7 @@ this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 3.0, 3.1b, 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve listing completeness, oracle independence, isolation, request identity and operation-owned cancellation. |
+| audit-boundary-residue | A; 3.1b, 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve listing completeness, isolation, request identity and operation-owned cancellation. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -175,7 +175,7 @@ this reconciliation document itself.
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 52 source issues.
+There are 53 source issues.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -217,6 +217,7 @@ There are 52 source issues.
 | process-identity-reads-have-no-discharge-channel | A/X; 2.2, 2.4, 7.3 | Explicit exact assertion and revocation; changed process identity may affect behavior. |
 | protodb-changed-run-commits-within-the-hour | A; 7.7, 9.3 | Named full-oracle workload's first durable target measured honestly against field expectation. |
 | purity-assertion-run-surface | A; 2.4, 5.4, 7.3 | Operation assertion recorded/root-scoped/revocable; no implicit acceptance or forged invoke explanation. |
+| retired-oracle-drift-helper-tests | A; 5.6 | Remove unconsumed forward-reference and drift-count helpers while preserving full-oracle, conservation, history and attestation coverage on admitted paths. |
 | run-faces-assemble-rows-twice | A; 6.7, 8.3 | Same persisted semantic result projects consistently including post-write failure. |
 | run-seams-snapshotted-per-run | A; 5.4, 7.1, 7.2 | Concurrent immutable observers do not cross; subscription cannot enable execution. |
 | seam-swap-helper-for-tests | R; 5.6, 9.3 | Nested swaps restore actual previous value after failure/cleanup. |

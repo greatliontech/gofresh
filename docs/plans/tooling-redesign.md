@@ -51,12 +51,17 @@
     retain the existing conditional result model and accepted sampling limits.
 - [ ] 3. Gofresh: establish complete evidence dependencies for the first
   consumer vertical, retaining existing sound analysis algorithms.
-  - [ ] 3.0 Gomutant safety prerequisite: cut off oracle-drift composition
+  - [x] 3.0 Gomutant safety prerequisite: cut off oracle-drift composition
     lacking an independence license, preserve history without granting exact
     reuse to contaminated records, and pin both shared-state kill and survivor
     counterexamples against a fresh complete oracle. Install before relying on
     changed-oracle campaign results; direct tests and full-pattern ephemeral
     body probes remain independently usable.
+    - [x] 3.0a Remove measured verification-harness waste without reducing
+      assertions or required oracles. Preserve tool-state isolation and the
+      effective compiler cache; use disk-backed scratch for measurements.
+      Converge independent review and mutation sensitivity before one full
+      optimized verification run over the settled safety cutoff.
   - [ ] 3.1 Reproduce changed selected GOROOT content under an unchanged
     reported version across fresh/memoized analysis and recorded proof reuse.
     - [ ] 3.1b Include same-name directory-to-source retyping in listing memo

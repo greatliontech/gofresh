@@ -26,31 +26,6 @@ control. Preserve legitimate empty selected-file sets for individual packages;
 do not confuse those with an absent surface inventory or demand authentication
 of coherently forged private cache data.
 
-## Oracle growth and shared state — 3.0 safety prerequisite
-
-Gomutant's `freshness.go` killer-drift gate follows forward declaration
-references and refreshes the target compartment. An added test can write a
-carrier-free scalar that an unchanged test reads without entering that forward
-walk. The assertion that growth cannot un-kill is then false.
-
-Measured against Gomutant `a921be9`, with the original implementation and a
-temporary added-test overlay:
-
-- `Value(x) = x+1`, `var disabled bool`, and `TestZ` checking `Value(1)==2`
-  only when `!disabled`: the original complete oracle kills three candidates.
-- Add `aa_test.go` with earlier-running `TestA` setting `disabled=true`, and
-  include both tests in the explicit oracle.
-- Reuse reports all three kills standing and re-measures zero candidates.
-  A forced complete-oracle run reports zero kills and three survivors.
-
-The inverse, a new test enabling an assertion, is a required survivor-side
-case. Historical full-oracle execution does not prove independence under a
-changed oracle. Disable unlicensed composition conservatively and prevent
-records produced through it from gaining exact-reuse authority after the fix.
-Retain useful history and independently justified unchanged-input reuse.
-Until that cutoff is installed, use direct tests or fresh explicit-full-oracle
-ephemeral probes for assurance, never killer-drift composition or its scores.
-
 ## Shaped mutation materialization and dependencies — 5.4, before shaped assurance
 
 Gomutant `shaped.go` copies symlinks unchanged, then writes replacements through
@@ -59,7 +34,7 @@ tree follows it during the scratch write; the clean twin follows it too.
 The same path can reach an external file. The tool's own write, not merely its
 oracle, needs physical isolation. Test original bytes across success, failure
 and cancellation with both original-tree and outside-tree targets. This path
-is not used by the fresh body-overlay probes allowed above.
+is not used by fresh body-overlay probes.
 
 The same file's `localReplaceActive` scans text after `=>` for unquoted path
 prefixes. A legal quoted local replacement is missed. An import-boundary
