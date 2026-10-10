@@ -56,28 +56,15 @@ register.
   of an operation (every symbol resolved, every subject captured,
   every proof proven) is never computed up front when the slice can
   carry its own share; "committed evidence first" is the test of
-  conformance. Per tool (restated by the user 2026-10-04, recorded so
-  it is never re-derived): gomutant's vertical is the target within
-  its window — preparation fail-early, freshness per record, the
-  window committed and banked per batch (207.2b, 304) — with ONE known
-  deviation: the derived oracle's observation-proof pass runs over the
-  whole union before the first target commits (the prove phase;
-  observed-union-memory-slicing's trigger, 277), to become per group
-  (prove the group's union, commit its targets, the next group).
-  stipulator's vertical is the PACKAGE under its covering invocation — a
-  witness group is the invocation's build coordinate and spans every
-  package the invocation runs, so the group was the deviation (a check
-  cancelled at 1h51m "kept nothing"); 307.B2a lands the package unit on
-  the selective form (its executed records publish at its completion,
-  its isolation re-runs inside its unit, its served records revalidated
-  after every execution), 307.B2b on the health-judged form — with the
-  resolver child's whole-corpus discovery the remaining deviation (307.B's
-  last step). pew's vertical is the arm (157.2a's preparation, 157.3's
-  per-arm persistence and gates) — conforms. gofresh is the library:
-  the view a consumer builds is the vertical, every pass is per view
-  and bounded by the analysis budget (305); its conformance is its
-  consumers' slicing. The principle holds across the board; what is per
-  tool is only the vertical's unit. The same rule governs
+  conformance. Gomutant's unit is the target within its confirmation
+  window, Stipulator's the package under its covering invocation, and
+  Pew's the measured arm. Retried executions and bounded post-process
+  evidence finalization obey the same durability rule. Gofresh supplies
+  the consumer-selected view and its analysis budget; a static sharing
+  unit is not automatically a persistence barrier for unrelated results.
+  These are obligations, not declarations that every path conforms.
+  The pending publication and interruption corrections are numbered in
+  the active sequence below. The same rule governs
   this train's own gates: a long measurement runs once, over the
   settled tree, after the loop converges; a measurement started
   before its inputs settle is wasted work, not diligence. A
@@ -117,29 +104,24 @@ register.
   defect; Band P's per-tool chunks land the entry guidance and a test
   that pins it derives from the spec.
 
-- **A second machine works pew under pew's own plan** (pew
-  docs/plans/performance-evidence.md, 2026-10-06; its chunk 2 is the
-  train's 291, its chunks 4–8 reach into 174, 252, 232, 276, 177, 15
-  and 127). No train session opens a pew chunk while that plan is
-  open; pew's train tail is re-chartered at the pew re-audit (319)
-  against that plan's residue; every chunk open AND every push here
-  fetches all four repos first and rebases onto origin (the other
-  machine does the same); a pew-side chore the train owes — the
-  minted ignore's two exit-log lines (gomutant 312) — lands after that
-  machine's gomutant reinstall, never before.
-- **The evidence-model boundary is the other machine's** (2026-10-07):
-  that agent holds gofresh 314 and 202 and every change to observation
-  completion, fingerprint serialization, attachment/validation
-  lifecycles and observed-reuse admission behind its rederivation (pew
-  docs/notes/evidence-model.md, gofresh
-  docs/specs/runtime-inputs.md, pew
-  docs/specs/spec.md §5 — the native fingerprint envelope;
-  the canonical specs stay authoritative). A train chunk crossing that
-  boundary is REPORTED to that agent before it is implemented (a
-  report, not an approval gate — the user's ruling 2026-10-07), its
-  charter saying so; a tightening-only admission change proceeds after
-  the report. Every rebase over that machine's commits re-derives the
-  touched contracts, never a blind rebase.
+- **One tooling owner.** Gofresh, gomutant, stipulator and pew follow
+  the single sequence below. Pew's docs/plans/performance-evidence.md
+  remains the completion checklist for its performance workflow, not a
+  second execution lane. Fetch all four repositories before opening a
+  chunk and before pushing; re-derive contracts across incoming changes.
+  Preserve migration checkpoints, WIP branches and dirty worktrees until
+  their contents have been individually reconciled and verified. Git-go
+  is outside this roadmap; godst and go-x-tools changes are prerequisites
+  only where a demonstrated tooling fault requires them.
+- **The shared evidence boundary is canonical.** Gofresh's overview and
+  runtime-input specs and Pew's native-envelope contract govern process
+  completion, outcome support, fingerprint serialization, applicability,
+  attachment and validation. Published implementations, checkpointed work
+  and proposals are distinct. No merge upgrades historical evidence,
+  grants outcome support from healthy execution, or replaces producer
+  validation with a later reconstruction. A producer change releases
+  before consumer adoption; each consumer retains its own execution-model
+  obligations.
 
 - **Cross-session filings are triage inputs.** An issue filed into
   the train by another session carries `Lands: awaiting triage`; the
@@ -170,24 +152,167 @@ register.
 
 ## Execution order
 
-Replanned 2026-09-02 (user ruling: no wasted work; audit the four
-repos, consolidate the behaviour, and only then run the tools against
-the work). The audit is docs/plans/pipeline-audit/ (delete-on-close).
-The order from here: **Band T first** — 150, 151, 152, 153 (the
-self-test partition per repo: the code of every tool testable in
-seconds without running the tool over a tree) — then **Band P** —
-154 (gofresh: the observation pass gains a preparation pass, a
-persistent contribution memo, and a per-package tick; release),
-155 (stipulator), 156 (gomutant), 157 (pew) — each the tool's
-operations restaged as fail-early preparation, then the incremental
-check-freshness / measure / persist loop per unit, the operator told
-throughout, on both surfaces, with every preparation-decidable refusal
-moved forward and the audit's knob dispositions landed in the same
-seam — then the deferred self-host verdicts (141's, re-run once over
-the settled tree under 155's warm, reporting check), then the field
-band as previously ordered: 138, 140, 115, then 142, 143, 144, 145,
-then 136 (rescoped: the consolidation scan and the refusal-site walk
-that Band P leaves), then the rest as recorded below.
+- [x] 339. Reconcile the four current implementations, migration
+      checkpoints, contracts, history and field reports; independently
+      audit reuse soundness, package/arm/target durability, analysis cost
+      and both reader surfaces; derive one execution sequence without
+      treating a field timing as a reproduced fault or a checkpoint as
+      completed work. Preserve every remaining numbered obligation below.
+      Each numbered implementation entry has its own regression, review
+      and landing boundary and counts once toward the standing twelve-chunk
+      re-audit rule; an intervening re-audit takes precedence over the
+      displayed sequence.
+- [ ] 340. gofresh: make content-audit admission a complete input to
+      cached and recorded evidence. Pin the same-version changed-GOROOT
+      case across fresh and memo-served analysis and historical observed
+      checks; couple dependent scopes and compatibility to the admitted
+      surface without allowing an old proof to suppress a current audit
+      refusal. Settle the contract and invalidation rules first,
+      then review and release before consumer adoption; this owns the
+      correctness opening of 203, not its unrelated memo cleanup.
+- [ ] 341. gofresh: preserve budget-cut provenance through sibling
+      projection and validation. Pin cut-first/complete-second parent
+      construction followed by sibling validation over the unchanged
+      tree, and retain real-drift precedence. Release the correction.
+- [ ] 342. stipulator: resolve under the complete declared selection,
+      including module mode and an explicit toolchain without tags.
+      Align selection construction, keys, loading and precedence with
+      the contract, adopting 340/341 first; fold this portion of 226.
+- [ ] 343. stipulator: use the longest declared import path for dotted
+      package identities in discovery, resolution, capture and publication;
+      retain the external symbol grammar and fold this portion of 249.
+- [ ] 344. stipulator: make cached resolution certificates cover the
+      selection-local and policy-wide facts their answers depend on.
+      Preserve cross-selection seeding, first-declaring-view precedence
+      and classifier identity across cache hits and upgrades. Pin edits
+      confined to another selected view and introduction of an earlier
+      declaring view; refuse old records lacking the required evidence.
+- [ ] 345. stipulator: keep ambiguous binary arguments identity-bearing.
+      Pin a custom flag whose value spells `-test.timeout=...`, ordinary
+      timeout edits and unknown forms, without inferring token roles from
+      a prefix. Fold the runtime-bound identity correction into its clause.
+- [ ] 346. stipulator: preserve clause scope through supersede or refuse
+      an unresolvable carry. Pin label/ordinal changes, multiple successors
+      and whole-claim contrasts; fold this correctness portion of 176.
+- [ ] 347. gofresh: reconcile the locality portion of
+      checkpoint 5bf9023 against the current released evidence model and
+      340. Re-derive mixed-selection validation, sibling obligations,
+      discharge rejection and missing-attachment ordering.
+      Derive memo and recorded-compatibility identities from
+      the integrated rules: neither the checkpoint's reserved @42 nor
+      released @43 is reusable blindly, and unchanged proof semantics
+      should not be invalidated merely to add a memoized projection.
+      Repair obsolete bindings, prove the post-integration tree, converge
+      review and release. Retain the checkpoint until that work lands.
+- [ ] 348. gofresh: separately reconcile checkpoint 5bf9023's record-only
+      support validation. Preserve original producing identity and trust
+      class, perform no current observation or authenticity inference,
+      and reject malformed or unsupported records. Complete its bindings,
+      regressions and independent review before release.
+- [ ] 349. gomutant: require sound negative-coverage authority before
+      omitting an oracle batch. Cover self-reexecuting mutated children,
+      environment-dependent coverage/scored executions, and compile-time
+      candidate influence outside the covered block. Use the released
+      locality evidence only within its stated scope; unknown negatives
+      execute the whole oracle, with a positive arithmetic narrowing
+      control retained. Version or invalidate affected coverage banks and
+      findings on every serve, extension and splice route; remeasure the
+      affected narrowed survivors. Preserve the full oracle of record and
+      the explicitly stated runtime-sampling limit. This unblocks Pew's
+      performance-evidence 12.1 coverage obligation.
+- [ ] 350. pew: derive requested profile obligations from the benchmark
+      inventory, including benchmarks absent on both recording sides.
+      Pin one fulfilled diagnostic beside an unrecorded requested benchmark
+      on both renderers and the command's exit classification.
+- [ ] 351. pew: carry a successfully completed timed process into its
+      bounded finalization gate before observation ingestion. Pin
+      cancellation after successful execution, genuine incomplete execution
+      and finalization drift; preserve earlier arms.
+- [ ] 352. pew: judge A/B stream names against the requested declarations,
+      not names supplied by the stream. Pin an unselected well-formed row
+      beside the selected result without dropping valid sub-benchmarks.
+- [ ] 353. pew: reconcile checkpoint 1f8df13, retain its native positive
+      controls and stated non-OS-exit limit, bind the generated premise
+      witness as the required evidence class and converge independent
+      review. Do not close the property gap on file presence alone.
+- [ ] 354. gomutant: remove best-effort instability attribution from the
+      path blocking other measured targets' commits. Expose the current
+      test, repeat and completed count; distinguish partial, failed and
+      unknown attribution from stable evidence, preserving its completed
+      prefix on interruption. Fold this portion of 267.
+- [ ] 355. gomutant: close a measured window after its own validation and
+      confirmation obligations without waiting for successor preparation.
+      Amend the existing horizon clause before moving the boundary; pin a
+      completed window beside a blocked next preparation and retain drift
+      refusal and deterministic membership.
+- [ ] 356. gomutant: give passing baselines independently validated durable
+      deposits, and serialize/merge bank writes at their shared tree scope
+      across distinct findings files. Amend the baseline-completion clause
+      first; pin restart before any finding and concurrent deposits through
+      separate documents. Preserve all producer and oracle evidence. Fold
+      the baseline portion of 302, leaving its selection format separate.
+- [ ] 357. stipulator: use the package completion path for drift retries
+      as well as first executions; preserve completed packages across a
+      later retry's cancellation. Fold the corresponding 249 work without
+      creating a second publication protocol.
+- [ ] 358. stipulator: keep race/plain attribution on each served group
+      record; pin the same subject serving from both admitted tiers and
+      preserve the race grant in correlation.
+- [ ] 359. stipulator: preserve resolution and witness publication
+      accounts across operational failures on both surfaces, including
+      publication at quiescence followed by execution cancellation. Fold
+      the corresponding 249 work into one operation account.
+- [ ] 360. Measure the remaining preparation barriers on the
+      corrected trees. Attribute cold/warm costs separately to typed
+      loading, SSA, digesting, validation, parent/child residency and
+      build/run peaks; do not assume the already-present per-package SSA
+      release is missing. Re-derive 314, 241, 238 and the memory reports
+      from measured ownership; distinguish physical admission capacity
+      from collection targets. Do not diagnose exit 137 as OOM without
+      attribution. Slot demonstrated reductions as commit-sized chunks
+      before the final campaign, without changing scope semantics.
+- [ ] 361. gofresh: settle cancellation ownership for observation
+      composition and revalidation, including context-free conversion,
+      adoption and merge paths. Preserve guard semantics and bound the
+      documented work between cancellation checks; release before the
+      consumer adaptations. Fold this portion of 243; the separate loader
+      boundary remains 241/238, re-derived from 360.
+- [ ] 362. gomutant: keep cumulative counters through audit events,
+      maintain cadence through finalization and preserve the committed
+      structured summary on render expiry. Fold these response-lifecycle
+      corrections from 267; the persistent run-state protocol remains 233.
+- [ ] 363. stipulator: share one live evaluation across requested
+      projections where policy permits, keeping report filters distinct
+      from execution scope and retaining invocation/process identity in
+      failures. Fold the corresponding 249 orchestration work, preserving
+      the prohibition on persisted verification verdicts as inputs.
+- [ ] 364. pew: reconcile entry guidance, exit classifications and the
+      complete measurement/profile/comparison workflow with the current
+      canonical contract. Keep CLI and machine output tailored to their
+      readers; settle genuinely new machine-reader product scope explicitly.
+- [ ] 365. Settle the historical-floor policy without presenting an
+      empirical envelope as proof of harmless noise. Before any approved
+      implementation, define lineage, complete history, source/guard and
+      support admission, candidate overlap, fallback, and the observable
+      sensitivity tradeoff; use 348's record-only judgment for native
+      support. A policy decision is not an inferred measurement result.
+- [ ] 366. Finish Pew performance-evidence 11.3 and 12 on the settled
+      tree, after executing retained charters 302 and 233 in that order.
+      Charter 302 precedes the final multi-selection campaigns: both layers,
+      reuse/splice/extension, lifecycle commands and reports keep distinct
+      resolved selections. Use the next format identity after the live
+      version, never the old charter's reserved 14-to-15 transition.
+      Charter 233 precedes the final long campaigns, retaining bounded useful
+      progress and the identity of committed work without a progress token.
+      Reconcile every interrupted campaign's actual scope under the
+      repaired oracle, verify the generated premise obligation, settle
+      historical-floor policy without presenting an empirical envelope as
+      proof of harmless noise, reconcile guidance and final formats,
+      complete the authorized gates and campaigns, retire resolving
+      artifacts and install the clean committed tool. Re-census the
+      retained numbered charters against the completed work before
+      resuming them; no remaining contract obligation disappears with a
+      superseded ordering or consumed handoff.
 
 Standing rule from the ruling (restated 2026-09-07, binding on every
 chunk): the tools' self-checks — `stipulator check` over a repo and
@@ -2990,40 +3115,21 @@ in their repos.
       whose probes read the shared tree.
 - [ ] 302. gomutant: a findings record keyed by (symbol, selection)
       (gomutant docs/issues/findings-records-keyed-by-symbol-alone.md,
-      filed at 284's review): a record keyed by its symbol alone lets
-      two build selections over one document re-measure each other,
-      and a drift re-measure under the default selection turns the
-      integration selection's kill into a survivor — measured at 284:
-      89.4% of the root's statements covered under the integration
-      selection, 59.9% under the default, 1,601 of 4,958 covered
-      blocks and 97 of 514 covered functions reach zero under the
-      affordable selection; the document holds one record per
-      selection it was measured under, the faces read the selection's
-      records, serving and drift judged within a selection, a survivor
-      under one selection carrying the other's verdict where one
-      exists; REQ-result-record's key sentence and the tables amended,
-      the document version bumped; the bump behind gofresh 303 rides
-      it (the integration campaign then serves), and that bump adopts
-      281's forms: gotool.Runner.List for the linked-set `go list`
-      (buildset.go's served salvage retires),
-      gofresh.NewToolchainProvenance for the composite, one
-      runtimeinput.Roots and one gotool.Sampler per judged run on
-      every ProducerIngest, parseGoVersion/releaseTags folded onto
-      gotool.ParseGoVersion/ReleaseTags (the development-build
-      divergence declared), the oracle's boundary through
-      Runner.Program. Correctness first: heads gomutant's tail,
-      directly before 269.
-      Grown (2026-10-06, audit 317): heads gomutant's tail after the CI gate; the stale 'behind gofresh 303' clause struck (303 closed by verdict at 310 — the integration selection admits by content; policy.textproto and ci.yaml's premise text corrected at 323); the 281 adoption moved out to 324; serve-path-posture-keying judged at its open gate; its close measure the self-campaign (284's half).
-      Audit 6 (2026-10-07): grows: baseline-measurement-banks-only-at-
-      the-first-commit (REQ-result-baseline-bank contradicts itself: 'a
-      completed deposit persists immediately' vs 'a baseline deposit
-      completes when its finding commits' — the deposit at the passing
-      probe, as the coverage batches); the version bump 14→15 absorbs
-      209's legacy-floor item (OldestReadableDocumentVersion's three
-      dispatch arms and the ≤12 splice become one format move with a
-      clean-break floor at the oldest live document; the duplicate-key
-      refusal the splice exists for preserved). After 324 — the bump re-
-      measures every record once, the self-campaign after it.
+      with serve-path-posture-keying judged at open). Derive the resolved
+      selection identity before choosing its encoding; ambient inputs are
+      not equivalent to an empty explicit declaration. Preserve distinct
+      measurements across both store layers, selection-scoped serving,
+      extension and splice, filters, reconciliation, prune, retarget and
+      disposition ownership. A survivor under one selection may name a
+      killer from another without replacing either measurement. Amend
+      REQ-result-record and the table grammar; choose a version after the
+      live document version. Reconcile 209's legacy-floor obligation with
+      actual persisted documents and preserve duplicate-key refusal. The
+      already-adopted runner/version/roots forms are not work to repeat;
+      baseline durability is 356. Preserve complete native bindings and
+      applicability evidence through the format move. Measure the scoped
+      self-campaign only after sound coverage admission and the new format
+      are installed; before 366's multi-selection campaign reconciliation.
 - [x] 303. gofresh: a build selection whose tags constrain no
       standard-library file is admitted with the base selection's
       audit (gofresh selection-with-no-standard-library-delta-unwalked,
