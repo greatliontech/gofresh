@@ -1,9 +1,12 @@
 # Cross-tool train: correctness, speed, caching, UX
 
-The active roadmap across gofresh, gomutant, stipulator, and pew. Each
-chunk is one commit in its named repo, run through the full adversarial
-loop there; gofresh chunks release before consumer chunks bump. WIP = 1
-across the whole train. Chunk numbers are stable identifiers, never
+The retained obligation inventory across gofresh, gomutant, stipulator,
+and pew. The active roadmap is [tooling-redesign.md](tooling-redesign.md);
+its accepted architecture and execution sequence govern this inventory.
+Each landing runs through independent review; shared releases precede
+consumer adoption. WIP = 1 across the tooling work. Numbers here remain
+stable identities for existing obligations, not a second execution order.
+Chunk numbers are stable identifiers, never
 order; chunks 1–102 are landed or listed below — landed chunks live in
 git history (`git log --all -- docs/plans/cross-tool-train.md` recovers
 every close-out), and numbering continues from where they left off.
@@ -19,6 +22,17 @@ numbered chunk — no condition-parked `Lands:` survives outside the
 register.
 
 ## Standing doctrine
+
+- **Evidence tools have scoped authority.** Select verification per change
+  and the instrument's actual execution path, version and known limitations.
+  A green answer from a known-defective path is not diligence; an unaffected
+  path of the same tool may still provide useful evidence. This takes
+  precedence over the retained command recipes below: preserve the proof
+  obligation, choose a suitable independent or direct check, and record the
+  limitation rather than treating a tool invocation as the obligation itself.
+  The early negative-coverage cutoff and existing authorization limits still
+  apply; this is no permission to weaken assertions, omit deciding oracles,
+  or launch unapproved broad witness runs or campaigns.
 
 - **Field-response protocol.** A field defect gets a numbered chunk in
   the session that diagnoses it, band stated (blocking-a-user /
@@ -151,6 +165,12 @@ register.
   landed chunks since the last audit restarts at zero from there.
 
 ## Execution order
+
+The active sequence is [tooling-redesign.md](tooling-redesign.md). The
+numbered charters below retain the prior audit's obligations and must be
+mapped to that sequence before implementation, not executed as a parallel
+train. The approved controls and architecture replace mechanisms proposed
+here where they differ; historical evidence and unfinished work stay tracked.
 
 - [x] 339. Reconcile the four current implementations, migration
       checkpoints, contracts, history and field reports; independently
