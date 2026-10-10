@@ -12,7 +12,7 @@
     shaped evidence; decoding and layer movement confer no new authority.
   - [x] 1.4 Verify with direct regressions and independently suitable full-
     oracle probes, converge read-only review, release and install the repair.
-- [ ] 2. Settle the shared semantic foundation and authority ledger before
+- [x] 2. Settle the shared semantic foundation and authority ledger before
   changing public contracts or construction boundaries.
   - [x] 2.1 Map each retained issue, numbered charter and migration change to
     retain/adapt/reject, its deciding regression and its destination vertical.
@@ -25,7 +25,7 @@
     toolchain-content compatibility, static derivation certificates and
     producing versus current provenance. Missing historical support never
     becomes evidence through decoding or current analysis.
-  - [ ] 2.4 Assign each control one owner, scope, default, precedence and
+  - [x] 2.4 Assign each control one owner, scope, default, precedence and
     consequence; retain genuine intent/resources/trust and derive mechanics.
     Preserve separate analysis and producing environments, source assertions
     and policy assertions, and declaration/record/measurement authority.
@@ -47,7 +47,7 @@
     one terminal disposition per contribution, no late admission past close,
     independent sibling transactions, and source/runtime exclusion spans
     through validation and publication or judgment consumption.
-  - [ ] 2.6 Converge the canonical contracts and enforcement obligations;
+  - [x] 2.6 Converge the canonical contracts and enforcement obligations;
     retain the existing conditional result model and accepted sampling limits.
 - [ ] 3. Gofresh: establish complete evidence dependencies for the first
   consumer vertical, retaining existing sound analysis algorithms.

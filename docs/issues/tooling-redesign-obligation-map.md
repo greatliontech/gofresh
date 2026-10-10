@@ -352,10 +352,16 @@ need explicit readability and non-upgrade treatment.
 
 ## Control-boundary follow-through
 
-These are source-level findings or questions from the authority inventory,
-not new runtime measurements. They belong to the indicated verticals rather
-than a detached repair train. Contract choices are settled before adoption;
-the executable regressions decide implementation conformance.
+The memory, argument, selection, diagnostic-trust and PGO cases were checked
+with named, temporary Go test overlays against
+the original implementations: Gomutant `a921be9`, Stipulator `372ef99` and
+Pew `149e26d`, under `go1.27.2-dst.15`. The overlays added reproduction tests,
+not production changes or mutants. The results below establish boundary
+behavior, not repaired implementations or whole-store serving. They belong
+to the indicated verticals rather than a detached repair train. Their
+admission, execution-description and evidence-identity fixes are part of
+those migrations; carrying the demonstrated behavior into an adopted
+vertical is not permitted by completing this verification step.
 
 | Boundary | Source evidence | Destination and deciding regression |
 |---|---|---|
@@ -365,8 +371,68 @@ the executable regressions decide implementation conformance.
 | Explicit-empty selection | Gomutant MCP tags:[] and omission both inherit ambient tags; explicit target/oracle emptiness already has different semantics. | 2.4, 5.4, 7.2: omitted/clear/nonempty across CLI/MCP and ambient tags; retain explicit-empty target and oracle inventories. |
 | Internal empty test selection | Stipulator ExecuteSelection accepts an empty package row; testCommandArgs emits no -run for it. No public producer of that row established. | 2.4, 5.2: trace reachable callers first; nil versus empty must not accidentally request a whole package. |
 | Diagnostic A/B trust | Pew prepareABProfiles reaches invocationVouches fallback and each side's own benchmarks/vouches without an A/B source control. | 2.4, 5.1, 7.3: define the source; divergent/missing/malformed/revoked side declarations, no trust transfer via output path. |
-| Auto-PGO | Stipulator pgoBuildInputs treats omitted PGO like off while cmd/go defaults to auto. Full reuse consequence unproved. | 2.4, 5.2: valid main-package default.pgo under omitted/auto/off/path; observe actual compiler choice and guard/publication/reuse changes. |
+| Auto-PGO | Go reads default.pgo when PGO is omitted, while Stipulator contributes no profile input; two valid profile contents produced identical native fingerprints and a later native check answered valid. Explicit auto/path controls answered stale on buildconfig. | 2.4 verified; 5.2 repairs default-consuming build inputs and adds lasting producer/publication/record-serving regressions, including missing/unreadable profiles and workspace scope. |
 | Callback selects work | Gomutant emitOracleGuidance starts per-test execution only with a Guidance callback and derived oracle. | 6.3, 7.2: subscription and oracle derivation do not choose diagnostic workload. |
+
+### Reproduction boundaries and positive controls
+
+- **Memory conversion:** calling the real
+  `OracleMemoryBytesFromMiB` followed by `DeriveOracleBounds` accepts
+  `8796093022207` MiB as `9223372036853727232` bytes, but the next value
+  becomes `-9223372036854775808`, interpreted as disabled. `17592186044416`
+  becomes zero/automatic and its successor becomes 1 MiB. Negative-disable,
+  zero-derived and ordinary positive controls retain their own meanings.
+  This establishes the shared converter/bounds fault; permanent regression
+  coverage still needs every face's early-refusal wiring.
+- **Count:** `validateConfig` accepts typed count 2 with raw
+  `-test.count=3`. Executing the actual `testCommandArgs` output on a temporary
+  package produces three `run` events for its named test. BYPASS likewise
+  produces three rather than one. Typed count 2 without the raw override
+  produces exactly two. The fixture counts Go's JSON events, not command text.
+- **Argument identity:** accepted vectors `-fixture -test.timeout=1s` and
+  `-fixture -test.timeout=2s` deliver different values to a custom string
+  flag while `identityArgs` returns the same `[-fixture]`. The corresponding
+  vectors after `--` deliver different positional values while both identities
+  are `[--]`. This is an executed value/identity collision, not a measured
+  claim that a complete witness-store run served the wrong value.
+- **Selection:** the actual MCP decoder preserves nil versus empty slices
+  for `{}` and `{"tags":[]}`, but both produce `Declared=false` and
+  `judged=false`. The real selection environment function inherits ambient
+  `GOFLAGS=-tags=integration` for both. A nonempty replacement selects that
+  replacement alone; an empty CLI tag element refuses. Explicit-empty oracle
+  inventory remains empty without invoking derivation and is a distinct
+  positive control, not the same defect.
+- **Diagnostic trust:** the real `prepareABProfiles` path over two temporary
+  modules reads each module's own `benchmarks/vouches`. The selected sets are
+  independently `example.com/dep.Left` and `example.com/dep.Right`; changing
+  `out` changes neither. A malformed selected file refuses naming that side's
+  path; removing the ref side's file yields an empty set without borrowing
+  the working side's. Malformed module-level `vouches` files are ignored, as
+  the store-source policy intends. This verifies preparation and source
+  selection, not a fresh performance measurement or every discharge path.
+- **PGO:** use a temporary main package with an arithmetic `TestWork`, no
+  embed of `default.pgo`, and two different valid CPU profiles generated by
+  `runtime/pprof`. For each profile, `go test -c -x` under omitted PGO visibly
+  invokes the profile-processing tool on `default.pgo`. Through Stipulator's
+  real policy discovery, `groupEngine` and capture, the omitted setting gives
+  no PGO input and the same complete native fingerprint. A named plain-witness
+  execution and producer validation finish before the profile changes; a new
+  capture/check interval then judges the earlier fingerprint valid. Explicit
+  `auto` and `default.pgo` move their build guard and check stale; `off` stays
+  valid. Absence of a profile-processing command on a cache hit is not proof
+  that the compiler ignored the profile. This demonstrates the default-input
+  validity hole at the actual group-engine/native-check boundary, not an
+  end-to-end Stipulator record-serving campaign. The existing
+  `TestProfileContentMovesTheFingerprint` provides the profile-generation and
+  capture fixture pattern; its explicit-path arms did not cover omission.
+
+The overlay checks are investigations, not permanent tests that bless buggy
+behavior. Each repair replaces the relevant expectation with the contract's
+refusal, distinct identity or stale result and binds that regression in its
+owning tool. Implementation changes require the owning admitted-description
+and evidence paths, including historical-record eligibility, to agree; this
+contract reconciliation does not introduce a parallel normalization layer or
+silently alter either process arguments or record identities.
 
 ## Contract reconciliation anchors
 

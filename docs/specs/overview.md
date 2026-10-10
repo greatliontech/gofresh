@@ -127,8 +127,9 @@ This declaration's authority remains caller responsibility. It supplies neither
 the independently admitted outcome method nor a missing process completion
 receipt; those are separate premises under REQ-inputs-producer-premises.
 
-**observability proof** (term): optional, caller-selected, versioned per-subject
-evidence that whole-program analysis found every behavior-affecting non-source effect
+**observability proof** (term): optional, versioned per-subject evidence whose
+producing obligation is selected before execution wherever the declared model
+requires it, establishing that whole-program analysis found every behavior-affecting non-source effect
 reachable by the subject and proved each one representable by the recognized
 observation stream. It is an engine proof, distinct from the caller's
 observation-completeness assertion and from a purity assertion.
@@ -152,12 +153,15 @@ the stored result may be reused; stale when some applicable guard demonstrably
 fails, so the result is recomputed; unverifiable when every guard would hold but
 the source closure reaches an unverifiable dependence, so validity can be neither
 proven nor refuted and the result is recomputed with the reason recorded. A
-verdict's reason is human-oriented diagnostic data: its wording is not a stable
-vocabulary and carries no contract beyond accompanying its status — with one
-exception: the reason "test variants" is stable vocabulary a consumer may
+judgment exposes semantic causes, scope and accepted authority as structured
+data independently of diagnostic wording. Human explanations and reader-specific
+remedies project those facts; prose does not select evidence or determine its
+authority. The reason "test variants" remains a stable compatibility projection a consumer may
 discriminate on, reporting test-variant compartment drift under an unchanged
 core, or a recording that predates the compartment and fails closed
-(REQ-closure-test-variant-identity).
+(REQ-closure-test-variant-identity). Diagnostic bytes included in an existing
+record's integrity evidence remain integrity-bound; structured causes do not
+authorize rewriting them inside an existing seal.
 
 **REQ-fresh-sound** (invariant): A subject MUST be reported valid only when every
 applicable guard provably holds over a source closure that is a superset of the
@@ -643,8 +647,10 @@ context for each entry: no cancelled entry continues under a private
 uncancellable context. A consumer may supply an explicit, separately bounded
 closing-phase context for already-paid work, preserving interruption in its
 operation account and excluding new producing work; this is a new declared
-phase, not concealed continuation of the cancelled entry. The context bounds observation work; a producer validation
-attempt still seals its original view against later capture. Bounding only the
+phase, not concealed continuation of the cancelled entry. The context bounds
+observation work; a producer validation attempt seals that unit's mutable
+capture/attachment state, not the immutable snapshot shared with independent
+units. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
 expressed through a caller-supplied analysis budget, never through cancellation:
 a proof refused under an exhausted budget names the budget in its unavailable
