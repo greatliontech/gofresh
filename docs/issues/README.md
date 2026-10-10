@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [audit-boundary-residue](audit-boundary-residue.md) | listing admission, unsafe oracle composition, shaped isolation, operation ownership and requested-work cases retained at their deciding verticals | tooling-redesign 3.0–3.2, 4.1–4.5, 5.3–5.6 and 7.4/7.7 as specified per component |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
 | [resident-walk-counts-a-vfork-child-twice](resident-walk-counts-a-vfork-child-twice.md) | a descendant between its clone and its exec shares its parent's memory map, so the family-room reading counts the parent's held set twice and a ceiling derived from it errs high by half of it — the one high-side blind spot | cross-tool train chunk 314 (the resident class; a release) |
 | [cold-analysis-pass-program-retention](cold-analysis-pass-program-retention.md) | attribute the remaining cold working set with the same workload and phase-local readings; completed-package program release already exists | tooling-redesign 7.7 (retained charter 314) |

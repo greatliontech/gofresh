@@ -1,14 +1,15 @@
 // Package guard captures and compares the environment facts that decide whether a
 // cached result is still valid — the toolchain, build-configuration, machine, and
-// runtime-configuration guards (spec guards.md). Guard values are plain data: the
-// caller owns how a fingerprint is serialized and stored (REQ-fresh-fingerprint-data),
-// and supplies commit/dirty from its own git layer, since validity is
+// runtime-configuration guards (spec guards.md). Guard values are data used by
+// the native fingerprint record (REQ-fresh-fingerprint-data). The caller owns
+// result storage and supplies commit/dirty from its own git layer, since validity is
 // commit-independent (REQ-fresh-commit-independent) and dirty is a baseline policy.
 //
 // Guards split by what they bear on (REQ-fresh-guard-set): the toolchain and
 // build-configuration guards determine the compiled binary, so they apply to every
-// result (code guards); the machine and runtime-configuration guards move a timing
-// measurement but not a pass/fail outcome, so they apply only to a measurement.
+// result (code guards). The machine and runtime-configuration fields apply only
+// to measurements; omitting them does not prove all runtime or machine effects
+// irrelevant to a code result (REQ-guard-runtime-relevance).
 package guard
 
 import (

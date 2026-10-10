@@ -117,11 +117,12 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 48 source issues, excluding
+Each slug names a file beside this one. There are 49 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
+| audit-boundary-residue | A; 3.0, 3.1b, 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve listing completeness, oracle independence, isolation, request identity and operation-owned cancellation. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -243,7 +244,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 33.
 | check-summary-tally-names-one-invocation | R; 5.3, 8.3 | Unequal selected-invocation populations retain separate eligibility and outcome accounts. |
 | clause-structured-whole-claims | A; 2.4, 2.6, 5.3 | Scoped test/proof requirement's whole-claim default and explicit exception are deliberate. |
 | cli-test-binary-builds | R; 5.6, 9.3 | One binary build preserves real CLI tests; in-process pins remain mutation-sensitive. |
-| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | Attribute compile/link/run peaks before changing completed-package estimates. |
+| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | Attribute pre-exec parent high-water, compiler/linker and test-process peaks separately before changing completed-package estimates; the incoming Weaver correspondence is not proof of causality. |
 | cross-platform-resolution-views | C; 2.3, 5.2, 9.4 | Off-host declaration resolution grants no invented on-host witness result. |
 | dangling-empty-label-remedy-names-no-clause | R; 5.3, 8.3 | Malformed empty label remedy cannot unbind valid sibling claims. |
 | deadline-roster-head-unbounded | R; 5.3, 8.3 | Large roster's bound preserves useful failure residue and exact omitted account. |
@@ -436,13 +437,13 @@ silently alter either process arguments or record identities.
 
 ## Contract reconciliation anchors
 
-The next contract work reads Gofresh's overview before its lower-tier clauses.
-Current contract conflicts cannot be hidden by a rename: observation lifecycle
-explicitly selects observed checking; absent input currently implies assertion;
-guard prose says runtime configuration cannot alter pass/fail; toolchain prose
-equates source change with version change; proof memo and record compatibility
-share one strategy; supplied-observation merge has no expected contributor
-roster. Each needs its own explicit amendment or retained boundary.
+Gofresh's overview precedes the lower-tier clauses. The semantic amendments now
+separate automatic final evidence selection, absent observation from assertion,
+runtime relevance, content dependencies, compatibility and contributor rosters.
+The remaining gaps are implementation obligations under those contracts, not
+permission to restore the superseded assumptions by renaming a method. In
+particular, the current proof/memo strategy coupling and supplied-observation
+merge do not yet implement the complete dependency and unit-roster boundaries.
 
 Keep producing evidence and a licensed applicability endpoint distinct. Static
 certificates have source/configuration/classifier dependencies without a fake

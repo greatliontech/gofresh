@@ -51,8 +51,17 @@
     retain the existing conditional result model and accepted sampling limits.
 - [ ] 3. Gofresh: establish complete evidence dependencies for the first
   consumer vertical, retaining existing sound analysis algorithms.
+  - [ ] 3.0 Gomutant safety prerequisite: cut off oracle-drift composition
+    lacking an independence license, preserve history without granting exact
+    reuse to contaminated records, and pin both shared-state kill and survivor
+    counterexamples against a fresh complete oracle. Install before relying on
+    changed-oracle campaign results; direct tests and full-pattern ephemeral
+    body probes remain independently usable.
   - [ ] 3.1 Reproduce changed selected GOROOT content under an unchanged
     reported version across fresh/memoized analysis and recorded proof reuse.
+    - [ ] 3.1b Include same-name directory-to-source retyping in listing memo
+      admission and incomplete cached toolchain-surface inventories; compare
+      warm/cold/discarded-cache results and valid-hit controls.
   - [ ] 3.2 Couple content, admission policy and derivation identities to all
     dependent evidence; separate logical lookup, producing identity, memo
     identity, wire version and proof/outcome compatibility.
@@ -67,6 +76,9 @@
   - [ ] 4.1 Derive only the shared operations that this vertical needs:
     immutable operation/session configuration, coherent analysis snapshot,
     unit-owned obligations, native evidence and final typed judgment.
+    - [ ] 4.1a Pin immutable configuration after a cancelled sampler take,
+      invocation-wide destination injectivity, ordinary effort admission and
+      requested sub-benchmark workload through serving and stream admission.
   - [ ] 4.2 Prepare evidence before execution wherever producing obligations
     require it. One final check selects admissible evidence under the declared
     model automatically; trust permissions and optional analysis cost remain
@@ -82,6 +94,8 @@
     support; normal failure, abnormal completion, cancellation after success,
     finalization expiry, late contributions, sibling closing, drift, revoked
     policy, publication failure, restart and historical non-upgrade.
+    - [ ] 4.5a Make every evidence-composition operation the first arm actually
+      uses cancellable under its unit; 5.5 completes the remaining paths.
   - [ ] 4.6 Remove the arm's repeated coordinate/environment/support assembly
     and stage-selection wiring. Retire its adapter at adoption, converge
     review and install only the clean committed consumer.
