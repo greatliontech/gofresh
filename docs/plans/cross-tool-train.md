@@ -3318,7 +3318,7 @@ in their repos.
       filed as source-traversal-cancellation-gaps (resolved at 315.B;
       `git log --all -- docs/issues/source-traversal-cancellation-gaps.md`); the
       charter's own 'After 314' struck — Before 314, as 316 grew it.
-- [ ] 338. godst (greatliontech/godst, main): the testing harness's
+- [x] 338. godst (greatliontech/godst, main): the testing harness's
       test-log writer propagates a write error — testing/dst_hostio.go's
       `dstHostStreamWrite` returns the errno its `writeFull` swallows
       (EINTR/EAGAIN retried as today) and `dstTestlogWriter.Write`
