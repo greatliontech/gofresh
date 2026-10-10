@@ -33,6 +33,16 @@
     precedence, explicit-empty selection, diagnostic A/B trust sourcing and
     omitted/explicit auto-PGO before adopting the affected vertical. The PGO
     concern is a verification question until demonstrated, not an assumed bug.
+    - [ ] 2.4a Specify one optional request-scoped `cwd` for project-bound MCP
+      verbs. Omission uses the server's configured default directory, resolved
+      at startup from its launch directory; a relative value resolves against
+      that same default, never a previous request.
+      Apply each tool's normal root discovery and report the resolved root.
+      Invalid or disallowed selections refuse before expensive work or writes;
+      they never fall back silently. Static guidance needs no project selector.
+      Bind relative paths, declarations, evidence, stores and subprocesses to
+      the resolved operation context. Preserve distinct evidence-root and
+      process-directory roles; no process-wide chdir or mutable active project.
   - [ ] 2.5 Pin lifetime and closing invariants: complete contributing roster,
     one terminal disposition per contribution, no late admission past close,
     independent sibling transactions, and source/runtime exclusion spans
@@ -88,6 +98,18 @@
   - [ ] 5.5 Make observation finalization, adoption, conversion and merge
     cancellable under their owning unit. Share evaluation only within a
     coherent phase, not across observation endpoints.
+    - [ ] 5.5a Implement the request-scoped project context on the existing
+      Gomutant and Stipulator MCP surfaces. Scope cache identities, declarations,
+      trust, stores, locks, progress and diagnostics correctly across concurrent
+      roots, without partitioning intentionally process-wide resource admission.
+      Do not spread a default project's server-supplied vouches to another root
+      implicitly. Preserve existing access and write-confinement rules. Give
+      resources and operation handles unambiguous project identity; define the
+      compatibility of old unqualified URIs with the default project. Bound
+      retained per-root state. Test alternating and concurrent calls with
+      identical symbol/requirement names in different roots, relative paths,
+      cancellation, cache reuse and failure attribution. Publish schema/guidance
+      changes together. This does not itself commission a new Pew MCP server.
   - [ ] 5.6 Remove obsolete adapters and protocol copies after each migration;
     release shared changes before adoption and converge each vertical's review.
 - [ ] 6. Make mutation work precise, durable and recoverable after the cutoff.
