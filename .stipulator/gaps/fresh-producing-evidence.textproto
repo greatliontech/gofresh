@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-producing-evidence"
+reason: "Existing producer and applicability paths enforce portions of historical identity preservation. Complete unit-boundary enforcement and independently tested record-only support validation remain outstanding; neither milestone alone covers the whole requirement."
+content_hash: "d08d33bcc2ab58a23cdac77fec4f3e035a40773667b5662cf1675633ccd72fab"
+source_hash: "b574a3b43f7baabc392c66cb5722ee396a677ef45869d6cb9b72b9ffaa874d9a"
+lands { manual { condition: "The first Pew measured-arm unit enforces original producing identity and historical non-upgrade, and record-only support validation independently passes no-current-runtime-read, original-identity, support-class and no-provenance-authentication regressions." } }
+excuses: GAP_EXCUSE_UNCOVERED

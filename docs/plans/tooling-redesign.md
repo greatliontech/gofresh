@@ -17,7 +17,7 @@
   - [x] 2.1 Map each retained issue, numbered charter and migration change to
     retain/adapt/reject, its deciding regression and its destination vertical.
     Preserve all WIP branches and dirty worktrees until accounted for.
-  - [ ] 2.2 Specify conditional applicability, immutable producing evidence,
+  - [x] 2.2 Specify conditional applicability, immutable producing evidence,
     separately licensed applicability endpoints, and observed/proven/asserted/
     unknown authority. Preserve consumer-owned outcome, suite-health,
     statistical and mutation-attribution claims.

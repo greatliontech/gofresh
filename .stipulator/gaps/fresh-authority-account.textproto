@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-authority-account"
+reason: "The shared contract distinguishes result-model applicability, claim authority and immutable producing evidence. Existing guards and producer premises enforce portions, but the unit-owned final judgment and its complete positive, negative and historical non-upgrade witnesses are not yet bound to these requirements."
+content_hash: "da53bc5e0d1a3139a36a54387d44baee62a1d95ba59767ba21d382613a45610f"
+source_hash: "853a44eb0b2877a8ec6c35f5ba1149145041b3644db340f9b5892ed5824e3a17"
+lands { manual { condition: "The session/snapshot/unit boundary is adopted by the first Pew measured arm and its result-model, authority-preservation and historical non-upgrade regressions pass." } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-static-certificate"
+reason: "The complete-dependency rule governs native analysis memos as well as consumer resolution and classification certificates. Native toolchain-content/admission dependencies and the cross-selection consumer certificate both need enforcement; neither alone covers the requirement."
+content_hash: "8e5ac2b508018d9352c68d46a62808dfb144c2c9dbc596c278714e06b1ae167d"
+source_hash: "6340ab5984afcd55d373a49ec09c3d086e22834689c1092ce79f0171bbc5595c"
+lands { manual { condition: "Native analysis memo/proof reuse enforces complete toolchain-content and admission-policy dependencies, and Stipulator's resolution/classification certificates enforce all selected views, declaration precedence and classifier identity with bound deciding regressions." } }
+excuses: GAP_EXCUSE_UNCOVERED

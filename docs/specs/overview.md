@@ -55,6 +55,7 @@ a second home would mean a second implementation.
 
 ## Documents
 
+- [evidence.md](evidence.md) — result models, authority and ownership.
 - [closure.md](closure.md) — the source closure and its tiers.
 - [guards.md](guards.md) — the guards beside the closure.
 - [runtime-inputs.md](runtime-inputs.md) — observed runtime inputs.
@@ -119,6 +120,10 @@ partial outcome not derivable from that value making the process observation
 incomplete. It vouches for how the run was observed, not for which effects the subject
 can reach.
 
+This declaration's authority remains caller responsibility. It supplies neither
+the independently admitted outcome method nor a missing process completion
+receipt; those are separate premises under REQ-inputs-producer-premises.
+
 **observability proof** (term): optional, caller-selected, versioned per-subject
 evidence that whole-program analysis found every behavior-affecting non-source effect
 reachable by the subject and proved each one representable by the recognized
@@ -161,6 +166,11 @@ valid.
 > The one forbidden outcome is a false valid: a result reported reusable while the
 > source or environment behind it has changed. Over-approximation — a spurious
 > stale or unverifiable — is always safe. Every other requirement serves this one.
+
+Validity is conditional on the declared result model and admitted assertions
+(REQ-fresh-result-model and REQ-fresh-authority-account), not an unconditional
+promise of identical future execution. The result owner still judges its own
+outcome, population, suite-health and statistical claims.
 
 **REQ-fresh-observation-conjunction** (invariant): Closure-level external-input
 unverifiability MUST be suppressed by observation only when a recognized attributable

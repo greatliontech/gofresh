@@ -33,8 +33,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-sound"
-  content_hash: "df85450fe3441bb05fd30c2e61320e78bb001053be859661b4f177e6740996d7"
-  source_hash: "bb54c9a0907b8d1d781779969b8d7a750d2305b540dee08ac693625d9305111a"
+  content_hash: "0dbe30acf0c3ce992c7fc0ee677537974caf0aee268c0d71d757edec5b808175"
+  source_hash: "6fc81c0049c337cd7859b2e0c27f1c2f7d203294d584fcf1aef79271b456c0bd"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestDecide"
   role: BINDING_ROLE_TESTS
@@ -53,8 +53,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-sound"
-  content_hash: "df85450fe3441bb05fd30c2e61320e78bb001053be859661b4f177e6740996d7"
-  source_hash: "bb54c9a0907b8d1d781779969b8d7a750d2305b540dee08ac693625d9305111a"
+  content_hash: "0dbe30acf0c3ce992c7fc0ee677537974caf0aee268c0d71d757edec5b808175"
+  source_hash: "6fc81c0049c337cd7859b2e0c27f1c2f7d203294d584fcf1aef79271b456c0bd"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
   role: BINDING_ROLE_TESTS
