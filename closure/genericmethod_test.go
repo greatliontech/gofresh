@@ -49,9 +49,12 @@ func TestUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, "Use"); err != nil {
 		t.Fatalf("precise analysis over a generic-method closure: %v", err)
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{{Package: pkg, Symbol: "Use"}})
 	if err != nil {
 		t.Fatalf("observability over a generic-method closure: %v", err)
@@ -100,9 +103,12 @@ func TestDraw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, "Draw"); err != nil {
 		t.Fatalf("precise analysis reaching stdlib generic methods: %v", err)
 	}
+	fixtures.supply(t, pkg)
 	if _, err := h.ComputeObservabilityBatch([]Subject{{Package: pkg, Symbol: "Draw"}}); err != nil {
 		t.Fatalf("observability reaching stdlib generic methods: %v", err)
 	}

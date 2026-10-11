@@ -1950,3 +1950,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "1fb8ea778f8720e6e3344145a168ff3d580892ace4137a3be0162bbc9c30343b"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "488a53c97f521f0d0359ce261fe9cdaec1c8073237652c9ade64e9fb9cd4e6ee"
+  source_hash: "43099f15955668565d7252fa12ff061115256403e4b835b9ce6360b4ae645016"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestAnalysisBoundPreservesDeadlineContract"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c2716263f69647ae7ae6ae9fbb0fa20cabb159600384cd517c5c199b86a0271d"
+}

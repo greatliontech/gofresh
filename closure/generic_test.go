@@ -66,10 +66,13 @@ func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	refined, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatalf("precise analysis over a generic subject: %v", err)
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
 	if err != nil {
 		t.Fatalf("observability over a generic subject: %v", err)
@@ -84,6 +87,7 @@ func TestAttributedAnalysisCoversGenericSubjects(t *testing.T) {
 	if proof.Observable || !strings.Contains(proof.Reason, "open subject world") {
 		t.Fatalf("generic subject disposition = %+v, want the open-world refusal", proof)
 	}
+	fixtures.release()
 
 	edited := writeGenericFixture(t, `package generic
 
@@ -184,6 +188,8 @@ func Orphan[K comparable](k K) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	refined, err := computeTier2Result(h, pkg, subject.Symbol)
 	if err != nil {
 		t.Fatalf("precise analysis over an uninstantiated generic subject: %v", err)
@@ -191,9 +197,11 @@ func Orphan[K comparable](k K) string {
 	if refined.widen {
 		t.Fatalf("uninstantiated generic subject widened: %+v", refined)
 	}
+	fixtures.supply(t, pkg)
 	if _, err := h.ComputeObservabilityBatch([]Subject{subject}); err != nil {
 		t.Fatalf("observability over an uninstantiated generic subject: %v", err)
 	}
+	fixtures.release()
 	// The origin declaration is the subject's own content even with no
 	// instantiation to traverse: a body edit moves the precise contributions.
 	edited := writeGenericFixture(t, strings.Replace(genericFixtureBody, `import "fmt"`, "import (\n\t\"fmt\"\n\t\"os\"\n)", 1)+`
@@ -365,11 +373,14 @@ func UseInt() string { return Outer[int](1) }
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	for _, symbol := range []string{"Inner", "Outer"} {
+		fixtures.supply(t, pkg)
 		if _, err := computeTier2Result(h, pkg, symbol); err != nil {
 			t.Fatalf("precise analysis over %s: %v", symbol, err)
 		}
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{
 		{Package: pkg, Symbol: "Inner"},
 		{Package: pkg, Symbol: "UseInt"},
@@ -433,11 +444,14 @@ func UseInt() string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	for _, symbol := range []string{"Inner", "Outer", "UseInt"} {
+		fixtures.supply(t, pkg)
 		if _, err := computeTier2Result(h, pkg, symbol); err != nil {
 			t.Fatalf("precise analysis over %s: %v", symbol, err)
 		}
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{
 		{Package: pkg, Symbol: "Inner"},
 		{Package: pkg, Symbol: "UseInt"},

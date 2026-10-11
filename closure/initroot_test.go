@@ -44,7 +44,9 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	const pkg = "example.com/initroot"
+	fixtures := newFixturePrograms(t, h)
 	for _, symbol := range []string{"init#a.go#0", "init#a.go#1", "init#aa.go#0"} {
+		fixtures.supply(t, pkg)
 		if _, err := computeTier2Result(h, pkg, symbol); err != nil {
 			t.Fatalf("tier-2 analysis for %s: %v", symbol, err)
 		}
@@ -53,9 +55,11 @@ func TestRegistry(t *testing.T) {
 	// subject's reachable set by design (the blanket init rooting), so
 	// init subjects share reach - the root's load-bearing role is
 	// resolution, and the wiring content rides every subject's closure.
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, "init#a.go#2"); err == nil || !strings.Contains(err.Error(), "init#a.go#2 not found in "+pkg) {
 		t.Fatalf("past-the-end ordinal = %v, want a not-found error naming the subject", err)
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{
 		{Package: pkg, Symbol: "init#a.go#0"},
 		{Package: pkg, Symbol: "init#aa.go#0"},

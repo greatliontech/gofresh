@@ -1217,9 +1217,12 @@ func TestRecompiledDependencyStaysOutOfSubjectRoots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAt: %v", err)
 		}
+		fixtures := newFixturePrograms(t, h)
+		fixtures.supply(t, "example.com/triangle/a")
 		if _, reach, err := computeTier2ResultAndReach(h, "example.com/triangle/a", "A"); err != nil || len(reach) == 0 {
 			t.Fatalf("analysis of a.A: reach %v, %v; want a's own subject to resolve", reach, err)
 		}
+		fixtures.supply(t, "example.com/triangle/a")
 		if _, err := computeTier2Result(h, "example.com/triangle/a", "Use"); err == nil {
 			t.Fatal("analysis of a.Use: want an error (a never declares Use), got the recompiled dependency's closure")
 		}
@@ -1240,6 +1243,8 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
 
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	_, valReach, err := computeTier2ResultAndReach(h, pkg, "Adder.Value") // value receiver
 	if err != nil {
 		t.Fatalf("analysis of value-receiver method Adder.Value: %v", err)
@@ -1247,6 +1252,7 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	if len(valReach) == 0 {
 		t.Fatal("empty reachability for a method subject")
 	}
+	fixtures.supply(t, pkg)
 	_, ptrReach, err := computeTier2ResultAndReach(h, pkg, "Adder.Ptr") // pointer receiver
 	if err != nil {
 		t.Fatalf("analysis of pointer-receiver method Adder.Ptr: %v", err)
@@ -1256,6 +1262,7 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	if maps.Equal(ptrReach, valReach) {
 		t.Error("Adder.Value and Adder.Ptr reach identically; not rooting at the specific method")
 	}
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, "Adder.Missing"); err == nil {
 		t.Error("a missing method name: want error, got nil")
 	}
@@ -1274,10 +1281,13 @@ func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/genericmethod"
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	_, getReach, err := computeTier2ResultAndReach(h, pkg, "Box.Get") // value receiver on Box[T]
 	if err != nil {
 		t.Fatalf("analysis of Box.Get: %v", err)
 	}
+	fixtures.supply(t, pkg)
 	_, setReach, err := computeTier2ResultAndReach(h, pkg, "Box.Set") // pointer receiver on Box[T]
 	if err != nil {
 		t.Fatalf("analysis of Box.Set: %v", err)
@@ -1307,6 +1317,8 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/harnessroot"
 
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	bench, err := computeTier2Result(h, pkg, "BenchmarkProd")
 	if err != nil {
 		t.Fatalf("analysis of BenchmarkProd: %v", err)
@@ -1315,6 +1327,7 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 		t.Error("test subject: want unverifiable (its closure reaches TestMain's file I/O), got verifiable")
 	}
 
+	fixtures.supply(t, pkg)
 	prod, err := computeTier2Result(h, pkg, "Prod")
 	if err != nil {
 		t.Fatalf("analysis of Prod: %v", err)
@@ -1550,6 +1563,7 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	// retainedEffect pins a classified fact that must survive among the
 	// subject's effects when a higher-ranked diagnostic is preferred: the
@@ -1589,6 +1603,7 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 		{"mixedexternal", "BenchmarkMixedExternal", "network I/O", ""},
 	} {
 		t.Run(tc.pkg+"/"+tc.bench, func(t *testing.T) {
+			fixtures.supply(t, base+tc.pkg)
 			tr, err := computeTier2Result(h, base+tc.pkg, tc.bench)
 			if err != nil {
 				t.Fatalf("analysis: %v", err)
@@ -1646,13 +1661,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Adjacent cases over unchanged fixture files can reuse their loaded SSA,
-	// including its lazy structural caches. Every case still runs a singleton
-	// production analysis with fresh reachability and subject judgments. Keep
-	// only the latest package; the independent batch-equivalence and release
-	// tests retain their own cold loads and lifetime judgments.
-	var loadedPackage string
-	var loaded *program
+	fixtures := newFixturePrograms(t, h)
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	for _, tc := range []struct {
 		fixture, subject string
@@ -1985,20 +1994,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	} {
 		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
 			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
-			if loadedPackage != subject.Package {
-				delete(h.progs, loadedPackage)
-				loadedPackage = ""
-				loaded = nil
-				loaded, err = h.loadCached(subject.Package)
-				if err != nil {
-					t.Fatal(err)
-				}
-				loadedPackage = subject.Package
-			}
-			// This is an analysis-failure memo, not a structural SSA cache:
-			// each case must independently discriminate an unsupported shape.
-			loaded.PkgScopeProbe = nil
-			h.progs[subject.Package] = loaded
+			fixtures.supply(t, subject.Package)
 			results, err := h.ComputeObservabilityBatch([]Subject{subject})
 			if err != nil {
 				t.Fatal(err)
@@ -2190,20 +2186,31 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	independentResults := make([]Observability, len(subjects))
+	// Each comparison keeps a genuinely independent hasher and singleton load.
+	// Join the cohort before aggregating or beginning the maximal->observe arm.
+	t.Run("independent", func(t *testing.T) {
+		for i, subject := range subjects {
+			t.Run(subject.Package+"/"+subject.Symbol, func(t *testing.T) {
+				t.Parallel()
+				independentHasher, err := newAt("")
+				if err != nil {
+					t.Fatal(err)
+				}
+				independent, err := independentHasher.ComputeObservabilityBatch([]Subject{subject})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if batch[subject] != independent[subject] {
+					t.Errorf("%s.%s batch=%+v independent=%+v", subject.Package, subject.Symbol, batch[subject], independent[subject])
+				}
+				independentResults[i] = independent[subject]
+			})
+		}
+	})
 	statuses := map[bool]int{}
-	for _, subject := range subjects {
-		independentHasher, err := newAt("")
-		if err != nil {
-			t.Fatal(err)
-		}
-		independent, err := independentHasher.ComputeObservabilityBatch([]Subject{subject})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if batch[subject] != independent[subject] {
-			t.Errorf("%s.%s batch=%+v independent=%+v", subject.Package, subject.Symbol, batch[subject], independent[subject])
-		}
-		statuses[independent[subject].Observable]++
+	for _, independent := range independentResults {
+		statuses[independent.Observable]++
 	}
 	if statuses[true] == 0 || statuses[false] == 0 {
 		t.Fatalf("corpus lost its disposition spread: %v", statuses)

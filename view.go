@@ -1745,6 +1745,9 @@ func analysisBound(ctx context.Context, budget time.Duration) (context.Context, 
 	if budget <= 0 {
 		return ctx, func() {}
 	}
+	if viewTestHooks.analysisBound != nil {
+		return viewTestHooks.analysisBound(ctx, budget)
+	}
 	return context.WithTimeout(ctx, budget)
 }
 

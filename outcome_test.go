@@ -185,155 +185,160 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		symbol    string
-		supported bool
-		exit      int
-	}{
-		{"TestEnv", true, 0}, {"TestFail", true, 1}, {"TestFile", false, 0},
-	} {
-		t.Run(tc.symbol, func(t *testing.T) {
-			subject := Subject{Package: "example.com/outcomes", Symbol: tc.symbol}
-			view, err := engine.NewView(ctx, []Subject{subject}, dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
-			support, err := view.PrepareOutcomeSupport(ctx, frame, "execution")
-			if err != nil {
-				t.Fatal(err)
-			}
-			fp, err := view.CaptureObserved(ctx, subject)
-			if err != nil {
-				t.Fatal(err)
-			}
-			log := filepath.Join(t.TempDir(), "input.log")
-			command := exec.Command(bin, "-test.v", "-test.run=^"+tc.symbol+"$", "-test.testlogfile="+log)
-			command.Dir = dir
-			command.Env = env
-			output, runErr := command.CombinedOutput()
-			if command.ProcessState == nil || !command.ProcessState.Exited() || command.ProcessState.ExitCode() != tc.exit {
-				t.Fatalf("execution: %v\n%s", runErr, output)
-			}
-			if tc.exit == 1 && !strings.Contains(string(output), "ordinary failure") {
-				t.Fatalf("not the expected completed failure: %s", output)
-			}
-			receipt, err := frame.Completion("execution", env, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			obs, reason, err := frame.Observe(ctx, log, runtimeinput.ProducerIngest{Identity: "execution", Env: env, Completion: receipt, Outcome: support})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.supported != (reason == "") {
-				t.Fatalf("outcome reason=%q, want supported=%t", reason, tc.supported)
-			}
-			fp, err = view.AttachObservation(subject, fp, obs)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := view.Validate(ctx); err != nil {
-				t.Fatal(err)
-			}
-			data, err := json.Marshal(fp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var stored Fingerprint
-			if err := json.Unmarshal(data, &stored); err != nil || stored != fp {
-				t.Fatalf("record roundtrip=%v", err)
-			}
-			current, err := engine.NewView(ctx, []Subject{subject}, dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			verdict, err := current.CheckObserved(ctx, stored, subject)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := Unverifiable
-			if tc.supported {
-				want = Valid
-			}
-			if verdict.Status != want {
-				t.Fatalf("verdict=%+v want %v", verdict, want)
-			}
-			if tc.symbol != "TestEnv" {
-				return
-			}
-			// Isolate support identity from the stale-guard ladder: each changed
-			// fingerprint names its own fresh code facts, but retains the old
-			// runtime support. No ordinary verdict comparison can mask an omitted
-			// constituent of the support identity in this check.
-			for name, change := range map[string]func(*Fingerprint){
-				"closure":      func(f *Fingerprint) { f.MaximalClosure = "another closure" },
-				"test variant": func(f *Fingerprint) { f.TestVariantClosure = "another test variant" },
-				"toolchain":    func(f *Fingerprint) { f.Guards.Toolchain = "another toolchain" },
-				"build":        func(f *Fingerprint) { f.Guards.BuildConfig = "another build" },
-			} {
-				fresh := fp
-				change(&fresh)
-				fresh.ObservationProof.Evidence = observationProofEvidence(fresh)
-				if !compatibleObservationProof(fresh, subject) {
-					t.Fatal("test did not construct a compatible fresh proof")
+	// Join the independently owned execution transactions before inspecting
+	// mixed-process support. The fixture and executable stay parent-owned.
+	t.Run("transactions", func(t *testing.T) {
+		for _, tc := range []struct {
+			symbol    string
+			supported bool
+			exit      int
+		}{
+			{"TestEnv", true, 0}, {"TestFail", true, 1}, {"TestFile", false, 0},
+		} {
+			t.Run(tc.symbol, func(t *testing.T) {
+				t.Parallel()
+				subject := Subject{Package: "example.com/outcomes", Symbol: tc.symbol}
+				view, err := engine.NewView(ctx, []Subject{subject}, dir)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if runtimeinput.HasOutcomeSupport(obs.Manifest, outcomeSubject(fresh, subject)) {
-					t.Fatalf("%s borrowed old outcome support", name)
+				frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
+				support, err := view.PrepareOutcomeSupport(ctx, frame, "execution")
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			changedStrategy := fp
-			changedStrategy.ObservationProof.Strategy = "another proof strategy"
-			if runtimeinput.HasOutcomeSupport(obs.Manifest, outcomeSubject(changedStrategy, subject)) {
-				t.Fatal("another proof strategy borrowed old outcome support")
-			}
-			// Same package and environment are insufficient: the runtime evidence
-			// must include the exact subject's preparation identity.
-			other := Subject{Package: subject.Package, Symbol: "TestOther"}
-			otherView, err := engine.NewView(ctx, []Subject{other}, dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			otherFP, err := otherView.CaptureObserved(ctx, other)
-			if err != nil {
-				t.Fatal(err)
-			}
-			otherFP.RuntimeInputs, otherFP.RuntimeDigest = fp.RuntimeInputs, fp.RuntimeDigest
-			wrong, err := otherView.CheckObserved(ctx, otherFP, other)
-			if err != nil || wrong.Status != Unverifiable {
-				t.Fatalf("borrowed subject support=%+v %v", wrong, err)
-			}
-			// An identity-only observation is still useful for input movement,
-			// but neither attachment nor checking manufactures outcome support.
-			bracket, err := runtimeinput.CaptureBracket(ctx, dir, []string{"."})
-			if err != nil {
-				t.Fatal(err)
-			}
-			plain, err := runtimeinput.FromTestLog([]byte("getenv OUTCOME_VALUE\n"), dir, dir, env, runtimeinput.WithCompletedProcess("identity-only"), runtimeinput.WithBracket(bracket))
-			if err != nil {
-				t.Fatal(err)
-			}
-			missing := fp
-			missing.RuntimeInputs, missing.RuntimeDigest = plain.Manifest, plain.Digest
-			refused, err := current.CheckObserved(ctx, missing, subject)
-			if err != nil || refused.Status != Unverifiable {
-				t.Fatalf("identity-only support=%+v %v", refused, err)
-			}
-			movedEnv := gotool.SetEnv(env, "OUTCOME_VALUE", "changed")
-			movedEngine, err := New(WithDir(dir), WithEnv(movedEnv...))
-			if err != nil {
-				t.Fatal(err)
-			}
-			moved, err := movedEngine.NewView(ctx, []Subject{subject}, dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			stale, err := moved.CheckObserved(ctx, stored, subject)
-			if err != nil || stale.Status != Stale {
-				t.Fatalf("moved environment=%+v %v", stale, err)
-			}
-		})
-	}
+				fp, err := view.CaptureObserved(ctx, subject)
+				if err != nil {
+					t.Fatal(err)
+				}
+				log := filepath.Join(t.TempDir(), "input.log")
+				command := exec.Command(bin, "-test.v", "-test.run=^"+tc.symbol+"$", "-test.testlogfile="+log)
+				command.Dir = dir
+				command.Env = env
+				output, runErr := command.CombinedOutput()
+				if command.ProcessState == nil || !command.ProcessState.Exited() || command.ProcessState.ExitCode() != tc.exit {
+					t.Fatalf("execution: %v\n%s", runErr, output)
+				}
+				if tc.exit == 1 && !strings.Contains(string(output), "ordinary failure") {
+					t.Fatalf("not the expected completed failure: %s", output)
+				}
+				receipt, err := frame.Completion("execution", env, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				obs, reason, err := frame.Observe(ctx, log, runtimeinput.ProducerIngest{Identity: "execution", Env: env, Completion: receipt, Outcome: support})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.supported != (reason == "") {
+					t.Fatalf("outcome reason=%q, want supported=%t", reason, tc.supported)
+				}
+				fp, err = view.AttachObservation(subject, fp, obs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := view.Validate(ctx); err != nil {
+					t.Fatal(err)
+				}
+				data, err := json.Marshal(fp)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var stored Fingerprint
+				if err := json.Unmarshal(data, &stored); err != nil || stored != fp {
+					t.Fatalf("record roundtrip=%v", err)
+				}
+				current, err := engine.NewView(ctx, []Subject{subject}, dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				verdict, err := current.CheckObserved(ctx, stored, subject)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := Unverifiable
+				if tc.supported {
+					want = Valid
+				}
+				if verdict.Status != want {
+					t.Fatalf("verdict=%+v want %v", verdict, want)
+				}
+				if tc.symbol != "TestEnv" {
+					return
+				}
+				// Isolate support identity from the stale-guard ladder: each changed
+				// fingerprint names its own fresh code facts, but retains the old
+				// runtime support. No ordinary verdict comparison can mask an omitted
+				// constituent of the support identity in this check.
+				for name, change := range map[string]func(*Fingerprint){
+					"closure":      func(f *Fingerprint) { f.MaximalClosure = "another closure" },
+					"test variant": func(f *Fingerprint) { f.TestVariantClosure = "another test variant" },
+					"toolchain":    func(f *Fingerprint) { f.Guards.Toolchain = "another toolchain" },
+					"build":        func(f *Fingerprint) { f.Guards.BuildConfig = "another build" },
+				} {
+					fresh := fp
+					change(&fresh)
+					fresh.ObservationProof.Evidence = observationProofEvidence(fresh)
+					if !compatibleObservationProof(fresh, subject) {
+						t.Fatal("test did not construct a compatible fresh proof")
+					}
+					if runtimeinput.HasOutcomeSupport(obs.Manifest, outcomeSubject(fresh, subject)) {
+						t.Fatalf("%s borrowed old outcome support", name)
+					}
+				}
+				changedStrategy := fp
+				changedStrategy.ObservationProof.Strategy = "another proof strategy"
+				if runtimeinput.HasOutcomeSupport(obs.Manifest, outcomeSubject(changedStrategy, subject)) {
+					t.Fatal("another proof strategy borrowed old outcome support")
+				}
+				// Same package and environment are insufficient: the runtime evidence
+				// must include the exact subject's preparation identity.
+				other := Subject{Package: subject.Package, Symbol: "TestOther"}
+				otherView, err := engine.NewView(ctx, []Subject{other}, dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				otherFP, err := otherView.CaptureObserved(ctx, other)
+				if err != nil {
+					t.Fatal(err)
+				}
+				otherFP.RuntimeInputs, otherFP.RuntimeDigest = fp.RuntimeInputs, fp.RuntimeDigest
+				wrong, err := otherView.CheckObserved(ctx, otherFP, other)
+				if err != nil || wrong.Status != Unverifiable {
+					t.Fatalf("borrowed subject support=%+v %v", wrong, err)
+				}
+				// An identity-only observation is still useful for input movement,
+				// but neither attachment nor checking manufactures outcome support.
+				bracket, err := runtimeinput.CaptureBracket(ctx, dir, []string{"."})
+				if err != nil {
+					t.Fatal(err)
+				}
+				plain, err := runtimeinput.FromTestLog([]byte("getenv OUTCOME_VALUE\n"), dir, dir, env, runtimeinput.WithCompletedProcess("identity-only"), runtimeinput.WithBracket(bracket))
+				if err != nil {
+					t.Fatal(err)
+				}
+				missing := fp
+				missing.RuntimeInputs, missing.RuntimeDigest = plain.Manifest, plain.Digest
+				refused, err := current.CheckObserved(ctx, missing, subject)
+				if err != nil || refused.Status != Unverifiable {
+					t.Fatalf("identity-only support=%+v %v", refused, err)
+				}
+				movedEnv := gotool.SetEnv(env, "OUTCOME_VALUE", "changed")
+				movedEngine, err := New(WithDir(dir), WithEnv(movedEnv...))
+				if err != nil {
+					t.Fatal(err)
+				}
+				moved, err := movedEngine.NewView(ctx, []Subject{subject}, dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stale, err := moved.CheckObserved(ctx, stored, subject)
+				if err != nil || stale.Status != Stale {
+					t.Fatalf("moved environment=%+v %v", stale, err)
+				}
+			})
+		}
+	})
 	// A process set containing an unsupported member cannot borrow support
 	// from an independently eligible member.
 	set := []Subject{{Package: "example.com/outcomes", Symbol: "TestEnv"}, {Package: "example.com/outcomes", Symbol: "TestFile"}}

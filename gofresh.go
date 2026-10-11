@@ -614,9 +614,9 @@ type Engine struct {
 	packageProcessExecution bool
 }
 
-// viewTestHooks is the package's one test-observation surface: each field
-// observes an internal step tests prove taken, skipped, or counted; nil
-// disables. Root tests run sequentially, so package scope suffices.
+// viewTestHooks holds internal observation callbacks and explicitly named
+// test controls. Nil or zero disables them. Root tests run sequentially,
+// so package scope suffices.
 var viewTestHooks struct {
 	// observe observes every source/guard/purity observation pass — tests
 	// pin how many observations an operation performs.
@@ -648,6 +648,10 @@ var viewTestHooks struct {
 	// pin that an operation's cancellation is never read as a budget
 	// cut.
 	beforeDischarge func()
+	// analysisBound replaces only positive-budget deadline construction in
+	// tests. A provenance fixture can expire its selected analysis phase
+	// deterministically while default-clock tests exercise real deadlines.
+	analysisBound func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	// scanMemoOff disables the view scan memo (REQ-closure-scan-memo) so
 	// derivation tests that poison the in-process fact cache between two
 	// scans — a seam with no production analogue, since a pinned fact

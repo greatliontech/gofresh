@@ -3808,12 +3808,16 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 // init body. The two proofs: a leak-free callee parameter (deferred to
 // composition, cross-package included), and a leak-free range binding
 // over the loop body (REQ-closure-shared-dynamic-state).
+// Each child owns its module tree, Engine and View and reads an unchanged
+// process environment. Keep this parent nonparallel: its grouped children
+// must finish before any root test can change environment or observation hooks.
 func TestCarrierEscapeDischarges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")
 	}
 	goMod := "module example.com/xesc\n\ngo 1.26\n"
 	t.Run("escape through a proven function stays escaped", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nvar stash map[string]func()\n\nfunc Keep(m map[string]func()) { stash = m }\n\nfunc Seed() { Keep(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
@@ -3826,6 +3830,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("return escape through a proven function stays escaped", func(t *testing.T) {
+		t.Parallel()
 		// The carrier is returned, not argument-passed: no parameter
 		// proof applies, and the alias lands in the caller's package
 		// state - init flow must not launder it.
@@ -3845,6 +3850,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("leak-free consumer discharges the argument escape", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc check(m map[string]func()) {\n\tfor k := range m {\n\t\t_ = k\n\t}\n}\n\nfunc Seed() { check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
@@ -3857,6 +3863,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-typed hook argument stays valid", func(t *testing.T) {
+		t.Parallel()
 		// A non-alias-handing carrier cannot be rebound through an
 		// argument - it must not enter the parameter deferral, whose
 		// facts deliberately omit no-reach parameters and would refuse
@@ -3873,6 +3880,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bare range over a carrier discharges", func(t *testing.T) {
+		t.Parallel()
 		// A binding-free range aliases nothing.
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -3886,6 +3894,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("declared local alias read discharges", func(t *testing.T) {
+		t.Parallel()
 		// var-declared bindings track exactly like := bindings.
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -3899,6 +3908,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("declared local alias write refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc poke(m map[string]func()) {\n\tvar x = m\n\tx[\"k\"] = func() {}\n}\n\nfunc Seed() { poke(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
@@ -3911,6 +3921,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("deferred call argument earns the discharge", func(t *testing.T) {
+		t.Parallel()
 		// A deferred call is synchronous at function exit - the
 		// parameter proof bounds the alias exactly as a plain call's.
 		files := map[string]string{
@@ -3925,6 +3936,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliased local read discharges", func(t *testing.T) {
+		t.Parallel()
 		// The consumer binds the parameter to a local and reads through
 		// it - the tracked binding keeps every arm, so the proof holds.
 		files := map[string]string{
@@ -3939,6 +3951,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("literal reading an init-local alias discharges", func(t *testing.T) {
+		t.Parallel()
 		// The nested literal only length-reads the aliased local - the
 		// read shapes apply to the alias exactly as to the carrier.
 		files := map[string]string{
@@ -3953,6 +3966,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go statement argument keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = map[string]func(){}\n\nfunc check(m map[string]func()) {\n\tfor k := range m {\n\t\t_ = k\n\t}\n}\n\nfunc Seed() { go check(Hooks) }\n\nfunc Count() int { return len(Hooks) }\n",
@@ -3965,6 +3979,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("unrecognized consumer use refuses", func(t *testing.T) {
+		t.Parallel()
 		// The parameter appears only inside a composite literal - a shape
 		// no enumerated arm classifies; the engine's catch-all ident
 		// visit must refuse it, fail-closed.
@@ -3980,6 +3995,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package retaining callee refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\nvar held map[string]func()\n\nfunc Register(m map[string]func()) { held = m }\n",
@@ -3993,6 +4009,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package leak-free callee discharges", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\nfunc Check(m map[string]func()) int { return len(m) }\n",
@@ -4006,6 +4023,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("leak-free range binding discharges the iteration", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Labels() []string {\n\tout := []string{}\n\tfor _, e := range Registry {\n\t\tout = append(out, e.Label)\n\t}\n\treturn out\n}\n",
@@ -4018,6 +4036,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("range binding retained beyond the loop refuses", func(t *testing.T) {
+		t.Parallel()
 		// The binding is copied into a local declared OUTSIDE the loop
 		// body - the alias survives where the loop-body arms cannot see
 		// its uses, so the proof must refuse.
@@ -4033,6 +4052,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("leaking range binding keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Columns() []string {\n\tout := []string{}\n\tfor _, e := range Registry {\n\t\tout = append(out, e.Cols...)\n\t}\n\treturn out\n}\n",
@@ -4045,6 +4065,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field call through the binding discharges", func(t *testing.T) {
+		t.Parallel()
 		// The registry-of-builders shape: the loop invokes a func-typed
 		// field of the binding - the callee receives only its arguments,
 		// so the binding proof holds and the pure builder composes.
@@ -4060,6 +4081,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument discharges through the registered population", func(t *testing.T) {
+		t.Parallel()
 		// An argument handing the callee an alias into carrier state
 		// defers to the field position's registered population: the only
 		// registrant is a named function whose parameter proves
@@ -4076,6 +4098,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument refuses when a registrant retains the alias", func(t *testing.T) {
+		t.Parallel()
 		// The same shape with a registrant that stores its parameter
 		// into package state: the population cannot prove the position
 		// leak-free, so the escape stays.
@@ -4091,6 +4114,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument discharges through a judged literal registrant", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int { return len(cols) }}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4103,6 +4127,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument refuses on a leaking literal registrant", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int {\n\t\tsink = cols\n\t\treturn len(cols)\n\t}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4115,6 +4140,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument discharges through a constructor registrant", func(t *testing.T) {
+		t.Parallel()
 		// The registry is built by a proven return-environment-free
 		// constructor: its field marks join the population through the
 		// carrier's constructor-registration pair.
@@ -4130,6 +4156,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument refuses on a constructor's leaking registrant", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nfunc build() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: grab}}\n}\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4142,6 +4169,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument refuses on a method-expression registrant", func(t *testing.T) {
+		t.Parallel()
 		// A method expression carries a receiver frame no leak-free fact
 		// covers - the classification poisons the field position.
 		files := map[string]string{
@@ -4156,6 +4184,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor-argument registrants join the population", func(t *testing.T) {
+		t.Parallel()
 		// A passthrough constructor's parameters carry the store site's
 		// values into the carrier - the arguments are classified at the
 		// store site, so the leaking registrant inside one refuses.
@@ -4171,6 +4200,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor-argument leak-free registrants discharge", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc pass(es []entry) []entry { return es }\n\nvar Registry = pass([]entry{{Cols: []string{\"a\"}, Build: width}})\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4183,6 +4213,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("rebound binding detaches from the population and refuses", func(t *testing.T) {
+		t.Parallel()
 		// Rebinding the tracked local from a value the population never
 		// registered would resolve its field calls against the wrong
 		// registrants - the proof refuses the rebinding.
@@ -4198,6 +4229,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("foreign-valued declaration of a tracked binding refuses", func(t *testing.T) {
+		t.Parallel()
 		// The declaration twin of the rebinding refusal: the name is
 		// tracked by a later carrier assignment, but its initial value
 		// is one the population never registered - the declaration
@@ -4215,6 +4247,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("delegating constructor joins its dependency's population", func(t *testing.T) {
+		t.Parallel()
 		// The proven constructor returns another constructor's result -
 		// the dependency's field marks decide, joined over the proof's
 		// dependency edges.
@@ -4230,6 +4263,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("delegating constructor's leak-free dependency discharges", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc part() []entry {\n\treturn []entry{{Cols: []string{\"a\"}, Build: width}}\n}\n\nfunc build() []entry { return part() }\n\nvar Registry = build()\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4242,6 +4276,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("literal registrant's own deferral resolves at composition", func(t *testing.T) {
+		t.Parallel()
 		// The judged literal hands its parameter to a named function -
 		// the deferral rides the population marks and resolves against
 		// the leak-free union.
@@ -4257,6 +4292,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("literal registrant's unproven deferral refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(cols []string) int\n}\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Build: func(cols []string) int { return grab(cols) }}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += e.Build(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4269,6 +4305,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument through an unrelated value keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		// The invoked field belongs to a local that is not the judged
 		// binding - its callee is outside the carrier's registered
 		// population, so the want must not be recorded against it.
@@ -4284,6 +4321,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor reading a func-carrying package variable poisons its population", func(t *testing.T) {
+		t.Parallel()
 		// The proof's derivation channel could hand the read variable's
 		// unclassified interior into the result - whole-population
 		// poison, whatever the constructor's literals prove.
@@ -4299,6 +4337,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("nested registrant pools into the population by field name", func(t *testing.T) {
+		t.Parallel()
 		// A nested struct's func field can become a judged binding
 		// through the taint chain - its registrants share the field-name
 		// namespace, so the nested leaking registrant must refuse.
@@ -4314,6 +4353,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("non-signature rebind of a carrier-derived local stays discharged", func(t *testing.T) {
+		t.Parallel()
 		// A rebound []string local can never be a func-field base - the
 		// rebinding refusal is scoped to signature-carrying bindings,
 		// so the default-fallback pattern keeps its discharge.
@@ -4329,6 +4369,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("make-constructed registry discharges", func(t *testing.T) {
+		t.Parallel()
 		// make's type argument is not a value - the population stays
 		// exactly the appended registrants'.
 		files := map[string]string{
@@ -4343,6 +4384,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("named func-typed field earns the discharge", func(t *testing.T) {
+		t.Parallel()
 		// The http.HandlerFunc idiom: the field's type is a named func
 		// type, unwrapped to its signature on both sides.
 		files := map[string]string{
@@ -4357,6 +4399,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("nested leak-free registrant discharges through the pooled population", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inner struct {\n\tFn  func(cols []string) int\n\tPad []string\n}\n\ntype entry struct {\n\tCols []string\n\tSub  inner\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Sub: inner{Fn: width}}}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ts := e.Sub\n\t\ttotal += s.Fn(e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4369,6 +4412,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go-statement func-field argument keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		// The goroutine runs concurrently with the loop - the field call's
 		// argument never defers, whatever the population proves.
 		files := map[string]string{
@@ -4383,6 +4427,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("func-field argument refuses on a direct field-write registrant", func(t *testing.T) {
+		t.Parallel()
 		// Re-registration through the carrier's own storage joins the
 		// population exactly as the initial store did.
 		files := map[string]string{
@@ -4397,6 +4442,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("comma-ok existence read discharges on any carrier", func(t *testing.T) {
+		t.Parallel()
 		// The blank target produces no value to hand out - writeless
 		// whatever the element type.
 		files := map[string]string{
@@ -4411,6 +4457,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("comma-ok binding that writes through refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Table = map[string]entry{\"a\": {Cols: []string{\"x\"}}}\n\nfunc Poke(token string) bool {\n\tv, ok := Table[token]\n\tif ok {\n\t\tv.Cols[0] = \"z\"\n\t}\n\treturn ok\n}\n",
@@ -4423,6 +4470,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch-table carrier argument discharges through the element population", func(t *testing.T) {
+		t.Parallel()
 		// legs[token](shared): the callee is unknowable statically, so
 		// the argument defers to the dispatch carrier's element
 		// population - every registered value must prove the position.
@@ -4438,6 +4486,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch-table argument refuses when an element retains it", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": grab}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4450,6 +4499,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch-table literal element judges at registration", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar Legs = map[string]func(v *inv) int{\"w\": func(v *inv) int { return len(v.Cols) }}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4462,6 +4512,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch-table leaking literal element refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nvar Legs = map[string]func(v *inv) int{\"w\": func(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4474,6 +4525,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element from a constructor-returned bare function refuses", func(t *testing.T) {
+		t.Parallel()
 		// The registrant reaches the element through a proven
 		// constructor's returned bare function - its disposition rides
 		// the return-environment-free channel.
@@ -4489,6 +4541,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element from a constructor-returned leak-free function discharges", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() func(v *inv) int { return width }\n\nvar Legs = map[string]func(v *inv) int{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4501,6 +4554,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element through a constructor local passthrough refuses", func(t *testing.T) {
+		t.Parallel()
 		// The proof admits the local; the value-position sweep pools
 		// its source - the retaining registrant must surface.
 		files := map[string]string{
@@ -4515,6 +4569,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element written into a constructor local refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = grab\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4527,6 +4582,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element behind a conversion refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype Leg func(v *inv) int\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() Leg { return Leg(grab) }\n\nvar Legs = map[string]Leg{\"w\": pick()}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4539,6 +4595,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element appended in a constructor refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc pick() []func(v *inv) int {\n\treturn append([]func(v *inv) int{}, grab)\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[0](Shared)\n}\n",
@@ -4551,6 +4608,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dispatch element written into a constructor local discharges when leak-free", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar kept []string\n\nfunc keep(s []string) { kept = s }\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick() map[string]func(v *inv) int {\n\tkeep(nil)\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4563,6 +4621,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("callee-mutated constructor local refuses the dispatch discharge", func(t *testing.T) {
+		t.Parallel()
 		// A callee handed the local can insert a registrant after the
 		// recorded population - the local breaks at the call, keeping
 		// the proof and the discharge fail-closed.
@@ -4578,6 +4637,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("signature-var callee handed the constructor local refuses", func(t *testing.T) {
+		t.Parallel()
 		// The callee is a func-valued package variable - unattributable,
 		// so the handed local breaks and the proof refuses.
 		files := map[string]string{
@@ -4592,6 +4652,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("closure-mutated constructor local refuses the dispatch discharge", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype config struct {\n\tFn func(v *inv) int\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc pick(cfg config) map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\tswap := func() { r[\"w\"] = cfg.Fn }\n\tswap()\n\treturn r\n}\n\nvar Legs = pick(config{Fn: grab})\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4604,6 +4665,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("param-field insertion into the constructor local refuses", func(t *testing.T) {
+		t.Parallel()
 		// cfg.Fn is priced under its field name at the store site - an
 		// element-position insertion is a different position, so the
 		// sweep's fail-closed default poisons it.
@@ -4619,6 +4681,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("void-callee param-field insertion refuses through the edge", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\ntype config struct {\n\tFn func(v *inv) int\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc hookf(m map[string]func(v *inv) int, cfg config) {\n\tm[\"w\"] = cfg.Fn\n}\n\nfunc pick(cfg config) map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r, cfg)\n\treturn r\n}\n\nvar Legs = pick(config{Fn: grab})\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4631,6 +4694,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("value-receiver method insertion refuses", func(t *testing.T) {
+		t.Parallel()
 		// A value receiver over a map-underlying type writes through -
 		// the receiver breaks exactly like a handed argument.
 		files := map[string]string{
@@ -4645,6 +4709,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("void-callee call-result insertion refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nvar sink []string\n\nfunc grab(v *inv) int {\n\tsink = v.Cols\n\treturn len(v.Cols)\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nfunc mk() func(v *inv) int { return grab }\n\nfunc hookf(m map[string]func(v *inv) int) {\n\tm[\"w\"] = mk()\n}\n\nfunc pick() map[string]func(v *inv) int {\n\tr := map[string]func(v *inv) int{}\n\tr[\"w\"] = width\n\thookf(r)\n\treturn r\n}\n\nvar Legs = pick()\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\treturn Legs[token](Shared)\n}\n",
@@ -4657,6 +4722,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("struct-receiver interior insertion refuses", func(t *testing.T) {
+		t.Parallel()
 		// The receiver copies by value but its interior map shares
 		// backing - the break covers any receiver whose interior hands
 		// out mutable reach.
@@ -4672,6 +4738,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("void-callee signature-var call-result insertion refuses", func(t *testing.T) {
+		t.Parallel()
 		// The producing callee is a func-valued variable - its result
 		// is unattributable, so the sweep's fail-closed default poisons
 		// the element position.
@@ -4687,6 +4754,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("callee-inserted leak-free element discharges", func(t *testing.T) {
+		t.Parallel()
 		// The edge's precision pin: the callee's swept marks join the
 		// population, and a leak-free insertion discharges.
 		files := map[string]string{
@@ -4701,6 +4769,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body dispatch argument keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		// Init flow is program code for deferrals - the alias outlives
 		// initialization, so the dispatch admission never applies there.
 		files := map[string]string{
@@ -4715,6 +4784,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go-statement dispatch argument keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype inv struct {\n\tCols []string\n\tHook func()\n}\n\nfunc width(v *inv) int { return len(v.Cols) }\n\nvar Legs = map[string]func(v *inv) int{\"w\": width}\n\nvar Shared = &inv{Cols: []string{\"a\"}}\n\nfunc Total(token string) int {\n\tgo Legs[token](Shared)\n\treturn 0\n}\n",
@@ -4727,6 +4797,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("range-binding dispatch argument defers through the element population", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc width(cols []string) int { return len(cols) }\n\nvar Legs = map[string]func(cols []string) int{\"w\": width}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total(token string) int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += Legs[token](e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4739,6 +4810,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("range-binding dispatch argument refuses on a retaining element", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar sink []string\n\nfunc grab(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n\nvar Legs = map[string]func(cols []string) int{\"w\": grab}\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Total(token string) int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += Legs[token](e.Cols)\n\t}\n\treturn total\n}\n",
@@ -4751,6 +4823,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package parameter forwarding resolves the chain", func(t *testing.T) {
+		t.Parallel()
 		// The helper forwards its parameter to a foreign leak-free
 		// parameter - the conditional edge resolves at composition.
 		files := map[string]string{
@@ -4766,6 +4839,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package forwarding to a retaining parameter refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"prop/prop.go": "package prop\n\nvar sink []string\n\nfunc Sum(cols []string) int {\n\tsink = cols\n\treturn len(cols)\n}\n",
@@ -4779,6 +4853,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("three-hop forwarding chain resolves transitively", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"prop/prop.go": "package prop\n\nfunc Sum(cols []string) int { return len(cols) }\n",
@@ -4793,6 +4868,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("forwarding through a local intermediary resolves the foreign hop", func(t *testing.T) {
+		t.Parallel()
 		// The chain's first hop is same-package; the foreign hop sits
 		// behind it - the promoted edges resolve the whole chain.
 		files := map[string]string{
@@ -4808,6 +4884,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("mutual recursion with a foreign hop refuses as a cycle", func(t *testing.T) {
+		t.Parallel()
 		// Both members route to the edge channel; their mutual edges
 		// cycle and the composition fixed point refuses.
 		files := map[string]string{
@@ -4823,6 +4900,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("field registrant defers to a conditionally proven parameter", func(t *testing.T) {
+		t.Parallel()
 		// The registrant's own parameter proof rides the edge channel -
 		// the 'd' mark resolves against the composed fixed point.
 		files := map[string]string{
@@ -4838,6 +4916,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("registered literal handing out a captured field closure refuses", func(t *testing.T) {
+		t.Parallel()
 		// The wrapper literal returns w.handler - a signature-carrying
 		// read of its capture. The value IS its environment (the shared
 		// closure over n); the value-plane refusal keeps the escape.
@@ -4853,6 +4932,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor handing out a captured field closure refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nfunc mk() map[string]func() func() int {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\treturn map[string]func() func() int{\"h\": func() func() int { return w.handler }}\n}\n\nvar Registry = mk()\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
@@ -4865,6 +4945,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("registered literal handing out a captured method value refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Tick() int {\n\tc.n++\n\treturn c.n\n}\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tc := &counter{}\n\tw := widget{handler: c.Tick}\n\tRegistry[\"h\"] = func() func() int { return w.handler }\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
@@ -4877,6 +4958,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("rooted map-field dispatch with scalar arguments discharges", func(t *testing.T) {
+		t.Parallel()
 		// The callee read is an invocation, not a handout - the
 		// value-plane refusal skips call positions.
 		files := map[string]string{
@@ -4891,6 +4973,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("locally bound handout refuses on the value plane", func(t *testing.T) {
+		t.Parallel()
 		// The bind tracks - the signature-carrying value carries its
 		// environment through the local exactly as through the read.
 		files := map[string]string{
@@ -4905,6 +4988,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("range-bound handout refuses on the value plane", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tlist []func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{list: []func() int{func() int {\n\t\tn++\n\t\treturn n\n\t}}}\n\tRegistry[\"h\"] = func() func() int {\n\t\tfor _, f := range w.list {\n\t\t\treturn f\n\t\t}\n\t\treturn nil\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
@@ -4917,6 +5001,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("struct-copy bound handout refuses on the value plane", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype widget struct {\n\thandler func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\tw := widget{handler: func() int {\n\t\tn++\n\t\treturn n\n\t}}\n\tRegistry[\"h\"] = func() func() int {\n\t\tx := w\n\t\treturn x.handler\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
@@ -4929,6 +5014,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method-result handout refuses through the constructor door", func(t *testing.T) {
+		t.Parallel()
 		// The read-only method returns a signature-carrying value - the
 		// deferral's result gate refuses on the value plane.
 		files := map[string]string{
@@ -4943,6 +5029,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("package-var getter returning a callback refuses", func(t *testing.T) {
+		t.Parallel()
 		// The method call itself is the tolerated position, but its
 		// signature-carrying result denies the read-only deferral: the
 		// receiver stays fail-closed.
@@ -4958,6 +5045,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("field-callee call result handout refuses", func(t *testing.T) {
+		t.Parallel()
 		// return w.get() - the callee read is tolerated, but its
 		// signature-carrying result is a value-plane handout.
 		files := map[string]string{
@@ -4972,6 +5060,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bound-callee call result handout refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype widget struct {\n\tget func() func() int\n}\n\nvar Registry = map[string]func() func() int{}\n\nfunc init() {\n\tn := 0\n\thandler := func() int {\n\t\tn++\n\t\treturn n\n\t}\n\tw := widget{get: func() func() int { return handler }}\n\tRegistry[\"h\"] = func() func() int {\n\t\tfn := w.get\n\t\treturn fn()\n\t}\n}\n\nfunc Run() int {\n\tf := Registry[\"h\"]()\n\treturn f() + f()\n}\n",
@@ -4984,6 +5073,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("void method call on a rooted element stays valid", func(t *testing.T) {
+		t.Parallel()
 		// A void call hands out nothing - the read-only method deferral
 		// resolves it; the result gate must not misread the empty result
 		// tuple as a handout.
@@ -4999,6 +5089,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("two-result dispatch on a rooted element stays valid", func(t *testing.T) {
+		t.Parallel()
 		// Every element of the result tuple is a copied scalar - the
 		// multi-result shape alone is not a handout.
 		files := map[string]string{
@@ -5013,6 +5104,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("map-returning field callee refuses", func(t *testing.T) {
+		t.Parallel()
 		// The call is tolerated but its result hands the caller shared
 		// mutable reach - a mutation-equivalent escape.
 		files := map[string]string{
@@ -5027,6 +5119,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("two-result handout with a signature element refuses", func(t *testing.T) {
+		t.Parallel()
 		// One tuple element is a signature - the comma-discarded shape
 		// must not launder it past the result gate.
 		files := map[string]string{
@@ -5041,6 +5134,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("two-result handout with a map element refuses", func(t *testing.T) {
+		t.Parallel()
 		// The shared-reach element rides the tuple beside a scalar.
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -5054,6 +5148,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bound field callee invocation stays valid", func(t *testing.T) {
+		t.Parallel()
 		// The bind-then-call idiom: the tracked local is only ever
 		// invoked - a call position, never a handout.
 		files := map[string]string{
@@ -5068,6 +5163,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("stateless handout through a registered literal stays valid", func(t *testing.T) {
+		t.Parallel()
 		// The benign twin: the returned literal captures nothing - the
 		// value-plane refusal must not reach it.
 		files := map[string]string{
@@ -5082,6 +5178,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("plain-data builder effects stay per-process", func(t *testing.T) {
+		t.Parallel()
 		// A registered named builder mutating a plain package variable is
 		// per-process-deterministic content the whole-graph hash already
 		// covers - the discharge composes Valid exactly as the identical
@@ -5098,6 +5195,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("interface-dispatched method call through the binding refuses", func(t *testing.T) {
+		t.Parallel()
 		// The statically-typed read-only twin now defers (the method-use
 		// marks); interface dispatch stays refused - the callee set is
 		// unknowable to the receiver fact.
@@ -5113,6 +5211,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("capture-free literal registration discharges", func(t *testing.T) {
+		t.Parallel()
 		// The literal references a package-level variable: not a capture -
 		// its uses attribute at this site like any program code.
 		files := map[string]string{
@@ -5127,6 +5226,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("sibling writer poisons a reader-only carrier", func(t *testing.T) {
+		t.Parallel()
 		// The reader literal is leak-free over its own body, but a sibling
 		// literal registered into a different carrier writes the shared
 		// environment - one object however many carriers reach it, so the
@@ -5143,6 +5243,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliased environment poisons through the alias set", func(t *testing.T) {
+		t.Parallel()
 		// A one-line alias of the captured slice hands the goroutine the
 		// same backing under another name - the audit closes the alias
 		// set over the enclosing body before judging.
@@ -5158,6 +5259,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("builtin copy registration is a judged store", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = []func() int{nil}\n\nfunc init() {\n\tcounter := 0\n\tcopy(Hooks, []func() int{func() int { counter++; return counter }})\n}\n\nfunc Run() int {\n\ttotal := 0\n\tfor _, f := range Hooks {\n\t\tif f != nil {\n\t\t\ttotal += f()\n\t\t}\n\t}\n\treturn total\n}\n",
@@ -5170,6 +5272,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body carrier argument earns the deferral", func(t *testing.T) {
+		t.Parallel()
 		// The call sits directly in an init body - the exempt region -
 		// and defers to the foreign parameter's leak-free fact exactly as
 		// program code does.
@@ -5186,6 +5289,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body carrier argument to a retaining callee escapes", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\nvar held map[string]func()\n\nfunc Keep(m map[string]func()) { held = m }\n",
@@ -5199,6 +5303,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body carrier argument to a method escapes", func(t *testing.T) {
+		t.Parallel()
 		// No leak-free fact exists for a method callee - the exempt
 		// region's handout keeps the fail-closed escape.
 		files := map[string]string{
@@ -5213,6 +5318,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body fill through a writing parameter discharges", func(t *testing.T) {
+		t.Parallel()
 		// The callee writes a data field through its parameter but
 		// retains nothing - in init flow the write is the region's own
 		// exempt store, so the retention grade discharges the deferral.
@@ -5228,6 +5334,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("program-code fill through a writing parameter refuses", func(t *testing.T) {
+		t.Parallel()
 		// The same callee reached from program code: the write is a
 		// post-initialization mutation channel, the strict leak-free
 		// grade governs and refuses.
@@ -5243,6 +5350,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-flow fill chaining a retaining method refuses", func(t *testing.T) {
+		t.Parallel()
 		// The helper writes (retention tolerates that) but then calls a
 		// method whose goroutine retains the receiver - the retention
 		// grade's method chain must demand retention, never read-only.
@@ -5258,6 +5366,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("foreign carrier stored through an init fill refuses", func(t *testing.T) {
+		t.Parallel()
 		// The stored value reaches another carrier: tolerating the store
 		// would silently alias two backings through the parameter.
 		files := map[string]string{
@@ -5272,6 +5381,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("eager goroutine argument keeps the discharge", func(t *testing.T) {
+		t.Parallel()
 		// A go statement's direct arguments are evaluated at the
 		// statement and retain nothing - only the goroutine's own
 		// literal captures refuse.
@@ -5287,6 +5397,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init fill laundering a carrier through a local hop refuses", func(t *testing.T) {
+		t.Parallel()
 		// A local bound from the foreign carrier is that carrier's
 		// backing - the store tolerance must see through the hop.
 		files := map[string]string{
@@ -5301,6 +5412,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("leak-free proof survives a converting read-only method", func(t *testing.T) {
+		t.Parallel()
 		// The conversion of a tracked read to a reach-free result is a
 		// fresh copy - the retention grade must not refuse it, or every
 		// leak-free proof chaining through the method breaks.
@@ -5316,6 +5428,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-bound method result stays valid", func(t *testing.T) {
+		t.Parallel()
 		// A called method's receiver is priced by the call's own
 		// deferral - binding the RESULT retains nothing of the receiver.
 		files := map[string]string{
@@ -5330,6 +5443,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bound carrier method value in init flow escapes", func(t *testing.T) {
+		t.Parallel()
 		// The bound value retains its receiver past initialization -
 		// fail-closed exactly as the call spelling's unproven receiver.
 		files := map[string]string{
@@ -5344,6 +5458,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body writing method fill on a carrier receiver discharges", func(t *testing.T) {
+		t.Parallel()
 		// The method writes receiver state but retains nothing - in init
 		// flow the write is the region's own exempt store, so the
 		// receiver retention grade discharges the deferral.
@@ -5359,6 +5474,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-body method call on a carrier receiver escapes", func(t *testing.T) {
+		t.Parallel()
 		// The receiver is handed to the callee exactly as an argument
 		// is - a retaining method (the goroutine outlives initialization)
 		// must not slip through the exempt region unmarked.
@@ -5374,6 +5490,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("foreign self-append of a judged element discharges", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks []func() string\n\nfunc Run() string {\n\tout := \"\"\n\tfor _, f := range Hooks {\n\t\tout += f()\n\t}\n\treturn out\n}\n",
@@ -5386,6 +5503,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("foreign-carrier registration is audited by the storing package", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks []func() string\n\nfunc Run() string {\n\tout := \"\"\n\tfor _, f := range Hooks {\n\t\tout += f()\n\t}\n\treturn out\n}\n",
@@ -5398,6 +5516,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method expression and nil registrations stay environment-free", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype calc struct{}\n\nfunc (calc) Double(n int) int { return n * 2 }\n\ntype entry struct {\n\tCols  []string\n\tBuild func(c calc, n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{\n\t\t{Cols: []string{\"a\"}, Build: calc.Double},\n\t\t{Cols: []string{\"b\"}, Build: nil},\n\t}\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\tif e.Build != nil {\n\t\t\ttotal += e.Build(calc{}, 1)\n\t\t}\n\t}\n\treturn total\n}\n",
@@ -5410,6 +5529,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("mutation culprit outranks the environment culprit", func(t *testing.T) {
+		t.Parallel()
 		// One package, two refusals: a registered literal stores into a
 		// second carrier (program code - the mutation mark), and the
 		// first carrier's registration is itself environment-carrying.
@@ -5426,6 +5546,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("param-sourced fill in exempt init flow poisons", func(t *testing.T) {
+		t.Parallel()
 		// The store sits in an init-only helper - the exempt region, so
 		// no escape attribution fires - and the parameter RHS is an
 		// opaque source the audit alone refuses.
@@ -5441,6 +5562,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliased-local handout to a method in an init body escapes", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype sink struct{ m map[string]func() }\n\nfunc (s *sink) Keep(m map[string]func()) { s.m = m }\n\nvar keeper sink\n\nvar Hooks = map[string]func(){}\n\nfunc init() {\n\tm := Hooks\n\tkeeper.Keep(m)\n}\n\nfunc Count() int { return len(Hooks) }\n",
@@ -5453,6 +5575,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("wrapped carrier argument in an init body escapes", func(t *testing.T) {
+		t.Parallel()
 		// The carrier rides inside a composite argument - no deferral
 		// can resolve it, and the exempt region's fail-closed arm must
 		// still see it.
@@ -5468,6 +5591,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("copied-out carrier alias escapes through its handout", func(t *testing.T) {
+		t.Parallel()
 		// A builtin copy binds the destination local to the carrier's
 		// backing; handing the destination out afterwards is handing the
 		// carrier out.
@@ -5483,6 +5607,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("declared alias joins the alias set", func(t *testing.T) {
+		t.Parallel()
 		// The var-declaration form of the one-line alias - a declaration
 		// binding aliases exactly as an assignment binding does.
 		files := map[string]string{
@@ -5497,6 +5622,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("declared init-local alias is the carrier inside a stored literal", func(t *testing.T) {
+		t.Parallel()
 		// The var-declaration form of the init-local alias: a stored
 		// literal writing through it writes the carrier.
 		files := map[string]string{
@@ -5511,6 +5637,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("store through a pointer alias is audited", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks []func() string\n\nfunc init() {\n\tstate := []string{\"a\"}\n\tp := &Hooks\n\t*p = []func() string{func() string { state[0] = \"b\"; return state[0] }}\n}\n\nfunc Run() string {\n\tout := \"\"\n\tfor _, f := range Hooks {\n\t\tout += f()\n\t}\n\treturn out\n}\n",
@@ -5523,6 +5650,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("parenthesized copy destination stays bound", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = []map[string]func() int{{\"a\": one}}\n\nfunc one() int { return 1 }\n\nfunc two() int { return 2 }\n\nfunc churn(d []map[string]func() int) {\n\tfor _, m := range d {\n\t\tm[\"a\"] = two\n\t}\n}\n\nfunc init() {\n\tdst := make([]map[string]func() int, 1)\n\tcopy((dst), Hooks)\n\tgo churn(dst)\n}\n\nfunc Read() int { return len(Hooks) }\n",
@@ -5535,6 +5663,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("append through a resliced alias is audited", func(t *testing.T) {
+		t.Parallel()
 		// The append rebinds the local AND writes the new element into
 		// the shared backing whenever capacity allows - a store through
 		// the alias, never exempt as a rebinding.
@@ -5550,6 +5679,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("copy into an aliased local is audited", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks = []func() int{nil}\n\nfunc init() {\n\tstate := 0\n\tm := Hooks\n\tcopy(m, []func() int{func() int { state++; return state }})\n}\n\nfunc Run() int {\n\ttotal := 0\n\tfor _, f := range Hooks {\n\t\tif f != nil {\n\t\t\ttotal += f()\n\t\t}\n\t}\n\treturn total\n}\n",
@@ -5562,6 +5692,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("store through a paren-copied alias is audited", func(t *testing.T) {
+		t.Parallel()
 		// The destination arrives parenthesized and the capturing store
 		// goes through it - the audit's alias resolution must see both.
 		files := map[string]string{
@@ -5576,6 +5707,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("multi-source binding joins every backing to the alias set", func(t *testing.T) {
+		t.Parallel()
 		// One binding, two sources: the combined slice shares the
 		// captured state's backing through the appended elements, and
 		// the goroutine writes it.
@@ -5591,6 +5723,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go-statement argument poisons the captured environment", func(t *testing.T) {
+		t.Parallel()
 		// The goroutine outlives initialization holding the environment
 		// the registered reader captures - fail-closed without judging
 		// what the goroutine's callee does with it.
@@ -5606,6 +5739,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("capturing literal registration refuses every reader", func(t *testing.T) {
+		t.Parallel()
 		// The environment hole: registered closures share an init-local
 		// slice, one writing it, one reading it - subjects in one binary
 		// observe order-dependent state under what would otherwise be a
@@ -5624,6 +5758,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("written captured scalar refuses like captured reach", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks []func() int\n\nfunc init() {\n\tcounter := 0\n\tHooks = []func() int{func() int { counter++; return counter }}\n}\n\nfunc Run() int {\n\ttotal := 0\n\tfor _, f := range Hooks {\n\t\ttotal += f()\n\t}\n\treturn total\n}\n",
@@ -5636,6 +5771,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("read-only captured scalar stays environment-free", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nvar Hooks []func() int\n\nfunc init() {\n\tbase := 10\n\tHooks = []func() int{func() int { return base }}\n}\n\nfunc Run() int {\n\ttotal := 0\n\tfor _, f := range Hooks {\n\t\ttotal += f()\n\t}\n\treturn total\n}\n",
@@ -5648,6 +5784,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor-result registration audits the returns", func(t *testing.T) {
+		t.Parallel()
 		// The generated-registry shape: a carrier initialized from a
 		// plain named in-package constructor defers to the
 		// constructor's return-environment-free proof instead of
@@ -5664,6 +5801,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("foreign constructor chain resolves at composition", func(t *testing.T) {
+		t.Parallel()
 		// The generated-thresholds shape: the in-package constructor
 		// returns a foreign constructor's result over foreign
 		// call-result arguments - each proof persists per package and
@@ -5681,6 +5819,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned closure over a parameter admits with judged arguments", func(t *testing.T) {
+		t.Parallel()
 		// The near-policy shape: the constructor returns a literal
 		// capturing only its own parameter, whose in-literal use
 		// chains through a same-package leak-free parameter; the
@@ -5697,6 +5836,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor returning a bound method value keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc generated() []handler {\n\tc := &counter{}\n\treturn []handler{c.Next}\n}\n\nvar Registry = generated()\n\nfunc Count() int { return len(Registry) }\n",
@@ -5709,6 +5849,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor closure leaking its capture keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The returned literal's body hands its captured environment
 		// to a package variable - the use-shape judgment over the
 		// literal refuses, so the constructor never proves.
@@ -5724,6 +5865,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("non-environment-free constructor argument keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc wrap(h handler) []handler { return []handler{h} }\n\nvar seed = &counter{}\n\nvar Registry = wrap(seed.Next)\n\nfunc Count() int { return len(Registry) }\n",
@@ -5736,6 +5878,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor cycle keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc genA() []handler { return genB() }\n\nfunc genB() []handler { return genA() }\n\nvar Registry = genA()\n\nfunc Count() int { return len(Registry) }\n",
@@ -5748,6 +5891,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element write into a returned local keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A write through an index reaches the local's storage without
 		// a whole-identifier bind - the binding breaks, however the
 		// composite it started from judged.
@@ -5763,6 +5907,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("field write into a returned local keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype row struct{ H handler }\n\nfunc generated() []row {\n\tr := row{H: double}\n\tc := &counter{}\n\tr.H = c.Next\n\treturn []row{r}\n}\n\nvar Registry = generated()\n\nfunc Count() int { return len(Registry) }\n",
@@ -5775,6 +5920,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("address-captured returned local keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The address opens a deref write path the binding walk cannot
 		// see - the capture breaks the binding.
 		files := map[string]string{
@@ -5789,6 +5935,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("reassigned parameter keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The caller judged the entry value; the body swapped in a
 		// bound method value the caller never saw.
 		files := map[string]string{
@@ -5803,6 +5950,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("building constructor derives from its parameter", func(t *testing.T) {
+		t.Parallel()
 		// The validate-loop-and-build shape: range over the variadic
 		// parameter, field reads off the bound row, append
 		// accumulation onto the local, an index write whose operand
@@ -5820,6 +5968,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("explicit generic constructor instantiation resolves", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"lib/lib.go":   "package lib\n\nfunc Must[T any](rows ...T) []T {\n\tout := make([]T, 0, len(rows))\n\tfor _, r := range rows {\n\t\tout = append(out, r)\n\t}\n\treturn out\n}\n",
@@ -5833,6 +5982,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned append of judged elements derives", func(t *testing.T) {
+		t.Parallel()
 		// The append arm in return position: judged elements onto the
 		// caller-judged variadic base, no local in between.
 		files := map[string]string{
@@ -5847,6 +5997,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("pointer-receiver method write on a range binding keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The method call addresses its receiver with no & in the
 		// syntax - the auto-address is the same write path the
 		// explicit capture arm breaks on.
@@ -5862,6 +6013,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("self-capturing field bind breaks the read-only proof", func(t *testing.T) {
+		t.Parallel()
 		// A constructor-installed closure capturing the receiver is the
 		// receiver-stored launder: the holding field reads reach-free
 		// under the carrier rules, yet calling it writes receiver state.
@@ -5883,6 +6035,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		t.Logf("reason: %q", verdict.Reason)
 	})
 	t.Run("read-only method call on a judged binding stays judged", func(t *testing.T) {
+		t.Parallel()
 		// The in-package receiver-read-only proof exempts the
 		// auto-address break - the precision the exemption exists for.
 		files := map[string]string{
@@ -5897,6 +6050,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("channel range keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A channel's elements are sender-supplied - never part of the
 		// judged operand.
 		files := map[string]string{
@@ -5911,6 +6065,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("function range keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// An iterator's elements are yield-supplied - the function
 		// value's own environment-freedom says nothing about them.
 		files := map[string]string{
@@ -5925,6 +6080,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliased map write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The break follows the storage, not the name: a write through
 		// either alias breaks both.
 		files := map[string]string{
@@ -5939,6 +6095,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("append through a fresh base of an unjudged element keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The free-arm append judgment (not the self-append bind arm):
 		// the element must judge wherever the append lands.
 		files := map[string]string{
@@ -5953,6 +6110,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("shared-backing append write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A fresh-base append with spare capacity shares the base's
 		// backing: the write through the new name lands in the
 		// returned one.
@@ -5968,6 +6126,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("nested append chain write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Every level of an append chain may share the innermost
 		// base's backing: the alias link descends to it.
 		files := map[string]string{
@@ -5982,6 +6141,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("sliced-base append write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The base hunt stops at the slice expression; the tracked
 		// name inside it still owns the backing the target shares.
 		files := map[string]string{
@@ -5996,6 +6156,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("sliced nested append chain write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The chain's slice step hides the base from the descend;
 		// the walk of the terminal expression still links it.
 		files := map[string]string{
@@ -6010,6 +6171,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element write of a judged value derives", func(t *testing.T) {
+		t.Parallel()
 		// A store of a caller-judged value into a fresh map is a
 		// store, not a break: the base holds only judged values.
 		files := map[string]string{
@@ -6024,6 +6186,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("field write of a judged value derives", func(t *testing.T) {
+		t.Parallel()
 		// The building-constructor shape: a fresh struct filled field
 		// by field with caller-judged values.
 		files := map[string]string{
@@ -6038,6 +6201,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dereference write of a judged value derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype catalog struct{ current handler }\n\nfunc gen(h handler) map[string]handler {\n\tp := new(catalog)\n\t*p = catalog{current: h}\n\treturn map[string]handler{\"d\": p.current}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6050,6 +6214,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element write of an unjudged value keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{}\n\tm[\"d\"] = h\n\tc := &counter{}\n\tm[\"k\"] = c.Next\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6062,6 +6227,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("field write of an unjudged value keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\ntype catalog struct{ current handler }\n\nfunc gen() map[string]handler {\n\tc := catalog{}\n\tk := &counter{}\n\tc.current = k.Next\n\treturn map[string]handler{\"d\": c.current}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -6074,6 +6240,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliased element write of a judged value stays judged", func(t *testing.T) {
+		t.Parallel()
 		// The store lands through the alias; the component's store
 		// set answers for both names.
 		files := map[string]string{
@@ -6088,6 +6255,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element write into a parameter keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The caller's storage mutates under the caller's judgment;
 		// the write breaks the assumption even when the value judges.
 		files := map[string]string{
@@ -6102,6 +6270,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element write through a parameter alias keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The store reaches the caller's storage through the local
 		// alias; the parameter's component breaks outright.
 		files := map[string]string{
@@ -6116,6 +6285,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("judged element write through a parameter alias keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Even a judged store mutates the caller's storage under the
 		// caller's judgment - the break is unconditional.
 		files := map[string]string{
@@ -6130,6 +6300,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dereference write of an unjudged value keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\ntype catalog struct{ current handler }\n\nfunc gen() map[string]handler {\n\tp := new(catalog)\n\tk := &counter{}\n\t*p = catalog{current: k.Next}\n\treturn map[string]handler{\"d\": p.current}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -6142,6 +6313,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("pointer-carrier field store of a judged value derives", func(t *testing.T) {
+		t.Parallel()
 		// The constructor returns the pointer itself; the audit judges
 		// the package state without the accessor reading through it (a
 		// field read through a pointer-typed package carrier refuses
@@ -6158,6 +6330,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("copy into a constructor local keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A valueless write breaks outright - copy's stored values are
 		// invisible to the binding walk.
 		files := map[string]string{
@@ -6172,6 +6345,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through an element-read binding keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// x aliases s[0]'s pointee; the write through x lands in the
 		// returned slice's element.
 		files := map[string]string{
@@ -6186,6 +6360,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a map-element-read binding keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string][]handler {\n\tm := map[string][]handler{\"a\": {h}}\n\tx := m[\"a\"]\n\tc := &counter{}\n\tx[0] = c.Next\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6198,6 +6373,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a conversion binding keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype table map[string]handler\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"d\": h}\n\tm2 := table(m)\n\tc := &counter{}\n\tm2[\"k\"] = c.Next\n\treturn m\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6210,6 +6386,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a literal-embedded parameter keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The composite literal embeds the parameter's backing; the
 		// store through the literal's field reaches the caller's
 		// storage.
@@ -6225,6 +6402,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through an argument-returning callee result keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc id(s []handler) []handler { return s }\n\nfunc gen(h handler) []handler {\n\tbase := []handler{h}\n\tout := id(base)\n\tc := &counter{}\n\tout[0] = c.Next\n\treturn base\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6237,6 +6415,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("self-append accumulation stays judged", func(t *testing.T) {
+		t.Parallel()
 		// The accumulation-loop core: appends onto the binding itself
 		// flow only the new elements, never the self-reference.
 		files := map[string]string{
@@ -6251,6 +6430,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("judged store through a conversion binding stays judged", func(t *testing.T) {
+		t.Parallel()
 		// The link feeds the store union, not a hard break: the
 		// conversion alias with a judged store keeps both names valid.
 		files := map[string]string{
@@ -6265,6 +6445,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("struct value copy stays independent storage", func(t *testing.T) {
+		t.Parallel()
 		// A struct value bind copies its scalar fields; the copy's
 		// unjudged store must not poison the original.
 		files := map[string]string{
@@ -6279,6 +6460,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("keyed literals of one struct type stay independent", func(t *testing.T) {
+		t.Parallel()
 		// A field name denotes no runtime value: two locals built
 		// from keyed literals of the same struct type must not share
 		// a component through the field object.
@@ -6294,6 +6476,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a stored value's container keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Storing base into m makes m's storage reach base's backing;
 		// the write through m's element lands in base.
 		files := map[string]string{
@@ -6308,6 +6491,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a self-appended element keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The appended element's backing joins the accumulating
 		// binding; a write through the binding's element lands in the
 		// element's original container.
@@ -6323,6 +6507,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("slice-step write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// s[0:1][0] writes s's backing through a slice step.
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -6336,6 +6521,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("address capture of a conversion alias keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The break through the alias propagates across the new link
 		// shapes exactly as across whole-identifier pairs.
 		files := map[string]string{
@@ -6350,6 +6536,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a call-rooted chain keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// id(s)[0] writes s's backing through the call result; the
 		// non-ident root breaks every tracked name it reaches.
 		files := map[string]string{
@@ -6364,6 +6551,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("argument-position call-rooted address capture keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// sink(&id(s)[0]) hands the callee a pointer into s's backing
 		// through the call result; the call-rooted capture breaks every
 		// tracked name the operand reaches, fail-closed.
@@ -6379,6 +6567,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("argument-position literal capture hands out embedded reach", func(t *testing.T) {
+		t.Parallel()
 		// sink(&holder{rows: rows}) lets the callee write p.rows[0] -
 		// the literal is fresh storage, but its embedded tracked names
 		// travel with the pointer; the literal exemption is sound only
@@ -6396,6 +6585,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned literal constructor stays admissible", func(t *testing.T) {
+		t.Parallel()
 		// return &T{field: param} is the constructor idiom the
 		// returned-literal audit owns: the literal addresses fresh
 		// storage and the parameter's reach rides the audit, never a
@@ -6412,6 +6602,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bind-position literal capture links without breaking", func(t *testing.T) {
+		t.Parallel()
 		// p := &holder{rows: rows} rides the bind link: reach is
 		// carried, nothing breaks, and absent writes the registration
 		// composes Valid.
@@ -6427,6 +6618,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bind-then-pass capture defers to the callee's argument insertions", func(t *testing.T) {
+		t.Parallel()
 		// p := &holder{rows: rows}; sink(p) hands the callee a write
 		// path into rows' backing through the bind link; sink's
 		// p.rows[0] = c.Next inserts a method value the audit refuses —
@@ -6446,6 +6638,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("no-address tracked argument defers to the callee's argument insertions", func(t *testing.T) {
+		t.Parallel()
 		// sink2(s) passes the slice header itself - same backing, no &
 		// anywhere; sink2's q[0] = c.Next is the same unaudited
 		// insertion through argument storage.
@@ -6461,6 +6654,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("elided address-of in pointer-element composite literal breaks embedded reach", func(t *testing.T) {
+		t.Parallel()
 		// sink([]*holder{{rows: rows}}) - Go elides the & on the inner
 		// literal (no UnaryExpr), but the slice element is *holder and
 		// the callee writes ps[0].rows[0]; the argument-literal walk
@@ -6477,6 +6671,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("non-inserting callee keeps the tracked argument admissible", func(t *testing.T) {
+		t.Parallel()
 		// probe(rows) reads len(q) only - a callee with no argument
 		// insertions must not poison the store; the admission leg pins
 		// that the new edge is precise, never a blanket break.
@@ -6492,6 +6687,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("plain-named-function insertion through argument storage stays admissible", func(t *testing.T) {
+		t.Parallel()
 		// fill(q) writes q[0] = double - an insertion the audit admits
 		// (a plain named function carries no environment); the edge must
 		// carry the insertion into the population, where it composes.
@@ -6507,6 +6703,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("init-flow carrier argument refuses on the writable escape", func(t *testing.T) {
+		t.Parallel()
 		// var A = ...; var Registry = gen2(A) - gen2 inserts a method
 		// value into A's backing at init. An observer of A refuses
 		// TODAY on the writable-escape arm (A handed to a call is
@@ -6525,6 +6722,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("rebound parameter insertion keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// sink rebinds h before storing it: the stored value is no
 		// longer the caller's judged argument, so the bare-parameter
 		// skip must not fire (H1 of the chunk-83 review).
@@ -6540,6 +6738,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("environment-carrying argument to a deferring call keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// gen passes c.Next as sink's second argument; sink stores it
 		// into the first. The caller's obligation is discharged by
 		// judging EVERY argument of a deferring call at the call site
@@ -6556,6 +6755,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("call-rooted tracked argument keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// sink(id(s)) hands the callee s's backing through a call
 		// result: the per-parameter fact cannot attribute the value's
 		// provenance, so the tracked names break fail-closed - the
@@ -6572,6 +6772,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("reach-free derived arguments stay admissible", func(t *testing.T) {
+		t.Parallel()
 		// append onto a fresh base, an audited clone, and a literal of
 		// copied function values each hand the callee fresh backing
 		// whose elements copy - no write path into rows exists, and
@@ -6589,6 +6790,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("relayed parameter chains through the callee's insertion fact", func(t *testing.T) {
+		t.Parallel()
 		// relay hands its own parameter onward: relay's insertion fact
 		// chains through sink2's, and sink2's poison reaches gen over
 		// two conditional edges.
@@ -6604,6 +6806,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("variadic trailing arguments key the final parameter", func(t *testing.T) {
+		t.Parallel()
 		// vsink's variadic parameter receives rows through the
 		// ellipsis; its insertion poisons, keyed at the final declared
 		// index whatever the call-site arity.
@@ -6619,6 +6822,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("local-rooted deferral edge survives the judgment memo", func(t *testing.T) {
+		t.Parallel()
 		// loc is a LOCAL handed to the inserting callee: the deferral
 		// edge must fold whether or not the local's freedom was
 		// memoized during use resolution (round-2 H1 - the memo
@@ -6635,6 +6839,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("param-sourced local carries the deferral to the return", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc b(q []handler) {\n\tc := &counter{}\n\tq[0] = c.Next\n}\n\nfunc gen(rows []handler) []handler {\n\tloc := rows\n\tb(loc)\n\treturn loc\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
@@ -6647,6 +6852,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("held copy carries the deferral to its origin", func(t *testing.T) {
+		t.Parallel()
 		// x copies the header struct, but x.rows shares rows' backing:
 		// the callee's insertion through the copy lands in the origin
 		// (round-2 H2 - the use maps crossed alias pairs only).
@@ -6662,6 +6868,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("held copy carries the poison to its origin", func(t *testing.T) {
+		t.Parallel()
 		// The same shape through the poison route: an unjudgeable
 		// argument beside the copy poisons the origin's storage too.
 		files := map[string]string{
@@ -6676,6 +6883,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element read of a judged map derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\tm := map[string]handler{\"a\": h}\n\tv := m[\"a\"]\n\treturn map[string]handler{\"d\": v}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6688,6 +6896,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("index read of a judged slice derives in return position", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ts := []handler{h}\n\treturn map[string]handler{\"d\": s[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6700,6 +6909,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("comma-ok map read derives", func(t *testing.T) {
+		t.Parallel()
 		// The registry-constructor group shape: comma-ok read of a
 		// pointer element, zero-miss fill, field write, field read.
 		files := map[string]string{
@@ -6714,6 +6924,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("index read of a judged array derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ta := [1]handler{h}\n\treturn map[string]handler{\"d\": a[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6726,6 +6937,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("index read through a judged array pointer derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\ta := &[1]handler{h}\n\treturn map[string]handler{\"d\": a[0]}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6738,6 +6950,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("poisoned store into a cyclic chain keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The cycle admits only recirculation; the external poison
 		// entering through the store refuses every member.
 		files := map[string]string{
@@ -6752,6 +6965,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element read of an unjudged container keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\tc := &counter{}\n\tm := map[string]handler{\"a\": c.Next}\n\tv := m[\"a\"]\n\treturn map[string]handler{\"d\": v}\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6764,6 +6978,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cloned judged rows derive", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport \"slices\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\treturn slices.Clone([]handler{h})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6776,6 +6991,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cloned judged map derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport \"maps\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) map[string]handler {\n\treturn maps.Clone(map[string]handler{\"d\": h})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6788,6 +7004,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("concatenated judged slices derive", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport \"slices\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\treturn slices.Concat([]handler{h}, []handler{h})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6800,6 +7017,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("explicitly instantiated clone derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport \"slices\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\treturn slices.Clone[[]handler]([]handler{h})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6812,6 +7030,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dot-imported clone derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport . \"slices\"\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\treturn Clone([]handler{h})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6824,6 +7043,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("clone of an unjudged slice keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nimport \"slices\"\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen(h handler) []handler {\n\tc := &counter{}\n\treturn slices.Clone([]handler{c.Next})\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6836,6 +7056,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("unaudited standard callee keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The audited set is closed: a value-plane-pure helper
 		// outside it still refuses.
 		files := map[string]string{
@@ -6850,6 +7071,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a cloned slice keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Clone copies the elements; reach-bearing elements still
 		// alias, and the bind link carries the store back.
 		files := map[string]string{
@@ -6864,6 +7086,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("registry accumulation constructor derives", func(t *testing.T) {
+		t.Parallel()
 		// The field's registry shape end-to-end: range over param
 		// rows, comma-ok group fill, append into a fresh pointee's
 		// field, slot stores into fresh maps, returned aggregate.
@@ -6879,6 +7102,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("registry accumulation of an unjudged element keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype group struct{ fns []handler }\n\nfunc gen(h handler) map[string][]handler {\n\tgroups := map[string]*group{}\n\tg := &group{}\n\tgroups[\"d\"] = g\n\tc := &counter{}\n\tg.fns = append(g.fns, c.Next)\n\tout := map[string][]handler{}\n\tout[\"d\"] = g.fns\n\treturn out\n}\n\nvar Registry = gen(double)\n\nfunc Count() int { return len(Registry) }\n",
@@ -6891,6 +7115,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("held-copy slot store stays local to the holder", func(t *testing.T) {
+		t.Parallel()
 		// A struct copy read out of a parameter takes slot writes
 		// without breaking the caller's assumption.
 		files := map[string]string{
@@ -6905,6 +7130,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dereference crossing below a held copy keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The copy's interior pointer reaches the caller's backing; a
 		// write crossing it is a write into the caller's storage.
 		files := map[string]string{
@@ -6919,6 +7145,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("non-final index write keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// m[k][i] writes through the slot's stored header - the write
 		// lands in foreign backing even on a fresh root.
 		files := map[string]string{
@@ -6933,6 +7160,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("store through a returned pointer keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Callee-returned storage is not provably body-owned; a write
 		// through it may land anywhere - fail-closed break.
 		files := map[string]string{
@@ -6947,6 +7175,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("held copy embedded in a fresh literal keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The literal is body-owned but the embedded copy's interior
 		// headers are not: the index write must route deep.
 		files := map[string]string{
@@ -6961,6 +7190,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("held copy installed by slot store keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype row struct {\n\tkey string\n\ths  []handler\n}\n\ntype box struct{ r row }\n\nfunc gen(rows []row) []row {\n\tb := box{}\n\tb.r = rows[0]\n\tc := &counter{}\n\tb.r.hs[0] = c.Next\n\treturn rows\n}\n\nvar Registry = gen([]row{{key: \"d\", hs: []handler{double}}})\n\nfunc Count() int { return len(Registry) }\n",
@@ -6973,6 +7203,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a closure-returned carrier keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The callee expression's captures carry backing into the
 		// result - the func literal's captured slice links as sharing.
 		files := map[string]string{
@@ -6987,6 +7218,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("write through a value-receiver method result keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\ntype wrap struct{ hs []handler }\n\nfunc (w wrap) get() []handler { return w.hs }\n\nfunc gen(rows []handler) []handler {\n\tw := wrap{hs: rows}\n\ts := w.get()\n\tc := &counter{}\n\ts[0] = c.Next\n\treturn rows\n}\n\nvar Registry = gen([]handler{double})\n\nfunc Count() int { return len(Registry) }\n",
@@ -6999,6 +7231,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("converted method value in return keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc gen() []handler {\n\tc := &counter{}\n\treturn []handler{handler(c.Next)}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7011,6 +7244,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("instantiated function reference derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\nfunc ident[T any](v T) T { return v }\n\nfunc gen() []func(int) int {\n\treturn []func(int) int{ident[int]}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7023,6 +7257,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("element read of a package carrier in return keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nvar pool = []handler{double}\n\nfunc gen() []handler {\n\treturn []handler{pool[0]}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7035,6 +7270,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("declared multi-value bind from a judged call derives", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc validate(in []handler) ([]handler, error) {\n\treturn in, nil\n}\n\nfunc gen() []handler {\n\tvar built, initErr = validate([]handler{double})\n\tif initErr != nil {\n\t\tpanic(initErr)\n\t}\n\treturn built\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7047,6 +7283,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("written range binding keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The derivation dies at the first write through the binding:
 		// the swapped-in method value never rides the proof.
 		files := map[string]string{
@@ -7061,6 +7298,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("append of an unjudged element keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc gen() []handler {\n\tout := []handler{double}\n\tc := &counter{}\n\tout = append(out, c.Next)\n\treturn out\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7073,6 +7311,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("naked-return constructor keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// Named results assigned across the body escape the
 		// return-expression judgment - a naked return refuses the
 		// proof.
@@ -7088,6 +7327,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned closure handing its capture to a retaining function keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// The literal's parameter want resolves against the declaring
 		// package's facts - a callee that retains its parameter never
 		// proves leak-free, so the constructor refuses.
@@ -7103,6 +7343,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor forwarding a function-variable call keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A multi-value forward of a non-plain call must not slip the
 		// judgment through its tuple type - the callee is unknown, so
 		// the proof refuses.
@@ -7118,6 +7359,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("tuple argument from a function-variable call keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		// A multi-value spread argument rides a tuple type the
 		// signature walk never descends - the judgment must fall to
 		// the call arm, whose unknown callee refuses, and never admit
@@ -7135,6 +7377,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("constructor called through a function variable keeps the poison", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype handler func(n int) int\n\nfunc double(n int) int { return 2 * n }\n\nfunc generated() []handler { return []handler{double} }\n\nvar mk = generated\n\nvar Registry = mk()\n\nfunc Count() int { return len(Registry) }\n",
@@ -7147,6 +7390,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bound method value registration refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next() int {\n\tc.n++\n\treturn c.n\n}\n\nvar Hooks []func() int\n\nfunc init() {\n\tc := &counter{}\n\tHooks = []func() int{c.Next}\n}\n\nfunc Run() int {\n\ttotal := 0\n\tfor _, f := range Hooks {\n\t\ttotal += f()\n\t}\n\treturn total\n}\n",
@@ -7159,6 +7403,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method-call-result registration refuses as an opaque source", func(t *testing.T) {
+		t.Parallel()
 		// The values arrive through a method result the audit cannot
 		// see into - only plain named callees earn the
 		// return-environment-free deferral, every other call shape
@@ -7175,6 +7420,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("binding argument to a leak-free sibling discharges", func(t *testing.T) {
+		t.Parallel()
 		// The classifier shape: the loop hands a binding's field to a
 		// plain named in-package function; the binding proof defers to
 		// that parameter's leak-free fact through the carrier's deferred
@@ -7191,6 +7437,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("binding argument to a retaining sibling refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nvar stash [][]string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc keep(cols []string) bool {\n\tstash = append(stash, cols)\n\treturn true\n}\n\nfunc Match() bool {\n\tfor _, e := range Registry {\n\t\tif keep(e.Cols) {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n",
@@ -7203,6 +7450,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("binding argument to a foreign leak-free parameter discharges", func(t *testing.T) {
+		t.Parallel()
 		// The deferred marks resolve cross-package at composition.
 		files := map[string]string{
 			"go.mod":       goMod,
@@ -7217,6 +7465,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("binding argument to a foreign retaining parameter refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\nvar held [][]string\n\nfunc Keep(cols []string) int {\n\theld = append(held, cols)\n\treturn len(held)\n}\n",
@@ -7230,6 +7479,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("parameter proof chains through a same-package sibling", func(t *testing.T) {
+		t.Parallel()
 		// The fact-side fixed point: Sum's parameter proves leak-free
 		// because its rooted argument goes to width, itself proven - so
 		// a carrier passed cross-package into Sum discharges.
@@ -7246,6 +7496,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("mutually recursive parameter chain refuses", func(t *testing.T) {
+		t.Parallel()
 		// Neither parameter proves first - the fixed point is
 		// deliberately conservative, and the carrier keeps its escape.
 		files := map[string]string{
@@ -7261,6 +7512,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package parameter chain resolves past a same-named sibling", func(t *testing.T) {
+		t.Parallel()
 		// Sum's parameter proof depends on lib.Width's - the
 		// conditional edge resolves at composition, and the same-named
 		// local sibling never stands in for the foreign key.
@@ -7278,6 +7530,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("same-named sibling never stands in for a retaining foreign parameter", func(t *testing.T) {
+		t.Parallel()
 		// The foreign target retains; the leak-free local decoy shares
 		// its name - key discrimination must keep the refusal.
 		files := map[string]string{
@@ -7294,6 +7547,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("wrapped goroutine call never defers", func(t *testing.T) {
+		t.Parallel()
 		// The literal wrap is the same concurrent execution as the
 		// direct go statement - both spellings refuse identically.
 		files := map[string]string{
@@ -7308,6 +7562,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("variadic binding arguments clamp to the final parameter", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc joins(sets ...[]string) int {\n\ttotal := 0\n\tfor _, s := range sets {\n\t\ttotal += len(s)\n\t}\n\treturn total\n}\n\nfunc Total() int {\n\ttotal := 0\n\tfor _, e := range Registry {\n\t\ttotal += joins(e.Cols, e.Cols)\n\t}\n\treturn total\n}\n",
@@ -7320,6 +7575,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go-statement binding argument never defers", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tBuild func() int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc width(cols []string) int { return len(cols) }\n\nfunc Total() int {\n\tfor _, e := range Registry {\n\t\tgo width(e.Cols)\n\t}\n\treturn 0\n}\n",
@@ -7332,6 +7588,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method value bound from the binding refuses", func(t *testing.T) {
+		t.Parallel()
 		// Binding a method value captures the receiver inside a func
 		// value the reach classification cannot see - calling it later
 		// writes the shared backing under a would-be-closed verdict.
@@ -7347,6 +7604,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("receiver fact refuses a method-value self-capture", func(t *testing.T) {
+		t.Parallel()
 		// The deferred fact itself must refuse: a method binding its own
 		// receiver's writing method is not read-only however reach-free
 		// the func value looks.
@@ -7362,6 +7620,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned method value refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Scribble() { e.Cols[0] = \"w\" }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc grab() func() {\n\tfor _, e := range Registry {\n\t\treturn e.Scribble\n\t}\n\treturn nil\n}\n\nfunc Run() int {\n\tif f := grab(); f != nil {\n\t\tf()\n\t}\n\treturn len(Registry)\n}\n",
@@ -7374,6 +7633,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method value argument refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Scribble() { e.Cols[0] = \"w\" }\n\nfunc invoke(f func()) { f() }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Touch() int {\n\tfor _, e := range Registry {\n\t\tinvoke(e.Scribble)\n\t}\n\treturn len(Registry)\n}\n",
@@ -7386,6 +7646,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method value returned by a sibling method refuses", func(t *testing.T) {
+		t.Parallel()
 		// Give hands its receiver out inside a func value the caller's
 		// result check cannot see - the receiver fact must refuse Give,
 		// so the binding call's deferral fails.
@@ -7401,6 +7662,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("sibling chain into a method-value return refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Scribble() { e.Cols[0] = \"w\" }\n\nfunc (e entry) Give() func() { return e.Scribble }\n\nfunc (e entry) Do() string {\n\tf := e.Give()\n\tf()\n\treturn e.Label\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Names() string {\n\tout := \"\"\n\tfor _, e := range Registry {\n\t\tout += e.Do()\n\t}\n\treturn out\n}\n",
@@ -7413,6 +7675,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("promoted method through concrete embedding defers", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype base struct{ Label string }\n\nfunc (b base) Spelling() string { return b.Label }\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n\tbase\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, base: base{Label: \"x\"}}}\n}\n\nfunc Spellings() string {\n\tout := \"\"\n\tfor _, e := range Registry {\n\t\tout += e.Spelling()\n\t}\n\treturn out\n}\n",
@@ -7425,6 +7688,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("read-only method call through the binding defers", func(t *testing.T) {
+		t.Parallel()
 		// The admissionSpelling shape: a value-receiver method reading
 		// string fields, proven receiver-read-only by its declaring
 		// package - the binding proof defers through the method-use
@@ -7441,6 +7705,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("composite-literal return through a reach-bearing step defers", func(t *testing.T) {
+		t.Parallel()
 		// The threshold Rule() shape: the returned literal wraps a
 		// string read whose intermediate field type carries a pointer -
 		// the read produces only the leaf copy, so the receiver proof
@@ -7457,6 +7722,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("chain method call converting its receiver defers", func(t *testing.T) {
+		t.Parallel()
 		// The proposition String() shape: a defined-string field's
 		// method converts its whole receiver to a reach-free type - a
 		// value copy that cannot write back.
@@ -7472,6 +7738,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("aliasing conversion of receiver state keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// The conversion admission is result-type-judged: converting a
 		// receiver slice to a named slice type aliases the backing, so
 		// the method never proves and the want refuses fail-closed.
@@ -7487,6 +7754,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method value conversion keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// A bound method value converted to a func type has a
 		// reach-free result type yet carries the captured receiver -
 		// invoking it executes receiver writes. The conversion
@@ -7504,6 +7772,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned method value conversion keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype fn func()\n\ntype entry struct {\n\tCols  []string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Mut() { e.Cols[0] = \"x\" }\n\nfunc (e entry) Handout() fn { return fn(e.Mut) }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}}}\n}\n\nfunc Sneaks() int {\n\tfor _, e := range Registry {\n\t\te.Handout()()\n\t}\n\treturn len(Registry)\n}\n",
@@ -7516,6 +7785,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("chain method value argument keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// A method value on a chain step must refuse at the selector
 		// arm itself: with the reach-free inner step consumed first,
 		// the ident backstop never fires, so a deferred refusal would
@@ -7532,6 +7802,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("package-level alias sink keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// The tracked-binding discipline covers only sinks that die
 		// with the body: a reach-bearing bind to a package variable
 		// outlives the proof, and the sink variable itself may fall
@@ -7549,6 +7820,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("range-assigned package variable sink keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// The assign-form range bind is the same outliving sink as an
 		// assignment: the bound element aliases receiver state past
 		// the body when the target is a reach-bearing package
@@ -7565,6 +7837,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("sibling-fed package sink keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// A leaky sibling call bound to an outliving target must not
 		// be governed into a consume: the alias arrives through the
 		// sibling's results and outlives the body all the same.
@@ -7580,6 +7853,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("dot-imported package sink keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// A dot-imported variable is the same outliving sink under a
 		// bare name; the scope test must follow the object's own
 		// package.
@@ -7596,6 +7870,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("closure handout of a tainted local keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// A return inside a nested literal is an escape position: the
 		// literal outlives the body carrying the captured alias, and
 		// the caller's result judgment sees only a signature.
@@ -7611,6 +7886,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("reach-free store to a package variable stays proven", func(t *testing.T) {
+		t.Parallel()
 		// The outliving-sink refusal is reach-judged: a string copy
 		// stored to a package variable cannot write back into the
 		// receiver, so the proof holds.
@@ -7626,6 +7902,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("reach-bearing chain leaf keeps the refusal", func(t *testing.T) {
+		t.Parallel()
 		// The outermost-node judgment still refuses when the produced
 		// value itself hands out reach: a pointer leaf handed to a
 		// callee is an escape however deep the chain.
@@ -7641,6 +7918,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("writing method call through the binding refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e *entry) Bump() {\n\te.Cols = append(e.Cols, \"y\")\n}\n\nvar Registry []*entry\n\nfunc init() {\n\tRegistry = []*entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Grow() int {\n\tfor _, e := range Registry {\n\t\te.Bump()\n\t}\n\treturn len(Registry)\n}\n",
@@ -7653,6 +7931,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("alias-handing method results refuse the deferral", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Columns() []string { return e.Cols }\n\nvar Registry []entry\n\nvar stash []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Leak() {\n\tfor _, e := range Registry {\n\t\tstash = e.Columns()\n\t}\n}\n",
@@ -7665,6 +7944,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package read-only method resolves at composition", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tAlt   string\n\tBuild func(n int) int\n}\n\nfunc (e Entry) Spelling() string {\n\tif e.Alt != \"\" {\n\t\treturn e.Alt\n\t}\n\treturn e.Label\n}\n",
@@ -7678,6 +7958,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("fact-time parameter proof chains through a local read-only method", func(t *testing.T) {
+		t.Parallel()
 		// Sum's parameter proof needs entry.Spelling read-only - the
 		// same-package receiver fixed point supplies it, so a carrier
 		// passed cross-package into Sum discharges.
@@ -7694,6 +7975,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("parameter chain through a writing method refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e *Entry) Bump() { e.Cols = append(e.Cols, \"y\") }\n\nfunc Sum(entries []*Entry) int {\n\tfor _, e := range entries {\n\t\te.Bump()\n\t}\n\treturn len(entries)\n}\n",
@@ -7707,6 +7989,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package method want stays unproven at fact time", func(t *testing.T) {
+		t.Parallel()
 		// Sum's parameter proof would need a foreign method - a
 		// same-named local read-only method must never satisfy it.
 		files := map[string]string{
@@ -7723,6 +8006,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("go-wrapped method call never defers", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nfunc (e entry) Spelling() string { return e.Label }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Spellings() int {\n\tfor _, e := range Registry {\n\t\tgo func() { _ = e.Spelling() }()\n\t}\n\treturn 0\n}\n",
@@ -7735,6 +8019,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned binding discharges when every caller contains it", func(t *testing.T) {
+		t.Parallel()
 		// The lookup shape: an unexported function ranges the registry
 		// and returns the matching entry; the caller binds it, reads a
 		// no-reach field, and calls the func field - all contained.
@@ -7750,6 +8035,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned binding retained by a caller refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar stash []string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Keep(label string) {\n\tclass, _ := lookup(label)\n\tstash = class.Cols\n}\n",
@@ -7762,6 +8048,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("exported returner refuses the disposition", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []Entry\n\nfunc init() {\n\tRegistry = []Entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc Lookup(label string) (Entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn Entry{}, false\n}\n\nfunc Count() int { return len(Registry) }\n",
@@ -7774,6 +8061,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("value reference of the returner refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Finder() func(string) (entry, bool) {\n\treturn lookup\n}\n",
@@ -7786,6 +8074,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("argument-position returner result refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"val/val.go":   "package val\n\nfunc Note(v any) {}\n",
@@ -7799,6 +8088,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned binding propagates through a contained chain", func(t *testing.T) {
+		t.Parallel()
 		// find re-returns lookup's binding; find's own caller contains -
 		// the disposition chains through the package-local fixed point.
 		files := map[string]string{
@@ -7813,6 +8103,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("propagation through an exported function refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype Entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []Entry\n\nfunc init() {\n\tRegistry = []Entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (Entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn Entry{}, false\n}\n\nfunc Find(label string) (Entry, bool) {\n\tclass, ok := lookup(label)\n\treturn class, ok\n}\n",
@@ -7825,6 +8116,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("package-level literal caller is a use site", func(t *testing.T) {
+		t.Parallel()
 		// The containment scan covers literals stored at package level -
 		// a writing use inside one refuses exactly as a function body's
 		// would.
@@ -7840,6 +8132,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("initializer-position returner binding refuses", func(t *testing.T) {
+		t.Parallel()
 		// A direct initializer-position call binds package variables -
 		// an alias-handing result landing anywhere but a blank refuses.
 		files := map[string]string{
@@ -7854,6 +8147,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("discarded returner result is contained", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Touch(label string) int {\n\tlookup(label)\n\treturn len(Registry)\n}\n",
@@ -7866,6 +8160,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("caller-site literal re-return refuses", func(t *testing.T) {
+		t.Parallel()
 		// The re-return sits inside a nested literal at the caller site:
 		// it chains to the literal's unknowable caller, never to the
 		// enclosing function's disposition - and the retained reach
@@ -7882,6 +8177,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("method re-return refuses the disposition", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\ntype finder struct{ prefix string }\n\nvar Registry []entry\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc (f finder) find(label string) (entry, bool) {\n\treturn lookup(f.prefix + label)\n}\n\nfunc Probe(label string) bool {\n\t_, ok := finder{}.find(label)\n\treturn ok\n}\n",
@@ -7894,6 +8190,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("bad containment propagates back through the chain", func(t *testing.T) {
+		t.Parallel()
 		// find re-returns lookup's binding and find's own caller
 		// retains - the failure walks back through the dependency edge
 		// and lookup's discharge retracts.
@@ -7909,6 +8206,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("literal return inside the loop never joins the disposition", func(t *testing.T) {
+		t.Parallel()
 		// An immediately invoked literal returning the binding exits the
 		// literal, not the function - its handout is an unknown caller's
 		// and the range keeps the strict refusal.
@@ -7924,6 +8222,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned binding argument defers through the caller", func(t *testing.T) {
+		t.Parallel()
 		// The caller hands the returned binding's field to a leak-free
 		// named function - the caller-site judgment carries the want to
 		// the carrier exactly as a range binding's would.
@@ -7939,6 +8238,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("returned binding argument to a retaining callee refuses", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"go.mod":       goMod,
 			"reg/reg.go":   "package reg\n\ntype entry struct {\n\tCols  []string\n\tLabel string\n\tBuild func(n int) int\n}\n\nvar Registry []entry\n\nvar held [][]string\n\nfunc init() {\n\tRegistry = []entry{{Cols: []string{\"a\"}, Label: \"x\"}}\n}\n\nfunc keep(cols []string) int {\n\theld = append(held, cols)\n\treturn len(held)\n}\n\nfunc lookup(label string) (entry, bool) {\n\tfor _, e := range Registry {\n\t\tif e.Label == label {\n\t\t\treturn e, true\n\t\t}\n\t}\n\treturn entry{}, false\n}\n\nfunc Measure(label string) int {\n\tclass, ok := lookup(label)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn keep(class.Cols)\n}\n",
@@ -7951,6 +8251,7 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 		}
 	})
 	t.Run("cross-package func-field caller proves leak-free", func(t *testing.T) {
+		t.Parallel()
 		// The fact side of the same arm: a foreign function ranging its
 		// parameter and invoking a func field of each binding records the
 		// parameter leak-free, so passing a carrier to it discharges.
@@ -8196,6 +8497,7 @@ func TestSharedDynamicStateWritelessReadsDoNotDowngrade(t *testing.T) {
 		"non-spread variadic copies the carrier":      "package view\n\nvar OnBoot = func() {}\n\nvar Rebind func()\n\nfunc register(hooks ...func()) {\n\tRebind = func() { hooks[0]() }\n}\n\nfunc init() { register(OnBoot) }\n\nfunc F() bool { return OnBoot != nil }\n",
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			dir := writeViewModule(t, source)
 			engine, err := New(WithDir(dir))
 			if err != nil {
@@ -8437,6 +8739,7 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			dir := writeViewModule(t, tc.source)
 			engine, err := New(WithDir(dir))
 			if err != nil {
@@ -8629,6 +8932,7 @@ func TestContentProvenPoolNonConformingShapesKeepAttestationRequirement(t *testi
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			dir := writeViewModule(t, tc.source)
 			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
 			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") || !strings.Contains(verdict.Reason, tc.culprit) {
@@ -10231,6 +10535,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 	const quietAppTest = "package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n"
 	subject := Subject{Package: "example.com/view/app", Symbol: "F"}
 	t.Run("unrooted armer discharges under the attestation", func(t *testing.T) {
+		t.Parallel()
 		dir := writeModuleTree(t, wireTree(quietAppTest))
 		engine, err := New(WithDir(dir), WithPackageProcessExecution())
 		if err != nil {
@@ -10256,6 +10561,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("no attestation keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		dir := writeModuleTree(t, wireTree(quietAppTest))
 		verdict := captureCheck(t, dir, subject)
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
@@ -10263,6 +10569,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("test-rooted armer keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		dir := writeModuleTree(t, wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc TestF(t *testing.T) {\n\tdisarm := wire.Arm()\n\tdefer disarm()\n\tif !F() {\n\t\tt.Fail()\n\t}\n}\n"))
 		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
@@ -10270,6 +10577,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("benchmark-rooted armer keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		dir := writeModuleTree(t, wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc BenchmarkF(b *testing.B) {\n\twire.Arm()\n\tfor i := 0; i < b.N; i++ {\n\t\tF()\n\t}\n}\n"))
 		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/wire.reg is mutated") {
@@ -10277,6 +10585,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("ambiguous harness root grants nothing", func(t *testing.T) {
+		t.Parallel()
 		tree := wireTree("package app\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif !F() && F() {\n\t\tt.Fail()\n\t}\n}\n")
 		tree["app/ext_test.go"] = "package app_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/app\"\n)\n\nfunc TestF(t *testing.T) {\n\t_ = app.F()\n}\n"
 		dir := writeModuleTree(t, tree)
@@ -10286,6 +10595,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("harness-library literal armer discharges when its runner is unrooted", func(t *testing.T) {
+		t.Parallel()
 		// The conformance-library shape: a shared test-harness package
 		// arms the oracle inside a subtest literal of a named runner.
 		// A binary that links the library without any root calling the
@@ -10302,6 +10612,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("harness-library runner rooted keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		tree := wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/kit\"\n)\n\nfunc TestF(t *testing.T) {\n\tkit.Conformance()\n\t_ = F()\n}\n")
 		tree["kit/kit.go"] = "package kit\n\nimport \"example.com/view/wire\"\n\nfunc Helper() int { return 1 }\n\nfunc run(f func()) { f() }\n\nfunc Conformance() {\n\trun(func() {\n\t\tdisarm := wire.Arm()\n\t\tdisarm()\n\t})\n}\n"
 		dir := writeModuleTree(t, tree)
@@ -10311,6 +10622,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("fuzz-rooted armer keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		tree := wireTree("package app\n\nimport (\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc FuzzF(f *testing.F) {\n\tdisarm := wire.Arm()\n\tdisarm()\n\t_ = F()\n}\n")
 		dir := writeModuleTree(t, tree)
 		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
@@ -10319,6 +10631,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("testmain-flow armer keeps the downgrade", func(t *testing.T) {
+		t.Parallel()
 		tree := wireTree("package app\n\nimport (\n\t\"os\"\n\t\"testing\"\n\n\t\"example.com/view/wire\"\n)\n\nfunc TestMain(m *testing.M) {\n\twire.Arm()\n\tos.Exit(m.Run())\n}\n\nfunc TestF(t *testing.T) {\n\tif !F() {\n\t\tt.Fail()\n\t}\n}\n")
 		dir := writeModuleTree(t, tree)
 		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
@@ -10327,6 +10640,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("open-world harness-named root leaves the inventory incomplete", func(t *testing.T) {
+		t.Parallel()
 		// The harness filter is name-only, so a PRODUCTION-file
 		// generic with a harness name joins the root set (test files
 		// cannot declare one — the go tool refuses); unbounded and
@@ -10341,6 +10655,7 @@ func TestBinaryScopedReachabilityDischarge(t *testing.T) {
 		}
 	})
 	t.Run("no harness roots discharges vacuously", func(t *testing.T) {
+		t.Parallel()
 		dir := writeModuleTree(t, wireTree(""))
 		verdict := captureCheck(t, dir, subject, WithPackageProcessExecution())
 		if verdict.Status != Valid {
@@ -10742,8 +11057,8 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 	// tree's: the construction pair builds the view when its first or
 	// its second pass alone is cut (taking the cut pass's fail-closed
 	// shape), and a validation whose re-observation alone is cut reports
-	// the analysis's unavailability, never drift. The hook sleeps the
-	// budget away on exactly one pass. A pass after a completed one is
+	// the analysis's unavailability, never drift. The deadline factory
+	// expires exactly one pass. A pass after a completed one is
 	// served by the scan memo before any discharge runs, so the cut pass
 	// is given a fresh cache home at its observation — the cache-loss
 	// shape, the one route to a cut re-observation of an unchanged tree.
@@ -10764,14 +11079,37 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
 			"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
 		})
-		// Keyed on the observation count, not on discharge calls: a
-		// memo-served pass runs no discharge.
+		// Keyed on the observation count, not on boundary calls: a memo
+		// hit runs no discharge, and the proof has its own analysis boundary.
+		injected, discharged := 0, 0
+		pending := false
+		viewTestHooks.analysisBound = func(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+			if budget != straddleBudget {
+				t.Fatalf("analysis budget = %s, want %s", budget, straddleBudget)
+			}
+			if observations == cutPass && injected == 0 {
+				injected++
+				pending = true
+				return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			return context.WithTimeout(ctx, budget)
+		}
 		viewTestHooks.beforeDischarge = func() {
-			if observations == cutPass {
-				time.Sleep(straddleBudget + time.Second)
+			if pending {
+				if observations != cutPass {
+					t.Fatalf("expired pass %d reached discharge in pass %d", cutPass, observations)
+				}
+				discharged++
+				pending = false
 			}
 		}
-		t.Cleanup(func() { viewTestHooks.beforeDischarge = nil })
+		t.Cleanup(func() {
+			viewTestHooks.analysisBound = nil
+			viewTestHooks.beforeDischarge = nil
+			if injected != 1 || discharged != 1 {
+				t.Errorf("target pass %d: injected=%d discharged=%d, want one each", cutPass, injected, discharged)
+			}
+		})
 		var mu sync.Mutex
 		var cuts []string
 		engine, err := New(WithDir(dir), WithSingleSubjectExecution(), WithAnalysisBudget(straddleBudget), WithProgress(func(p Progress) {

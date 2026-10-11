@@ -63,6 +63,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := writeViewModule(t, gen+tc.methods+"\nvar G = &gen{impl: lit(\"x\"), names: []string{\"a\"}, fns: []func() int{nil}, m: map[string]int{}, hooks: map[string]func(){}}\n\n"+tc.subject)
 			verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
 			if tc.valid && verdict.Status != Valid {
@@ -74,6 +75,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		})
 	}
 	t.Run("composite implementer's carrier-writing declaration is chained", func(t *testing.T) {
+		t.Parallel()
 		// An unnamed composite promotes the unexported method from an
 		// in-package declaration: that declaration is a chain target
 		// whatever type promotes it.
@@ -85,6 +87,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		}
 	})
 	t.Run("promoted implementer's clean declaration is chained", func(t *testing.T) {
+		t.Parallel()
 		source := "package view\n\ntype impl interface {\n\tString() string\n\tvalue() int\n}\n\ntype base struct{}\n\nfunc (base) String() string { return \"b\" }\n\nfunc (base) value() int { return 1 }\n\ntype promoted struct{ base }\n\ntype gen struct{ impl impl }\n\nfunc (g *gen) Value() int { return g.impl.value() }\n\nvar G = &gen{impl: promoted{}}\n\nfunc F() int { return G.Value() }\n"
 		dir := writeViewModule(t, source)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
@@ -93,6 +96,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		}
 	})
 	t.Run("a shared, reachable, or copied once hosts no fill", func(t *testing.T) {
+		t.Parallel()
 		for name, source := range map[string]string{
 			"pointer once":               "package view\n\nimport \"sync\"\n\ntype gen struct {\n\tonce *sync.Once\n\tcb   func()\n\tstr  string\n}\n\nfunc (g *gen) Fill() string {\n\tg.once.Do(func() { g.str = \"p\" })\n\treturn g.str\n}\n\nvar G = &gen{once: new(sync.Once)}\n\nfunc F() string { return G.Fill() }\n",
 			"exported once":              "package view\n\nimport \"sync\"\n\ntype gen struct {\n\tOnce sync.Once\n\tcb   func()\n\tstr  string\n}\n\nfunc (g *gen) Fill() string {\n\tg.Once.Do(func() { g.str = \"e\" })\n\treturn g.str\n}\n\nvar G = &gen{}\n\nfunc F() string { return G.Fill() }\n",
@@ -102,6 +106,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 			"embedded once":              "package view\n\nimport \"sync\"\n\ntype gen struct {\n\tsync.Once\n\tcb  func()\n\tstr string\n}\n\nfunc (g *gen) Fill() string {\n\tg.Do(func() { g.str = \"m\" })\n\treturn g.str\n}\n\nvar G = &gen{}\n\nfunc F() string { return G.Fill() }\n",
 		} {
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				dir := writeViewModule(t, source)
 				verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})
 				if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.G") {
@@ -111,6 +116,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		}
 	})
 	t.Run("a test-file declaration installed at init is chained", func(t *testing.T) {
+		t.Parallel()
 		// The proof is enumerated over the variant's own declarations,
 		// and the view's cone takes the test variant alone when one
 		// exists: the plain compilation's proof, blind to the test-file
@@ -127,6 +133,7 @@ func TestOnceFilledMemoKeepsTheProof(t *testing.T) {
 		}
 	})
 	t.Run("unexported method nobody declares keeps the escape", func(t *testing.T) {
+		t.Parallel()
 		source := "package view\n\ntype impl interface{ other() int }\n\ntype gen struct{ impl impl }\n\nfunc (g *gen) Other() int {\n\tif g.impl == nil {\n\t\treturn 0\n\t}\n\treturn g.impl.other()\n}\n\nvar G = &gen{}\n\nfunc F() int { return G.Other() }\n"
 		dir := writeViewModule(t, source)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: "F"})

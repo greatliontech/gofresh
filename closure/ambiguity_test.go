@@ -35,9 +35,12 @@ func TestAmbiguousRootDegradesSubjectLocally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, ambiguous.Symbol); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous subject analysis error = %v, want an error naming the collision", err)
 	}
+	fixtures.supply(t, pkg)
 	sib, err := computeTier2Result(h, pkg, sibling.Symbol)
 	if err != nil {
 		t.Fatalf("sibling subject failed because of the collision: %v", err)
@@ -45,6 +48,7 @@ func TestAmbiguousRootDegradesSubjectLocally(t *testing.T) {
 	if sib.unverifiable || strings.Contains(sib.reason, "ambiguous") {
 		t.Fatalf("sibling subject degraded by the collision: %+v", sib)
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{ambiguous, sibling})
 	if err != nil {
 		t.Fatal(err)

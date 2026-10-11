@@ -34,10 +34,13 @@ func TestLanguageShapeCanaries(t *testing.T) {
 				return
 			}
 			subject := Subject{Package: "example.com/shape", Symbol: "Subject"}
+			fixtures := newFixturePrograms(t, h)
+			fixtures.supply(t, subject.Package)
 			if _, err := computeTier2Result(h, subject.Package, subject.Symbol); err != nil {
 				t.Errorf("canary precise analysis: %v", err)
 				return
 			}
+			fixtures.supply(t, subject.Package)
 			proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
 			if err != nil {
 				t.Errorf("canary observability: %v", err)

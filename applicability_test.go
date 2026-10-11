@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,9 +172,9 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	}
 	env = gotool.SetEnv(env, "OUTCOME_VALUE", "guarded")
 	s := Subject{"example.com/growth", "BenchmarkEnv"}
-	newView := func(extra ...Option) *View {
+	newViewIn := func(t *testing.T, selectedEnv []string, extra ...Option) *View {
 		t.Helper()
-		opts := append([]Option{WithDir(dir), WithEnv(env...)}, extra...)
+		opts := append([]Option{WithDir(dir), WithEnv(selectedEnv...)}, extra...)
 		e, err := New(opts...)
 		if err != nil {
 			t.Fatal(err)
@@ -183,6 +184,10 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			t.Fatal(err)
 		}
 		return v
+	}
+	newView := func(extra ...Option) *View {
+		t.Helper()
+		return newViewIn(t, env, extra...)
 	}
 	producer := newView()
 	if !producer.facts.maximal[s].Unverifiable {
@@ -314,113 +319,178 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	if err != nil {
 		t.Fatal(err)
 	}
-	missing := fp
-	missing.RuntimeInputs, missing.RuntimeDigest = plain.Manifest, plain.Digest
-	if verdict, err := newView().CheckObserved(ctx, missing, s); err != nil || verdict.Status != Unverifiable {
-		t.Fatalf("backfilled support: %+v %v", verdict, err)
-	}
-	pureRecord := missing
-	pureRecord.PurityAssertion = "caller assertion"
-	pureView := newView(WithAssumePure(func(subject Subject) bool { return subject == s }))
-	if updated, _, verdict, err := pureView.CheckObservedInertTestVariantExtension(ctx, pureRecord, ledger, s); err != nil || verdict.Status != Valid || updated.RuntimeInputs != plain.Manifest {
-		t.Fatalf("explicit purity demanded outcome support: %+v %v", verdict, err)
-	}
-	if len(pureView.observable) != 0 {
-		t.Fatal("independently valid purity paid for an observation proof")
-	}
-	if err := pureView.Validate(ctx); err != nil {
-		t.Fatalf("purity applicability validation demanded producing support: %v", err)
-	}
-	for name, damage := range map[string]func(*Fingerprint){
-		"assertion":                func(f *Fingerprint) { f.ObservationAssertion = "" },
-		"proof strategy":           func(f *Fingerprint) { f.ObservationProof.Strategy = "future" },
-		"proof integrity":          func(f *Fingerprint) { f.ObservationProof.Evidence = "broken" },
-		"proof subject":            func(f *Fingerprint) { f.ObservationProof.Subject.Symbol = "TestReadsFile" },
-		"proof disposition":        func(f *Fingerprint) { f.ObservationProof.Observable = false },
-		"manual producing refresh": func(f *Fingerprint) { f.TestVariantClosure = f.EffectiveTestVariantClosure() },
-		"manifest absent":          func(f *Fingerprint) { f.RuntimeInputs, f.RuntimeDigest = "", "" },
-		"support absent":           func(f *Fingerprint) { f.RuntimeInputs, f.RuntimeDigest = plain.Manifest, plain.Digest },
-	} {
-		bad := fp
-		damage(&bad)
-		current := newView()
-		if updated, _, verdict, err := current.CheckObservedInertTestVariantExtension(ctx, bad, ledger, s); err != nil || verdict.Status != Unverifiable || updated != (Fingerprint{}) {
-			t.Fatalf("%s supplied historical evidence: %+v %v", name, verdict, err)
-		}
-	}
-	env = gotool.SetEnv(env, "OUTCOME_VALUE", "moved")
-	if updated, _, verdict, err := newView().CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
-		t.Fatalf("environment drift: %+v %v", verdict, err)
-	}
-	env = gotool.SetEnv(env, "OUTCOME_VALUE", "guarded")
-	// A current analysis cut or unsupported inventory cannot reuse the old proof.
-	for _, proof := range []closure.Observability{{Reason: unavailableReason("test cut")}, {Observable: true}} {
-		v := newView()
-		v.observable[s] = proof
-		if verdict, err := v.CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
-			t.Fatalf("current proof/inventory ignored: %+v %v", verdict, err)
-		}
-	}
-	if verdict, err := newView(WithAnalysisBudget(time.Nanosecond)).CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
-		t.Fatalf("budget-cut current applicability reused historical proof: %+v %v", verdict, err)
-	}
-	deferred := newView(WithDeferredCheckClose())
-	if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
-		t.Fatalf("deferred extension: %+v %v", verdict, err)
-	}
-	if len(deferred.capturedObserved) != 0 || len(deferred.applicabilityChecks) == 0 {
-		t.Fatal("applicability either became producer evidence or lost its validation obligation")
-	}
-	deferred.engine.analysisBudget = time.Nanosecond
-	if err := deferred.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
-		t.Fatalf("validation ignored current proof unavailability: %v", err)
-	}
-	// Sibling producer transactions retain their selected applicability duties.
-	parent := newView(WithDeferredCheckClose())
-	if _, _, verdict, err := parent.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
-		t.Fatalf("parent extension: %+v %v", verdict, err)
-	}
-	sibling, err := parent.Sibling([]Subject{s})
+	// These checks read one completed extension and immutable source. Join all
+	// independent transactions before the subsequent source-drift edits. Engines
+	// whose budgets change remain private; the damage cases share configuration
+	// only, retaining a fresh two-observation View for each case.
+	guardedEnv := append([]string(nil), env...)
+	damageEngine, err := New(WithDir(dir), WithEnv(guardedEnv...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sibling.applicabilityChecks) == 0 {
-		t.Fatal("sibling dropped applicability obligations")
-	}
-	parent.engine.analysisBudget = time.Nanosecond
-	if err := sibling.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
-		t.Fatalf("sibling skipped proof validation: %v", err)
-	}
-	// A concurrent validation seals even when it is cancelled. In-flight
-	// applicability analysis cannot publish either its proof or a replacement.
-	concurrent := newView()
-	entered, release := make(chan struct{}), make(chan struct{})
-	concurrent.beforePreciseAnalysis = func() { close(entered); <-release }
-	done := make(chan error, 1)
-	go func() {
-		updated, ledger, _, err := concurrent.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s)
-		if updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
-			done <- errors.New("published during concurrent validation")
-			return
+	t.Run("stable checking", func(t *testing.T) {
+		t.Run("missing support", func(t *testing.T) {
+			t.Parallel()
+			missing := fp
+			missing.RuntimeInputs, missing.RuntimeDigest = plain.Manifest, plain.Digest
+			if verdict, err := newViewIn(t, guardedEnv).CheckObserved(ctx, missing, s); err != nil || verdict.Status != Unverifiable {
+				t.Fatalf("backfilled support: %+v %v", verdict, err)
+			}
+		})
+		t.Run("independent purity", func(t *testing.T) {
+			t.Parallel()
+			pureRecord := fp
+			pureRecord.RuntimeInputs, pureRecord.RuntimeDigest = plain.Manifest, plain.Digest
+			pureRecord.PurityAssertion = "caller assertion"
+			pureView := newViewIn(t, guardedEnv, WithAssumePure(func(subject Subject) bool { return subject == s }))
+			if updated, _, verdict, err := pureView.CheckObservedInertTestVariantExtension(ctx, pureRecord, ledger, s); err != nil || verdict.Status != Valid || updated.RuntimeInputs != plain.Manifest {
+				t.Fatalf("explicit purity demanded outcome support: %+v %v", verdict, err)
+			}
+			if len(pureView.observable) != 0 {
+				t.Fatal("independently valid purity paid for an observation proof")
+			}
+			if err := pureView.Validate(ctx); err != nil {
+				t.Fatalf("purity applicability validation demanded producing support: %v", err)
+			}
+		})
+		for name, damage := range map[string]func(*Fingerprint){
+			"assertion":                func(f *Fingerprint) { f.ObservationAssertion = "" },
+			"proof strategy":           func(f *Fingerprint) { f.ObservationProof.Strategy = "future" },
+			"proof integrity":          func(f *Fingerprint) { f.ObservationProof.Evidence = "broken" },
+			"proof subject":            func(f *Fingerprint) { f.ObservationProof.Subject.Symbol = "TestReadsFile" },
+			"proof disposition":        func(f *Fingerprint) { f.ObservationProof.Observable = false },
+			"manual producing refresh": func(f *Fingerprint) { f.TestVariantClosure = f.EffectiveTestVariantClosure() },
+			"manifest absent":          func(f *Fingerprint) { f.RuntimeInputs, f.RuntimeDigest = "", "" },
+			"support absent":           func(f *Fingerprint) { f.RuntimeInputs, f.RuntimeDigest = plain.Manifest, plain.Digest },
+		} {
+			t.Run("damaged "+name, func(t *testing.T) {
+				t.Parallel()
+				bad := fp
+				damage(&bad)
+				current, err := damageEngine.NewViewFor(ctx, []Subject{s}, dir, Measurement)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if updated, _, verdict, err := current.CheckObservedInertTestVariantExtension(ctx, bad, ledger, s); err != nil || verdict.Status != Unverifiable || updated != (Fingerprint{}) {
+					t.Fatalf("%s supplied historical evidence: %+v %v", name, verdict, err)
+				}
+			})
 		}
-		done <- err
-	}()
-	<-entered
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	if err := concurrent.Validate(cancelled); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled validation: %v", err)
-	}
-	close(release)
-	if err := <-done; !errors.Is(err, ErrViewSealed) {
-		t.Fatalf("analysis publication crossed seal: %v", err)
-	}
+		t.Run("environment drift", func(t *testing.T) {
+			t.Parallel()
+			movedEnv := gotool.SetEnv(guardedEnv, "OUTCOME_VALUE", "moved")
+			if updated, _, verdict, err := newViewIn(t, movedEnv).CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
+				t.Fatalf("environment drift: %+v %v", verdict, err)
+			}
+		})
+		// A current analysis cut or unsupported inventory cannot reuse the old proof.
+		for name, proof := range map[string]closure.Observability{"cut": {Reason: unavailableReason("test cut")}, "unsupported": {Observable: true}} {
+			t.Run("current "+name, func(t *testing.T) {
+				t.Parallel()
+				v := newViewIn(t, guardedEnv)
+				v.observable[s] = proof
+				if verdict, err := v.CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
+					t.Fatalf("current proof/inventory ignored: %+v %v", verdict, err)
+				}
+			})
+		}
+		t.Run("current budget cut", func(t *testing.T) {
+			t.Parallel()
+			if verdict, err := newViewIn(t, guardedEnv, WithAnalysisBudget(time.Nanosecond)).CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
+				t.Fatalf("budget-cut current applicability reused historical proof: %+v %v", verdict, err)
+			}
+		})
+		t.Run("deferred validation", func(t *testing.T) {
+			t.Parallel()
+			deferred := newViewIn(t, guardedEnv, WithDeferredCheckClose())
+			if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
+				t.Fatalf("deferred extension: %+v %v", verdict, err)
+			}
+			if len(deferred.capturedObserved) != 0 || len(deferred.applicabilityChecks) == 0 {
+				t.Fatal("applicability either became producer evidence or lost its validation obligation")
+			}
+			deferred.engine.analysisBudget = time.Nanosecond
+			if err := deferred.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("validation ignored current proof unavailability: %v", err)
+			}
+		})
+		// Sibling producer transactions retain their selected applicability duties.
+		t.Run("sibling validation", func(t *testing.T) {
+			t.Parallel()
+			parent := newViewIn(t, guardedEnv, WithDeferredCheckClose())
+			if _, _, verdict, err := parent.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
+				t.Fatalf("parent extension: %+v %v", verdict, err)
+			}
+			sibling, err := parent.Sibling([]Subject{s})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sibling.applicabilityChecks) == 0 {
+				t.Fatal("sibling dropped applicability obligations")
+			}
+			parent.engine.analysisBudget = time.Nanosecond
+			if err := sibling.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("sibling skipped proof validation: %v", err)
+			}
+		})
+		// A concurrent validation seals even when it is cancelled. In-flight
+		// applicability analysis cannot publish either its proof or a replacement.
+		t.Run("publication seal", func(t *testing.T) {
+			t.Parallel()
+			concurrent := newViewIn(t, guardedEnv)
+			entered, release := make(chan struct{}), make(chan struct{})
+			concurrent.beforePreciseAnalysis = func() { close(entered); <-release }
+			workerCtx, stopWorker := context.WithCancel(ctx)
+			done := make(chan struct{})
+			var resultErr error
+			releaseAnalysis := sync.OnceFunc(func() { close(release) })
+			defer func() {
+				releaseAnalysis()
+				stopWorker()
+				select {
+				case <-done:
+				case <-time.After(30 * time.Second):
+					t.Error("applicability worker did not finish")
+				}
+			}()
+			go func() {
+				defer close(done)
+				updated, ledger, _, err := concurrent.CheckObservedInertTestVariantExtension(workerCtx, fp, ledger, s)
+				if updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
+					resultErr = errors.New("published during concurrent validation")
+					return
+				}
+				resultErr = err
+			}()
+			select {
+			case <-entered:
+			case <-done:
+				t.Fatalf("applicability ended before the analysis boundary: %v", resultErr)
+			case <-time.After(30 * time.Second):
+				t.Fatal("applicability did not reach the analysis boundary")
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if err := concurrent.Validate(cancelled); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled validation: %v", err)
+			}
+			releaseAnalysis()
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatal("applicability did not finish after release")
+			}
+			if !errors.Is(resultErr, ErrViewSealed) {
+				t.Fatalf("analysis publication crossed seal: %v", resultErr)
+			}
+		})
+	})
 	write("growth_test.go", strings.Replace(source, "_ = os.Getenv(\"OUTCOME_VALUE\")", "_, _ = os.LookupEnv(\"OUTCOME_VALUE\")", 1))
 	if updated, _, verdict, err := newView().CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
 		t.Fatalf("changed subject extended: %+v %v", verdict, err)
 	}
 	write("growth_test.go", source)
-	deferred = newView(WithDeferredCheckClose())
+	deferred := newView(WithDeferredCheckClose())
 	if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
 		t.Fatalf("deferred extension: %+v %v", verdict, err)
 	}

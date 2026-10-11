@@ -110,12 +110,32 @@ func TestCompartmentLedgerIsAFunctionOfTheHashUnderOneListingConfiguration(t *te
 		twin["extra.go"] = "package gen\n\nvar extra = 3\n"
 		twin["loose.txt"] = "unembedded data\n"
 		a, b := writeTestVariantModule(t, union(nonMembers, members)), writeTestVariantModule(t, union(twin, members))
-		ha, hb := computeAt(t, a, subject)[subject].TestVariants, computeAt(t, b, subject)[subject].TestVariants
+		var ha, hb string
+		var la, lb testvariant.TestVariantLedger
+		var filesA []string
+		// Keep the generator and its later member draw serial. The four
+		// independent preparations finish before B's source is edited.
+		t.Run(fmt.Sprintf("draw %d preparations", i), func(t *testing.T) {
+			t.Run("hash A", func(t *testing.T) {
+				t.Parallel()
+				ha = computeAt(t, a, subject)[subject].TestVariants
+			})
+			t.Run("hash B", func(t *testing.T) {
+				t.Parallel()
+				hb = computeAt(t, b, subject)[subject].TestVariants
+			})
+			t.Run("ledger A", func(t *testing.T) {
+				t.Parallel()
+				la, filesA = ledgerUnder(t, a, nil, nil, pkg)
+			})
+			t.Run("ledger B", func(t *testing.T) {
+				t.Parallel()
+				lb, _ = ledgerUnder(t, b, nil, nil, pkg)
+			})
+		})
 		if ha == "" || ha != hb {
 			t.Fatalf("draw %d: hashes %q vs %q over the same members\n%v", i, ha, hb, members)
 		}
-		la, filesA := ledgerUnder(t, a, nil, nil, pkg)
-		lb, _ := ledgerUnder(t, b, nil, nil, pkg)
 		if !reflect.DeepEqual(la.Declarations, lb.Declarations) || !reflect.DeepEqual(la.FileHeaders, lb.FileHeaders) {
 			t.Fatalf("draw %d: equal hashes, differing compartment entries:\n%+v\n%+v", i, la, lb)
 		}

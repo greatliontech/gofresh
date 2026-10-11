@@ -39,9 +39,12 @@ func TestExternal(t *testing.T) {
 	const pkg = "example.com/external"
 	unrootable := Subject{Package: pkg, Symbol: "Ok"}
 	sibling := Subject{Package: pkg, Symbol: "TestExternal"}
+	fixtures := newFixturePrograms(t, h)
+	fixtures.supply(t, pkg)
 	if _, err := computeTier2Result(h, pkg, unrootable.Symbol); err == nil || !strings.Contains(err.Error(), "Ok not found in "+pkg) {
 		t.Fatalf("unrootable subject analysis error = %v, want an error naming the subject", err)
 	}
+	fixtures.supply(t, pkg)
 	_, siblingReach, err := computeTier2ResultAndReach(h, pkg, sibling.Symbol)
 	if err != nil {
 		t.Fatalf("sibling analysis disturbed by the unrootable subject: %v", err)
@@ -49,6 +52,7 @@ func TestExternal(t *testing.T) {
 	if len(siblingReach) == 0 {
 		t.Fatal("sibling analysis reached nothing, want normal analysis undisturbed by the unrootable subject")
 	}
+	fixtures.supply(t, pkg)
 	proofs, err := h.ComputeObservabilityBatch([]Subject{unrootable, sibling})
 	if err != nil {
 		t.Fatalf("missing root failed the whole observability batch: %v", err)

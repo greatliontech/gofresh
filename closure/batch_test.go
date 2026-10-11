@@ -104,6 +104,7 @@ func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	for _, tc := range []struct {
 		symbol string
 		widen  bool
@@ -113,6 +114,7 @@ func TestTier2UsesOnlyResolvedAttributedDispatch(t *testing.T) {
 		{symbol: "Invoker", widen: true},
 	} {
 		t.Run(tc.symbol, func(t *testing.T) {
+			fixtures.supply(t, batchIsolationPackage)
 			result, err := computeTier2Result(h, batchIsolationPackage, tc.symbol)
 			if err != nil {
 				t.Fatal(err)

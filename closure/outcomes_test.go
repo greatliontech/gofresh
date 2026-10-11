@@ -97,55 +97,68 @@ func TestSubject(t *testing.T) { t.Cleanup(func() { _, _ = os.ReadFile("input.tx
 			t.Errorf("%s = %+v; want observable=%t method=%q", tc.name, proof, tc.observable, wantMethod)
 		}
 	}
-	warmHasher, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	warmHasher.SetAnalysisScope(scope)
-	warmHasher.OnProgress(func(phase, pkg string) {
-		if phase == "load" || phase == "prove" {
-			t.Errorf("warm inventory recomputed %s for %s", phase, pkg)
-		}
+	// The cold fill is complete before these independent readers begin. Each
+	// reader owns its hasher; the parent keeps the cache home and source stable.
+	t.Run("after cold", func(t *testing.T) {
+		t.Run("warm", func(t *testing.T) {
+			t.Parallel()
+			warmHasher, err := newAt(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			warmHasher.SetAnalysisScope(scope)
+			warmHasher.OnProgress(func(phase, pkg string) {
+				if phase == "load" || phase == "prove" {
+					t.Errorf("warm inventory recomputed %s for %s", phase, pkg)
+				}
+			})
+			warm, err := warmHasher.ComputeObservabilityBatch(subjects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, subject := range subjects {
+				if warm[subject] != cold[subject] {
+					t.Errorf("warm %s = %+v; cold %+v", subject.Package, warm[subject], cold[subject])
+				}
+			}
+		})
+		// The source model, not the analyzer's host platform, selects the method.
+		t.Run("other platform", func(t *testing.T) {
+			t.Parallel()
+			other, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=plan9", "GOARCH=amd64"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			proofs, err := other.ComputeObservabilityBatch(subjects[:3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			for subject, proof := range proofs {
+				if proof.OutcomeMethod != "" {
+					t.Errorf("unaudited outcome platform granted %s: %+v", subject.Symbol, proof)
+				}
+			}
+		})
+		// Keep the analyzed Linux snapshot and an empty effect set; independently
+		// withdraw the audit verdict so neither the platform guard nor an ordinary
+		// external-effect refusal can hide a missing outcome-audit prerequisite.
+		t.Run("unaudited", func(t *testing.T) {
+			t.Parallel()
+			unaudited, err := newAt(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unaudited.selectionResolved = false
+			pure := Subject{Package: "example.com/outcomes/pure", Symbol: "TestSubject"}
+			unsupported, err := unaudited.ComputeObservabilityBatch([]Subject{pure})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if proof := unsupported[pure]; !proof.Observable || proof.OutcomeMethod != "" {
+				t.Fatalf("empty effects under unaudited Linux selection = %+v; want observable without outcome support", proof)
+			}
+		})
 	})
-	warm, err := warmHasher.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, subject := range subjects {
-		if warm[subject] != cold[subject] {
-			t.Errorf("warm %s = %+v; cold %+v", subject.Package, warm[subject], cold[subject])
-		}
-	}
-	// The source model, not the analyzer's host platform, selects the method.
-	other, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=plan9", "GOARCH=amd64"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofs, err := other.ComputeObservabilityBatch(subjects[:3])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for subject, proof := range proofs {
-		if proof.OutcomeMethod != "" {
-			t.Errorf("unaudited outcome platform granted %s: %+v", subject.Symbol, proof)
-		}
-	}
-	// Keep the analyzed Linux snapshot and an empty effect set; independently
-	// withdraw the audit verdict so neither the platform guard nor an ordinary
-	// external-effect refusal can hide a missing outcome-audit prerequisite.
-	unaudited, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unaudited.selectionResolved = false
-	pure := Subject{Package: "example.com/outcomes/pure", Symbol: "TestSubject"}
-	unsupported, err := unaudited.ComputeObservabilityBatch([]Subject{pure})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if proof := unsupported[pure]; !proof.Observable || proof.OutcomeMethod != "" {
-		t.Fatalf("empty effects under unaudited Linux selection = %+v; want observable without outcome support", proof)
-	}
 }
 
 func FuzzOutcomeInventoryRejectsUnsupportedEffects(f *testing.F) {

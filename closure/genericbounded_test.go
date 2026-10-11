@@ -74,10 +74,16 @@ func TestConstraintBoundedGenericSubjectAnalyzesClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Each body remains a separate fixture and load. Release this body's
+		// representation at the helper return, not at the outer test's end.
+		fixtures := &fixturePrograms{h: h}
+		defer fixtures.release()
+		fixtures.supply(t, subject.Package)
 		refined, err := computeTier2Result(h, subject.Package, subject.Symbol)
 		if err != nil {
 			t.Fatal(err)
 		}
+		fixtures.supply(t, subject.Package)
 		proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
 		if err != nil {
 			t.Fatal(err)

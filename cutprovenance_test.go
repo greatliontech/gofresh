@@ -31,15 +31,36 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	})
 	const budget = 10 * time.Second
 	passes := 0
+	injected, discharged := 0, 0
+	pending := false
 	viewTestHooks.observe = func() { passes++ }
+	viewTestHooks.analysisBound = func(ctx context.Context, requested time.Duration) (context.Context, context.CancelFunc) {
+		if requested != budget {
+			t.Fatalf("analysis budget = %s, want %s", requested, budget)
+		}
+		if passes == 1 && injected == 0 {
+			injected++
+			pending = true
+			return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+		}
+		return context.WithTimeout(ctx, requested)
+	}
 	viewTestHooks.beforeDischarge = func() {
-		if passes == 1 {
-			time.Sleep(budget + time.Second)
+		if pending {
+			if passes != 1 {
+				t.Fatalf("expired construction reached discharge in pass %d", passes)
+			}
+			discharged++
+			pending = false
 		}
 	}
 	t.Cleanup(func() {
 		viewTestHooks.observe = nil
+		viewTestHooks.analysisBound = nil
 		viewTestHooks.beforeDischarge = nil
+		if injected != 1 || discharged != 1 {
+			t.Errorf("construction cut: injected=%d discharged=%d, want one each", injected, discharged)
+		}
 	})
 	engine, err := New(WithDir(dir), WithSingleSubjectExecution(), WithAnalysisBudget(budget))
 	if err != nil {

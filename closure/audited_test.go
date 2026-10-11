@@ -1033,7 +1033,9 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/harnesslog"
+	fixtures.supply(t, pkg)
 	result, err := computeTier2Result(h, pkg, "TestLogOnly")
 	if err != nil {
 		t.Fatal(err)
@@ -1059,6 +1061,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 	// A subject mixing the harness channel with a causal effect must keep
 	// the causal reason in the legacy projection: the harness fact ranks
 	// below every other classification.
+	fixtures.supply(t, pkg)
 	mixed, err := computeTier2Result(h, pkg, "TestReadFileFatal")
 	if err != nil {
 		t.Fatal(err)
@@ -1069,6 +1072,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 	// A weakest-rank sibling (the ambient clock's unaudited-standard read)
 	// must also win: the harness fact is strictly weakest, never a tie it
 	// can take lexicographically.
+	fixtures.supply(t, "github.com/greatliontech/gofresh/closure/fixtures/harnessclock")
 	sibling, err := computeTier2Result(h, "github.com/greatliontech/gofresh/closure/fixtures/harnessclock", "TestLogAmbientClock")
 	if err != nil {
 		t.Fatal(err)
@@ -1695,7 +1699,9 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtures := newFixturePrograms(t, h)
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/benchpacing"
+	fixtures.supply(t, pkg)
 	result, err := computeTier2Result(h, pkg, "BenchmarkLoopOnly")
 	if err != nil {
 		t.Fatal(err)
@@ -1715,6 +1721,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	if !found {
 		t.Fatalf("effects = %+v, want the recorded testing.Loop harness fact", result.effects)
 	}
+	fixtures.supply(t, pkg)
 	mixed, err := computeTier2Result(h, pkg, "BenchmarkLoopReadsFile")
 	if err != nil {
 		t.Fatal(err)
@@ -1725,6 +1732,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	// The pacing field is B's alone: a BenchmarkResult's N records no
 	// harness fact — the walk sees a plain struct field — while the
 	// Loop beside it is still recorded.
+	fixtures.supply(t, pkg)
 	other, err := computeTier2Result(h, pkg, "BenchmarkResultField")
 	if err != nil {
 		t.Fatal(err)
@@ -1739,6 +1747,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	}
 	// The harness's remaining reporting surface records nothing at all:
 	// the fallback exemption every testing symbol has, its body walked.
+	fixtures.supply(t, pkg)
 	reporting, err := computeTier2Result(h, pkg, "BenchmarkReporting")
 	if err != nil {
 		t.Fatal(err)
