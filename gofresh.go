@@ -1228,10 +1228,10 @@ func (e *Engine) guardInputs() []string {
 // decide is the pure verdict function (REQ-fresh-verdict, REQ-fresh-sound): stale on
 // the first failing guard; unverifiable when the guards hold but the closure or
 // runtime inputs reach an unhashable dependence and no purity override applies;
-// valid otherwise. A missing recorded value is a mismatch, never valid
-// (REQ-guard-completeness) — except an absent runtime-input manifest, which is the
-// caller's assertion that the run observed no runtime inputs
-// (REQ-inputs-absent-asserted). commit/dirty are never consulted
+// valid otherwise. A missing required guard is a mismatch, never valid
+// (REQ-guard-completeness). An absent runtime-input manifest supplies no
+// observation or assertion; any validity rests on independent applicable
+// evidence or purity (REQ-inputs-absent-asserted). commit/dirty are never consulted
 // (REQ-fresh-commit-independent).
 func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
 	if verdict, failed := recordedEvidenceVerdict(rec, cl); failed {

@@ -120,7 +120,7 @@ this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve isolation, request identity and operation-owned cancellation. |
+| audit-boundary-residue | A; 4.1, 4.1a, 4.3, 4.5, 4.5a, 4.6, 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -441,8 +441,10 @@ separate automatic final evidence selection, absent observation from assertion,
 runtime relevance, content dependencies, compatibility and contributor rosters.
 The remaining gaps are implementation obligations under those contracts, not
 permission to restore the superseded assumptions by renaming a method. In
-particular, the current proof/memo strategy coupling and supplied-observation
-merge do not yet implement the complete dependency and unit-roster boundaries.
+particular, native selected-content and admission-policy dependencies now have
+their own evidence and memo identities, while consumer certificate adoption and
+the separately tracked memo-version refinements remain. Supplied-observation
+merge still does not establish the complete contributor roster or unit ownership.
 
 Keep producing evidence and a licensed applicability endpoint distinct. Static
 certificates have source/configuration/classifier dependencies without a fake

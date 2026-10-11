@@ -105,6 +105,11 @@
     - [ ] 4.1a Pin immutable configuration after a cancelled sampler take,
       invocation-wide destination injectivity, ordinary effort admission and
       requested sub-benchmark workload through serving and stream admission.
+    - [ ] 4.1b Admit the actual producing build description against the analysis
+      description, including resolved architecture/compiler/Go-environment inputs,
+      and make expensive construction caller-context-owned. Preserve legitimate
+      runtime-environment differences without lending analysis code facts to a
+      different produced artifact.
   - [ ] 4.2 Prepare evidence before execution wherever producing obligations
     require it. One final check selects admissible evidence under the declared
     model automatically; trust permissions and optional analysis cost remain
@@ -120,6 +125,10 @@
     support; normal failure, abnormal completion, cancellation after success,
     finalization expiry, late contributions, sibling closing, drift, revoked
     policy, publication failure, restart and historical non-upgrade.
+    - [ ] 4.5b Pin actual execution/finalization/publication phase transitions,
+      closing-context expiry after lock acquisition, the last cancellable write
+      point and committed-state retention after it. Carry the executor's terminal
+      fact and the complete contributor roster into the owned closing boundary.
     - [ ] 4.5a Make every evidence-composition operation the first arm actually
       uses cancellable under its unit; 5.5 completes the remaining paths.
   - [ ] 4.6 Remove the arm's repeated coordinate/environment/support assembly
