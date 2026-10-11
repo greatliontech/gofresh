@@ -37,33 +37,19 @@ concurrency:
 # next-stable leg (next.yaml) first, and the listing lands before the
 # pin moves.
 #
-# full-timeout: the suite budget measured 2026-08-27 on the 24-core dev
-# host under upstream stock go1.27.0 (fork-vs-stock measured at n=1
-# per arm: noise-class at that length): slowest package closure 544s,
-# whole run 555s; headroom ~3.3x. Core count is a measured non-factor
-# (24 -> 4 cores cost ~4% on the child-process-serialized workload); a
-# cold cache lands on the job ceiling, not this flag. An overrun is a
-# real finding — re-measure before raising the number.
+# full-timeout bounds each plain test binary; the job budget also covers
+# setup, platform vet and the fast tier. An overrun needs attribution
+# before a budget increase, not an assumption about the runner's cores.
 #
-# race-timeout mirrors the policy's own race invocation
-# (.stipulator/policy.textproto: a 60m per-binary cap, measured
-# 2026-08-28 at 36m for the whole closure unit width-capped at 2 on the
-# 24-core host; the race detector measures ~4x on the observability
-# proofs — CPU-bound and in-process, so core count IS a factor here).
-# race-p 2 keeps two race binaries' heaps inside the runner's memory.
-# The tier is sharded (race-shards): one race job per entry, its `-run`
-# regex applied to every package, and the regexes partition the
-# module's tests by name — raceshards_test.go pins every Test, Example
-# and Fuzz function in exactly one shard, so none runs twice or leaves
-# the tier. The classes balance the closure package's measured plain
-# durations (2026-10-06, alone on the dev host, 778s over 259 tests:
-# R 235s, of which one proof 223s; A–I less C 199s; C with J–N 175s;
-# the rest with the fuzz seeds 167s), so the slowest shard is that one
-# proof's ~4x under the detector plus its share of the other packages
-# and a restored race build. Unsharded, the job measured 54m26s
-# (2026-10-03) and 61m32s (2026-10-06) on the 4-vCPU runner; the first
-# sharded run is the shards' measurement. Every shard runs under the
-# whole race-timeout and race-job-minutes.
+# Each race shard has its own complete binary/job budget. race-p 2 limits
+# concurrently resident race binaries on one runner. The same four jobs
+# partition top-level names: R-T groups the shared-setup observability
+# table with S/T work rather than leaving the remainder job overloaded.
+# Root and closure package workloads both matter to that balance.
+# raceshards_test.go pins every Test, Example and Fuzz function in exactly
+# one shard; moving a name class changes placement, never test population
+# or subtest selection. The class weights need remeasurement when the
+# fixture workloads change; no constant race-to-plain multiplier is assumed.
 
 jobs:
   gate:
@@ -80,6 +66,6 @@ jobs:
       race-p: 2
       race-timeout: 100m
       race-job-minutes: 150
-      race-shards: '[{"name":"r","run":"^TestR"},{"name":"abd-i","run":"^Test[ABD-I]"},{"name":"cj-n","run":"^Test[CJ-N]"},{"name":"o-z","run":"^Test[O-QS-Z0-9_]|^Example|^Fuzz"}]'
+      race-shards: '[{"name":"r-t","run":"^Test[R-T]"},{"name":"abd-i","run":"^Test[ABD-I]"},{"name":"cj-n","run":"^Test[CJ-N]"},{"name":"o-q-u-z","run":"^Test[O-QU-Z0-9_]|^Example|^Fuzz"}]'
       records: true
       stipulator-version: v0.66.1
