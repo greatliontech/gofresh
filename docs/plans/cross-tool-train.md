@@ -182,7 +182,7 @@ here where they differ; historical evidence and unfinished work stay tracked.
       and landing boundary and counts once toward the standing twelve-chunk
       re-audit rule; an intervening re-audit takes precedence over the
       displayed sequence.
-- [ ] 340. gofresh: make content-audit admission a complete input to
+- [x] 340. gofresh: make content-audit admission a complete input to
       cached and recorded evidence. Pin the same-version changed-GOROOT
       case across fresh and memo-served analysis and historical observed
       checks; couple dependent scopes and compatibility to the admitted
@@ -190,7 +190,7 @@ here where they differ; historical evidence and unfinished work stay tracked.
       refusal. Settle the contract and invalidation rules first,
       then review and release before consumer adoption; this owns the
       correctness opening of 203, not its unrelated memo cleanup.
-- [ ] 341. gofresh: preserve budget-cut provenance through sibling
+- [x] 341. gofresh: preserve budget-cut provenance through sibling
       projection and validation. Pin cut-first/complete-second parent
       construction followed by sibling validation over the unchanged
       tree, and retain real-drift precedence. Release the correction.
@@ -1492,7 +1492,7 @@ in their repos.
       edit to the memo scope; a NARROWING of a fold-consulted table
       without an effect-scan bump serves a warm memo's admissions the
       narrower set no longer grants — a wrong pass
-      (docs/issues/audited-set-versions-decoupled.md folds here); (b)
+      (recovery: git log --all -- docs/issues/audited-set-versions-decoupled.md); (b)
       the per-file memos' three parallel triples
       (closure/filememo.go:88–98; per-file-memos-one-shape); (c) the
       memo classes' Served names as literals with no set, and the

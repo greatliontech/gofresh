@@ -1,15 +1,18 @@
-# The fixture tier runs serially; `t.Parallel()` is the unmeasured lever
+# Verification-harness cost needs current attribution
 
-The full tier (`task test`) is child-process-bound: 24→4 cores cost
-~4% (measured 2026-08-27, `.github/workflows/ci.yaml`), so per-test
-parallelism — absent everywhere in the suite — is the lever that
-would cut its wall (closure 544s, whole run 555s) without touching
-coverage. A mechanical pass is unsafe: `t.Setenv` appears in 12 test
-files (85 sites) and forbids `t.Parallel()`; `SetMemoRoot` is a package
-global; `ExplainDynamicState` holds a process-global mutex. Landing it
-means a per-test audit of shared state, then measuring the wall under
-the CI core count.
+The August 2026 fixture measurement (24 to four cores cost about 4%;
+closure 544s, whole run 555s) does not identify today's critical path.
+Measure the current plain and race workloads, distinguishing recurring warm
+verification from cold compiler-cache population. Attribute compiler/linker
+spawns, repeated fixtures and analysis setup, cache isolation, and the longest
+individual tests before selecting a mechanism.
 
-Lands: cross-tool train chunk 206 (audit 285, 2026-09-29: the trigger reads as met
-at the recorded closes — closure 798–812s beside root 390–398s — or is ambiguous;
-206 states the per-package reading or fires it).
+Parallelism alone is not a diagnosis: `t.Setenv`, package-level memo controls,
+analysis hooks, and the explanation mutex constrain safe sharing. Audit the
+actual shared state before changing fixture ownership or scheduling. Preserve
+every deciding assertion, test population, race obligation and isolation
+boundary. Compare equal completed workloads, retaining targeted development
+checks and the full settled-tree gate after independent review convergence.
+
+Lands: docs/plans/tooling-redesign.md 3.5 for current measurement and harness
+repair; 7.7 and 9.3 retain broader performance and final assurance obligations.

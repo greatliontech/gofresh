@@ -27,7 +27,7 @@ coverage, and locality alone cannot exclude compile-time mutant influence.
 
 ## Retained charters
 
-The inventory contains 80 open charters: 22 Gofresh, 28 Gomutant, 17
+The inventory contains 78 open charters: 20 Gofresh, 28 Gomutant, 17
 Stipulator, nine Pew and four shared/unprefixed entries. Each is mapped once
 here; its issue rows below preserve independently deciding cases. A split or
 fold at implementation carries every constituent obligation forward.
@@ -51,8 +51,6 @@ fold at implementation carries every constituent obligation forward.
 | gofresh | 260 | R | 7.8 | Iterator yield binding and closed standard invokes gain precision without dropping reachable effects. |
 | gofresh | 295 | A | 2.2, 2.4, 7.3 | Process-identity assertions have exact scope, ownership and revocation; liveness is not automatically irrelevant. |
 | gofresh | 314 | A/X | 7.7 | Measure actual cold and retained sets; do not rebuild existing completed-package SSA release. |
-| gofresh | 340 | R | 3.1, 3.2 | Same-version changed GOROOT bytes cannot reuse dependent warm facts or recorded proof. |
-| gofresh | 341 | R | 3.3 | A sibling preserves cut provenance; actual source/runtime drift still outranks cut-only unavailability. |
 | gofresh | 347 | A | 6.1, 6.2 | Reconcile locality checkpoint with live identities, sibling/mixed validation and influence limits. |
 | gofresh | 348 | A | 8.1 | Historical support validation observes no current inputs and preserves original producing identity. |
 | gofresh | 361 | R | 2.5, 5.5 | All evidence composition honors its unit's cancellation and closing interval. |
@@ -117,7 +115,7 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 50 source issues, excluding
+Each slug names a file beside this one. There are 49 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
@@ -127,7 +125,6 @@ this reconciliation document itself.
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
 | attribution-splits-one-quoted-string-helper | R; 5.6, 9.2 | Framing/quotes/malformed tails and legacy fixed points preserve their distinct grammar. |
-| audited-set-versions-decoupled | A; 2.3, 3.2 | Admission narrowing changes warm proof decisions under unchanged source. |
 | binary-roots-single-mask-union | A; 7.7, 7.8 | Binary union equals existing roots including startup/TestMain; subject projections remain separate. |
 | children-budget-bounded-by-available | A; 2.4, 2.6, 7.4 | Soft family target cannot authorize unavailable physical room or needlessly halve small-host capacity. |
 | classb-arms-one-table | A; 7.1, 7.8 | Fold and SSA agree on effect/entropy/body-cut meaning for every classified row. |
@@ -143,7 +140,7 @@ this reconciliation document itself.
 | entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable | A; 2.2, 7.8 | TLS reach alone proves neither entropy irrelevance nor supported network outcomes. |
 | explain-no-chain-for-a-dependency-culprit | R; 7.1, 8.3 | Named dependency culprit yields its chain or explicit scope limit, not false absence. |
 | first-offender-refusals | R; 2.5, 4.1, 7.1 | All decidable missing subjects/invalid records named deterministically before costly work. |
-| fixture-tier-parallelism | A; 7.7, 9.3 | Current timings plus shared-env/memo/fixture isolation, not historical core-count assumptions. |
+| fixture-tier-parallelism | A; 3.5, 7.7, 9.3 | Current cost attribution and equal completed workloads plus shared-env/memo/fixture isolation, not historical core-count assumptions. |
 | flag-surface-one-table | R; 7.1, 7.8 | Registration remains storage-judged; unknown Parse/default-set reads stay refused. |
 | fleet-sweep-tugboat-vouch-list-retires | C; 2.4, 7.3 | File supplies the same six effective identities before flag mirror removal. |
 | fold-import-name-declared | A; 7.8 | Legal same-basename imports with different declared names; classified renamed package cannot evade scan. |

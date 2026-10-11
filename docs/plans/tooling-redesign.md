@@ -73,10 +73,18 @@
     - [x] 3.2a Cover source-spelling dependencies of position-bearing memo
       payloads without changing public canonical source equivalence; compare
       cold, warm and discarded-cache answers after layout-only source edits.
-  - [ ] 3.3 Preserve budget-cut provenance through immutable subset selection
+  - [x] 3.3 Preserve budget-cut provenance through immutable subset selection
     and sibling validation, including real-drift precedence.
-  - [ ] 3.4 Release the shared correctness boundary with regression and
+  - [x] 3.4 Release the shared correctness boundary with regression and
     mutation evidence; retain old results as history without promoting support.
+  - [ ] 3.5 Measure and remove Gofresh verification-harness waste before the
+    consumer vertical. Attribute the current plain/race critical paths and
+    distinguish cold builds from recurring warm cost. Preserve test population,
+    deciding assertions, race obligations and fixture isolation; verify sharing
+    before changing setup ownership. Compare the same completed workload before
+    and after, use targeted checks during edits, and run the full settled-tree
+    gate after independent review converges. Do not assume more parallelism or
+    sharding is the answer.
 - [ ] 4. Prove the replacement architecture through one complete Pew arm.
   - [ ] 4.1 Derive only the shared operations that this vertical needs:
     immutable operation/session configuration, coherent analysis snapshot,
