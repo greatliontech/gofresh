@@ -656,7 +656,8 @@ agreement refusals name identically — the construction race is the one
 refusal with no reproduction path afterward. A view also derives sibling
 views over subsets of its subjects: a sibling's recorded facts are
 exclusively the parent's one observation — closures, guards, purity,
-source identities, digests, ledgers, and captured observation proofs —
+source identities, digests, ledgers, analysis-cut provenance, and captured
+observation proofs —
 so derivation itself observes nothing, and a caller whose parent
 captured proofs batch-wide runs one producer transaction per measured
 subset for one observation; the sibling owns its transaction

@@ -1181,7 +1181,7 @@ func sortedUniqueUnion(groups [][]string) []string {
 
 // Sibling derives a view over a subset of this view's subjects that
 // shares this view's single observation: every fact the sibling serves —
-// closures, guards, purity, source identities, digests, ledgers, and
+// closures, guards, purity, source identities, digests, ledgers, analysis cuts, and
 // captured observation proofs — is the parent's, so no generation can
 // mix (REQ-fresh-coherent-view), and the guards remain the family's one
 // capture (REQ-guard-view-lifetime). What the sibling owns is its
@@ -1228,6 +1228,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	vouchDischarges := make(map[Subject]string, len(unique))
 	attestationDischarges := make(map[Subject]string, len(unique))
 	packageProcessDischarges := make(map[Subject]string, len(unique))
+	cut := make(map[Subject]bool, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]testvariant.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
@@ -1251,6 +1252,9 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		}
 		if attested, ok := v.facts.packageProcessDischarges[subject]; ok {
 			packageProcessDischarges[subject] = attested
+		}
+		if v.facts.cut[subject] {
+			cut[subject] = true
 		}
 		if v.capturedObserved[subject] {
 			capturedObserved[subject] = true
@@ -1284,6 +1288,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 			vouchDischarges:          vouchDischarges,
 			attestationDischarges:    attestationDischarges,
 			packageProcessDischarges: packageProcessDischarges,
+			cut:                      cut,
 			sourceFiles:              sourceFiles,
 			sourceFilesBySubject:     sourceFilesBySubject,
 			fileDigests:              v.facts.fileDigests,
