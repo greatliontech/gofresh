@@ -49,7 +49,7 @@
     through validation and publication or judgment consumption.
   - [x] 2.6 Converge the canonical contracts and enforcement obligations;
     retain the existing conditional result model and accepted sampling limits.
-- [ ] 3. Gofresh: establish complete evidence dependencies for the first
+- [x] 3. Gofresh: establish complete evidence dependencies for the first
   consumer vertical, retaining existing sound analysis algorithms.
   - [x] 3.0 Gomutant safety prerequisite: cut off oracle-drift composition
     lacking an independence license, preserve history without granting exact
@@ -77,7 +77,7 @@
     and sibling validation, including real-drift precedence.
   - [x] 3.4 Release the shared correctness boundary with regression and
     mutation evidence; retain old results as history without promoting support.
-  - [ ] 3.5 Measure and remove Gofresh verification-harness waste before the
+  - [x] 3.5 Measure and remove Gofresh verification-harness waste before the
     consumer vertical. Attribute the current plain/race critical paths and
     distinguish cold builds from recurring warm cost. Preserve test population,
     deciding assertions, race obligations and fixture isolation; verify sharing
@@ -88,13 +88,13 @@
     - [x] 3.5a Share only loaded setup across adjacent immutable observability
       fixtures, preserve independent singleton judgments and failure sensitivity,
       and rebalance the existing race jobs from measured workload weights.
-    - [ ] 3.5b Attribute the remaining plain critical path and dominant fixture
+    - [x] 3.5b Attribute the remaining plain critical path and dominant fixture
       matrices to subprocesses, repeated setup, analysis, and intentional waits;
       distinguish necessary independent checks from redundant preparation.
-    - [ ] 3.5c Remove each demonstrated safe harness redundancy, retaining cold
+    - [x] 3.5c Remove each demonstrated safe harness redundancy, retaining cold
       and warm controls, mutation sensitivity and cancellation/failure behavior.
       Converge independent review of every change set before full acceptance.
-    - [ ] 3.5d Repeat comparable local and CI measurements, reconcile complete
+    - [x] 3.5d Repeat comparable local and CI measurements, reconcile complete
       test inventories, and account for the remaining measured bottlenecks.
       Close only when those bottlenecks have no further justified harness
       optimization; one speedup alone does not close this work.

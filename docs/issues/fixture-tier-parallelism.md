@@ -2,8 +2,10 @@
 
 `t.Setenv`, package-level memo controls, analysis hooks, and the explanation
 mutex constrain safe sharing between concurrently executing fixture tests.
-An audit of those owners is required before introducing per-test parallelism;
-sharing one fixture's loaded representation inside a sequential table does
+Any expansion beyond the explicitly owned parallel cohorts needs an audit of
+those owners. A serial parent's grouped children do not overlap another root
+test; moving the parent itself to parallel execution changes that boundary.
+Sharing one fixture's loaded representation inside a sequential table does
 not establish that unrelated tests can run together safely.
 
 At the broader performance pass, use the then-current per-test and per-phase
