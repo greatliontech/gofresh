@@ -1,39 +1,32 @@
 package gofresh
 
 import (
-	"github.com/greatliontech/gofresh/closure"
+	"slices"
 	"testing"
 
 	"github.com/greatliontech/gofresh/guard"
 )
 
-// The pass's analysis scope wires the real strategy constants to the
-// axes their memos read, and its proof, fact, and scan renderings are
-// byte for byte the identities persisted entries were written under —
-// a swapped constant would key the observability memo by the fact
-// strategy and stop a proof-strategy bump from retiring stale proofs
+// The engine supplies the strategy, guard and assertion axes; the constructed
+// hasher supplies the source and admission dependencies before a memo is armed.
+// A swapped constant must not key proofs by the fact derivation
 // (REQ-closure-observability-memo, REQ-closure-dynamic-state-memo,
 // REQ-closure-scan-memo).
 func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	guards := guard.Guards{Toolchain: "tc", BuildConfig: "bc"}
 	plain := (&Engine{}).analysisScope(guards)
-	if got, want := plain.Proofs(), ObservationRTA+"|tc|bc|"+closure.AnalyzingFrontend(); got != want {
-		t.Errorf("Proofs = %q, want %q", got, want)
+	if plain.ProofStrategy != ObservationRTA || plain.FactStrategy != DynamicStateStrategy || plain.Toolchain != "tc" || plain.BuildConfig != "bc" {
+		t.Fatalf("wrong caller-owned scope axes: %+v", plain)
 	}
-	if got, want := plain.Facts(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend(); got != want {
-		t.Errorf("Facts = %q, want %q", got, want)
-	}
-	if got, want := plain.Scan(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend()+"|vouches:"; got != want {
-		t.Errorf("Scan = %q, want %q", got, want)
+	if plain.Proofs() != "" || plain.Facts() != "" || plain.Scan() != "" || plain.TestingScan() != "" {
+		t.Fatal("reported guards without source dependencies armed a memo")
 	}
 	attested := (&Engine{singleSubjectExecution: true, packageProcessExecution: true, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
-	if got, want := attested.Facts(), DynamicStateStrategy+"|tc|bc|"+closure.AnalyzingFrontend()+"|single-subject-execution|package-process-execution"; got != want {
-		t.Errorf("attested Facts = %q, want %q", got, want)
+	slices.Sort(attested.Vouches)
+	if !attested.SingleSubject || !attested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
+		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v", plain, attested)
 	}
-	if got, want := attested.Scan(), attested.Facts()+"|vouches:a.example/x:Y,example.com/dep:Hooks"; got != want {
-		t.Errorf("attested Scan = %q, want %q", got, want)
-	}
-	if attested.Proofs() != plain.Proofs() {
-		t.Error("an attestation or vouch moved the proof scope")
+	if attested.ProofStrategy != plain.ProofStrategy || attested.FactStrategy != plain.FactStrategy || attested.Toolchain != plain.Toolchain || attested.BuildConfig != plain.BuildConfig {
+		t.Fatal("assertions moved an unrelated scope axis")
 	}
 }

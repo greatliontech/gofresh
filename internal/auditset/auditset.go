@@ -11,11 +11,32 @@
 package auditset
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"go/types"
 	"slices"
 	"sort"
 	"strings"
 )
+
+// Identity binds the immutable admission inventories. Algorithm changes still
+// carry the consuming derivation's version; changing table data keys itself.
+func Identity() string {
+	methods := func(table map[string][]string) map[string][]string {
+		result := make(map[string][]string, len(table))
+		for receiver, names := range table {
+			ordered := slices.Clone(names)
+			slices.Sort(ordered)
+			result[receiver] = slices.Compact(ordered)
+		}
+		return result
+	}
+	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods),
+		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), reflectImmutableTypes})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 // VersionListing is a source audit's record: each key (a toolchain
 // release, a module variable, a harness package) names the versions

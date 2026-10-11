@@ -103,3 +103,42 @@ func TestPackageFileWalkEndsAtTheNextEntry(t *testing.T) {
 		t.Fatalf("the live walk answered %v with %d files, want the three", err, len(live))
 	}
 }
+
+func TestFinalDigestReadCannotCompleteACancelledConstruction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("counts the selected standard-library reads")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	env := environmentWith()
+	reads := 0
+	prior := digestReadForTest
+	t.Cleanup(func() { digestReadForTest = prior })
+	digestReadForTest = func(string) { reads++ }
+	if _, err := newAtEnv(t.Context(), ".", env); err != nil {
+		t.Fatal(err)
+	}
+	last := reads
+	if last == 0 {
+		t.Fatal("no selected file was read")
+	}
+	for _, notice := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(t.Context())
+		reads = 0
+		digestReadForTest = func(string) {
+			reads++
+			if reads == last {
+				cancel()
+			}
+		}
+		var err error
+		if notice {
+			_, err = ToolchainSelectionNoticeResolved(ctx, gotool.NewEnvReader(gotool.Runner{}, ".", env), nil)
+		} else {
+			_, err = newAtEnv(ctx, ".", env)
+		}
+		cancel()
+		if reads != last || !errors.Is(err, context.Canceled) {
+			t.Fatalf("notice=%t final-read cancellation: reads=%d/%d error=%v", notice, reads, last, err)
+		}
+	}
+}

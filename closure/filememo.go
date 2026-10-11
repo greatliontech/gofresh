@@ -105,7 +105,7 @@ func newFileMemos() *fileMemos {
 // persistent store (stored true), or from a byte-identical sibling
 // derived earlier in this pass and still pending its merge.
 func (h *Hasher) fileScan(dir, digest string) (scan maximalEffectScan, ok, stored bool) {
-	if h.fileMemo == nil {
+	if h.fileMemo == nil || h.effectScanScope() == "" {
 		return maximalEffectScan{}, false, false
 	}
 	entries, loaded := h.fileMemo.scans[dir]
@@ -128,7 +128,7 @@ func (h *Hasher) fileScan(dir, digest string) (scan maximalEffectScan, ok, store
 // recordFileScan queues one freshly derived scan for the directory's
 // merge.
 func (h *Hasher) recordFileScan(dir, digest string, scan maximalEffectScan) {
-	if h.fileMemo == nil {
+	if h.fileMemo == nil || h.effectScanScope() == "" {
 		return
 	}
 	if h.fileMemo.pendingScans[dir] == nil {

@@ -117,12 +117,12 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 49 source issues, excluding
+Each slug names a file beside this one. There are 50 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 3.1b, 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve listing completeness, isolation, request identity and operation-owned cancellation. |
+| audit-boundary-residue | A; 4.1a, 4.5a, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7 | Component cases in that document preserve isolation, request identity and operation-owned cancellation. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -158,7 +158,8 @@ this reconciliation document itself.
 | iterator-calls-and-std-invokes-open-the-closure | A; 7.8, 9.4 | Reproduce both reported SplitSeq and hash.Sum shapes against live SSA/RTA before claiming resolution. |
 | json-record-readers-one-home | A; 5.6, 9.2 | Strict key/trailing checks retain distinct manifest-byte and indented-fingerprint canonicality rules. |
 | loader-spawns-outside-the-runner | A; 2.4, 4.1, 7.1 | Actual loader children carry immutable policy and cancellation accounting; no assumed hook/driver escape. |
-| memo-scope-axes | A; 3.2, 7.1, 7.8 | Discard/recompute invariance, phase-local reads and cone/whole composition state each enforced. |
+| memo-scope-axes | A; 7.8 | Memo/read-path folds preserve discard/recompute invariance; cone/whole composition state remains distinct. |
+| toolchain-dependency-consumer-adoption | R; 4.3, 5.1, 5.2, 5.4 | Native content/policy fields survive consumer formats; static certificates re-derive and execution evidence remeasures where required, without upgrading historical support. |
 | net-url-parse-godebug-channel | R; 2.3, 3.2 | ParseQuery under urlmaxqueryparams and sibling Setenv; retain refusal until relevance is sound. |
 | per-file-memos-one-shape | R; 7.8 | Cold/warm/corrupt/concurrent memo cases agree and preserve completed entries. |
 | prints-default-one-home | R; 5.6, 8.3 | Remaining Pew predicate agrees with actual pflag rendering, including string "0" versus integer zero. |

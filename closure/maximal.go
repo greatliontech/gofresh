@@ -69,9 +69,11 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, m
 		}
 		for _, subject := range byPackage[pkgPath] {
 			results[subject] = Closure{
-				Hash:         maximalSubjectHash(hash, subject),
-				TestVariants: h.testVariants[pkgPath].Hash,
-				Unverifiable: unverifiable,
+				Hash:             maximalSubjectHash(hash, subject),
+				ToolchainContent: h.ToolchainContent(),
+				AdmissionPolicy:  h.AdmissionPolicy(),
+				TestVariants:     h.testVariants[pkgPath].Hash,
+				Unverifiable:     unverifiable,
 				// The closure tier's refusal attributes the selection it
 				// was judged under at its own composition; the effect
 				// fold beneath stays selection-keyed and unattributed

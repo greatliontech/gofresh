@@ -1753,21 +1753,39 @@ platforms the fleet analyzes for from another host. The listing is memoized
 per
 selection scope — the record's version, the explicit flags, the pass
 snapshot's identity and the surface seeds' digest, so a rule whose seeds
-moved misses every record written before it — and a record serves only
-while every listed directory — a package's and every subdirectory an
-embedded file lives in — still carries exactly the
-entries it was listed over, each with its recorded size, modification time
+moved misses every record written before it — and the memo retains the shared
+standard-library inventory (`std` and its dependencies) from which the audited
+subset derives. Missing required audited roots never grant admission, and the
+actual subject graph's standard nodes are reconciled against that inventory
+before its content identity can justify a capture or memo.
+A scope-bound integrity commitment rejects incomplete cache payloads; it does
+not authenticate a coherently replaced private payload and commitment. A record
+serves only while every listed directory, the source-discovery tree under
+GOROOT/src under the go command's standard-package search rules, explicitly
+selected package directories outside that search and every selected embed
+pattern's discovery tree, and snapshot-mode FIPS selection
+inputs under GOROOT/lib/fips140 — its aliases, archives and verification inputs,
+empty directories and embed-member discovery included — carry
+exactly the
+entries it was listed over, each with its recorded kind, size, modification time
 and change time (a platform whose stat carries no change time never serves
 the memo): a tree moved under a scope re-lists, and the digests themselves
-are read from the files on every construction, never served; the digest
+are read from the files on every construction, never served. File digests use
+unsigned big-endian 64-bit lengths framing each name and its contents; raw NUL
+bytes cannot encode a different inventory. The digest
 traversal checks its context before every file read, so a construction
 cancelled during it ends at the next file boundary — the file the
 cancellation lands on is the last one read; a read in progress is never
 interrupted — answering the cancellation, and the package-file walk the
 member hashing and the analyzer share runs the package's cancellation
-check at every entry the same way; the stamp walks — the one that judges
-a memo record and the one that writes it — are unchecked, each bounded
-by one walk of the listed directories. The recording
+check at every entry the same way. Source-discovery traversal checks the
+operation context at every entry. Individual directory-stamp reads and the
+comparison of stored stamps are not interrupted, bounded by the recorded
+directory inventory. A discovery inventory containing symlinks, or a discovery
+directory reached through a symlink, is not memoized: every construction
+re-lists it, so changing a followed file's build constraint or an embedded
+directory's membership cannot reuse an unstamped selection. This changes cost,
+not content admission or applicability. The recording
 skew identity (REQ-fresh-toolchain-skew) stays by version: a measurement's
 cache key, not an admission. The verdict's rendering is additionally served
 to consumers as one owned notice — the refusing axis named (the moved keys
@@ -2147,10 +2165,12 @@ pass's environment snapshot (toolchain, module cache, build
 configuration, flags in the environment), the working directory, and the
 build flags — and, recorded beside the stored listing, every file-system
 input the listing consulted: for every mutable-local package directory
-in the graph its entry names and the bytes of every source-kind regular
+in the graph its entry names and kinds, the effective kind or absence of each
+symlink's target, and the bytes of every source-kind regular
 file (build constraints and import lines live there; an excluded file's
 edit can include it; a non-regular or dangling entry contributes its
-name alone, as the toolchain reads no byte of it), the entry names of every directory under its embed
+classification without source bytes, so retyping it cannot serve an old
+listing), the entry classifications of every directory under its embed
 patterns' roots (membership the listing resolves), the module files
 of every module the module graph reads — go.mod and go.sum of each
 module contributing a package (a vendored node rides the vendor tree),

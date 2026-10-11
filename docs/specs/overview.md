@@ -208,6 +208,29 @@ purity, result kind, and guard values, their record form the fingerprint's
 (REQ-fresh-fingerprint-record). Empty assertion and proof evidence means the lift was not selected; partial,
 unknown, or internally inconsistent evidence confers no proof.
 
+**REQ-fresh-toolchain-dependencies** (behavior): A fingerprint MUST retain
+the selected standard-library content identity separately from the reported
+toolchain version and the admission-policy identity. The content inventory
+covers a shared standard-library inventory, including packages outside the
+audited admission surface. Every standard node of the subject's actual graph
+agrees with that inventory's source selection or analysis refuses; wildcard
+discovery alone does not establish coverage of explicitly imported packages.
+The inventory deliberately includes unused packages as an over-approximation.
+A known content difference is stale
+even under an explicit purity assertion. Missing historical or current content
+evidence cannot yield validity; concrete source or runtime drift still reports
+stale before an unavailable-dependency answer. Admission-policy movement
+requires re-derivation of dependent memoized facts and prevents lifting a
+closure refusal with an incompatible recorded proof, but does not revoke an
+independent applicable purity assertion. A proof's integrity evidence and its
+prepared outcome-subject identity bind both dependencies. Neither filling a
+missing field nor copying a current dependency beside an old proof or outcome
+establishes producing evidence. Every construction supplies its own dependencies
+to its memos, and producer and checking closure comparisons retain them through
+sibling selection, applicability extension and closing validation. The proof
+compatibility strategy is `gofresh/observation-rta@44`; older proofs remain
+readable without acquiring these dependencies or the new compatibility claim.
+
 **REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
 as a producing obligation before execution wherever the declared model needs
 it, from the same pre-execution snapshot as the closure. The unit retains that
@@ -465,7 +488,8 @@ receiving the same verdict, so an unrelated commit never invalidates a result
 whose inputs are unchanged.
 
 **REQ-fresh-fingerprint-data** (structural): A fingerprint MUST be exposed as its
-constituent guard values, maximal closure hash, test-variant compartment hash, the
+constituent guard values, selected toolchain content and admission-policy
+identities, maximal closure hash, test-variant compartment hash, the
 closure identity's derivation (REQ-closure-identity-strategy in
 [closure.md](closure.md)), the shared-dynamic-state facts' derivation, and
 optional attributable observation-completeness assertion and observability proof
@@ -477,7 +501,8 @@ it (REQ-fresh-caller-pins), never a second encoding of the fingerprint's own.
 **REQ-fresh-fingerprint-record** (wire): The fingerprint's record form MUST be
 one JSON object, encoded and decoded by the fingerprint itself: the keys
 `maximalClosure`, `testVariantClosure`, `toolchain`, `buildConfig`, and numeric
-`resultKind` always present, in that relative order; `machine` and
+`resultKind` always present, in that relative order; `toolchainContent`,
+`admissionPolicy`, `machine` and
 `runtimeConfig` (the measurement guards), `observationAssertion`,
 `observationProof`, `purityAssertion`, `dynamicStateVouches`,
 `singleSubjectDischarges`, `packageProcessDischarges`, `dynamicStateStrategy`,
@@ -496,7 +521,10 @@ consumer derives a record's name from the value's encoding. The form owns its
 escaping: the bytes are the same under any parent encoder's escaping setting. A
 strategy key absent from a record decodes to the empty strategy, which the check
 judges stale (REQ-closure-dynamic-state-memo, REQ-closure-identity-strategy) —
-absence is never filled in. A decoder refuses — naming a well-formed record's
+absence is never filled in. The content and policy keys are strings, omitted
+when absent so historical records preserve their original encoding; absence
+grants no dependency evidence (REQ-fresh-toolchain-dependencies).
+A decoder refuses — naming a well-formed record's
 fault in the record's own vocabulary, never an internal type; malformed JSON is
 the encoding library's refusal — a key the form does not define, a duplicated
 key, an explicit null, trailing data after the object (where the entry point has

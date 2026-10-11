@@ -32,10 +32,10 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	if canonicalScope() != canonicalStrategy+" "+frontend || variantParseScope() != variantParseStrategy+" "+frontend {
 		t.Fatalf("syntax memo scopes %q, %q do not compose the frontend %q", canonicalScope(), variantParseScope(), frontend)
 	}
-	if got := (&Hasher{selectionResolved: true}).effectScanScope(); !strings.HasPrefix(got, effectScanStrategy+" "+frontend) {
+	if got := (&Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}}).effectScanScope(); !strings.HasPrefix(got, effectScanStrategy+" "+frontend) {
 		t.Fatalf("effect scan scope %q does not compose the frontend", got)
 	}
-	scope := AnalysisScope{Toolchain: "go1.x", BuildConfig: "cfg", ProofStrategy: "proofs@1", FactStrategy: "facts@1"}
+	scope := AnalysisScope{Toolchain: "go1.x", BuildConfig: "cfg", ProofStrategy: "proofs@1", FactStrategy: "facts@1", toolchainContent: "content", admissionPolicy: "policy"}
 	for name, value := range map[string]string{"Proofs": scope.Proofs(), "TestingScan": scope.TestingScan(), "Facts": scope.Facts(), "Scan": scope.Scan()} {
 		if !strings.Contains(value, "|"+frontend) {
 			t.Errorf("type-level memo scope %s = %q does not compose the frontend", name, value)

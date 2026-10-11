@@ -62,15 +62,15 @@
       effective compiler cache; use disk-backed scratch for measurements.
       Converge independent review and mutation sensitivity before one full
       optimized verification run over the settled safety cutoff.
-  - [ ] 3.1 Reproduce changed selected GOROOT content under an unchanged
+  - [x] 3.1 Reproduce changed selected GOROOT content under an unchanged
     reported version across fresh/memoized analysis and recorded proof reuse.
-    - [ ] 3.1b Include same-name directory-to-source retyping in listing memo
+    - [x] 3.1b Include same-name directory-to-source retyping in listing memo
       admission and incomplete cached toolchain-surface inventories; compare
       warm/cold/discarded-cache results and valid-hit controls.
-  - [ ] 3.2 Couple content, admission policy and derivation identities to all
+  - [x] 3.2 Couple content, admission policy and derivation identities to all
     dependent evidence; separate logical lookup, producing identity, memo
     identity, wire version and proof/outcome compatibility.
-    - [ ] 3.2a Cover source-spelling dependencies of position-bearing memo
+    - [x] 3.2a Cover source-spelling dependencies of position-bearing memo
       payloads without changing public canonical source equivalence; compare
       cold, warm and discarded-cache answers after layout-only source edits.
   - [ ] 3.3 Preserve budget-cut provenance through immutable subset selection

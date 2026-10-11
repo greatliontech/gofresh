@@ -81,7 +81,7 @@ func TestSubject(t *testing.T) { t.Cleanup(func() { _, _ = os.ReadFile("input.tx
 	if !h.SelectionAudited() {
 		t.Fatalf("test requires audited toolchain: %s", h.SelectionNotice())
 	}
-	scope := AnalysisScope{ProofStrategy: "outcome-inventory-test@1", Toolchain: "test-selection"}
+	scope := AnalysisScope{ProofStrategy: "outcome-inventory-test@1", Toolchain: "test-selection", BuildConfig: "build"}
 	h.SetAnalysisScope(scope)
 	cold, err := h.ComputeObservabilityBatch(subjects)
 	if err != nil {

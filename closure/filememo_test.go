@@ -321,7 +321,7 @@ func TestFileScanGatesModuleCacheFilesAndPendingSiblings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := &Hasher{selectionResolved: true, modCache: cacheRoot, maximalFiles: map[string]maximalEffectScan{}, fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
+	h := &Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}, modCache: cacheRoot, maximalFiles: map[string]maximalEffectScan{}, fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
 	var parsed []string
 	analysisTestHooks.fileParse = func(path string) { parsed = append(parsed, filepath.Base(path)) }
 	defer func() { analysisTestHooks.fileParse = nil }()

@@ -272,35 +272,36 @@ func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 		importCandidates: []externalEffect{{kind: externalEffectNetwork, packagePath: "net", reason: "reaches net (network I/O)"}},
 	}
 	key := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go"}, nil)
-	storeEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key, scan)
-	if got, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key); !ok || !reflect.DeepEqual(got, scan) {
+	scope := (&Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}}).effectScanScope()
+	storeEffectScan(effectScanDirName, scope, key, scan)
+	if got, ok := loadEffectScan(effectScanDirName, scope, key); !ok || !reflect.DeepEqual(got, scan) {
 		t.Fatalf("round trip = %+v ok=%v", got, ok)
 	}
-	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope()+"-bumped", key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, scope+"-bumped", key); ok {
 		t.Fatal("a bumped scan strategy served a prior generation's scan")
 	}
 	if _, ok := loadEffectScan(effectScanDirName, effectScanStrategy, key); ok {
 		t.Fatal("the bare strategy without the analyzing frontend served")
 	}
-	if _, ok := loadEffectScan(testingScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key); ok {
+	if _, ok := loadEffectScan(testingScanDirName, scope, key); ok {
 		t.Fatal("the sibling testing-scan directory served the effect-scan entry")
 	}
 	otherFiles := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go", "extra.go"}, nil)
-	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), otherFiles); ok {
+	if _, ok := loadEffectScan(effectScanDirName, scope, otherFiles); ok {
 		t.Fatal("a changed file set served the prior set's scan")
 	}
 	migrated := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", nil, []string{"eff.go"})
-	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), migrated); ok {
+	if _, ok := loadEffectScan(effectScanDirName, scope, migrated); ok {
 		t.Fatal("a file migrating between the Go and cgo lists served the prior partition's scan")
 	}
-	path, err := cachefile.Path(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key)
+	path, err := cachefile.Path(effectScanDirName, scope, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadEffectScan(effectScanDirName, (&Hasher{selectionResolved: true}).effectScanScope(), key); ok {
+	if _, ok := loadEffectScan(effectScanDirName, scope, key); ok {
 		t.Fatal("a corrupt entry served")
 	}
 }

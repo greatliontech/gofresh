@@ -12,11 +12,13 @@ import (
 	"github.com/greatliontech/gofresh/guard"
 )
 
-// fullFingerprint is a code-result fingerprint with every pre-applicability
-// optional key present, pinning the existing record's unchanged bytes.
+// fullFingerprint is a code-result fingerprint with every scalar optional
+// key present. Historical omission is checked separately from fresh encoding.
 func fullFingerprint() Fingerprint {
 	return Fingerprint{
 		MaximalClosure:       "0123456789abcdef0123456789abcdef",
+		ToolchainContent:     "stdlib-content",
+		AdmissionPolicy:      "audit-policy",
 		TestVariantClosure:   "fedcba9876543210fedcba9876543210",
 		ObservationAssertion: "caller assertion",
 		ObservationProof: ObservationProof{
@@ -40,15 +42,15 @@ func fullFingerprint() Fingerprint {
 }
 
 // TestFingerprintRecordIsTheFleetForm pins the record form byte for
-// byte in both directions: the seventeen keys in their order, the
+// byte in both directions: the keys in their order, the
 // guards flattened, the proof nested with its package and symbol, every
-// optional key omitted when empty — the bytes stipulator's witness
-// store already holds inside its indented envelope, so its records
-// decode, and their values re-encode to the same compact bytes
+// optional key omitted when empty. Historical dependency omission remains
+// readable, including inside indented consumer envelopes, and re-encodes
+// without filling missing evidence
 // (REQ-fresh-fingerprint-record).
 func TestFingerprintRecordIsTheFleetForm(t *testing.T) {
 	full := fullFingerprint()
-	want := `{"maximalClosure":"0123456789abcdef0123456789abcdef","testVariantClosure":"fedcba9876543210fedcba9876543210","toolchain":"go1.27.0 linux/amd64","buildConfig":"b1","observationAssertion":"caller assertion","observationProof":{"strategy":"` + ObservationRTA + `","package":"example.com/m/p","symbol":"TestX","observable":false,"reason":"reaches os.Getenv","evidence":"00112233445566778899aabbccddeeff"},"purityAssertion":"source directive","dynamicStateVouches":"example.com/m/p.state","singleSubjectDischarges":"example.com/m/p.single","packageProcessDischarges":"example.com/m/p.proc","dynamicStateStrategy":"` + DynamicStateStrategy + `","closureStrategy":"` + ClosureStrategy + `","runtimeInputs":"manifest","runtimeDigest":"ffeeddccbbaa99887766554433221100","resultKind":1}`
+	want := `{"maximalClosure":"0123456789abcdef0123456789abcdef","testVariantClosure":"fedcba9876543210fedcba9876543210","toolchain":"go1.27.0 linux/amd64","buildConfig":"b1","toolchainContent":"stdlib-content","admissionPolicy":"audit-policy","observationAssertion":"caller assertion","observationProof":{"strategy":"` + ObservationRTA + `","package":"example.com/m/p","symbol":"TestX","observable":false,"reason":"reaches os.Getenv","evidence":"00112233445566778899aabbccddeeff"},"purityAssertion":"source directive","dynamicStateVouches":"example.com/m/p.state","singleSubjectDischarges":"example.com/m/p.single","packageProcessDischarges":"example.com/m/p.proc","dynamicStateStrategy":"` + DynamicStateStrategy + `","closureStrategy":"` + ClosureStrategy + `","runtimeInputs":"manifest","runtimeDigest":"ffeeddccbbaa99887766554433221100","resultKind":1}`
 	got, err := json.Marshal(full)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +64,15 @@ func TestFingerprintRecordIsTheFleetForm(t *testing.T) {
 	}
 	if back != full {
 		t.Fatalf("decoded %+v\nwant    %+v", back, full)
+	}
+	legacyBytes := strings.Replace(want, `"toolchainContent":"stdlib-content","admissionPolicy":"audit-policy",`, "", 1)
+	legacyBytes = strings.Replace(legacyBytes, ObservationRTA, "gofresh/observation-rta@43", 1)
+	var legacy Fingerprint
+	if err := json.Unmarshal([]byte(legacyBytes), &legacy); err != nil || legacy.ToolchainContent != "" || legacy.AdmissionPolicy != "" || legacy.ObservationProof.Strategy != "gofresh/observation-rta@43" {
+		t.Fatalf("historical dependencies were invented: %+v %v", legacy, err)
+	}
+	if data, err := json.Marshal(legacy); err != nil || string(data) != legacyBytes {
+		t.Fatalf("historical bytes changed: %s %v", data, err)
 	}
 	// The minimal code-result record: the two hashes, the two code
 	// guards, the kind — nothing else.
@@ -131,6 +142,8 @@ func genFingerprint(r *rand.Rand) Fingerprint {
 	pick := func(vals ...string) string { return vals[r.Intn(len(vals))] }
 	f := Fingerprint{
 		MaximalClosure:           pick("m1", "m2"),
+		ToolchainContent:         pick("", "content-a", "content-b"),
+		AdmissionPolicy:          pick("", "policy-a", "policy-b"),
 		TestVariantClosure:       pick("", "v1", "v2"),
 		ObservationAssertion:     pick("", "caller assertion"),
 		PurityAssertion:          pick("", "caller assertion", "source directive"),
@@ -172,6 +185,8 @@ func genFingerprint(r *rand.Rand) Fingerprint {
 func TestFingerprintRecordRoundTrips(t *testing.T) {
 	r := rand.New(rand.NewSource(274))
 	optional := map[string]func(Fingerprint) string{
+		"toolchainContent":              func(f Fingerprint) string { return f.ToolchainContent },
+		"admissionPolicy":               func(f Fingerprint) string { return f.AdmissionPolicy },
 		"inertTestVariantApplicability": func(f Fingerprint) string { return f.InertTestVariantApplicability.Strategy },
 		"machine":                       func(f Fingerprint) string { return f.Guards.Machine }, "runtimeConfig": func(f Fingerprint) string { return f.Guards.RuntimeConfig },
 		"observationAssertion": func(f Fingerprint) string { return f.ObservationAssertion }, "purityAssertion": func(f Fingerprint) string { return f.PurityAssertion },

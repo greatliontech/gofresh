@@ -22,13 +22,14 @@ func TestDecide(t *testing.T) {
 	base := func() (Fingerprint, closure.Closure, guard.Guards, runtimeinput.State) {
 		return Fingerprint{
 				MaximalClosure:       "C",
+				ToolchainContent:     "stdlib",
 				TestVariantClosure:   "T",
 				Guards:               guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
 				DynamicStateStrategy: DynamicStateStrategy,
 				RuntimeInputs:        "MANIFEST",
 				RuntimeDigest:        "D",
 			},
-			closure.Closure{Hash: "C", TestVariants: "T"},
+			closure.Closure{Hash: "C", TestVariants: "T", ToolchainContent: "stdlib"},
 			guard.Guards{Toolchain: "tc", BuildConfig: "bc", Machine: "m", RuntimeConfig: "rc"},
 			runtimeinput.State{Digest: "D", OK: true}
 	}
@@ -42,6 +43,27 @@ func TestDecide(t *testing.T) {
 		wantReas string
 	}{
 		{"all clean", nil, Measurement, false, Valid, ""},
+		{"policy movement preserves independent purity", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			f.AdmissionPolicy = "old"
+			c.AdmissionPolicy = "new"
+			c.Unverifiable = true
+		}, CodeResult, true, Valid, ""},
+		{"toolchain content drift", func(_ *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.ToolchainContent = "other"
+		}, CodeResult, false, Stale, "toolchain content"},
+		{"toolchain content drift under purity", func(_ *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.ToolchainContent = "other"
+		}, CodeResult, true, Stale, "toolchain content"},
+		{"historical content absent", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			f.ToolchainContent = ""
+		}, CodeResult, true, Unverifiable, "toolchain content evidence unavailable"},
+		{"current content unavailable", func(_ *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
+			c.ToolchainContent = ""
+		}, CodeResult, false, Unverifiable, "toolchain content evidence unavailable"},
+		{"runtime drift before missing content", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) {
+			f.ToolchainContent = ""
+			r.Digest = "moved"
+		}, CodeResult, true, Stale, "runtimeinputs"},
 		{"closure mismatch", func(f *Fingerprint, c *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) { c.Hash = "C2" }, Measurement, false, Stale, "closure"},
 		{"closure missing", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			f.MaximalClosure = ""
@@ -120,15 +142,19 @@ func TestDecide(t *testing.T) {
 // and non-empty so the property exercises the unverifiability branch, not a guard
 // mismatch.
 func FuzzDecideSound(f *testing.F) {
-	f.Add("C", "C", "T", "T", true, false, "", false)
-	f.Add("C", "C", "T", "T2", false, false, "M", true)
-	f.Add("C", "C", "", "T", false, false, "M", false)
-	f.Fuzz(func(t *testing.T, recCl, curCl, recTv, curTv string, clUnver, pure bool, manifest string, rtUnver bool) {
+	f.Add("C", "C", "T", "T", "stdlib", "stdlib", true, false, "", false)
+	f.Add("C", "C", "T", "T2", "stdlib", "stdlib", false, false, "M", true)
+	f.Add("C", "C", "", "T", "stdlib", "changed", false, false, "M", false)
+	f.Add("C", "C", "T", "T", "", "stdlib", false, true, "M", false)
+	f.Fuzz(func(t *testing.T, recCl, curCl, recTv, curTv, recStd, curStd string, clUnver, pure bool, manifest string, rtUnver bool) {
 		g := guard.Guards{Toolchain: "t", BuildConfig: "b"}
-		rec := Fingerprint{MaximalClosure: recCl, TestVariantClosure: recTv, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
-		cl := closure.Closure{Hash: curCl, TestVariants: curTv, Unverifiable: clUnver}
+		rec := Fingerprint{MaximalClosure: recCl, TestVariantClosure: recTv, ToolchainContent: recStd, DynamicStateStrategy: DynamicStateStrategy, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
+		cl := closure.Closure{Hash: curCl, TestVariants: curTv, ToolchainContent: curStd, Unverifiable: clUnver}
 		rt := runtimeinput.State{Digest: "D", Unverifiable: rtUnver, OK: true}
 		v := decide(rec, cl, g, rt, CodeResult, pure)
+		if v.Status == Valid && (recStd == "" || recStd != curStd) {
+			t.Fatal("valid with missing or changed toolchain content")
+		}
 		if v.Status == Valid && !pure {
 			if cl.Unverifiable || (rec.RuntimeInputs != "" && rt.Unverifiable) {
 				t.Fatalf("sound violated: valid with an unverifiable dependence and no purity override (rec=%+v cl=%+v rt=%+v)", rec, cl, rt)
@@ -171,7 +197,7 @@ func TestFingerprintDataShape(t *testing.T) {
 		name string
 		typ  reflect.Type
 	}{
-		{"MaximalClosure", reflect.TypeFor[string]()}, {"TestVariantClosure", reflect.TypeFor[string]()},
+		{"MaximalClosure", reflect.TypeFor[string]()}, {"ToolchainContent", reflect.TypeFor[string]()}, {"AdmissionPolicy", reflect.TypeFor[string]()}, {"TestVariantClosure", reflect.TypeFor[string]()},
 		{"InertTestVariantApplicability", reflect.TypeFor[InertTestVariantApplicability]()},
 		{"ObservationAssertion", reflect.TypeFor[string]()}, {"ObservationProof", reflect.TypeFor[ObservationProof]()},
 		{"Guards", reflect.TypeFor[guard.Guards]()}, {"PurityAssertion", reflect.TypeFor[string]()},
@@ -205,8 +231,8 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@43" {
-		t.Fatalf("ObservationRTA = %q, want the corrected SSA derivation", ObservationRTA)
+	if ObservationRTA != "gofresh/observation-rta@44" {
+		t.Fatalf("ObservationRTA = %q, want content- and policy-bound proof evidence", ObservationRTA)
 	}
 }
 
@@ -718,17 +744,18 @@ func TestExternalDirectiveConflictRefused(t *testing.T) {
 // external subject.
 func TestExternalDirectiveImmuneToObservationEvidence(t *testing.T) {
 	rec := Fingerprint{
-		MaximalClosure: "h",
-		Guards:         guard.Guards{Toolchain: "tc", BuildConfig: "bc"},
-		RuntimeInputs:  "manifest",
-		RuntimeDigest:  "d",
+		MaximalClosure:   "h",
+		ToolchainContent: "stdlib",
+		Guards:           guard.Guards{Toolchain: "tc", BuildConfig: "bc"},
+		RuntimeInputs:    "manifest",
+		RuntimeDigest:    "d",
 	}
 	rt := runtimeinput.State{Manifest: "manifest", Digest: "d", OK: true}
-	inferred := closure.Closure{Hash: "h", Unverifiable: true, Reason: "reaches os.Open"}
+	inferred := closure.Closure{Hash: "h", ToolchainContent: "stdlib", Unverifiable: true, Reason: "reaches os.Open"}
 	if v := decideAfterClosureObserved(rec, inferred, rec.Guards, rt, CodeResult, false, true); v.Status != Valid {
 		t.Fatalf("observed inferred unverifiability = {%s %q}, want valid (the upgrade this test contrasts)", v.Status, v.Reason)
 	}
-	declared := closure.Closure{Hash: "h", Unverifiable: true, External: true, Reason: "external directive"}
+	declared := closure.Closure{Hash: "h", ToolchainContent: "stdlib", Unverifiable: true, External: true, Reason: "external directive"}
 	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, false, true); v.Status != Unverifiable || v.Reason != "external directive" {
 		t.Fatalf("observed external subject = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
 	}

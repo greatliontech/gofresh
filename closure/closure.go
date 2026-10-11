@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -37,6 +38,10 @@ import (
 // computed (and recorded at run time, REQ-guard-recompute) regardless.
 type Closure struct {
 	Hash string
+	// ToolchainContent and AdmissionPolicy are the construction's independent
+	// source and admission dependencies; neither is the reported version.
+	ToolchainContent string
+	AdmissionPolicy  string
 	// TestVariants is the subject package's test-variant compartment: 32 hex
 	// over the package's own test-only files — the in-package and external
 	// test-variant file sets minus the base package's file set — under the
@@ -265,7 +270,11 @@ func NewBracketAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...s
 	if err != nil {
 		return nil, err
 	}
-	h, err := NewAt(ctx, reader, buildFlags...)
+	base, err := reader.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	h, err := NewAt(ctx, livePass, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +282,7 @@ func NewBracketAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...s
 	// (classification agrees with the view); the live snapshot scopes
 	// the memo, and its identity carries GOMODCACHE, so no entry crosses
 	// a moved module cache.
+	h.modCache = filepath.Clean(base.Value("GOMODCACHE"))
 	h.snapshot = live
 	return h, nil
 }
@@ -1255,6 +1265,19 @@ func hashFilesWith(dir string, files []string, canonicalMembers map[string]bool,
 // lifetime and rationale as the SSA program cache). Callers treat the slice as
 // read-only, so sharing one backing array across them is safe.
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
+	pkgs, err := h.listUnvalidated(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.standardInventoryCovers(pkgs); err != nil {
+		return nil, err
+	}
+	return pkgs, nil
+}
+
+// listUnvalidated is the go command's declaration listing and its cache.
+// Analyses use list, which additionally admits the listing's source coverage.
+func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
 	}
@@ -1278,4 +1301,23 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	h.lists[pkgPath] = pkgs
 	h.storeListing(pkgPath, pkgs)
 	return pkgs, nil
+}
+
+// standardInventoryCovers reconciles pattern discovery with the packages
+// actually imported by the subject. An explicitly importable standard package
+// omitted by the wildcard inventory never inherits its content coverage.
+func (h *Hasher) standardInventoryCovers(pkgs []listPkg) error {
+	if h.ToolchainContent() == "" {
+		return nil
+	}
+	for _, p := range pkgs {
+		if !p.Standard {
+			continue
+		}
+		inventory, ok := h.source.inventory[p.ImportPath]
+		if !ok || filepath.Clean(inventory.Dir) != filepath.Clean(p.Dir) || !slices.Equal(inventory.Files, selectedFiles(p)) {
+			return fmt.Errorf("closure: selected standard package %s is not covered by the toolchain content inventory", p.ImportPath)
+		}
+	}
+	return nil
 }

@@ -70,6 +70,7 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // of a package it cut — cut is the set of subjects it left undischarged
 // (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
 func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+	scope = hasher.SetAnalysisScope(scope)
 	// The scope is the one source of the attestations and the vouches:
 	// what keys a memo is what the derivation applies.
 	factScope := scope.Facts()

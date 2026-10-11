@@ -69,24 +69,26 @@ func TestInertApplicabilityRecordGrammar(t *testing.T) {
 func applicabilityFixture(t *testing.T) (*View, Fingerprint, Subject, TestVariantLedger) {
 	t.Helper()
 	s := Subject{"example.com/p", "BenchmarkEnv"}
-	f := Fingerprint{MaximalClosure: "core", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
+	f := Fingerprint{MaximalClosure: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
 	l := TestVariantLedger{BindingStrategy: testvariant.BindingStrategy}
-	v := &View{engine: &Engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]closure.Closure{s: {Hash: "core", TestVariants: "B"}}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
+	v := &View{engine: &Engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]closure.Closure{s: {Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"}}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
 	return v, f, s, l
 }
 
 func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 	for name, change := range map[string]func(*View, *Fingerprint, *TestVariantLedger){
-		"core":                     func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "moved" },
-		"missing core":             func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "" },
-		"missing compartment":      func(v *View, f *Fingerprint, l *TestVariantLedger) { f.TestVariantClosure = "" },
-		"closure derivation":       func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ClosureStrategy = "old" },
-		"dynamic derivation":       func(v *View, f *Fingerprint, l *TestVariantLedger) { f.DynamicStateStrategy = "old" },
-		"toolchain":                func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Toolchain = "old" },
-		"build":                    func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.BuildConfig = "old" },
-		"machine":                  func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Machine = "old" },
-		"runtime":                  func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.RuntimeConfig = "old" },
-		"missing runtime manifest": func(v *View, f *Fingerprint, l *TestVariantLedger) { f.RuntimeDigest = "orphan" },
+		"core":                      func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "moved" },
+		"missing core":              func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "" },
+		"missing compartment":       func(v *View, f *Fingerprint, l *TestVariantLedger) { f.TestVariantClosure = "" },
+		"closure derivation":        func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ClosureStrategy = "old" },
+		"dynamic derivation":        func(v *View, f *Fingerprint, l *TestVariantLedger) { f.DynamicStateStrategy = "old" },
+		"toolchain":                 func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Toolchain = "old" },
+		"toolchain content":         func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "other" },
+		"missing toolchain content": func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "" },
+		"build":                     func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.BuildConfig = "old" },
+		"machine":                   func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Machine = "old" },
+		"runtime":                   func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.RuntimeConfig = "old" },
+		"missing runtime manifest":  func(v *View, f *Fingerprint, l *TestVariantLedger) { f.RuntimeDigest = "orphan" },
 		"unknown endpoint": func(v *View, f *Fingerprint, l *TestVariantLedger) {
 			f.InertTestVariantApplicability = InertTestVariantApplicability{"future", "A"}
 		},

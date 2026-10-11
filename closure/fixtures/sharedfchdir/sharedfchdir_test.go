@@ -1,3 +1,7 @@
+//go:build !plan9
+
+// Plan 9 has a different syscall.Open signature; this fixture exercises the
+// descriptor-based POSIX-compatible call surface.
 package sharedfchdir
 
 import (

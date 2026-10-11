@@ -64,6 +64,23 @@ func TestDigestFilesFollowsNamesAndBytes(t *testing.T) {
 	}
 }
 
+func TestDigestFilesFramesBinaryContentsUnambiguously(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"assets/a": "x\x00assets/b\x00y"})
+	one, err := digestFiles(t.Context(), dir, []string{"assets/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTree(t, dir, map[string]string{"assets/a": "x", "assets/b": "y"})
+	two, err := digestFiles(t.Context(), dir, []string{"assets/a", "assets/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Fatal("different file inventories have the same framing")
+	}
+}
+
 // Every non-test file class the build selects joins the digest, sorted
 // and deduplicated (test files are never listed in these classes).
 func TestSelectedFilesCoversEveryBuildClass(t *testing.T) {
@@ -242,11 +259,11 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 		}
 		return stamps
 	}
-	l := surfaceListing{Version: sourceDigestsVersion, Packages: []listedPackage{{ImportPath: "p", Dir: dir, Files: files, Dirs: stamp()}}}
+	l := surfaceListing{Version: sourceDigestsVersion, Packages: []listedPackage{{ImportPath: "p", Dir: dir, Files: files}}, Discovery: stamp()}
 	if !stampsCurrent(l) {
 		t.Fatal("an unchanged directory reads as stale")
 	}
-	stamps := l.Packages[0].Dirs
+	stamps := l.Discovery
 	if len(stamps) != 2 || stamps[0].Path != dir || stamps[1].Path != filepath.Join(dir, "data") || len(stamps[0].Entries) != 3 || stamps[0].Entries[1].Name != "b.go" || stamps[0].Entries[1].Size != int64(len("//go:build never\n\npackage p\n")) {
 		t.Fatalf("stamps = %+v", stamps)
 	}
@@ -267,7 +284,7 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 		t.Fatal("an edit with the modification time restored left the stamp unchanged")
 	}
 	write("b.go", "//go:build never\n\npackage p\n")
-	l.Packages[0].Dirs = stamp()
+	l.Discovery = stamp()
 	if !stampsCurrent(l) {
 		t.Fatal("a re-stamped listing reads as stale")
 	}
@@ -278,7 +295,7 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "c.go")); err != nil {
 		t.Fatal(err)
 	}
-	l.Packages[0].Dirs = stamp()
+	l.Discovery = stamp()
 	write("data/y.txt", "y\n")
 	if stampsCurrent(l) {
 		t.Fatal("an entry added under an embedded file's directory served the stale listing")
@@ -286,7 +303,7 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "data", "y.txt")); err != nil {
 		t.Fatal(err)
 	}
-	l.Packages[0].Dirs = stamp()
+	l.Discovery = stamp()
 	if err := os.Rename(filepath.Join(dir, "b.go"), filepath.Join(dir, "bb.go")); err != nil {
 		t.Fatal(err)
 	}
@@ -296,14 +313,14 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 	if err := os.Rename(filepath.Join(dir, "bb.go"), filepath.Join(dir, "b.go")); err != nil {
 		t.Fatal(err)
 	}
-	l.Packages[0].Dirs = stamp()
+	l.Discovery = stamp()
 	if err := os.Remove(filepath.Join(dir, "a.go")); err != nil {
 		t.Fatal(err)
 	}
 	if stampsCurrent(l) {
 		t.Fatal("a removed entry served the stale listing")
 	}
-	l.Packages = append(l.Packages, listedPackage{ImportPath: "q", Dir: filepath.Join(dir, "gone"), Dirs: []dirStamp{{Path: filepath.Join(dir, "gone")}}})
+	l.Discovery = append(l.Discovery, dirStamp{Path: filepath.Join(dir, "gone")})
 	if stampsCurrent(l) {
 		t.Fatal("an unreadable directory served the stale listing")
 	}

@@ -66,7 +66,7 @@ func testScope(scope string) closure.AnalysisScope {
 	if scope == "" {
 		return closure.AnalysisScope{}
 	}
-	return closure.AnalysisScope{FactStrategy: scope}
+	return closure.AnalysisScope{FactStrategy: scope, Toolchain: "test-toolchain", BuildConfig: "test-build"}
 }
 
 // attestedScope is testScope under the single-subject attestation.
@@ -95,6 +95,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	for v := range vouches {
 		analysis.Vouches = append(analysis.Vouches, v)
 	}
+	analysis = hasher.SetAnalysisScope(analysis)
 	scan, _, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, 0, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)

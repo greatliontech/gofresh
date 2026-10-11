@@ -7,7 +7,8 @@ import (
 
 // AnalysisScope is the analysis identity outside the source closure,
 // set once per pass: the strategy versions of the two derivations the
-// caller owns, the code guards, the execution attestations, and the
+// caller owns, the code guards, hasher-owned selected source and admission
+// policy, the execution attestations, and the
 // caller's vouch set. Every persistent memo that depends on any of
 // these renders its own scope from this one value, naming exactly the
 // axes it reads — the observability proofs, the typed testing scan,
@@ -15,8 +16,9 @@ import (
 // cannot be joined by hand at one site and forgotten at another, and an
 // axis a memo does not depend on (the proof-strategy version, for the
 // typed testing scan) never widens its misses. The listing memo and the
-// classification-root resolution key by the environment instead, which
-// no guard carries. The zero value arms nothing: every memo stays inert
+// classification-root resolution also need their environment; the listing
+// additionally depends on selected standard source. The zero value arms
+// nothing: every memo stays inert
 // and every pass recomputes. The Hasher reads the proof and testing-scan
 // renderings; the fact strategy, the attestations, and the vouches key
 // the facts and the view scan the observation pass derives, and the
@@ -37,11 +39,13 @@ type AnalysisScope struct {
 	// Vouches are the caller's dynamic-state vouch identities; a vouch
 	// is load-bearing for the discharges a scan records.
 	Vouches []string
+	// Only a constructed Hasher supplies these dependencies. A caller's
+	// reported guards cannot stand in for the content the hasher analyzed.
+	toolchainContent, admissionPolicy string
 }
 
-// Each rendering is empty — its memo inert — exactly when the axis
-// that versions it is absent: a rendering never carries a partial
-// identity.
+// Each rendering is empty when its strategy or any required guard/dependency
+// is absent: a rendering never carries a partial identity.
 
 // guards is the key every type-level memo shares: the code guards of
 // the analyzed selection and the analyzing frontend's version — the
@@ -50,13 +54,17 @@ type AnalysisScope struct {
 // differently and the skew check permits to read older records
 // (REQ-closure-identity-strategy).
 func (s AnalysisScope) guards() string {
-	return s.Toolchain + "|" + s.BuildConfig + "|" + AnalyzingFrontend()
+	return s.Toolchain + "|" + s.BuildConfig + "|" + AnalyzingFrontend() + "|" + s.toolchainContent + "|" + s.admissionPolicy
+}
+
+func (s AnalysisScope) completeGuards() bool {
+	return s.Toolchain != "" && s.BuildConfig != "" && s.toolchainContent != "" && s.admissionPolicy != ""
 }
 
 // Proofs is the observability memo's scope: the proof-strategy version
 // and the guard key (the code guards and the analyzing frontend).
 func (s AnalysisScope) Proofs() string {
-	if s.ProofStrategy == "" {
+	if s.ProofStrategy == "" || !s.completeGuards() {
 		return ""
 	}
 	return s.ProofStrategy + "|" + s.guards()
@@ -66,7 +74,7 @@ func (s AnalysisScope) Proofs() string {
 // strategy version and the guard key (the code guards the type environment
 // depends on and the analyzing frontend).
 func (s AnalysisScope) TestingScan() string {
-	if s.Toolchain == "" && s.BuildConfig == "" {
+	if !s.completeGuards() {
 		return ""
 	}
 	return testingScanStrategy + "|" + s.guards()
@@ -77,7 +85,7 @@ func (s AnalysisScope) TestingScan() string {
 // and the execution attestations, which change
 // what a fact records.
 func (s AnalysisScope) Facts() string {
-	if s.FactStrategy == "" {
+	if s.FactStrategy == "" || !s.completeGuards() {
 		return ""
 	}
 	scope := s.FactStrategy + "|" + s.guards()

@@ -84,7 +84,9 @@ func listFrom(t *testing.T, dir, pkg string, env []string, snapshot *gotool.EnvS
 			spawns++
 		}
 	})
-	pkgs, err := h.list(pkg)
+	// This helper measures the declaration-listing cache, independently of
+	// admission to an analysis (including a module-less stdlib test listing).
+	pkgs, err := h.listUnvalidated(pkg)
 	return pkgs, spawns, h, err
 }
 
@@ -422,7 +424,7 @@ func TestListingScopeCarriesTheRecordShape(t *testing.T) {
 	if typeShape(reflect.TypeOf(other{})) == listingShape {
 		t.Fatal("a record type with an extra field has the same shape identity")
 	}
-	h := &Hasher{snapshot: &gotool.EnvSnapshot{}, dir: "/x"}
+	h := &Hasher{snapshot: &gotool.EnvSnapshot{}, dir: "/x", source: sourceDigests{Content: "content", Policy: "policy"}}
 	if !strings.Contains(h.listingScope(), "|"+listingShape+"|") {
 		t.Fatalf("scope %q does not carry the shape", h.listingScope())
 	}

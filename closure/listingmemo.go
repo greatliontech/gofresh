@@ -22,7 +22,7 @@ import (
 // the stored listing was derived from. go list is a deterministic
 // function of the toolchain and environment (the pass's env snapshot),
 // the build flags, the working directory, the module graph's files, and
-// the contents of every mutable-local directory it reads — file names,
+// the contents of every mutable-local directory it reads — entry names/kinds,
 // and the bytes of every source-kind file, whose build constraints and
 // import lines shape the graph — plus the trees under embed patterns,
 // whose membership the listing resolves; version-pinned modules are
@@ -40,17 +40,30 @@ const listingDirName = "listing"
 // record's Go shape rides the scope on its own (listingShape), so a
 // field added to the listing's package type retires older entries
 // without a version bump.
-const listingRecordVersion = 2
+const listingRecordVersion = 3
 
 // listingRecord is one persisted listing with the inputs it was derived
-// from: file digests by absolute path, directory entry names by absolute
-// directory, and paths that must not exist.
+// from: file digests by absolute path, effective entry classifications by
+// absolute directory, and paths that must not exist.
 type listingRecord struct {
-	Version  int                 `json:"version"`
-	Files    map[string]string   `json:"files"`
-	Dirs     map[string][]string `json:"dirs"`
-	Absent   []string            `json:"absent"`
-	Packages []listPkg           `json:"packages"`
+	Version  int                       `json:"version"`
+	Files    map[string]string         `json:"files"`
+	Dirs     map[string][]listingEntry `json:"dirs"`
+	Absent   []string                  `json:"absent"`
+	Packages []listPkg                 `json:"packages"`
+}
+
+// listingEntry keeps both the entry's kind and a symlink's effective kind.
+// A dangling link can become source without its own name or kind changing.
+type listingEntry struct {
+	Name       string      `json:"name"`
+	Type       os.FileMode `json:"type"`
+	TargetType os.FileMode `json:"targetType"`
+	Dangling   bool        `json:"dangling"`
+}
+
+func (e listingEntry) regular() bool {
+	return e.Type == 0 || e.Type == os.ModeSymlink && !e.Dangling && e.TargetType == 0
 }
 
 // listingShape is the record type's structural identity — every field
@@ -111,6 +124,9 @@ var listingSourceExts = map[string]bool{
 // directory, and the build flags. Empty — the memo inert — when a flag
 // names a module file outside the recorded input model.
 func (h *Hasher) listingScope() string {
+	if h.ToolchainContent() == "" {
+		return ""
+	}
 	for _, flag := range append(strings.Fields(h.snapshot.Value("GOFLAGS")), h.buildFlags...) {
 		name := strings.TrimLeft(strings.Trim(flag, `"'`), "-")
 		if name == "modfile" || strings.HasPrefix(name, "modfile=") {
@@ -118,7 +134,7 @@ func (h *Hasher) listingScope() string {
 		}
 	}
 	sum := sha256.Sum256([]byte(h.snapshot.Identity()))
-	return "listing|" + strconv.Itoa(listingRecordVersion) + "|" + listingShape + "|" + hex.EncodeToString(sum[:16]) + "|" + h.dir + "|" + strings.Join(h.buildFlags, "\x00")
+	return "listing|" + strconv.Itoa(listingRecordVersion) + "|" + listingShape + "|" + hex.EncodeToString(sum[:16]) + "|" + h.ToolchainContent() + "|" + h.dir + "|" + strings.Join(h.buildFlags, "\x00")
 }
 
 // loadListing serves pkgPath's listing when the persisted record exists
@@ -135,7 +151,7 @@ func (h *Hasher) loadListing(pkgPath string) ([]listPkg, bool) {
 		return nil, false
 	}
 	for dir, want := range rec.Dirs {
-		got, err := dirEntryNames(dir)
+		got, err := listingEntries(dir)
 		if err != nil || !slices.Equal(got, want) {
 			return nil, false
 		}
@@ -194,7 +210,7 @@ func (h *Hasher) storeListing(pkgPath string, pkgs []listPkg) {
 // diagnostic on every pass the condition holds): the pass stays
 // unmodelled and spawns.
 func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, bool) {
-	rec := &listingRecord{Version: listingRecordVersion, Files: map[string]string{}, Dirs: map[string][]string{}}
+	rec := &listingRecord{Version: listingRecordVersion, Files: map[string]string{}, Dirs: map[string][]listingEntry{}}
 	absent := map[string]bool{}
 	addFile := func(path string) ([]byte, bool) {
 		if _, done := rec.Files[path]; done || absent[path] {
@@ -215,7 +231,7 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 		if _, done := rec.Dirs[dir]; done {
 			return true
 		}
-		names, err := dirEntryNames(dir)
+		names, err := listingEntries(dir)
 		if err != nil {
 			return false
 		}
@@ -295,17 +311,11 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 		if !addDir(dir) {
 			return nil, false
 		}
-		for _, name := range rec.Dirs[dir] {
-			if !listingSourceExts[filepath.Ext(name)] {
+		for _, entry := range rec.Dirs[dir] {
+			if !listingSourceExts[filepath.Ext(entry.Name)] || !entry.regular() {
 				continue
 			}
-			path := filepath.Join(dir, name)
-			info, err := os.Stat(path)
-			if err != nil || !info.Mode().IsRegular() {
-				// A dangling link or a non-regular entry is a name the
-				// listing sees and no byte it reads.
-				continue
-			}
+			path := filepath.Join(dir, entry.Name)
 			if _, ok := addFile(path); !ok {
 				return nil, false
 			}
@@ -442,16 +452,27 @@ func embedRoots(dir string, patternSets ...[]string) []string {
 	return roots
 }
 
-// dirEntryNames returns a directory's entry names, sorted.
-func dirEntryNames(dir string) ([]string, error) {
+// listingEntries returns the names and effective classifications the listing
+// can observe. Permissions and timestamps are not membership identity.
+func listingEntries(dir string) ([]listingEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(entries))
+	names := make([]listingEntry, 0, len(entries))
 	for _, e := range entries {
-		names = append(names, e.Name())
+		entry := listingEntry{Name: e.Name(), Type: e.Type()}
+		if entry.Type == os.ModeSymlink {
+			info, err := os.Stat(filepath.Join(dir, e.Name()))
+			if os.IsNotExist(err) {
+				entry.Dangling = true
+			} else if err != nil {
+				return nil, err
+			} else {
+				entry.TargetType = info.Mode().Type()
+			}
+		}
+		names = append(names, entry)
 	}
-	sort.Strings(names)
 	return names, nil
 }

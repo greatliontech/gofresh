@@ -1,3 +1,6 @@
+//go:build !plan9
+
+// Plan 9 has no syscall.Unlink; this fixture exercises that binding mutation.
 package syscallbinding
 
 import (

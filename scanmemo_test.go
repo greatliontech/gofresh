@@ -213,10 +213,9 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 // The key moves under any source edit inside the view package's
 // test-binary graph and holds under an edit outside it, so a served
 // scan never describes a program other than the current one
-// (REQ-closure-scan-memo). A comment-only edit inside the graph is not
-// a source edit: the closure identity holds by
-// REQ-closure-canonical-member and the scan serves — the caching axis
-// the canonical form exists for.
+// (REQ-closure-scan-memo). A comment-only edit preserves public source
+// equivalence under REQ-closure-canonical-member, but invalidates the private
+// raw-source key that protects position-bearing scan payloads.
 func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds module fixtures and runs the engine over them")
@@ -264,10 +263,8 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 				t.Fatalf("an edit to %s (outside the graph) missed the scan memo", tc.path)
 			}
 		}
-		// The compartment keeps its own byte fold (its header folds
-		// comments outside declarations by design,
-		// REQ-closure-test-variant-ledger), so only the core's
-		// members are comment-inert.
+		// Core equivalence ignores ordinary comments, but position-bearing
+		// scan payloads have an additional raw-source dependency.
 		if !tc.inside || strings.HasSuffix(tc.path, "_test.go") {
 			continue
 		}
@@ -280,15 +277,24 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 			t.Fatal(err)
 		}
 		loads = 0
-		_, err = engine.NewView(context.Background(), scanMemoSubjects, dir)
+		changedView, viewErr := engine.NewView(context.Background(), scanMemoSubjects, dir)
 		if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
 			t.Fatal(restoreErr)
 		}
+		if viewErr != nil {
+			t.Fatal(viewErr)
+		}
+		if loads == 0 {
+			t.Fatalf("a comment-only edit to %s served a spelling-sensitive scan", tc.path)
+		}
+		restoredView, err := engine.NewView(context.Background(), scanMemoSubjects, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if loads != 0 {
-			t.Fatalf("a comment-only edit to %s reloaded the scan — the identity moved on a comment", tc.path)
+		for _, subject := range scanMemoSubjects {
+			if changedView.facts.maximal[subject].Hash != restoredView.facts.maximal[subject].Hash {
+				t.Fatal("comment edit moved public core equivalence")
+			}
 		}
 	}
 }

@@ -406,8 +406,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// load) and keys the facts and the scan below
 	// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo,
 	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
-	scope := e.analysisScope(guards)
-	hasher.SetAnalysisScope(scope)
+	scope := hasher.SetAnalysisScope(e.analysisScope(guards))
 	if viewTestHooks.factScope != nil {
 		viewTestHooks.factScope(scope.Facts())
 	}
@@ -573,7 +572,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if !ok {
 		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
 	}
-	return Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy, ResultKind: v.kind}, nil
+	return v.fingerprintLocked(subject, cl), nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -630,9 +629,24 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
 		cl := v.facts.maximal[subject]
-		result[subject] = Fingerprint{MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants, Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject], DynamicStateVouches: v.facts.vouchDischarges[subject], SingleSubjectDischarges: v.facts.attestationDischarges[subject], PackageProcessDischarges: v.facts.packageProcessDischarges[subject], DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy, ResultKind: v.kind}
+		result[subject] = v.fingerprintLocked(subject, cl)
 	}
 	return result, nil
+}
+
+// fingerprintLocked projects the view's immutable producing facts. Callers
+// hold the view lock; observed capture adds its independently derived proof.
+func (v *View) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprint {
+	return Fingerprint{
+		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
+		ToolchainContent: cl.ToolchainContent, AdmissionPolicy: cl.AdmissionPolicy,
+		Guards: v.facts.guards, PurityAssertion: v.facts.purity[subject],
+		DynamicStateVouches:      v.facts.vouchDischarges[subject],
+		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
+		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
+		DynamicStateStrategy:     DynamicStateStrategy, ClosureStrategy: ClosureStrategy,
+		ResultKind: v.kind,
+	}
 }
 
 // CaptureObserved returns maximal closure evidence plus a caller-selected,
@@ -691,21 +705,10 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		Reason:     disposition.Reason,
 	}
 	const assertion = "caller assertion"
-	proof.Evidence = observationProofEvidence(v.facts.maximal[subject].Hash, assertion, proof)
-	return Fingerprint{
-		MaximalClosure:           v.facts.maximal[subject].Hash,
-		TestVariantClosure:       v.facts.maximal[subject].TestVariants,
-		ObservationAssertion:     assertion,
-		ObservationProof:         proof,
-		Guards:                   v.facts.guards,
-		PurityAssertion:          v.facts.purity[subject],
-		DynamicStateVouches:      v.facts.vouchDischarges[subject],
-		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
-		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
-		DynamicStateStrategy:     DynamicStateStrategy,
-		ClosureStrategy:          ClosureStrategy,
-		ResultKind:               v.kind,
-	}
+	fingerprint := v.fingerprintLocked(subject, v.facts.maximal[subject])
+	fingerprint.ObservationAssertion, fingerprint.ObservationProof = assertion, proof
+	fingerprint.ObservationProof.Evidence = observationProofEvidence(fingerprint)
+	return fingerprint
 }
 
 // AttachObservation binds sealed, process-backed runtime evidence to a captured
@@ -822,7 +825,7 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 			continue
 		}
 		pending[subject] = rec
-		positives[subject] = compatibleObservationProof(rec.ObservationProof, rec.ObservationAssertion, subject, rec.MaximalClosure) && rec.ObservationProof.Observable && runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject))
+		positives[subject] = compatibleObservationProof(rec, subject) && rec.AdmissionPolicy == cl.AdmissionPolicy && rec.ObservationProof.Observable && runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject))
 	}
 	hasRuntimeInputs := false
 	for _, fingerprint := range pending {
@@ -1881,6 +1884,13 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	if err != nil {
 		return err
 	}
+	liveSnapshot, err := hasher.PassReader().Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if liveSnapshot.Identity() != v.facts.snapshot.Identity() {
+		return fmt.Errorf("%w: analysis environment", ErrViewChanged)
+	}
 	// The bracket's analysis scope is the view's: the same identity
 	// outside the source closure the observation pass set, so its
 	// memos and the pass's are one store. The observability memo's key
@@ -1973,18 +1983,21 @@ func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err er
 	return ctx.Err()
 }
 
-func compatibleObservationProof(proof ObservationProof, assertion string, subject Subject, maximalClosure string) bool {
-	if assertion != "caller assertion" || proof.Strategy != ObservationRTA || proof.Subject != subject {
+func compatibleObservationProof(recorded Fingerprint, subject Subject) bool {
+	proof := recorded.ObservationProof
+	if recorded.ObservationAssertion != "caller assertion" || proof.Strategy != ObservationRTA || proof.Subject != subject || recorded.ToolchainContent == "" || recorded.AdmissionPolicy == "" {
 		return false
 	}
 	if proof.Observable == (proof.Reason != "") {
 		return false
 	}
-	return proof.Evidence == observationProofEvidence(maximalClosure, assertion, proof)
+	return proof.Evidence == observationProofEvidence(recorded)
 }
 
-func observationProofEvidence(maximalClosure, assertion string, proof ObservationProof) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason))
+func observationProofEvidence(recorded Fingerprint) string {
+	proof := recorded.ObservationProof
+	maximalClosure, assertion := recorded.MaximalClosure, recorded.ObservationAssertion
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
 	return hex.EncodeToString(sum[:])[:32]
 }
 

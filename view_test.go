@@ -341,7 +341,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !fingerprint.ObservationProof.Observable || !compatibleObservationProof(fingerprint.ObservationProof, fingerprint.ObservationAssertion, subject, fingerprint.MaximalClosure) {
+	if !fingerprint.ObservationProof.Observable || !compatibleObservationProof(fingerprint, subject) {
 		t.Fatalf("captured proof = %+v", fingerprint.ObservationProof)
 	}
 	withoutManifest, err := producer.CheckObserved(context.Background(), fingerprint, subject)
@@ -2972,7 +2972,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	// only the subject binding — not the evidence hash — discriminates.
 	spliced := fingerprint
 	spliced.ObservationProof.Subject = Subject{Package: "example.com/observed", Symbol: "Sibling"}
-	spliced.ObservationProof.Evidence = observationProofEvidence(spliced.MaximalClosure, spliced.ObservationAssertion, spliced.ObservationProof)
+	spliced.ObservationProof.Evidence = observationProofEvidence(spliced)
 	verdict, err := current.CheckObserved(context.Background(), spliced, subject)
 	if err != nil {
 		t.Fatal(err)

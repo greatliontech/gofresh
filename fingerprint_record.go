@@ -23,6 +23,8 @@ type fingerprintRecord struct {
 	TestVariantClosure            string                               `json:"testVariantClosure"`
 	Toolchain                     string                               `json:"toolchain"`
 	BuildConfig                   string                               `json:"buildConfig"`
+	ToolchainContent              string                               `json:"toolchainContent,omitempty"`
+	AdmissionPolicy               string                               `json:"admissionPolicy,omitempty"`
 	Machine                       string                               `json:"machine,omitempty"`
 	RuntimeConfig                 string                               `json:"runtimeConfig,omitempty"`
 	ObservationAssertion          string                               `json:"observationAssertion,omitempty"`
@@ -78,6 +80,8 @@ func (f Fingerprint) MarshalJSON() ([]byte, error) {
 		TestVariantClosure:       f.TestVariantClosure,
 		Toolchain:                f.Guards.Toolchain,
 		BuildConfig:              f.Guards.BuildConfig,
+		ToolchainContent:         f.ToolchainContent,
+		AdmissionPolicy:          f.AdmissionPolicy,
 		Machine:                  f.Guards.Machine,
 		RuntimeConfig:            f.Guards.RuntimeConfig,
 		ObservationAssertion:     f.ObservationAssertion,
@@ -136,6 +140,8 @@ func (f *Fingerprint) UnmarshalJSON(data []byte) error {
 	}
 	decoded := Fingerprint{
 		MaximalClosure:     rec.MaximalClosure,
+		ToolchainContent:   rec.ToolchainContent,
+		AdmissionPolicy:    rec.AdmissionPolicy,
 		TestVariantClosure: rec.TestVariantClosure,
 		Guards: guard.Guards{
 			Toolchain:     rec.Toolchain,

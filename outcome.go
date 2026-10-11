@@ -60,7 +60,7 @@ func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.Pro
 func outcomeSubject(fingerprint Fingerprint, subject Subject) string {
 	// A string-array encoding is total; it frames every field and uses the
 	// manifest's canonical escaping without another serialization grammar.
-	data, _ := json.Marshal([]string{outcome.Method, subject.Package, subject.Symbol, fingerprint.MaximalClosure, fingerprint.TestVariantClosure, fingerprint.Guards.Toolchain, fingerprint.Guards.BuildConfig, fingerprint.ObservationProof.Strategy})
+	data, _ := json.Marshal([]string{outcome.Method, subject.Package, subject.Symbol, fingerprint.MaximalClosure, fingerprint.TestVariantClosure, fingerprint.Guards.Toolchain, fingerprint.Guards.BuildConfig, fingerprint.ToolchainContent, fingerprint.AdmissionPolicy, fingerprint.ObservationProof.Strategy})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }

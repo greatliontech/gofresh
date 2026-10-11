@@ -3,27 +3,26 @@ package closure
 import "testing"
 
 // Each memo's scope renders exactly the axes its derivation reads: the
-// proofs and the facts keep the identities their hand-joined strings
-// carried (persisted entries keep serving), the typed testing scan reads
-// the guards and its own strategy alone, the view scan joins the sorted
-// vouch set, and the zero value arms nothing.
+// proofs, facts and typed scans share the complete guard/dependency identity;
+// the view scan additionally joins the sorted vouch set. A partial identity
+// and the zero value arm nothing.
 func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
-	scope := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2", Toolchain: "tc", BuildConfig: "bc", Vouches: []string{"b:y", "a:x"}}
-	if got, want := scope.Proofs(), "rta@1|tc|bc|"+AnalyzingFrontend(); got != want {
+	scope := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2", Toolchain: "tc", BuildConfig: "bc", Vouches: []string{"b:y", "a:x"}, toolchainContent: "content", admissionPolicy: "policy"}
+	if got, want := scope.Proofs(), "rta@1|tc|bc|"+AnalyzingFrontend()+"|content|policy"; got != want {
 		t.Errorf("Proofs = %q, want %q", got, want)
 	}
-	if got, want := scope.TestingScan(), testingScanStrategy+"|tc|bc|"+AnalyzingFrontend(); got != want {
+	if got, want := scope.TestingScan(), testingScanStrategy+"|tc|bc|"+AnalyzingFrontend()+"|content|policy"; got != want {
 		t.Errorf("TestingScan = %q, want %q", got, want)
 	}
-	if got, want := scope.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend(); got != want {
+	if got, want := scope.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|content|policy"; got != want {
 		t.Errorf("Facts = %q, want %q", got, want)
 	}
-	if got, want := scope.Scan(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|vouches:a:x,b:y"; got != want {
+	if got, want := scope.Scan(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|content|policy|vouches:a:x,b:y"; got != want {
 		t.Errorf("Scan = %q, want %q", got, want)
 	}
 	attested := scope
 	attested.SingleSubject, attested.PackageProcess = true, true
-	if got, want := attested.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|single-subject-execution|package-process-execution"; got != want {
+	if got, want := attested.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|content|policy|single-subject-execution|package-process-execution"; got != want {
 		t.Errorf("attested Facts = %q, want %q", got, want)
 	}
 	if attested.Proofs() != scope.Proofs() || attested.TestingScan() != scope.TestingScan() {
@@ -35,11 +34,11 @@ func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 	}
 	// A rendering is inert exactly when the axis that versions it is
 	// absent, never armed under a partial identity.
-	guardsOnly := AnalysisScope{Toolchain: "tc", BuildConfig: "bc", SingleSubject: true, Vouches: []string{"a:x"}}
+	guardsOnly := AnalysisScope{Toolchain: "tc", BuildConfig: "bc", SingleSubject: true, Vouches: []string{"a:x"}, toolchainContent: "content", admissionPolicy: "policy"}
 	if guardsOnly.Proofs() != "" || guardsOnly.Facts() != "" || guardsOnly.Scan() != "" {
 		t.Errorf("guards without a strategy armed a memo: %q %q %q", guardsOnly.Proofs(), guardsOnly.Facts(), guardsOnly.Scan())
 	}
-	if guardsOnly.TestingScan() != testingScanStrategy+"|tc|bc|"+AnalyzingFrontend() {
+	if guardsOnly.TestingScan() != testingScanStrategy+"|tc|bc|"+AnalyzingFrontend()+"|content|policy" {
 		t.Errorf("the testing scan, which reads the guards alone, is inert under them: %q", guardsOnly.TestingScan())
 	}
 	strategiesOnly := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2"}

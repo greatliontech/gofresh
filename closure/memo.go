@@ -1,6 +1,13 @@
 package closure
 
-import "github.com/greatliontech/gofresh/closure/internal/cachefile"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"path/filepath"
+
+	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+)
 
 // SetAnalysisScope arms every persistent closure memo that needs the
 // caller's guards — the observability proofs and the typed
@@ -15,9 +22,12 @@ import "github.com/greatliontech/gofresh/closure/internal/cachefile"
 // memos live under the consumer-controlled store root (the user cache
 // by default; SetMemoRoot); a missing, unreadable, or corrupt entry
 // recomputes silently - the key IS the freshness, so no entry is ever
-// trusted beyond it.
-func (h *Hasher) SetAnalysisScope(scope AnalysisScope) {
+// trusted beyond it. The returned scope carries this hasher's own source and
+// policy dependencies for sibling derivations such as dynamic-state facts.
+func (h *Hasher) SetAnalysisScope(scope AnalysisScope) AnalysisScope {
+	scope.toolchainContent, scope.admissionPolicy = h.ToolchainContent(), h.AdmissionPolicy()
 	h.scope = scope
+	return scope
 }
 
 // SetMemoRoot redirects the persistent memo store - one knob covering
@@ -59,7 +69,8 @@ func storeMemo(scope, closureKey string, proofs map[string]Observability) {
 // of the core contributions (REQ-closure-test-variant-hash) while
 // the analyzed program compiles them all the same — a key equating the
 // test binary with the core alone serves stale proofs after test-only
-// edits (REQ-closure-observability-memo).
+// edits (REQ-closure-observability-memo). Raw mutable-source spelling also
+// participates because payloads can include file names and positions.
 func (h *Hasher) testBinaryClosureKey(pkgPath string) (string, error) {
 	if key, ok := h.testBinaryKeys[pkgPath]; ok {
 		return key, nil
@@ -70,16 +81,54 @@ func (h *Hasher) testBinaryClosureKey(pkgPath string) (string, error) {
 	}
 	// maximalHash derives and records the compartment identity for the
 	// package as a side effect, so the axis is in hand.
-	key := mh + "\x00" + h.testVariants[pkgPath].Hash
+	spelling, err := h.sourceSpellingKey(pkgPath)
+	if err != nil {
+		return "", err
+	}
+	key := mh + "\x00" + h.testVariants[pkgPath].Hash + "\x00" + spelling
 	if h.testBinaryKeys != nil {
 		h.testBinaryKeys[pkgPath] = key
 	}
 	return key, nil
 }
 
+// sourceSpellingKey binds position-bearing memo payloads to the raw source
+// and its names without changing public canonical closure equivalence.
+// Standard source is in the hasher's content dependency; cache modules are
+// immutable under their version pins. Mutable source is read in this pass.
+func (h *Hasher) sourceSpellingKey(pkgPath string) (string, error) {
+	pkgs, err := h.list(pkgPath)
+	if err != nil {
+		return "", err
+	}
+	files := map[string]string{}
+	for _, pkg := range pkgs {
+		if pkg.Standard || pkg.Module == nil || h.pinnedPackage(&pkg) || pkg.IsGeneratedTestMainFor(pkgPath) {
+			continue
+		}
+		for _, name := range pkg.SourceFiles() {
+			if err := h.contextErr(); err != nil {
+				return "", err
+			}
+			path := filepath.Join(pkg.Dir, name)
+			if _, seen := files[path]; seen {
+				continue
+			}
+			data, err := h.readFile(path)
+			if err != nil {
+				return "", err
+			}
+			files[path] = data.digest()
+		}
+	}
+	data, _ := json.Marshal(files)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 // PackageScanKey is the complete content identity of one view package's
-// typed test-binary program — the maximal closure hash joined with the
-// test-variant compartment identity — the key a scan of that program is
+// typed test-binary program — the maximal closure hash, test-variant
+// compartment identity and raw mutable-source spelling — the key a scan is
 // a pure function under (REQ-closure-scan-memo). It is the observability
 // and testing-scan memos' key, exported for the view's scan memo.
 func (h *Hasher) PackageScanKey(pkgPath string) (string, error) {

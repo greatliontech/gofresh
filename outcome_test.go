@@ -274,8 +274,8 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 			} {
 				fresh := fp
 				change(&fresh)
-				fresh.ObservationProof.Evidence = observationProofEvidence(fresh.MaximalClosure, fresh.ObservationAssertion, fresh.ObservationProof)
-				if !compatibleObservationProof(fresh.ObservationProof, fresh.ObservationAssertion, subject, fresh.MaximalClosure) {
+				fresh.ObservationProof.Evidence = observationProofEvidence(fresh)
+				if !compatibleObservationProof(fresh, subject) {
 					t.Fatal("test did not construct a compatible fresh proof")
 				}
 				if runtimeinput.HasOutcomeSupport(obs.Manifest, outcomeSubject(fresh, subject)) {

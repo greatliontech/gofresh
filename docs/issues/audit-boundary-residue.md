@@ -1,4 +1,4 @@
-# Unclosed listing, oracle and operation boundaries
+# Unclosed mutation and operation boundaries
 
 Lands: the component destinations in docs/plans/tooling-redesign.md below;
 delete after every component has landed or been refuted by its deciding case.
@@ -7,24 +7,6 @@ These are distinct obligations, not permission to broaden a repair into a
 second implementation trajectory. Except where explicitly measured below,
 the mechanisms are source-traced and their deciding regressions remain to be
 run. Existing execution-model, assertion and sampling limits remain governing.
-
-## Listing dependency admission — 3.1b / 3.2
-
-`closure/listingmemo.go` records directory names but only the bytes of entries
-already recognized as regular source files. Replacing an empty directory
-`extra.go` with a source file of the same name leaves the recorded names equal
-and adds no compared file. The old listing can omit the new initializer and
-feed an unchanged scan key. Test warm/cold/discarded-cache answers after the
-retype, including a changed value read by the original subject.
-
-`closure/toolchainsource.go` accepts a version-matching cached surface with
-no packages or stamps. Its empty digest map reaches `movedKeys`, which checks
-only supplied keys, and produces no moved key. Incomplete cache shape is not
-positive admission evidence. Test empty and structurally incomplete inventories
-under a selection the real listing refuses, with an ordinary valid hit as
-control. Preserve legitimate empty selected-file sets for individual packages;
-do not confuse those with an absent surface inventory or demand authentication
-of coherently forged private cache data.
 
 ## Shaped mutation materialization and dependencies — 5.4, before shaped assurance
 

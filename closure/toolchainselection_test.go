@@ -162,19 +162,27 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 	}
 }
 
-// The effect-scan memo scope discriminates on the selection verdict:
-// an unaudited selection's scans key apart from the default's, so
-// neither ever serves the other (REQ-closure-effect-scan-memo's
-// selection dimension); the default scope stays byte-identical to the
-// pre-selection era's so existing memos keep serving.
-func TestEffectScanScopeDiscriminatesSelectionVerdict(t *testing.T) {
-	audited := (&Hasher{selectionResolved: true}).effectScanScope()
-	unaudited := (&Hasher{selectionResolved: true, selection: selectionDegradation{axis: "unwalked"}}).effectScanScope()
-	if audited == unaudited {
-		t.Fatal("effect-scan memo scope ignores the selection verdict — unaudited scans could serve audited consumers")
+// Equal admission Booleans cannot alias different source or policy inputs.
+func TestEffectScanScopeDiscriminatesContentAndPolicy(t *testing.T) {
+	h := Hasher{selectionResolved: true, source: sourceDigests{Content: "content-a", Policy: "policy-a"}}
+	base := h.effectScanScope()
+	if base != effectScanStrategy+" "+runtime.Version()+"|content-a|policy-a" {
+		t.Fatalf("effect scope lost a dependency: %q", base)
 	}
-	if audited != effectScanStrategy+" "+runtime.Version() {
-		t.Fatalf("audited scope moved from the pre-selection format: %q", audited)
+	for _, source := range []sourceDigests{
+		{Content: "content-b", Policy: "policy-a"},
+		{Content: "content-a", Policy: "policy-b"},
+	} {
+		h.source = source
+		if h.effectScanScope() == base {
+			t.Fatal("different dependencies share a scope")
+		}
+	}
+	for _, source := range []sourceDigests{{Content: "content-a"}, {Policy: "policy-a"}, {}} {
+		h.source = source
+		if h.effectScanScope() != "" {
+			t.Fatal("incomplete dependencies armed the memo")
+		}
 	}
 }
 

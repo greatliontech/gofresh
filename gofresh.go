@@ -419,7 +419,10 @@ const ClosureStrategy = closure.IdentityStrategy
 // admission; missing older inventories never gain a supported derivation.
 // The current derivation uses corrected generic receiver/range control flow
 // and treats the SSA builder's internal iterator/defer tokens as opaque.
-const ObservationRTA = "gofresh/observation-rta@43"
+// @44 binds selected standard-library content and admission policy into
+// proof integrity and outcome-subject identities; older evidence cannot
+// acquire the missing dependencies from current analysis.
+const ObservationRTA = "gofresh/observation-rta@44"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.
@@ -443,6 +446,11 @@ type ObservationProof struct {
 // fingerprints by equality.
 type Fingerprint struct {
 	MaximalClosure string
+	// ToolchainContent records the complete selected standard-library content.
+	// AdmissionPolicy records the independent audit inventory used by dependent
+	// derivations. Absence in historical records never acquires today's value.
+	ToolchainContent string
+	AdmissionPolicy  string
 	// TestVariantClosure is the subject package's test-variant compartment:
 	// 32 hex over the package's own test-only files, which the maximal
 	// closure excludes. A sibling test edit moves only this compartment, so
@@ -1248,6 +1256,9 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 	if rec.MaximalClosure != current.Hash {
 		return Verdict{Stale, "closure"}, true
 	}
+	if rec.ToolchainContent != "" && current.ToolchainContent != "" && rec.ToolchainContent != current.ToolchainContent {
+		return Verdict{Stale, "toolchain content"}, true
+	}
 	if rec.DynamicStateStrategy != DynamicStateStrategy {
 		// The dynamic-state derivation the record was computed under
 		// moved (or predates the field): its verdict semantics are not
@@ -1277,6 +1288,9 @@ func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, r
 func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure, observed bool) Verdict {
 	if verdict, failed := decideKnownGuards(rec, cur, rt, kind); failed {
 		return verdict
+	}
+	if rec.ToolchainContent == "" || cl.ToolchainContent == "" {
+		return Verdict{Unverifiable, "toolchain content evidence unavailable"}
 	}
 	// An external-state declaration withholds reuse whenever the guards hold:
 	// unverifiability by the author's word, immune to purity overrides and

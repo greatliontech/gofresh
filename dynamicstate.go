@@ -1109,10 +1109,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		if node.Class != closure.PinnedPackage || node.ForTest != "" || node.TestMain {
 			continue
 		}
-		if unkeyable[node.Pin] {
-			// Part of this module's type environment is mutable-local: no
-			// key can pin its fact, so it derives fresh every pass and
-			// enters no cache layer (REQ-closure-dynamic-state-memo).
+		if factScope == "" || unkeyable[node.Pin] {
+			// Missing scope dependencies or a mutable-local part of this
+			// module's type environment prevents a complete key: derive
+			// fresh and enter no cache layer (REQ-closure-dynamic-state-memo).
 			missing = append(missing, node)
 			continue
 		}
@@ -1171,7 +1171,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				return nil, fmt.Errorf("gofresh: dynamic-state scan did not load pinned package %s", node.PkgPath)
 			}
 			record(node.ImportPath, node.PkgPath, fact)
-			if unkeyable[node.Pin] {
+			if factScope == "" || unkeyable[node.Pin] {
 				continue
 			}
 			bucket := buckets[node.Pin]

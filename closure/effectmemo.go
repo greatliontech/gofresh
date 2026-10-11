@@ -65,19 +65,14 @@ import (
 const effectScanStrategy = "gofresh/effect-scan@21"
 
 // effectScanScope is the memo's full scope: the strategy version, the
-// analyzing frontend's version, and — when the analysis' build selection is not
-// the audited default — the selection's audit verdict, because the
-// scan's audited-set consultations now answer per selection
-// (REQ-closure-effect-scan-memo). The default-selection scope is
-// byte-identical to the pre-selection era's, so existing memos keep
-// serving; an unaudited selection's scans key separately and can
-// never serve an audited consumer or vice versa.
+// analyzing frontend, complete selected source and admission policy. A Boolean
+// admission is not their identity, including under the default selection
+// (REQ-closure-effect-scan-memo). Missing dependencies leave the memo inert.
 func (h *Hasher) effectScanScope() string {
-	scope := effectScanStrategy + " " + AnalyzingFrontend()
-	if !h.SelectionAudited() {
-		scope += " selection-unaudited"
+	if h.ToolchainContent() == "" || h.AdmissionPolicy() == "" {
+		return ""
 	}
-	return scope
+	return effectScanStrategy + " " + AnalyzingFrontend() + "|" + h.ToolchainContent() + "|" + h.AdmissionPolicy()
 }
 
 // testingScanStrategy versions the typed testing-effect scan's semantics:
@@ -162,6 +157,9 @@ const (
 // loadEffectScan returns the persisted scan for (scope, key) in dirName;
 // ok is false on any failure — the memo is a cache, never a record.
 func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
+	if scope == "" {
+		return maximalEffectScan{}, false
+	}
 	var payload effectScanPayload
 	if !cachefile.Load(dirName, scope, key, &payload) {
 		return maximalEffectScan{}, false
@@ -173,5 +171,8 @@ func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
 // replace; failures are silent — a lost store costs one recomputation,
 // never a wrong scan.
 func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
+	if scope == "" {
+		return
+	}
 	cachefile.Store(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
 }
