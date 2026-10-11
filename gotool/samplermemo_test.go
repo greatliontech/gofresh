@@ -142,3 +142,35 @@ func TestSamplerReleasesTheHolderAfterAPanickingTake(t *testing.T) {
 		t.Fatalf("the ask after a panicking take = %q, %v; want the sample taken afresh", v, err)
 	}
 }
+
+// A cancelled ask leaves an unfilled holder, but its environment still belongs
+// to its original key. Reusing the caller's slice for another request cannot
+// change what a later live ask under that first key actually samples.
+func TestSamplerOwnsEnvironmentAfterCancelledTake(t *testing.T) {
+	env := append(shimGo(t, "printf '%s\\n' \"$SAMPLE_VERSION\"\n"), "SAMPLE_VERSION=go1.99.1")
+	original := append([]string(nil), env...)
+	s := &Sampler{}
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.Sample(ctx, dir, env); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ask: %v", err)
+	}
+	env[len(env)-1] = "SAMPLE_VERSION=go1.99.2"
+	if got, err := s.Sample(context.Background(), dir, original); err != nil || got != "go1.99.1" {
+		t.Fatalf("original key sampled another environment: %q, %v", got, err)
+	}
+	if got, err := s.Sample(context.Background(), dir, env); err != nil || got != "go1.99.2" {
+		t.Fatalf("distinct key did not sample its own environment: %q, %v", got, err)
+	}
+}
+
+func TestEnvReaderOwnsSuppliedEnvironment(t *testing.T) {
+	env := append(shimGo(t, "printf '{\"GOVERSION\":\"%s\"}\\n' \"$SAMPLE_VERSION\"\n"), "SAMPLE_VERSION=go1.99.1")
+	r := NewEnvReader(Runner{}, t.TempDir(), env)
+	env[len(env)-1] = "SAMPLE_VERSION=go1.99.2"
+	got, err := r.Value(context.Background(), "GOVERSION")
+	if err != nil || got != "go1.99.1" {
+		t.Fatalf("reader adopted caller mutation: %q, %v", got, err)
+	}
+}

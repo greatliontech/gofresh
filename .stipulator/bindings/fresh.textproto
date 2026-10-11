@@ -1960,3 +1960,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "c2716263f69647ae7ae6ae9fbb0fa20cabb159600384cd517c5c199b86a0271d"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-skew"
+  content_hash: "1728af5bb812bf641c79b7a19afbbecb6f6eeaccde24908631a1e2e61542ca76"
+  source_hash: "8d6bde8b6c37b9688d1346468e6f8b324dbca93bd0acd2c813c712f6a6a6fe73"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestSamplerOwnsEnvironmentAfterCancelledTake"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "967e6a48678852ccd77136135b391adbc6ea97df2157df3ca8082683627fa35c"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-go-command-policy"
+  content_hash: "010e4c72173228dea7c8de8973511f1827d37855d085473368278ecdaeecf661"
+  source_hash: "dca593eaf04a7aaaed0d49d846ad7b14b61a43e3e3692ce1c233059ffa2e3933"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestEnvReaderOwnsSuppliedEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "72e64fccea73ce20f0667b0d5c87f0a4634a00a41b2cf990a54698fcf9bff970"
+}

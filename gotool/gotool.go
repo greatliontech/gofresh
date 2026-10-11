@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -250,7 +251,9 @@ func (r *versionReader) sample(ctx context.Context) (string, error) {
 // lifetime.
 func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string, error) {
 	reader, err := s.memo.Get(dir, env, func() *versionReader {
-		return &versionReader{runner: s.Runner, dir: dir, env: env}
+		// A cancelled take leaves this holder available for a retry. Its
+		// configuration belongs to the original key, not the caller's slice.
+		return &versionReader{runner: s.Runner, dir: dir, env: slices.Clone(env)}
 	})
 	if err != nil {
 		return "", err
@@ -278,9 +281,9 @@ type EnvReader struct {
 // NewEnvReader is a pass's reader over the runner, directory, and
 // complete environment every spawn of that pass shares — the one value
 // an analysis entry takes in place of a directory, an environment, and
-// a snapshot.
+// a snapshot. The reader owns a copy of the supplied environment.
 func NewEnvReader(r Runner, dir string, env []string) *EnvReader {
-	return &EnvReader{Runner: r, Dir: dir, Env: env}
+	return &EnvReader{Runner: r, Dir: dir, Env: slices.Clone(env)}
 }
 
 // PrimedEnvReader is a reader whose snapshot is already taken — a

@@ -63,7 +63,8 @@ The immutable-environment method carries no path entries.
 Each subject-support identity is 64 lowercase hexadecimal SHA-256 characters over
 the UTF-8 JSON encoding of the string array containing, in order, the method,
 subject package, subject symbol, maximal closure, test-variant closure, toolchain
-guard, build guard and observation-proof strategy.
+guard, build guard, selected toolchain content identity, admission-policy identity,
+and observation-proof strategy.
 All strings use the manifest's canonical JSON escaping. The support fields
 participate in the combined digest before input entries. They are preserved by
 identity conversion and adoption; merge retains them only when every contributing
