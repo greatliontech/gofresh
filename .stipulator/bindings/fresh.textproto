@@ -1920,3 +1920,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7ae4414839ebefaeab95d1123c8db9c6c63a3e085adc40030a5062fcf527d2b1"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-dependencies"
+  content_hash: "95d55c4b8f0817ee615ec6f97c0ef3aa34adad5e8582dc01b6865251dd95bf03"
+  source_hash: "d5cf438b73671adbaac77c14987973215df2233a23dcd0aff3bebcb713c423c3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPolicyMemoPreservesIdentityAndOwnsItsInputs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e430c071caa7346a965152dea1dcafa52130532617e1d786d2ee54097363a47e"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-dependencies"
+  content_hash: "95d55c4b8f0817ee615ec6f97c0ef3aa34adad5e8582dc01b6865251dd95bf03"
+  source_hash: "d5cf438b73671adbaac77c14987973215df2233a23dcd0aff3bebcb713c423c3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPolicyMemoKeysEveryInput"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8ce20cfd0af1b5bc11ffbb1534f51884025656da495058e0057969f643c183ab"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-dependencies"
+  content_hash: "95d55c4b8f0817ee615ec6f97c0ef3aa34adad5e8582dc01b6865251dd95bf03"
+  source_hash: "d5cf438b73671adbaac77c14987973215df2233a23dcd0aff3bebcb713c423c3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPolicyMemoGeneratedHistories"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1fb8ea778f8720e6e3344145a168ff3d580892ace4137a3be0162bbc9c30343b"
+}
