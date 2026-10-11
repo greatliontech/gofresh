@@ -1646,6 +1646,13 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Adjacent cases over unchanged fixture files can reuse their loaded SSA,
+	// including its lazy structural caches. Every case still runs a singleton
+	// production analysis with fresh reachability and subject judgments. Keep
+	// only the latest package; the independent batch-equivalence and release
+	// tests retain their own cold loads and lifetime judgments.
+	var loadedPackage string
+	var loaded *program
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	for _, tc := range []struct {
 		fixture, subject string
@@ -1978,6 +1985,20 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	} {
 		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
 			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
+			if loadedPackage != subject.Package {
+				delete(h.progs, loadedPackage)
+				loadedPackage = ""
+				loaded = nil
+				loaded, err = h.loadCached(subject.Package)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loadedPackage = subject.Package
+			}
+			// This is an analysis-failure memo, not a structural SSA cache:
+			// each case must independently discriminate an unsupported shape.
+			loaded.PkgScopeProbe = nil
+			h.progs[subject.Package] = loaded
 			results, err := h.ComputeObservabilityBatch([]Subject{subject})
 			if err != nil {
 				t.Fatal(err)
