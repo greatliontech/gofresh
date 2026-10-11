@@ -49,7 +49,7 @@
     through validation and publication or judgment consumption.
   - [x] 2.6 Converge the canonical contracts and enforcement obligations;
     retain the existing conditional result model and accepted sampling limits.
-- [ ] 3. Gofresh: establish complete evidence dependencies for the first
+- [x] 3. Gofresh: establish complete evidence dependencies for the first
   consumer vertical, retaining existing sound analysis algorithms.
   - [x] 3.0 Gomutant safety prerequisite: cut off oracle-drift composition
     lacking an independence license, preserve history without granting exact
@@ -77,7 +77,7 @@
     and sibling validation, including real-drift precedence.
   - [x] 3.4 Release the shared correctness boundary with regression and
     mutation evidence; retain old results as history without promoting support.
-  - [ ] 3.5 Measure and remove Gofresh verification-harness waste before the
+  - [x] 3.5 Measure and remove Gofresh verification-harness waste before the
     consumer vertical. Attribute the current plain/race critical paths and
     distinguish cold builds from recurring warm cost. Preserve test population,
     deciding assertions, race obligations and fixture isolation; verify sharing

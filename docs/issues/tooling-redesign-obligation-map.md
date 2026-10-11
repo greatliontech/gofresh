@@ -140,7 +140,7 @@ this reconciliation document itself.
 | entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable | A; 2.2, 7.8 | TLS reach alone proves neither entropy irrelevance nor supported network outcomes. |
 | explain-no-chain-for-a-dependency-culprit | R; 7.1, 8.3 | Named dependency culprit yields its chain or explicit scope limit, not false absence. |
 | first-offender-refusals | R; 2.5, 4.1, 7.1 | All decidable missing subjects/invalid records named deterministically before costly work. |
-| fixture-tier-parallelism | A; 3.5, 7.7, 9.3 | Current cost attribution and equal completed workloads plus shared-env/memo/fixture isolation, not historical core-count assumptions. |
+| fixture-tier-parallelism | A; 7.7, 9.3 | Broader per-test scheduling needs measured benefit, equal completed workloads and shared-env/memo/hook ownership; sequential fixture reuse alone establishes none of these concurrency premises. |
 | flag-surface-one-table | R; 7.1, 7.8 | Registration remains storage-judged; unknown Parse/default-set reads stay refused. |
 | fleet-sweep-tugboat-vouch-list-retires | C; 2.4, 7.3 | File supplies the same six effective identities before flag mirror removal. |
 | fold-import-name-declared | A; 7.8 | Legal same-basename imports with different declared names; classified renamed package cannot evade scan. |
