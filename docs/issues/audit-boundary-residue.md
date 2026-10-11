@@ -34,15 +34,15 @@ admitted beside analysis selecting `v1`; feature-tagged implementations can
 then differ while the recorded closure and build guard describe analysis
 alone. Cgo flags, compiler selection and persistent GOENV defaults need the
 same complete effective-build judgment, not successive whitelist patches.
-Pin the actual selected implementations and later native checking. Current
-Pew exploitation is not asserted; the public construction path is sufficient
-to require the shared boundary's admission to enforce agreement.
-
-The existing `New` constructor validates effective flags through a background
-context. It is not a cancellable operation entry: a slow `go env -json` can
-outlive a consumer's preparation context. The new operation boundary must own
-this work under its supplied context, including independent waiter cancellation.
-Do not label legacy context-free construction itself a cancelled-entry violation.
+A real-process case confirms admission: `!amd64.v2` selects a function returning
+1 for analysis while `amd64.v2` selects a function returning 2 for execution;
+editing only the latter to return 3 leaves the recorded analysis closure and
+build guard unchanged. Pin later native checking as well. Current Pew
+exploitation is not asserted; the public construction path requires the shared
+boundary's admission to enforce agreement. Distinguish compilation under a
+build environment from execution of its artifact under a runtime environment;
+equality of Go's reported settings alone cannot certify the complete environment
+seen by a compiler wrapper.
 
 ## Declaration snapshot ownership — 5.4 / 5.5a
 

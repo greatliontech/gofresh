@@ -1067,8 +1067,28 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
-// New builds an Engine.
+// New builds an Engine without a caller cancellation bound. Operation owners
+// use NewContext so effective build-flag resolution shares their preparation
+// context.
 func New(opts ...Option) (*Engine, error) {
+	return NewContext(context.Background(), opts...)
+}
+
+// NewContext builds an Engine under ctx, including the go-environment query
+// that resolves effective build flags. Cancellation returns no Engine. The
+// context belongs to construction alone; later operations supply their own.
+func NewContext(ctx context.Context, opts ...Option) (engine *Engine, err error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil construction context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			engine, err = nil, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	e := &Engine{assumePure: func(Subject) bool { return false }}
 	for _, o := range opts {
 		o(e)
@@ -1097,12 +1117,18 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("gofresh: producer env %s=%q disagrees with the analysis env's %q: closure and guard evidence would describe artifacts the producer processes never ran against", key, producer, analysis)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if e.dir == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("gofresh: resolve working directory: %w", err)
 		}
 		e.dir = cwd
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	root, err := gotool.CanonicalDir(e.dir)
 	if err != nil {
@@ -1114,6 +1140,9 @@ func New(opts ...Option) (*Engine, error) {
 	// shares (coherentDir) — read whole or refused, an absent file the
 	// empty set (REQ-vouch-input).
 	if !e.withoutRepositoryVouches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		reviewed, err := ReadVouchFile(filepath.Join(e.dir, RepositoryVouchFile))
 		if err != nil {
 			return nil, fmt.Errorf("gofresh: %w", err)
@@ -1121,6 +1150,9 @@ func New(opts ...Option) (*Engine, error) {
 		WithDynamicStateVouches(reviewed...)(e)
 	}
 	if e.evidenceRoot != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		evidenceRoot, err := gotool.CanonicalDir(e.evidenceRoot)
 		if err != nil {
 			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
@@ -1135,9 +1167,7 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
 		}
 	}
-	// Engine construction is caller-side setup, not an operation phase; its
-	// one-time flag validation runs to completion.
-	if err := buildflags.Validate(context.Background(), e.newPassReader(), e.buildFlags); err != nil {
+	if err := buildflags.Validate(ctx, e.newPassReader(), e.buildFlags); err != nil {
 		return nil, err
 	}
 	return e, nil

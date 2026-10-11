@@ -667,7 +667,8 @@ a sibling's validation re-observes the tree exactly as any view's, an
 observed capture over a subject whose proof the parent never captured
 computes it fresh, and a subject outside the parent refuses.
 
-**REQ-fresh-context** (behavior): Analysis-view construction, checking —
+**REQ-fresh-context** (behavior): Context-bound engine preparation,
+analysis-view construction, checking —
 maximal and observed alike — and producer validation MUST honor caller
 cancellation before and between source, guard, runtime-input, precise-analysis,
 and comparison observations, returning the context error rather than a partial
