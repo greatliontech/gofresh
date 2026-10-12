@@ -155,7 +155,7 @@
     skip settings, and each named killer's own baseline disposition. Establish
     the cases against independent execution, preserve full-oracle dispatch,
     and decide historical eligibility without promoting missing evidence.
-  - [ ] 5.1v Provide consistent, discoverable CLI build identity across Gomutant,
+  - [x] 5.1v Provide consistent, discoverable CLI build identity across Gomutant,
     Stipulator and Pew through `version` and `--version`, before 5.1t. Specify the
     output in each tool, derive it from the running executable, preserve release,
     development, revision, dirty and unknown distinctions, and expose linked

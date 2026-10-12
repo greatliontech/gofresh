@@ -111,7 +111,7 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 52 source issues, excluding
+Each slug names a file beside this one. There are 51 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
@@ -125,7 +125,6 @@ this reconciliation document itself.
 | children-budget-bounded-by-available | A; 2.4, 2.6, 7.4 | Soft family target cannot authorize unavailable physical room or needlessly halve small-host capacity. |
 | classb-arms-one-table | A; 7.1, 7.8 | Fold and SSA agree on effect/entropy/body-cut meaning for every classified row. |
 | cli-long-help-rendering-two-homes | R; 5.6, 8.3 | Remaining Pew help/pointer join equals shared projection for knobbed and knobless verbs. |
-| cli-version-discovery-is-inconsistent | R; 5.1v | All executable tools expose version/--version from actual build metadata without project work; release/dev/dirty/unknown and linked dependency facts remain distinct. |
 | closed-value-ladders-one-source | R; 7.8 | Collected targets cannot grant closure when operand judgment refuses unknown cells. |
 | closure-sub-contract-granularity-residue | R; 2.6, 9.4 | Independent clauses retain their own consent, bindings and wrapped citations. |
 | cold-analysis-pass-program-retention | A/X; 7.7 | Reject retain-all premise; measure residual cold working set after existing per-group releases. |
