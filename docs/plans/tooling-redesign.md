@@ -150,11 +150,20 @@
     cadence boundary before opening another consumer. Reconcile incoming reports,
     remaining contract gaps and the landed changes against the obligation map;
     preserve the completed consumer's evidence and replan only the remaining work.
-  - [ ] 5.1s Repair Gomutant's oracle admission before using it for subsequent
+  - [x] 5.1s Repair Gomutant's oracle admission before using it for subsequent
     assurance. Include Go's alias-shaped runnable tests, effective inherited
     skip settings, and each named killer's own baseline disposition. Establish
     the cases against independent execution, preserve full-oracle dispatch,
     and decide historical eligibility without promoting missing evidence.
+  - [ ] 5.1v Provide consistent, discoverable CLI build identity across Gomutant,
+    Stipulator and Pew through `version` and `--version`, before 5.1t. Specify the
+    output in each tool, derive it from the running executable, preserve release,
+    development, revision, dirty and unknown distinctions, and expose linked
+    Gofresh identity for field reports. The query works outside a repository,
+    with broken project files and without git/go on PATH, and performs no project
+    load, measurement or write. Keep existing server identities truthful without
+    introducing a new transport. Pin metadata variants and both actual CLI forms,
+    update help/guidance, release and install clean builds.
   - [ ] 5.1t Repair the shared native producing boundary: establish the PWD
     dependency across identical builds and different runtime directories,
     reconcile its recordless premise and historical eligibility, and refuse
@@ -165,6 +174,9 @@
     closing, classify legitimately absent A/B diagnostic sides as unfulfilled,
     and reject invalid explicit timing effort before listing or building.
     Preserve independent durable prefixes and operational/interruption precedence.
+    Reconcile the incoming immediate-staleness report with fixed producer/checker
+    identities and reduced tool-owned cases before changing build or artifact
+    guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.2 Migrate Stipulator's package unit and source-derived resolution
     certificates. Cover all selected views, declaration precedence, classifier
     changes, module mode, untagged toolchain pins and dotted package identities.

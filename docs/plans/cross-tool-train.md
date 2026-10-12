@@ -121,8 +121,17 @@ register.
 - **One tooling owner.** Gofresh, gomutant, stipulator and pew follow
   the single sequence below. Pew's docs/plans/performance-evidence.md
   remains the completion checklist for its performance workflow, not a
-  second execution lane. Fetch all four repositories before opening a
-  chunk and before pushing; re-derive contracts across incoming changes.
+  second execution lane. Fetch all four tool repositories and the active
+  shared-workflow/toolchain prerequisite repositories at every chunk open,
+  before pushing, and at every chunk close. During long work, fetch again
+  at review returns and long-run/CI completion checkpoints. Inspect incoming
+  issue changes and disposition them against the active roadmap; fetching
+  alone is not triage. Re-derive contracts across incoming code changes before
+  continuing in the affected repository. A fetch updates remote references,
+  not an observing run's worktree: integrate only at a safe stopped boundary,
+  never by auto-stashing or overwriting another actor's dirty work. Where
+  integration cannot yet occur, inspect the remote documents directly and
+  retain their obligations in the map rather than silently losing the report.
   Preserve migration checkpoints, WIP branches and dirty worktrees until
   their contents have been individually reconciled and verified. Git-go
   is outside this roadmap; godst and go-x-tools changes are prerequisites
@@ -1713,7 +1722,7 @@ in their repos.
       leaves the confirmation unmeasured; sixteen root seams + six face
       seams + SwapGoVersionSamplerForTest with no non-test caller.)
 - [ ] 214. gomutant: the engine's catalog and spawn fan (gomutant
-      docs/issues/engine-run-scoped-oracle-value.md, probe-seam-tuple.md)
+      docs/issues/engine-run-scoped-oracle-value.md)
       — five variant emitters of one token shape and ~35 family-rank
       literals across seven files become one table the emitters and the
       inventory test read; eight spawn entries into runMutantBase and

@@ -5,6 +5,7 @@ when its work lands (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
+| [cli-version-discovery-is-inconsistent](cli-version-discovery-is-inconsistent.md) | Gomutant exposes CLI version lookup, Pew and Stipulator do not; actors need consistent project-independent identity from the running binary | tooling-redesign 5.1v, before 5.1t |
 | [runtime-pwd-without-a-recorded-dependency](runtime-pwd-without-a-recorded-dependency.md) | truthful runtime PWD is discarded although the persisted native record does not bind its runtime directory | tooling-redesign 5.1t, release before consumer adoption |
 | [unit-scratch-declarations-refuse-after-execution](unit-scratch-declarations-refuse-after-execution.md) | malformed scratch declarations reach an executable contribution before the existing grammar refuses them during closing | tooling-redesign 5.1t |
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | remaining Stipulator/Gomutant native content/policy evidence, historical non-upgrade and consumer format boundaries at library adoption | tooling-redesign 5.2 and 5.4 |

@@ -57,7 +57,7 @@ fold at implementation carries every constituent obligation forward.
 | gomutant | 95 | C | 6.7, 9.4 | Recovery works without MCP Tasks; protocol adoption awaits actual SDK/client capability. |
 | gomutant | 187 | A | 2.5, 5.4, 5.5 | Isolated probe writes preserve input identity and contain descendants on cancellation. |
 | gomutant | 188 | R | 2.4, 5.4 | Explicit testdata package loading differs from wildcard filtering and persists attributable evidence. |
-| gomutant | 209 | A | 2.6, 8.3, 9.2 | Live contracts cover observation contributors, enumeration, server identity, bounds and sideline grammar. |
+| gomutant | 209 | A | 2.6, 5.1v, 8.3, 9.2 | Live contracts cover observation contributors, enumeration, running-binary identity, bounds and sideline grammar. |
 | gomutant | 212 | A | 5.4, 6.6 | Licensed splices conserve candidates, attribution, buckets and disposition history. |
 | gomutant | 214 | A | 5.4, 7.1, 7.4, 7.8 | Complete catalog, run-owned spawn facts, memory boundaries and lazy materialization preserve results. |
 | gomutant | 216 | A | 4.2, 5.4, 7.8 | One judgment's projections agree; same-phase sharing never grants missing input evidence. |
@@ -111,7 +111,7 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 51 source issues, excluding
+Each slug names a file beside this one. There are 52 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
@@ -125,6 +125,7 @@ this reconciliation document itself.
 | children-budget-bounded-by-available | A; 2.4, 2.6, 7.4 | Soft family target cannot authorize unavailable physical room or needlessly halve small-host capacity. |
 | classb-arms-one-table | A; 7.1, 7.8 | Fold and SSA agree on effect/entropy/body-cut meaning for every classified row. |
 | cli-long-help-rendering-two-homes | R; 5.6, 8.3 | Remaining Pew help/pointer join equals shared projection for knobbed and knobless verbs. |
+| cli-version-discovery-is-inconsistent | R; 5.1v | All executable tools expose version/--version from actual build metadata without project work; release/dev/dirty/unknown and linked dependency facts remain distinct. |
 | closed-value-ladders-one-source | R; 7.8 | Collected targets cannot grant closure when operand judgment refuses unknown cells. |
 | closure-sub-contract-granularity-residue | R; 2.6, 9.4 | Independent clauses retain their own consent, bindings and wrapped citations. |
 | cold-analysis-pass-program-retention | A/X; 7.7 | Reject retain-all premise; measure residual cold working set after existing per-group releases. |
@@ -171,7 +172,7 @@ this reconciliation document itself.
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 56 source issues.
+There are 55 source issues.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -193,6 +194,7 @@ There are 56 source issues.
 | findings-records-keyed-by-symbol-alone | R; 6.6 | Integration kill and default survivor coexist through every lifecycle/reuse path. |
 | findings-row-projections-one-shape | A; 6.7, 8.3 | Absent/computed-empty delta and layer/reason/omission semantics agree across faces. |
 | gofresh-corpus-pin-lag | R; 5.4 | Adopt the released native boundary with target/window ownership, then verify the clean installed consumer's dependency. |
+| git-go-native-oracle-reuse | A; 5.4, 7.7, 7.8, 8.3 | Reproduce generic native-oracle scratch, testing-context and unavailable-subject refusals after admission repair/adoption; keep placement, attribution and reuse distinct, without commissioning git-go work or promoting historical counts. |
 | installed-binary-dirty-build | R; 4.6, 5.6, 9.3 | Both binaries and live MCP process identify the clean committed repair. |
 | interned-table-entries-admit-duplicate-keys | R; 6.6, 9.2 | Historical table upgrades preserve duplicate-key refusal instead of erasing duplicates. |
 | knob-terse-clause-per-face | R; 2.4, 8.3 | Four named clauses plus nested fields retain face-neutral meaning and explicit form/defaults. |
@@ -207,11 +209,9 @@ There are 56 source issues.
 | narrowing-exemption-and-freshness-clauses-judged-apart | A/X; 2.2, 6.2, 6.3 | Reach alone authorizes no omission; reuse refusal is not observed flakiness. |
 | never-executed-exemption-unaudited | A/X; 6.2, 9.1 | Historical negative buckets neither skip remeasurement nor establish equivalence. |
 | oracle-attribution-hides-post-commit-work | A; 6.3, 6.7, 7.2 | Slow per-test work cannot block another target's commit; partial work is not stable. |
-| oracle-admission-does-not-establish-the-full-set | R; 5.1s | Alias-shaped runnable tests, inherited skip aliases and each named killer's baseline disposition cannot disappear behind a full pattern or aggregate count; historical labels confer no missing evidence. |
 | package-crash-kill-omits-the-panic | R; 5.4, 8.3 | Package panic kill includes bounded message/frame without changing attribution. |
 | per-layer-counts-one-type | R; 6.6, 6.7, 8.3 | Unequal repo/local counts and coexisting selections discriminate swapped/collapsed counts. |
 | plan-cost-is-candidate-materialization | A; 7.7, 7.8 | Lazy construction retains exact candidate identities/extents/counts. |
-| probe-seam-tuple | A; 5.4, 7.1 | Typed result retains every outcome/diagnostic/observation/error through each caller. |
 | probe-unit-build-failure-retries-every-batch | X/A; 6.2, 5.4 | No removed schedule producer rebuilt; live stream unit-build failure remains correctly classified. |
 | process-identity-reads-have-no-discharge-channel | A/X; 2.2, 2.4, 7.3 | Explicit exact assertion and revocation; changed process identity may affect behavior. |
 | protodb-changed-run-commits-within-the-hour | A; 7.7, 9.3 | Named full-oracle workload's first durable target measured honestly against field expectation. |
@@ -234,7 +234,9 @@ There are 56 source issues.
 
 ## Stipulator issue inventory
 
-Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
+Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
+fetched `origin/main`. There are 40, including the nested-module report already
+retained from the remote while local work prevents immediate integration.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -262,6 +264,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 | impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
 | invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
 | ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
+| nested-module-freshness-root | R; 5.2a, 5.2d | Independently selected nested modules retain their accepted module root and workspace mode through resolve/capture/publish; a reduced fixture distinguishes module-local failure from unjustified pass-wide degradation. |
 | out-of-process-backends | C; 2.6, 9.4 | Real second-language backend before capability; persisted verdict is never fresh evidence. |
 | per-stream-color | R; 8.3 | Each stream's own TTY/NO_COLOR/TERM and JSON govern its styling independently. |
 | performance-evidence-axis | C/A; 2.2, 7.6, 9.4 | Fresh measurement alone cannot satisfy a performance requirement; explicit policy required. |
@@ -280,12 +283,13 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 
 ## Pew issue inventory and index-only obligations
 
-Each slug names the sibling `pew/docs/issues/` file. There are nine.
+Each slug names the sibling `pew/docs/issues/` file. There are ten.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
 | derived-state-recompute-invariance-witness | A; 2.3, 3.2, 7.8 | Cold/warm/discarded derived state yields identical judgments under complete identities. |
 | guidance-purpose-column-second-enumeration | A; 2.4, 8.3 | Purpose/default changes cannot diverge between canonical table and served projections. |
+| git-go-recording-immediate-staleness | A; 5.1u, 7.7, 8.3 | Pin producer/checker versions and attribute the complete build-description difference and temporary executable dependency with reduced tool-owned cases; neither version ambiguity nor unsupported outcome is proof of a freshness defect. |
 | mcp-surface | C/A; 8.3 | Existing CLI/JSON complete first; a concrete agent workflow precedes new transport. |
 | mutation-oracle-observation | R; 6.2, 6.6, 6.7, 9.1 | Every named interrupted/historically affected scope remeasured under complete deciding oracles. |
 | per-arm-noise-floors | A/X; 7.6, 8.1, 8.2 | Regression within historical spread still fails explicit tolerance; no automatic threshold increase. |
