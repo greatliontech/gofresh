@@ -2120,3 +2120,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "4b06a5cf5829031b14bde4310491e2aeb97c435db4ebef0f98984bc6f67c7179"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-toolchain-dependencies"
+  content_hash: "95d55c4b8f0817ee615ec6f97c0ef3aa34adad5e8582dc01b6865251dd95bf03"
+  source_hash: "d5cf438b73671adbaac77c14987973215df2233a23dcd0aff3bebcb713c423c3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStandardInventoryCoversPGOCopiesWithoutLosingSourceChecks"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "60578bd62d3775dfa23c640e737c4f1f07725828c2a53251d24b0365d29f6c09"
+}

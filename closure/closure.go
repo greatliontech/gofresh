@@ -1314,7 +1314,7 @@ func (h *Hasher) standardInventoryCovers(pkgs []listPkg) error {
 		if !p.Standard {
 			continue
 		}
-		inventory, ok := h.source.inventory[p.ImportPath]
+		inventory, ok := h.source.inventory[p.SourcePath()]
 		if !ok || filepath.Clean(inventory.Dir) != filepath.Clean(p.Dir) || !slices.Equal(inventory.Files, selectedFiles(p)) {
 			return fmt.Errorf("closure: selected standard package %s is not covered by the toolchain content inventory", p.ImportPath)
 		}

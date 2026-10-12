@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Package is one go-list node.
@@ -42,6 +43,14 @@ type Package struct {
 	ForTest            string
 	Module             *Module
 	Error              *Error
+}
+
+// SourcePath is the package's source import path. Go list decorates build
+// copies for test binaries and PGO mains; ForTest names only the former.
+// The decorated ImportPath remains the graph identity of each build copy.
+func (p Package) SourcePath() string {
+	path, _, _ := strings.Cut(p.ImportPath, " [")
+	return path
 }
 
 // IsGeneratedTestMainFor reports the toolchain-generated test main of

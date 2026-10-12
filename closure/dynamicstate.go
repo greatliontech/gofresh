@@ -66,12 +66,9 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 			seen[p.ImportPath] = true
 			node := GraphPackage{
 				ImportPath: p.ImportPath,
-				PkgPath:    p.ImportPath,
+				PkgPath:    p.SourcePath(),
 				ForTest:    p.ForTest,
 				Imports:    append([]string(nil), p.Imports...),
-			}
-			if i := strings.Index(node.PkgPath, " ["); i >= 0 {
-				node.PkgPath = node.PkgPath[:i]
 			}
 			if p.Name == "main" && strings.HasSuffix(p.ImportPath, ".test") {
 				node.TestMain = true
