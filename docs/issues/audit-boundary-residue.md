@@ -26,10 +26,10 @@ Use module grammar or resolved metadata, with quoted/unquoted, workspace and
 mutable introduced-dependency controls. Current-policy shaped records also
 need that dependency judgment; their policy label alone grants nothing.
 
-## Build-description adoption — 4.3 / 5.1 / 5.2 / 5.4
+## Remaining build-description adoption — 5.1 / 5.2 / 5.4
 
 Adopt the explicit build/runtime boundary and its complete-build guard together
-at each producer and its checking surfaces. The shared contract is
+at the remaining producers and their checking surfaces. The shared contract is
 REQ-guard-explicit-build in `docs/specs/guards.md`; unit ownership is
 REQ-fresh-built-unit in `docs/specs/evidence.md`. A compiling producer cannot
 simply rename its old split-environment option to a runtime description.
@@ -100,29 +100,6 @@ and can retain a valid record name. Pin per-file refusal under the declared
 optional-field grammar while preserving the native and ledger codecs' distinct
 rules. This is not authentication of a private store.
 
-## Ordinary arm closing and progress — 4.3 / 4.5 / 4.5a / 4.6
-
-Pew announces measurement before support preparation, whose analysis progress
-overwrites that label. A long measurement can therefore heartbeat an already
-finished analysis phase; publication waiting likewise lacks its own transition.
-Pin preparation, actual execution, finalization and publication at their real
-boundaries, not only through a reporter unit test.
-
-`Store.WriteBatchContext` bounds lock waiting but calls context-free encoding,
-staging and rename afterward. A closing deadline that expires after the lock
-can still publish; its error also bypasses the arm's deadline attribution.
-Define the last cancellable publication point, check it before installation,
-and retain the committed disposition if cancellation follows a successful
-rename. Keep the old complete recording on pre-commit failure.
-
-The contributing process is the arm's package test binary, not its warm-up,
-analysis probes or subsequent profiles. Carry the executor's actual terminal
-fact into the unit instead of reconstructing a success receipt during ingest.
-Observation roots must use the owned runner. The already-mapped cancellation
-after successful execution must enter bounded closing before ingestion, not
-only at the later write gate. Preserve source/runtime exclusion through final
-validation and publication without claiming endpoint comparisons are a lock.
-
 ## MCP resource publication — 5.5a, including the existing single-root server
 
 Stipulator's `Server.syncIndex` reads/writes/iterates `indexed` without a lock,
@@ -134,25 +111,14 @@ compile followed by `resources/list`, including removals. One successful
 compilation publication boundary can own reconciliation without changing
 compile's diagnostic-return behavior. Repair is not conditional on adding cwd.
 
-## Requested work and destination ownership — 4.1–4.5 / 5.1
+## Remaining A/B selection admission — 5.1
 
-Pew's per-package `Destinations` check cannot see two workspace modules with
-root-level `BenchmarkWork` writing to the same explicit store path. Under
-`run --all`, both can report recorded while the second replaces the first.
-Admit destination injectivity over the whole requested invocation before any
-measurement, not independently per package.
-
-A valid recording of `BenchmarkWork/small` can satisfy ordinary `run`'s
-top-level freshness filter for a subsequent request of `BenchmarkWork/large`.
-Requested workload fulfillment is separate from native freshness. Carry one
-admitted workload through selection, serving and stream admission; retain the
-known bounds on dynamic children never observed, and extend the same rule to
-the already-mapped A/B selection case.
-
-`run --benchtime=bogus` reaches ordinary package preparation and warm-up before
-the measurement command rejects it; run count also lacks the corresponding
-entry admission. Test the supported duration/iteration and count domains before
-listing/building, keeping diagnostic effort separate from ordinary effort.
+Extend requested-workload admission to the already-mapped A/B selection case:
+a valid but unselected row cannot authorize its own selection. Requested work
+is distinct from native freshness and from capture health. Retain the known
+bounds on dynamic children never observed; missing-on-both-sides profile
+obligations remain requested obligations rather than disappearing from the
+intersection of emitted rows.
 
 ## Destructive cancellation — 5.6 / 7.1
 
@@ -177,6 +143,3 @@ overwrite, applicability refresh and profile attachment semantics.
   accumulated prefix. Source establishes the allocation/cumulative work shape,
   not a measured resource failure. Measure equal completed workloads before
   choosing bounded retention; never truncate authoritative successful listings.
-- **4.3 / 4.5 before acceptance:** every conversion/adoption/merge used by the
-  first Pew arm needs unit-owned cancellation there. Item 5.5 completes other
-  paths; it cannot defer a prerequisite of the first accepted vertical.

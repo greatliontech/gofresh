@@ -98,40 +98,40 @@
       test inventories, and account for the remaining measured bottlenecks.
       Close only when those bottlenecks have no further justified harness
       optimization; one speedup alone does not close this work.
-- [ ] 4. Prove the replacement architecture through one complete Pew arm.
-  - [ ] 4.1 Derive only the shared operations that this vertical needs:
+- [x] 4. Prove the replacement architecture through one complete Pew arm.
+  - [x] 4.1 Derive only the shared operations that this vertical needs:
     immutable operation/session configuration, coherent analysis snapshot,
     unit-owned obligations, native evidence and final typed judgment.
-    - [ ] 4.1a Pin immutable configuration after a cancelled sampler take,
+    - [x] 4.1a Pin immutable configuration after a cancelled sampler take,
       invocation-wide destination injectivity, ordinary effort admission and
       requested sub-benchmark workload through serving and stream admission.
-    - [ ] 4.1b Admit the actual producing build description against the analysis
+    - [x] 4.1b Admit the actual producing build description against the analysis
       description, including resolved architecture/compiler/Go-environment inputs,
       and make expensive construction caller-context-owned. Preserve legitimate
       runtime-environment differences without lending analysis code facts to a
       different produced artifact.
-  - [ ] 4.2 Prepare evidence before execution wherever producing obligations
+  - [x] 4.2 Prepare evidence before execution wherever producing obligations
     require it. One final check selects admissible evidence under the declared
     model automatically; trust permissions and optional analysis cost remain
     explicit. Current refinement never fills a missed producing obligation.
-  - [ ] 4.3 Release the capability, then adopt invocation admission,
+  - [x] 4.3 Release the capability, then adopt invocation admission,
     preparation, actual receipt, finalization, validation, atomic publication
     and subsequent checking for one ordinary/supported benchmark arm.
-  - [ ] 4.4 Integrate, review and bind migration checkpoint 1f8df13's generated
+  - [x] 4.4 Integrate, review and bind migration checkpoint 1f8df13's generated
     producer-premise witness before accepting the migrated producer. Preserve
     its native positive controls and non-OS-exit scope; add real process tests
     for terminal-event claims.
-  - [ ] 4.5 Pin missing/borrowed frame, process, subject, environment and
+  - [x] 4.5 Pin missing/borrowed frame, process, subject, environment and
     support; normal failure, abnormal completion, cancellation after success,
     finalization expiry, late contributions, sibling closing, drift, revoked
     policy, publication failure, restart and historical non-upgrade.
-    - [ ] 4.5b Pin actual execution/finalization/publication phase transitions,
+    - [x] 4.5b Pin actual execution/finalization/publication phase transitions,
       closing-context expiry after lock acquisition, the last cancellable write
       point and committed-state retention after it. Carry the executor's terminal
       fact and the complete contributor roster into the owned closing boundary.
-    - [ ] 4.5a Make every evidence-composition operation the first arm actually
+    - [x] 4.5a Make every evidence-composition operation the first arm actually
       uses cancellable under its unit; 5.5 completes the remaining paths.
-  - [ ] 4.6 Remove the arm's repeated coordinate/environment/support assembly
+  - [x] 4.6 Remove the arm's repeated coordinate/environment/support assembly
     and stage-selection wiring. Retire its adapter at adoption, converge
     review and install only the clean committed consumer.
 - [ ] 5. Extend the proven boundaries through complete consumer verticals.

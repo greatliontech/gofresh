@@ -2905,8 +2905,9 @@ in their repos.
       the bump's work); command.go's 'no go command, so outside gotool's
       runner' comment stale since 281.A. Directly after 331; no longer
       behind 292/297/300 (landed or merged) nor 314/315/202.
-- [x] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — pew
-      docs/issues/gofresh-corpus-pin-lag.md; runCommand's containment
+- [x] 291. pew: the bump behind gofresh 279, 281 (v0.107.0 today) — recover
+      in Pew with `git log --all -- docs/issues/gofresh-corpus-pin-lag.md`;
+      runCommand's containment
       copy deletes at it (281); the store re-measures once. After 290.
       Rider (2026-09-29 replan): gofresh 292's clause re-key, as at 290.
       Delegated (2026-10-06): lands as pew's performance-evidence plan
@@ -4093,8 +4094,9 @@ in their repos.
       import) were found from the field, not by a test; asserting
       NeverServe only refuses more as drivers are added and a reachable
       driver never serves.
-- [x] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (pew docs/issues/
-      gofresh-corpus-pin-lag.md, serve-proven-blocked-by-benchmark-loop.md)
+- [x] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (recover in Pew with
+      `git log --all -- docs/issues/gofresh-corpus-pin-lag.md` and
+      `git log --all -- docs/issues/serve-proven-blocked-by-benchmark-loop.md`)
       — six releases consumed at once: the harness-pacing audit that
       lifts serve-proven's inertness (today run's default serves only
       empty-bodied benchmarks), the canonical closure member (every

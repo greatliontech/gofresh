@@ -120,7 +120,7 @@ this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 4.1, 4.1a, 4.3, 4.5, 4.5a, 4.6, 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
+| audit-boundary-residue | A; 5.1, 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -173,13 +173,14 @@ this reconciliation document itself.
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 53 source issues.
+There are 55 source issues.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
 | attest-has-no-replace-or-withdraw | R; 2.4, 6.6, 9.2 | Explicit replace/withdraw preserves history and affects only selected survivor. |
 | baseline-measurement-banks-only-at-the-first-commit | A; 2.5, 6.5 | Restart before first finding retains validated baseline; separate documents merge shared bank. |
 | campaign-silent-past-its-deadline | R; 5.5, 6.7 | Deadline during final evidence work returns bounded ending with committed prefix. |
+| check-red-fleet-sweep | R; 5.4 | Mutation-basis and candidate-conservation requirements obtain their required evidence class without deleting deciding witnesses or granting historical counts authority. |
 | engine-run-scoped-oracle-value | A; 5.4, 7.1, 7.4 | Concurrent probes/campaigns retain their own bounds and environments. |
 | enumeration-lag-gate-unstated | R; 2.6, 5.4 | Effective tags/configuration affect enumeration and its before-measurement refusal. |
 | ephemeral-attestation-lifecycle | A; 2.2, 6.6, 9.2 | New uncommitted file then commit/rename/delete never invents producing provenance. |
@@ -193,6 +194,7 @@ There are 53 source issues.
 | findings-judge-minutes-class-over-a-real-document | R; 7.7, 7.8 | Cold/warm real-document phase costs with identical judged population. |
 | findings-records-keyed-by-symbol-alone | R; 6.6 | Integration kill and default survivor coexist through every lifecycle/reuse path. |
 | findings-row-projections-one-shape | A; 6.7, 8.3 | Absent/computed-empty delta and layer/reason/omission semantics agree across faces. |
+| gofresh-corpus-pin-lag | R; 5.4 | Adopt the released native boundary with target/window ownership, then verify the clean installed consumer's dependency. |
 | installed-binary-dirty-build | R; 4.6, 5.6, 9.3 | Both binaries and live MCP process identify the clean committed repair. |
 | interned-table-entries-admit-duplicate-keys | R; 6.6, 9.2 | Historical table upgrades preserve duplicate-key refusal instead of erasing duplicates. |
 | knob-terse-clause-per-face | R; 2.4, 8.3 | Four named clauses plus nested fields retain face-neutral meaning and explicit form/defaults. |
@@ -233,7 +235,7 @@ There are 53 source issues.
 
 ## Stipulator issue inventory
 
-Each slug names the sibling `stipulator/docs/issues/` file. There are 33.
+Each slug names the sibling `stipulator/docs/issues/` file. There are 36.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -252,6 +254,9 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 33.
 | dotted-package-element-unresolvable | R; 5.2 | m and m.v2 resolve/capture/publish distinctly without whole-tree fallback. |
 | executed-and-resolution-reason-faces-unclassed | A; 5.2, 5.3, 8.3 | Typed execution/resolution/gofresh causes retain their actual authority. |
 | go-backend-load-path-pairs | A; 5.2, 7.8 | One membership result supplies ownership/refusal across malformed or escaping workspace paths. |
+| gofresh-corpus-pin-lag | R; 5.2 | Adopt the released native boundary under every declared selection, retaining static-certificate semantics and verifying the installed dependency. |
+| findings-store-historical-fleet-sweep | R; 9.1, 9.3 | The three historical records remain non-authoritative until a named complete-oracle scope remeasures them or they resolve; this is not authorization for a campaign. |
+| installed-binary-skew | R; 5.2 | Both installed binaries and long-lived readers identify the clean committed consumer after adoption. |
 | impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
 | invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
 | ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
