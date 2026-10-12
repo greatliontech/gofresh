@@ -27,8 +27,8 @@ coverage, and locality alone cannot exclude compile-time mutant influence.
 
 ## Retained charters
 
-The inventory contains 78 open charters: 20 Gofresh, 28 Gomutant, 17
-Stipulator, nine Pew and four shared/unprefixed entries. Each is mapped once
+The inventory contains 74 open charters: 20 Gofresh, 28 Gomutant, 17
+Stipulator, five Pew and four shared/unprefixed entries. Each is mapped once
 here; its issue rows below preserve independently deciding cases. A split or
 fold at implementation carries every constituent obligation forward.
 
@@ -103,10 +103,6 @@ fold at implementation carries every constituent obligation forward.
 | pew | 252 | A | 5.1, 5.6, 7.1, 8.3 | Declaration/path/metadata/line-grammar folds preserve actual selected benchmark obligations. |
 | pew | 276 | A | 4.4, 4.5, 5.1, 9.3 | Generated premise/corruption/conditions tests use independent expectations and live record grammar. |
 | pew | 320 | A | 3.4, 4.3, 5.6, 7.4, 8.3 | Adopt each shared release without changing producer environment or native evidence semantics. |
-| pew | 350 | R | 5.1 | Missing-on-both-sides benchmarks remain requested profile obligations. |
-| pew | 351 | R | 2.5, 4.5, 5.1 | Success followed by cancellation reaches bounded finalization; incomplete execution does not. |
-| pew | 352 | R | 5.1 | A valid but unselected A/B row cannot authorize its own selection. |
-| pew | 353 | A | 4.4, 9.1 | Adapt and bind the generated premise witness; add separate actual OS-terminal cases. |
 | pew | 364 | R | 7.6, 8.3 | Informational versus enforcing workflows expose their evidence policies and exits. |
 | shared | 330 | A | 2.3, 5.5, 8.3 | Caller frames are producer diagnostics, not proof a directory open was harmless. |
 | shared | 360 | R | 7.7, 7.8 | Attribute cold/warm/first-result/lost-work/RSS costs without counting refused work as speed. |
@@ -120,7 +116,7 @@ this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 5.1, 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
+| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -156,7 +152,7 @@ this reconciliation document itself.
 | json-record-readers-one-home | A; 5.6, 9.2 | Strict key/trailing checks retain distinct manifest-byte and indented-fingerprint canonicality rules. |
 | loader-spawns-outside-the-runner | A; 2.4, 4.1, 7.1 | Actual loader children carry immutable policy and cancellation accounting; no assumed hook/driver escape. |
 | memo-scope-axes | A; 7.8 | Memo/read-path folds preserve discard/recompute invariance; cone/whole composition state remains distinct. |
-| toolchain-dependency-consumer-adoption | R; 4.3, 5.1, 5.2, 5.4 | Native content/policy fields survive consumer formats; static certificates re-derive and execution evidence remeasures where required, without upgrading historical support. |
+| toolchain-dependency-consumer-adoption | R; 5.2, 5.4 | Native content/policy fields survive remaining consumer formats; static certificates re-derive and execution evidence remeasures where required, without upgrading historical support. |
 | net-url-parse-godebug-channel | R; 2.3, 3.2 | ParseQuery under urlmaxqueryparams and sibling Setenv; retain refusal until relevance is sound. |
 | per-file-memos-one-shape | R; 7.8 | Cold/warm/corrupt/concurrent memo cases agree and preserve completed entries. |
 | prints-default-one-home | R; 5.6, 8.3 | Remaining Pew predicate agrees with actual pflag rendering, including string "0" versus integer zero. |
@@ -235,7 +231,7 @@ There are 55 source issues.
 
 ## Stipulator issue inventory
 
-Each slug names the sibling `stipulator/docs/issues/` file. There are 36.
+Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -254,6 +250,9 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 36.
 | dotted-package-element-unresolvable | R; 5.2 | m and m.v2 resolve/capture/publish distinctly without whole-tree fallback. |
 | executed-and-resolution-reason-faces-unclassed | A; 5.2, 5.3, 8.3 | Typed execution/resolution/gofresh causes retain their actual authority. |
 | go-backend-load-path-pairs | A; 5.2, 7.8 | One membership result supplies ownership/refusal across malformed or escaping workspace paths. |
+| cerebro-scoped-discovery-cost | A; 5.2, 7.7, 7.8 | Attribute the identified scoped-discovery workload by subphase on cold and warm states before changing reuse or admission; a timed-out pass is not completion. |
+| generic-constraint-seeding-reuse | A; 5.2, 7.8 | Deterministic, runtime-seeded and unresolved generic method targets retain distinct classification; measure repeated traversal separately from precision. |
+| implemented-capability-acceptance | C; 7.5, 9.4 | Derive explicit partial capability acceptance separately from execution scope and report filtering, retaining global reds and suite-health limits; the consumer filing does not commission implementation. |
 | gofresh-corpus-pin-lag | R; 5.2 | Adopt the released native boundary under every declared selection, retaining static-certificate semantics and verifying the installed dependency. |
 | findings-store-historical-fleet-sweep | R; 9.1, 9.3 | The three historical records remain non-authoritative until a named complete-oracle scope remeasures them or they resolve; this is not authorization for a campaign. |
 | installed-binary-skew | R; 5.2 | Both installed binaries and long-lived readers identify the clean committed consumer after adoption. |
@@ -278,7 +277,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 36.
 
 ## Pew issue inventory and index-only obligations
 
-Each slug names the sibling `pew/docs/issues/` file. There are nine.
+Each slug names the sibling `pew/docs/issues/` file. There are eight.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -286,7 +285,6 @@ Each slug names the sibling `pew/docs/issues/` file. There are nine.
 | guidance-purpose-column-second-enumeration | A; 2.4, 8.3 | Purpose/default changes cannot diverge between canonical table and served projections. |
 | mcp-surface | C/A; 8.3 | Existing CLI/JSON complete first; a concrete agent workflow precedes new transport. |
 | mutation-oracle-observation | R; 6.2, 6.6, 6.7, 9.1 | Every named interrupted/historically affected scope remeasured under complete deciding oracles. |
-| observation-premise-property-evidence | A; 4.4, 4.5, 9.1 | Adapt/classify/bind generated premise witness plus independent real-process terminal cases. |
 | per-arm-noise-floors | A/X; 7.6, 8.1, 8.2 | Regression within historical spread still fails explicit tolerance; no automatic threshold increase. |
 | remote-bench-execution | C; 2.6, 9.4 | Real remote workflow binds build, receipt, machine lease and guards; disconnect releases ownership. |
 | spec-wide-requirement-forming | R; 2.6, 8.3, 9.4 | Canonical behavior and bindable enforcement agree; no automatic evidence grants. |

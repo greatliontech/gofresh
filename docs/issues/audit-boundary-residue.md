@@ -26,7 +26,7 @@ Use module grammar or resolved metadata, with quoted/unquoted, workspace and
 mutable introduced-dependency controls. Current-policy shaped records also
 need that dependency judgment; their policy label alone grants nothing.
 
-## Remaining build-description adoption — 5.1 / 5.2 / 5.4
+## Remaining build-description adoption — 5.2 / 5.4
 
 Adopt the explicit build/runtime boundary and its complete-build guard together
 at the remaining producers and their checking surfaces. The shared contract is
@@ -110,15 +110,6 @@ the advertised resource index. Test overlapping same-root calls and successful
 compile followed by `resources/list`, including removals. One successful
 compilation publication boundary can own reconciliation without changing
 compile's diagnostic-return behavior. Repair is not conditional on adding cwd.
-
-## Remaining A/B selection admission — 5.1
-
-Extend requested-workload admission to the already-mapped A/B selection case:
-a valid but unselected row cannot authorize its own selection. Requested work
-is distinct from native freshness and from capture health. Retain the known
-bounds on dynamic children never observed; missing-on-both-sides profile
-obligations remain requested obligations rather than disappearing from the
-intersection of emitted rows.
 
 ## Destructive cancellation — 5.6 / 7.1
 

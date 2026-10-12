@@ -1,7 +1,6 @@
 # Adopt native toolchain dependency evidence
 
-Lands: docs/plans/tooling-redesign.md 4.3 for the first Pew arm, 5.1 for its
-remaining producers, 5.2 for Stipulator and 5.4 for Gomutant.
+Lands: docs/plans/tooling-redesign.md 5.2 for Stipulator and 5.4 for Gomutant.
 
 Native fingerprints carry optional `toolchainContent` and `admissionPolicy`
 keys after `buildConfig`. Their omission preserves historical encoding, not
@@ -22,7 +21,7 @@ At each adoption:
   would otherwise encounter unknown native keys. Gomutant's embedded native
   member and key-set guard require its document-version decision at the bump;
   Stipulator's native aliases still need record-name and store-admission
-  checks; Pew's native envelope needs its own compatibility decision.
+  checks.
 - Stipulator's source-derived resolution certificates have a separate
   projection and comparison: `resolutioncache.SourceTiers`, `Admits`, and
   `backends/golang.closureMoved`. Adopt the dependencies of that static claim
@@ -30,7 +29,7 @@ At each adoption:
   unchanged. Test same-version selected-content changes and historical
   certificates with missing dependencies independently of witness execution.
 - Account for the public `closure.Closure` fields and `SetAnalysisScope`'s
-  returned enriched scope where used. No current call site in these three
+  returned enriched scope where used. No current call site in these remaining
   consumers uses either API. An ordinary call may discard the new return;
   a caller separately consuming the scope needs the constructed hasher's
   dependencies, because an incomplete caller scope does not arm a memo.
@@ -38,6 +37,6 @@ At each adoption:
   extension, producer closing and restart. A same-version GOROOT edit must not
   reuse an old result, and missing historical evidence must remain missing.
 
-The consumer pins remain unchanged until these scoped adoptions. Their
+The remaining consumer pins stay unchanged until these scoped adoptions. Their
 current binaries do not acquire new native-field support merely because the
 library has a newer release.

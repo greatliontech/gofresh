@@ -240,18 +240,18 @@ here where they differ; historical evidence and unfinished work stay tracked.
       affected narrowed survivors. Preserve the full oracle of record and
       the explicitly stated runtime-sampling limit. This unblocks Pew's
       performance-evidence 12.1 coverage obligation.
-- [ ] 350. pew: derive requested profile obligations from the benchmark
+- [x] 350. pew: derive requested profile obligations from the benchmark
       inventory, including benchmarks absent on both recording sides.
       Pin one fulfilled diagnostic beside an unrecorded requested benchmark
       on both renderers and the command's exit classification.
-- [ ] 351. pew: carry a successfully completed timed process into its
+- [x] 351. pew: carry a successfully completed timed process into its
       bounded finalization gate before observation ingestion. Pin
       cancellation after successful execution, genuine incomplete execution
       and finalization drift; preserve earlier arms.
-- [ ] 352. pew: judge A/B stream names against the requested declarations,
+- [x] 352. pew: judge A/B stream names against the requested declarations,
       not names supplied by the stream. Pin an unselected well-formed row
       beside the selected result without dropping valid sub-benchmarks.
-- [ ] 353. pew: reconcile checkpoint 1f8df13, retain its native positive
+- [x] 353. pew: reconcile checkpoint 1f8df13, retain its native positive
       controls and stated non-OS-exit limit, bind the generated premise
       witness as the required evidence class and converge independent
       review. Do not close the property gap on file presence alone.

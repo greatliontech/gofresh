@@ -135,9 +135,21 @@
     and stage-selection wiring. Retire its adapter at adoption, converge
     review and install only the clean committed consumer.
 - [ ] 5. Extend the proven boundaries through complete consumer verticals.
-  - [ ] 5.1 Migrate Pew's remaining producer/profile/A-B paths; preserve
+  - [x] 5.1 Migrate Pew's remaining producer/profile/A-B paths; preserve
     identity-only diagnostic evidence. Repair profile obligation inventory,
     post-success finalization and requested-selection stream admission.
+    - [x] 5.1a Preserve requested diagnostic obligations absent on both sides,
+      including renderer and exit precedence over independent fulfilled work.
+    - [x] 5.1b Admit A/B streams against each side's selected declarations and
+      child pattern before publication, preserving valid asymmetric populations.
+    - [x] 5.1c Complete retained-artifact and closing ownership on the remaining
+      producers, preserving the distinct timed-comparison and diagnostic models.
+    - [x] 5.1d Converge review and full-oracle probes, complete settled acceptance,
+      reconcile the retained obligations and install the clean consumer.
+  - [ ] 5.1r Re-audit the four current repositories at the completed-vertical
+    cadence boundary before opening another consumer. Reconcile incoming reports,
+    remaining contract gaps and the landed changes against the obligation map;
+    preserve the completed consumer's evidence and replan only the remaining work.
   - [ ] 5.2 Migrate Stipulator's package unit and source-derived resolution
     certificates. Cover all selected views, declaration precedence, classifier
     changes, module mode, untagged toolchain pins and dotted package identities.
