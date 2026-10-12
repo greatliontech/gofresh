@@ -1,0 +1,22 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-control-execution-description"
+  content_hash: "d9979299e6980a36b39ce9deafa62122fcc96b525154695f6362e36e43cef0f8"
+  source_hash: "4c3039657f728c4e6d9f33f3e31aedcf32acef05a0b42f8cb1c692d8198c9dad"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}
+
+bindings {
+  requirement_id: "REQ-control-execution-description"
+  content_hash: "d9979299e6980a36b39ce9deafa62122fcc96b525154695f6362e36e43cef0f8"
+  source_hash: "4c3039657f728c4e6d9f33f3e31aedcf32acef05a0b42f8cb1c692d8198c9dad"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionRuntimeDirectoryPreservesSymlinkParents"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "02f6e10bd2196fc9e97379c78219d3a33ebc1f52d51d7a417729364f03548a96"
+}

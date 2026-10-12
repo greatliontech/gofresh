@@ -1902,7 +1902,7 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 
 // Runtime-input revalidation computes environment values from the
 // producer processes' environment when the caller declared one
-// (WithProducerEnv): a record digested under the env the producing
+// (the session's runtime description): a record digested under the env the producing
 // process actually saw stays valid though the analysis env differs,
 // while an engine without the declaration - the analysis-env stand-in -
 // reads the same record stale. The runtime-inputs contract's
@@ -1917,23 +1917,23 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := func(opts ...Option) runtimeinput.State {
+	current := func(runtimeEnv []string) runtimeinput.State {
 		t.Helper()
-		e, err := New(append([]Option{WithDir(dir), WithEnv(os.Environ()...)}, opts...)...)
+		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{Environment: runtimeEnv}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		view := &View{moduleDir: dir, engine: e}
+		view := &View{moduleDir: dir, engine: session.engine}
 		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return st
 	}
-	if got := current(WithProducerEnv(producerEnv...)); !got.OK || got.Digest != state.Digest {
+	if got := current(producerEnv); !got.OK || got.Digest != state.Digest {
 		t.Fatalf("producer-env recompute = %+v, want the recorded digest %s", got, state.Digest)
 	}
-	if got := current(); got.Digest == state.Digest {
+	if got := current(nil); got.Digest == state.Digest {
 		t.Fatal("analysis-env stand-in reproduced the producer-env digest; the env divergence is invisible")
 	}
 
@@ -1944,13 +1944,13 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	obsDir := writeObservedViewModule(t)
 	sub := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	obsProducerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
-	validate := func(opts ...Option) error {
+	validate := func(runtimeEnv []string) error {
 		t.Helper()
-		e, err := New(append([]Option{WithDir(obsDir), WithEnv(os.Environ()...)}, opts...)...)
+		session, err := NewSession(context.Background(), BuildDescription{Directory: obsDir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{Environment: runtimeEnv}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.NewView(context.Background(), []Subject{sub}, obsDir)
+		v, err := session.engine.NewView(context.Background(), []Subject{sub}, obsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1967,10 +1967,10 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		}
 		return v.Validate(context.Background())
 	}
-	if err := validate(WithProducerEnv(obsProducerEnv...)); err != nil {
+	if err := validate(obsProducerEnv); err != nil {
 		t.Fatalf("producer-env observed validation = %v, want valid", err)
 	}
-	if err := validate(); !errors.Is(err, ErrViewChanged) {
+	if err := validate(nil); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("analysis-env stand-in = %v, want the view-changed manifest refusal", err)
 	}
 }
@@ -1980,7 +1980,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 // env moving its GOMAXPROCS stales every fingerprint captured under
 // the prior width - the runtime reads the key before execution, so
 // scheduling behavior moves with no other guard moving - while an
-// equal producer env checks valid (WithProducerEnv).
+// equal producer env checks valid (the session's runtime description).
 func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -1995,11 +1995,11 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 	}
 	view := func(width string) *View {
 		t.Helper()
-		e, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(append(append([]string(nil), base...), "GOMAXPROCS="+width)...))
+		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: base, Inputs: []string{}}, RuntimeDescription{Environment: append(append([]string(nil), base...), "GOMAXPROCS="+width)}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
+		v, err := session.engine.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2025,11 +2025,9 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 	}
 }
 
-// The producer env may diverge from the analysis env only in keys the
-// closure and guard evidence does not consume: build-identity
-// disagreement and a declared-but-empty producer env both refuse at
-// construction instead of letting stale evidence serve against
-// artifacts the producer processes never ran with (WithProducerEnv).
+// Legacy engine construction cannot distinguish compilation from prebuilt
+// execution, so every divergent producer environment refuses. The explicit
+// session form separately witnesses supported runtime differences above.
 func TestProducerEnvConstructionRefusals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -2045,12 +2043,15 @@ func TestProducerEnvConstructionRefusals(t *testing.T) {
 		t.Fatalf("empty producer env = %v, want the declared-empty refusal", err)
 	}
 	divergent := append(append([]string(nil), base...), "GOMODCACHE=/producer-only-cache")
-	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(divergent...)); err == nil || !strings.Contains(err.Error(), "GOMODCACHE") {
-		t.Fatalf("divergent build identity = %v, want the GOMODCACHE refusal", err)
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(divergent...)); err == nil || !strings.Contains(err.Error(), "NewSession") {
+		t.Fatalf("divergent build identity = %v, want the explicit build/runtime remedy", err)
 	}
-	agreeing := append(append([]string(nil), base...), "GOFRESH_TEST_WIDTH=2")
-	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(agreeing...)); err != nil {
-		t.Fatalf("resource-key-only divergence refused: %v", err)
+	divergentRuntime := append(append([]string(nil), base...), "GOFRESH_TEST_WIDTH=2")
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(divergentRuntime...)); err == nil {
+		t.Fatal("ambiguous runtime-only spelling admitted without an explicit build description")
+	}
+	if _, err := New(WithDir(dir), WithEnv(base...), WithProducerEnv(base...)); err != nil {
+		t.Fatalf("identical producing environment refused: %v", err)
 	}
 }
 

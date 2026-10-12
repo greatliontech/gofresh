@@ -2020,3 +2020,93 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "bf7af7cacc77b743b3049b30fd6abc0b0f94b883c8f0ad30585fac090873b806"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-built-unit"
+  content_hash: "583f76be610df26722a23f5cdf19ede9062b7ceb3a04b33ed132eda613e29f11"
+  source_hash: "19494162e8b4e3c18e69130e107bf00e2435aab9997ab086a375e63ed95c1f01"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionOwnsItsDescriptions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d36de30353920501757859d90a5df3d73eb20ce2dc85967a80e7be58f5775a30"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-built-unit"
+  content_hash: "583f76be610df26722a23f5cdf19ede9062b7ceb3a04b33ed132eda613e29f11"
+  source_hash: "19494162e8b4e3c18e69130e107bf00e2435aab9997ab086a375e63ed95c1f01"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-built-unit"
+  content_hash: "583f76be610df26722a23f5cdf19ede9062b7ceb3a04b33ed132eda613e29f11"
+  source_hash: "19494162e8b4e3c18e69130e107bf00e2435aab9997ab086a375e63ed95c1f01"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzUnitTerminalProtocol"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4df2a3f1af197ffadba92c6bc29a41858b8dcdc553bab77791f4f050fb64e5fe"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-unit-roster"
+  content_hash: "6a1e927116a4c32d86bf851baf5c562cbf341a1c8419bed22f90b9528c1bd184"
+  source_hash: "6606a026ac07dc60077351df86961d5a6b4cb5d977abf528eb338fa5ce786e8f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzUnitTerminalProtocol"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4df2a3f1af197ffadba92c6bc29a41858b8dcdc553bab77791f4f050fb64e5fe"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-unit-close"
+  content_hash: "901f9c224482ec6ab9a1f1af389acb3e9a8dadd1ba3811799c99e0dedcd9e0f0"
+  source_hash: "430be46aaa9fc2ee6c348bab49b8282d684d82f9c1da52fe7e13affd696f9b7d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzUnitTerminalProtocol"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4df2a3f1af197ffadba92c6bc29a41858b8dcdc553bab77791f4f050fb64e5fe"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-unit-bindings"
+  content_hash: "b741077139817432356ab421ca292940dea5aa761440c5730007991cffb79774"
+  source_hash: "8942ec2cab4cbee7088d7f88cf5deb03a7e5dcbad3299fe05d705eba183ee074"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-final-evidence-selection"
+  content_hash: "e4426c655042a4c42d0ec09a1d288f3f4cae3b7027d2396251038f381c0dc16d"
+  source_hash: "c4c53ee4e101dc0873cfb04a6a4c6d3444bdf6c52b8e21f7eb30ad35a02d5045"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-built-unit"
+  content_hash: "583f76be610df26722a23f5cdf19ede9062b7ceb3a04b33ed132eda613e29f11"
+  source_hash: "19494162e8b4e3c18e69130e107bf00e2435aab9997ab086a375e63ed95c1f01"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionRuntimeDirectoryPreservesSymlinkParents"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "02f6e10bd2196fc9e97379c78219d3a33ebc1f52d51d7a417729364f03548a96"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-applicability-transform"
+  content_hash: "5ab8cc25070470f12a72faaadc50f614f2663d8929b988662786d7d9bf660cfb"
+  source_hash: "0c3ca3aa688c69c7266784edeacb6f1eb49a7110aef6706d63489bc80d5cc782"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}

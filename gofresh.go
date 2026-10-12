@@ -582,10 +582,13 @@ type Engine struct {
 	envSet          bool
 	// producerEnv, when declared, is the producer processes' environment:
 	// runtime-input revalidation computes environment values from it
-	// instead of env, so checks stay coherent with recorded evidence when
-	// the two environments diverge (WithProducerEnv).
+	// instead of env. Sessions bind it to their separate prebuilt-runtime
+	// description; the legacy option can only repeat the analysis environment.
 	producerEnv    []string
 	producerEnvSet bool
+	// completeBuild selects the explicit session build-description guard.
+	// Legacy construction has no complete additional-input declaration.
+	completeBuild bool
 	// evidenceRoot is the root a subject's runtime-input evidence is
 	// anchored at: relative identities are re-hashed under it. Empty
 	// means the module directory (WithEvidenceRoot).
@@ -996,29 +999,15 @@ func WithEnv(env ...string) Option {
 	}
 }
 
-// WithProducerEnv supplies the complete process environment the
-// engine's producer processes actually run under, when it differs from
-// the analysis environment WithEnv configures — a consumer injecting
-// resource bounds (a GOMAXPROCS cap, say) into the processes it spawns
-// without throttling the engine's own loads. Revalidation of
-// runtime-input evidence — the current checks a view performs against
-// recorded observations, moved-input naming included — computes
-// environment values from this environment, keeping checks coherent
-// with what the producing processes recorded: the runtime-inputs
-// contract requires every environment-aware current check to use the
-// same complete process environment as the producing process, and an
-// analysis-env stand-in silently violates it the moment the two
-// diverge. Loads, Go commands, source analysis, and guard observation
-// keep using WithEnv's environment. Unset, WithEnv governs both. The
-// two environments may differ only in keys the closure, guard, and
-// snapshot evidence does not consume — New refuses a producer env
-// whose Go build identity (GOROOT, GOMODCACHE, GOCACHE, GOFLAGS,
-// GOOS, GOARCH, GOEXPERIMENT, GOTOOLCHAIN, GOWORK, GOPATH,
-// CGO_ENABLED) disagrees with the analysis env, because closure and
-// guard digests would then describe artifacts the producer processes
-// never ran against and stale evidence could serve silently. New also
-// refuses a declared-but-empty producer env. WithEnv's normalization
-// and ownership semantics apply.
+// WithProducerEnv repeats the complete producing environment for legacy engine
+// construction. It must equal the normalized analysis environment: this option
+// cannot distinguish a compiling go command from execution of a prebuilt binary.
+// A distinct environment or declared-empty environment is refused before queries.
+//
+// Deprecated: use NewSession's separate build and runtime descriptions for
+// prebuilt execution with different runtime values. An equal environment needs
+// only WithEnv. Compiler wrappers can consume any environment variable, so a
+// selected-key comparison cannot authorize split compilation environments.
 func WithProducerEnv(env ...string) Option {
 	owned := append([]string(nil), env...)
 	return func(e *Engine) {
@@ -1036,35 +1025,6 @@ func (e *Engine) evidenceEnv() []string {
 		return e.producerEnv
 	}
 	return e.env
-}
-
-// buildIdentityDivergence reports the first Go build-identity key whose
-// value differs between the analysis and producer environments, with
-// both values; empty key means agreement. The closure, guard, and
-// snapshot evidence consumes these keys from the analysis env, so a
-// producer env disagreeing on one would let stale evidence serve
-// silently against artifacts the producer never ran with.
-func buildIdentityDivergence(analysis, producer []string) (key, analysisValue, producerValue string) {
-	for _, k := range []string{"GOROOT", "GOMODCACHE", "GOCACHE", "GOFLAGS", "GOOS", "GOARCH", "GOEXPERIMENT", "GOTOOLCHAIN", "GOWORK", "GOPATH", "CGO_ENABLED"} {
-		a, producerV := envValue(analysis, k), envValue(producer, k)
-		if a != producerV {
-			return k, a, producerV
-		}
-	}
-	return "", "", ""
-}
-
-// envValue returns key's value in a normalized environment, empty when
-// absent — absence and an explicitly empty value deliberately compare
-// equal here: both make the go tool fall back to the same default.
-func envValue(env []string, key string) string {
-	prefix := key + "="
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			return entry[len(prefix):]
-		}
-	}
-	return ""
 }
 
 // New builds an Engine without a caller cancellation bound. Operation owners
@@ -1113,8 +1073,8 @@ func NewContext(ctx context.Context, opts ...Option) (engine *Engine, err error)
 			return nil, fmt.Errorf("gofresh: producer env: %w", err)
 		}
 		e.producerEnv = normalizedProducer
-		if key, analysis, producer := buildIdentityDivergence(e.env, e.producerEnv); key != "" {
-			return nil, fmt.Errorf("gofresh: producer env %s=%q disagrees with the analysis env's %q: closure and guard evidence would describe artifacts the producer processes never ran against", key, producer, analysis)
+		if !slices.Equal(e.env, e.producerEnv) {
+			return nil, errors.New("gofresh: distinct producer and analysis environments are ambiguous about compilation; use NewSession with separate build and runtime descriptions and execute the built artifact")
 		}
 	}
 	if err := ctx.Err(); err != nil {

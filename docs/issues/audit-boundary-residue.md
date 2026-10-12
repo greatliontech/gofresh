@@ -26,23 +26,22 @@ Use module grammar or resolved metadata, with quoted/unquoted, workspace and
 mutable introduced-dependency controls. Current-policy shaped records also
 need that dependency judgment; their policy label alone grants nothing.
 
-## Analysis and producing build agreement — 4.1, before 4.3
+## Build-description adoption — 4.3 / 5.1 / 5.2 / 5.4
 
-`gofresh.go`'s `buildIdentityDivergence` compares a smaller environment-key set
-than the build guard consumes. A producer selecting `GOAMD64=v2` can be
-admitted beside analysis selecting `v1`; feature-tagged implementations can
-then differ while the recorded closure and build guard describe analysis
-alone. Cgo flags, compiler selection and persistent GOENV defaults need the
-same complete effective-build judgment, not successive whitelist patches.
-A real-process case confirms admission: `!amd64.v2` selects a function returning
-1 for analysis while `amd64.v2` selects a function returning 2 for execution;
-editing only the latter to return 3 leaves the recorded analysis closure and
-build guard unchanged. Pin later native checking as well. Current Pew
-exploitation is not asserted; the public construction path requires the shared
-boundary's admission to enforce agreement. Distinguish compilation under a
-build environment from execution of its artifact under a runtime environment;
-equality of Go's reported settings alone cannot certify the complete environment
-seen by a compiler wrapper.
+Adopt the explicit build/runtime boundary and its complete-build guard together
+at each producer and its checking surfaces. The shared contract is
+REQ-guard-explicit-build in `docs/specs/guards.md`; unit ownership is
+REQ-fresh-built-unit in `docs/specs/evidence.md`. A compiling producer cannot
+simply rename its old split-environment option to a runtime description.
+The legacy distinct-environment form refuses with the migration remedy.
+
+The deciding regression retains the actual selected implementations: analysis
+under `GOAMD64=v1` and a compiling producer under `v2` previously admitted results
+1 and 2, followed by result 3 after editing the producer-only implementation
+while the analysis closure and guard stayed equal. Execute the admitted artifact,
+preserve legitimate runtime differences, and pin later native checking under
+the same guard domain. Diagnostic producers retain identity-only evidence;
+their instrumentation cannot silently acquire ordinary outcome support.
 
 ## Declaration snapshot ownership — 5.4 / 5.5a
 

@@ -271,3 +271,51 @@ using the context it supplies for that phase and retaining the interruption
 in the operation's account. The library does not continue a cancelled entry
 under a private uncancellable context. Closing expiry yields no final reusable
 answer from that unit; an earlier independently committed unit remains kept.
+
+## Explicit built-artifact production
+
+**REQ-fresh-built-unit** (behavior): The explicit built-artifact producing form
+MUST bind its snapshot, declared successful build and contributing execution
+without exposing mutable analysis or transaction state. The session owns copied
+build/runtime descriptions and accepted assertion sets; its complete vouch set
+is caller-resolved, with no additional implicit repository-file read. Its fixed
+runtime directory defaults to the build directory, a relative value resolving
+against that directory; it supplies the actual process PWD. A different runtime
+description requires a different session. The executor builds the selected
+package artifact under the snapshot's build description, retains it unchanged
+and declares its successful construction through a snapshot/package-bound
+identity. This is an attributable executor assertion, not binary authentication
+or a proof that an arbitrary compiler followed the description. The execution
+uses that artifact under the runtime description; a compiling go command under
+the latter is not that execution. The form admits one subject and exactly one
+contributing process per unit; a second registration refuses. Registration fixes
+the process identity, capture path and observation declarations before execution,
+with an exclusively assigned capture protected through finalization. A relative
+capture path resolves against the admitted runtime directory; execution and
+finalization receive that same absolute coordinate, preserving a symlink/parent
+path's filesystem meaning rather than lexically cancelling its components.
+Submission
+accepts only its opaque contribution handle and one explicit normal, abnormal or
+never-started terminal disposition. Normality includes harness completion and
+flush, not merely a zero exit code, and says nothing about sample success. A
+never-started process produces no executed fingerprint. Closing freezes the
+roster before work, owns finalization and validation under its context, and
+returns the native fingerprint, terminal fact, observation support class and
+final native judgment only on success. Supported observation, identity-only
+guards and incomplete capture remain distinct. A deliberately identity-only
+diagnostic unit selects no producing outcome proof, and completion cannot
+promote its evidence to supported observation. An abort that wins before closing
+commits its final state ends the unpublished unit, cancels its library-owned
+work and prevents final evidence from escaping. An already closed unit is
+unchanged; caller cancellation retains its attribution if it also occurred.
+Stopping the executed process and disposing of its capture remain the executor's
+responsibility. Checking an existing fingerprint selects admissible established
+evidence and closes its own interval before returning a final judgment. Neither
+operation seals the shared snapshot or supplies missing historical obligations.
+Source inventories, native compartment ledgers and explanation facts are
+caller-owned projections of that same immutable snapshot; explanation facts
+supply no execution or observation premise. An inert-compartment extension is
+separately requested, retains producing evidence and returns its checked native
+endpoint and companion ledger only after its own closing validation.
+The result owner retains sample acceptance, actual execution truth, hold-still
+protection through publication and the separate durable-write disposition.

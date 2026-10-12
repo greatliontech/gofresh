@@ -80,6 +80,34 @@ guard digest under this clause.
 > result. A code-determining input must be a code guard, or it is a false-valid hole
 > for exactly the consumers that drop measurement guards.
 
+**REQ-guard-explicit-build** (behavior): An explicitly described producing
+build MUST retain its complete normalized compilation environment separately
+from the runtime environment of its retained artifact. The ordinary package
+driver is pinned and the command directory supplies PWD before that description
+is used by analysis or compilation. Equality of selected environment keys or of
+Go's reported settings alone does not license different compilation environments:
+a compiler wrapper can consume other variables. The explicit form's build guard
+includes all raw compilation-environment entries, every resolved Go setting,
+ordered executable flags and the explicitly present additional-input declaration,
+including a present-empty declaration. A declared GOENV file is additionally a
+raw-byte dependency; absent, present and disabled remain distinct. These mutable
+resolved inputs are re-observed at closing, not cached for the session's lifetime.
+The guard's additional domain is `gofresh/build-description@1`; its environment
+identity uses SHA-256 over counted, byte-length-framed strings, preserving invalid
+UTF-8 and absent versus empty entries. The generated work-directory operand in
+Go's GOGCCFLAGS prefix-map argument alone is normalized: the recognized file/debug
+prefix-map flag and destination `/tmp/go-build` remain, while its absolute
+`go-build`-prefixed temporary source directory is replaced by a fixed marker.
+Multiple mappings, malformed quoting or an unrecognized mapping refuse admission.
+Other compiler flags remain identity-bearing. This relies on the stated ordinary
+compiler/linker and toolchain-cache integrity premise, including honoring that
+prefix mapping; it does not assert that wrappers ignore arbitrary environment
+variables. Additional compiler-file inputs remain the executor's declared-input
+responsibility. Existing legacy construction accepts an omitted producer override
+or an exactly equal normalized producer environment; a distinct producer
+environment refuses with the explicit build/runtime migration remedy. A later
+description or decoder cannot upgrade historical evidence into this guard domain.
+
 **REQ-guard-buildconfig-failclosed** (behavior, refines REQ-guard-buildconfig): An
 observable build input the build-configuration guard cannot parse — a malformed
 `go env` output — MUST fail closed, the capture refused, rather than digest to a

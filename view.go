@@ -387,7 +387,15 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// is the guard's, its directory the one every guard observation
 	// captures in — never a second probe of the same pass
 	// (REQ-guard-buildconfig, REQ-guard-toolchain).
-	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(e.runner, observedGuardDir(reader.Dir), e.env, snapshot), e.evidenceEnv(), kind, e.guardInputs()...)
+	inputs := e.guardInputs()
+	if e.completeBuild {
+		identity, err := completeBuildEnvironment(ctx, snapshot, e.dir, e.env)
+		if err != nil {
+			return observationFacts{}, err
+		}
+		inputs = append(inputs, "gofresh/build-description@1="+identity)
+	}
+	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(e.runner, observedGuardDir(reader.Dir), e.env, snapshot), e.evidenceEnv(), kind, inputs...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -714,6 +722,12 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 // AttachObservation binds sealed, process-backed runtime evidence to a captured
 // observation proof. The returned fingerprint is ready for producer validation.
 func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
+	return v.attachObservation(subject, fingerprint, observation, true)
+}
+
+// attachObservation checks the producing form the unit prepared. The ordinary
+// form carries identity-only evidence without synthesizing an observation proof.
+func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation, observed bool) (Fingerprint, error) {
 	state, err := runtimeinput.CompletedState(observation)
 	if err != nil {
 		return Fingerprint{}, err
@@ -723,8 +737,15 @@ func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, obser
 	if v.sealed {
 		return Fingerprint{}, ErrViewSealed
 	}
-	observed := v.observedFingerprintLocked(subject)
-	if !v.capturedObserved[subject] || fingerprint != observed {
+	cl, exists := v.facts.maximal[subject]
+	if !exists {
+		return Fingerprint{}, errors.New("gofresh: attachment subject is outside the view")
+	}
+	want := v.fingerprintLocked(subject, cl)
+	if observed {
+		want = v.observedFingerprintLocked(subject)
+	}
+	if (observed && !v.capturedObserved[subject]) || fingerprint != want {
 		return Fingerprint{}, errors.New("gofresh: observation does not match captured subject proof")
 	}
 	if _, attached := v.attachedObservations[subject]; attached {
@@ -1090,12 +1111,31 @@ func (v *View) Validate(ctx context.Context) (opErr error) {
 	v.sealed = true
 	hasObserved := len(v.capturedObserved) != 0
 	hasApplicability := len(v.applicabilityChecks) != 0
+	identities := make(map[Subject]runtimeinput.State)
+	var identitySubjects []Subject
+	for _, subject := range v.subjects {
+		if state, attached := v.attachedObservations[subject]; attached && !v.capturedObserved[subject] {
+			identities[subject] = state
+			identitySubjects = append(identitySubjects, subject)
+		}
+	}
 	v.mu.Unlock()
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// Identity-only attachments select no proof, but their runtime span still
+	// closes after source comparison. A concrete input move outranks a cut.
+	if len(identitySubjects) != 0 {
+		defer func() {
+			if opErr == nil || errors.Is(opErr, ErrAnalysisUnavailable) {
+				if err := v.compareAttachedObservations(ctx, identities, identitySubjects); err != nil {
+					opErr = err
+				}
+			}
+		}()
 	}
 	// The view validates whatever it captured: observation proofs pull
 	// in the observed arm, and a maximal-only producer the base

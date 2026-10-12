@@ -350,3 +350,43 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cea458ea0b98740a30a7f6eecb05a61b53ef6e8d5f4ea79bf07a306a32c25a57"
 }
+
+bindings {
+  requirement_id: "REQ-guard-explicit-build"
+  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
+  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestCompleteBuildDescriptionIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4aa3234232839b14b8f617642a83373d0ca9afd9558ee42377044fe371b43585"
+}
+
+bindings {
+  requirement_id: "REQ-guard-explicit-build"
+  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
+  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestGeneratedCompilerFlagNormalization"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b4d58de517a694c94f84024ed653f0deb3e66c067e6e1b3a1cb2d9748c822d70"
+}
+
+bindings {
+  requirement_id: "REQ-guard-explicit-build"
+  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
+  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
+}
+
+bindings {
+  requirement_id: "REQ-guard-explicit-build"
+  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
+  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestProducerEnvConstructionRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "532d3c99abfd6a31c01b915285a37920b00affb3a1b9334ed188541a1dde2c07"
+}
