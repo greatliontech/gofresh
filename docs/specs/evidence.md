@@ -278,7 +278,8 @@ answer from that unit; an earlier independently committed unit remains kept.
 MUST bind its snapshot, declared successful build and contributing execution
 without exposing mutable analysis or transaction state. The session owns copied
 build/runtime descriptions and accepted assertion sets; its complete vouch set
-is caller-resolved, with no additional implicit repository-file read. Its fixed
+is caller-resolved in canonical `import-path.Variable` identity form, with no
+additional implicit repository-file read or re-interpretation as CLI flag syntax. Its fixed
 runtime directory defaults to the build directory, a relative value resolving
 against that directory; it supplies the actual process PWD. A different runtime
 description requires a different session. The executor builds the selected

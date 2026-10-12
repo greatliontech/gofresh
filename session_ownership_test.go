@@ -16,13 +16,13 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	build := BuildDescription{Directory: dir, Environment: append(os.Environ(), "FRESH_BUILD_OWNED=original"), Flags: []string{"-tags=owned"}, Inputs: []string{"profile:original"}}
 	runEnv := append(os.Environ(), "FRESH_RUNTIME_OWNED=original")
 	pure := []Subject{{Package: "example.com/p", Symbol: "F"}}
-	vouches := []string{"example.com/dep:State"}
+	vouches := []string{"example.com/dep.State"}
 	containment := &gotool.Containment{WaitDelay: time.Second}
 	policy := SessionPolicy{PureSubjects: pure, Vouches: vouches, Runner: gotool.Runner{Containment: containment, Prepare: func(*exec.Cmd) {
 		build.Environment[len(build.Environment)-1] = "FRESH_BUILD_OWNED=changed"
 		runEnv[len(runEnv)-1] = "FRESH_RUNTIME_OWNED=changed"
 		build.Flags[0], build.Inputs[0] = "-tags=changed", "profile:changed"
-		pure[0].Symbol, vouches[0] = "G", "example.com/dep:Other"
+		pure[0].Symbol, vouches[0] = "G", "example.com/dep.Other"
 		containment.WaitDelay = 5 * time.Second
 	}}}
 	s, err := NewSession(context.Background(), build, RuntimeDescription{Environment: runEnv}, policy)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/greatliontech/gofresh/gotool"
@@ -48,7 +49,8 @@ const (
 )
 
 // SessionPolicy carries the operation's accepted analysis and assertion policy.
-// Vouches is the complete, caller-resolved standing set; session construction
+// Vouches is the complete, caller-resolved set of canonical import-path.Variable
+// identities, as returned by ParseVouchEntries; session construction
 // reads no additional repository vouch file. PureSubjects are explicit caller
 // assertions, distinct from selected source directives. Callback behavior remains
 // its author's responsibility; descriptions and sets are owned copies.
@@ -137,7 +139,7 @@ func NewSession(ctx context.Context, build BuildDescription, execution RuntimeDe
 	if err != nil {
 		return nil, err
 	}
-	vouches, err := ParseVouchEntries(policy.Vouches)
+	vouches, err := canonicalSessionVouches(policy.Vouches)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +179,26 @@ func NewSession(ctx context.Context, build BuildDescription, execution RuntimeDe
 	e.deferredCheckClose = true
 	owned := BuildDescription{Directory: e.dir, Environment: slices.Clone(e.env), Flags: slices.Clone(e.buildFlags), Inputs: append([]string{}, e.buildInputs...)}
 	return &Session{engine: e, build: owned, runtimeDir: runtimeDir}, nil
+}
+
+// canonicalSessionVouches validates the already-resolved identity form through
+// the vouch grammar's one validator, rather than asking an API caller to turn
+// identities back into flag spellings. Dots in import paths are not separators.
+func canonicalSessionVouches(identities []string) ([]string, error) {
+	owned := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		separator := strings.LastIndexByte(identity, '.')
+		if separator <= strings.LastIndexByte(identity, '/') || separator <= 0 {
+			return nil, fmt.Errorf("gofresh: vouch identity %q is not canonical import-path.Variable", identity)
+		}
+		canonical, err := ParseVouchEntry(identity[:separator] + ":" + identity[separator+1:])
+		if err != nil || canonical != identity {
+			return nil, fmt.Errorf("gofresh: vouch identity %q is not canonical import-path.Variable", identity)
+		}
+		owned = append(owned, canonical)
+	}
+	slices.Sort(owned)
+	return slices.Compact(owned), nil
 }
 
 // rebaseProcessPath gives a process-relative path one absolute spelling without
