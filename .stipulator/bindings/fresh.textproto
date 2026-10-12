@@ -2130,3 +2130,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "60578bd62d3775dfa23c640e737c4f1f07725828c2a53251d24b0365d29f6c09"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-evidence-support"
+  content_hash: "1ede787e2b119b64183c2c79246459559a2d9af66b07854a700917a6bb3606bd"
+  source_hash: "d7f08fa1b513af6ef1e076ffcfccdf8f514834f9b69d9683ca1716f52caf14e2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerPremisesAcrossGeneratedBindings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4ec3161d6c6afa866a919d405a3c6df5f2c605ababc8d61afb31b3c6488fad85"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-evidence-support"
+  content_hash: "1ede787e2b119b64183c2c79246459559a2d9af66b07854a700917a6bb3606bd"
+  source_hash: "d7f08fa1b513af6ef1e076ffcfccdf8f514834f9b69d9683ca1716f52caf14e2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzOutcomeEvidenceMergePreservesSupport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a11895dac710ce4aa3858e05956fafb1ff17229619acf7f68ed209f67c10eacb"
+}

@@ -1950,3 +1950,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "9575a1726769d02082811c05934b86515159ddfaf4012aedbf1707f252b4f0ef"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-producer-premises"
+  content_hash: "4c095a23fd7aca769dd1d8ecf8048f56b067ab9d831b0e4eb98753e254b8b8aa"
+  source_hash: "4be39b682152ac6ba9f790fde52c1ab9cb46abf760ec99786d9edf42bd8f984e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerPremisesAcrossGeneratedBindings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4ec3161d6c6afa866a919d405a3c6df5f2c605ababc8d61afb31b3c6488fad85"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-outcome-method"
+  content_hash: "5cb66c5397cf390d18092a70af88a450804d542de4a7ae11d81f637755541023"
+  source_hash: "2e5f22800728b54e38abb63134c2427b9286808a66cf9ffe9fef1bb506b25625"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestProducerPremisesAcrossGeneratedBindings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4ec3161d6c6afa866a919d405a3c6df5f2c605ababc8d61afb31b3c6488fad85"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-outcome-method"
+  content_hash: "5cb66c5397cf390d18092a70af88a450804d542de4a7ae11d81f637755541023"
+  source_hash: "2e5f22800728b54e38abb63134c2427b9286808a66cf9ffe9fef1bb506b25625"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
+}

@@ -2818,8 +2818,8 @@ in their repos.
 - [x] 289. gofresh: the weekly fleet sweep's first measured `stipulator
       check` over this repo is RED on three requirements —
       REQ-fresh-fingerprint-data, REQ-fresh-observation-data,
-      REQ-guard-buildconfig — with no gap excusing any (gofresh
-      docs/issues/check-red-fleet-sweep.md, measured at b34f15c): the
+      REQ-guard-buildconfig — with no gap excusing any (measured at
+      b34f15c; recover with `git log --all -- docs/issues/check-red-fleet-sweep.md`): the
       diagnosis first (a cold check over the current tree, the rows
       file read per binding), then the re-bind per requirement with the
       bound bodies read — never a blanket — and any row still red after
