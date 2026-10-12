@@ -26,6 +26,14 @@ Use module grammar or resolved metadata, with quoted/unquoted, workspace and
 mutable introduced-dependency controls. Current-policy shaped records also
 need that dependency judgment; their policy label alone grants nothing.
 
+Generated import probes also always choose `zz_gomutant_structural_probe.go`
+without establishing that the path is absent. An existing file with an
+initializer can be overwritten in the scratch tree, so a test fails because
+the initializer vanished rather than because of the declared forbidden import.
+Pin a collision carrying independent behavior, not merely a pre-existing copy
+of the same blank import. Preserve exact candidate attribution and the original
+tree; this is part of safe shaped materialization before shaped assurance.
+
 ## Remaining build-description adoption — 5.2 / 5.4
 
 Adopt the explicit build/runtime boundary and its complete-build guard together
@@ -42,6 +50,12 @@ while the analysis closure and guard stayed equal. Execute the admitted artifact
 preserve legitimate runtime differences, and pin later native checking under
 the same guard domain. Diagnostic producers retain identity-only evidence;
 their instrumentation cannot silently acquire ordinary outcome support.
+
+Stipulator's `newEngine(ctx, ...)` still calls `gofresh.New`, discarding the
+operation's context during construction queries. Adopt the context-owned
+constructor with the native session, and test an in-flight preparation query
+whose cancellation must return before any witness executes. The loader's
+separate containment limitation does not excuse this owned-query path.
 
 ## Declaration snapshot ownership — 5.4 / 5.5a
 
@@ -100,6 +114,13 @@ and can retain a valid record name. Pin per-file refusal under the declared
 optional-field grammar while preserving the native and ledger codecs' distinct
 rules. This is not authentication of a private store.
 
+The resolution envelope's `decodeRecord` performs only one decoder call.
+Appending another JSON value or trailing garbage to an otherwise valid named
+record leaves the first object and its computed name intact. Require whole-input
+admission in both loading and collection when replacing resolution certificates
+at 5.2b, with valid whitespace controls. Do not conflate this envelope grammar
+with the embedded native fingerprint's stricter canonical form.
+
 ## MCP resource publication — 5.5a, including the existing single-root server
 
 Stipulator's `Server.syncIndex` reads/writes/iterates `indexed` without a lock,
@@ -129,6 +150,26 @@ overwrite, applicability refresh and profile attachment semantics.
 - **5.6:** Gomutant's historical coverage wire data remains needed, but production
   `Coverage.Persist` / `PersistedCoverage.Restore` have only test callers after
   the cutoff. Separate fixture conversion from live execution capability.
+- **5.6:** Pew's profile parser and ordinary runner separately recognize the
+  same PASS/optional-CR completion marker. Use one recognizer when consolidating
+  the producer readers; keep executor success, sample admission and profile
+  validity separate. No current disagreement between those grammars is claimed.
+- **5.2 / 7.1:** The shared final judgment still exposes status and prose where
+  the contract requires an authority/cause account. Preserve that obligation at
+  migration rather than growing another consumer-local reason parser. Separately,
+  `EnvSnapshot.JSON` and its parsed values remain two representations; make the
+  common representation immutable before extending its consumer exposure.
+- **9.2:** Pew's older producer prose still describes a compiling go-test driver
+  and one package transaction beside the retained-binary/per-arm clauses. Its
+  toolchain prose conflates reported version with selected content. Reconcile
+  these with the current built-arm and selected-content contracts, without
+  changing the installed evidence model to match obsolete prose.
+- **5.2 / 5.3:** Stipulator's cancellation and publication prose must distinguish
+  interrupted work from the already-completed package prefix; the publisher's
+  old group-completion comment must describe its actual package callback.
+- **5.4:** Gomutant's shaped-observation prose must describe the transformed
+  executable's identity-only evidence and distinct assertion authority. A clean
+  baseline's supported observation is not the mutant's support.
 - **7.7:** `gotool.Runner.Run` retains all output in buffers before bounding a
   refusal, and Pew A/B retains streams plus cloned blocks while rewriting each
   accumulated prefix. Source establishes the allocation/cumulative work shape,

@@ -146,13 +146,49 @@
       producers, preserving the distinct timed-comparison and diagnostic models.
     - [x] 5.1d Converge review and full-oracle probes, complete settled acceptance,
       reconcile the retained obligations and install the clean consumer.
-  - [ ] 5.1r Re-audit the four current repositories at the completed-vertical
+  - [x] 5.1r Re-audit the four current repositories at the completed-vertical
     cadence boundary before opening another consumer. Reconcile incoming reports,
     remaining contract gaps and the landed changes against the obligation map;
     preserve the completed consumer's evidence and replan only the remaining work.
+  - [ ] 5.1s Repair Gomutant's oracle admission before using it for subsequent
+    assurance. Include Go's alias-shaped runnable tests, effective inherited
+    skip settings, and each named killer's own baseline disposition. Establish
+    the cases against independent execution, preserve full-oracle dispatch,
+    and decide historical eligibility without promoting missing evidence.
+  - [ ] 5.1t Repair the shared native producing boundary: establish the PWD
+    dependency across identical builds and different runtime directories,
+    reconcile its recordless premise and historical eligibility, and refuse
+    malformed scratch declarations before producing work. Release before the
+    affected consumer adoption; preserve legitimate runtime/build separation.
+  - [ ] 5.1u Complete Pew's remaining refusal and closing boundaries: contain
+    its environment-query children through preparation and completed-unit
+    closing, classify legitimately absent A/B diagnostic sides as unfulfilled,
+    and reject invalid explicit timing effort before listing or building.
+    Preserve independent durable prefixes and operational/interruption precedence.
   - [ ] 5.2 Migrate Stipulator's package unit and source-derived resolution
     certificates. Cover all selected views, declaration precedence, classifier
     changes, module mode, untagged toolchain pins and dotted package identities.
+    - [ ] 5.2a Carry complete selections into eager/lazy loads and certificate
+      identities, including module mode and untagged toolchain pins; reconcile
+      Go's runnable declaration inventory, physical source positions and longest
+      declared package identity before certifying presence or absence.
+    - [ ] 5.2b Certify every dependency of the returned resolution: all selected
+      views, earlier-declaration absence, seeding/classifier rules and native
+      source/content/admission identities. Refuse malformed whole envelopes and
+      re-derive historical incomplete certificates without fabricated execution.
+    - [ ] 5.2c Specify and release the minimal shared package-producing form
+      for the actual contributing subjects and processes. Preserve the existing
+      singleton form, independent package closing and separate retry executions;
+      reuse immutable preparation facts without merging mutable transactions.
+    - [ ] 5.2d Adopt complete build/runtime descriptions and retained artifacts
+      together, including omitted auto-PGO dependencies and caller-owned
+      construction cancellation. Migrate producing, finalizing, checking and
+      publication paths without carrying a degraded legacy adapter as completion.
+    - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
+      package failure and cancellation, and the independent completed prefix.
+      Attribute scoped discovery and certificate cold/warm costs before changing
+      sharing. Keep retry durability/tier/account obligations at 5.3 explicit,
+      and prevent another consumer-local reason parser during migration.
   - [ ] 5.3 Preserve Stipulator argument identity and clause-scoped supersede;
     retain per-group witness tiers and package-completion persistence during
     drift retries. Publish operation accounts even when a later step fails.

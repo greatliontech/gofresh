@@ -72,12 +72,12 @@ fold at implementation carries every constituent obligation forward.
 | gomutant | 258 | A | 5.4, 5.5, 8.3 | Subject and record faults remain distinct; human explanation and contained git failures name their causes. |
 | gomutant | 267 | A | 6.3, 6.7, 8.3 | Live vocabularies, structured dispositions, panic detail and cumulative counters survive finalization. |
 | gomutant | 268 | A | 2.6, 9.4 | Re-census and split live subcontracts without losing consent, scope or enforcement. |
-| gomutant | 269 | R | 5.4, 6.2 | Corrupt/truncated streams cannot invent verdicts; build/crash/retry classifications retain precedence. |
+| gomutant | 269 | R | 5.1s, 5.4, 6.2 | Early oracle admission retains named baseline dispositions; the later stream consolidation preserves corrupt/truncated refusal and build/crash/retry precedence. |
 | gomutant | 294 | A | 2.6, 5.4, 9.4 | An external oracle reads the materialized mutant and carries an explicit support/terminal model. |
 | gomutant | 296 | A/X | 2.6, 6.3, 9.4 | Flip evidence is named; no quarantined test silently disappears from the claimed full oracle. |
 | gomutant | 302 | R | 6.5, 6.6, 7.7 | Selection variants coexist across both layers and all lifecycle/reuse paths; choose format from live version. |
 | gomutant | 313 | A/X | 2.4, 7.3 | Reject omnibus/additive selection policy; justify each surviving standing declaration's authority home. |
-| gomutant | 349 | A | 6.1, 6.2, 9.1 | Preserve cutoff regressions; future negatives need locality and candidate-influence authority. |
+| gomutant | 349 | A | 5.1s, 6.1, 6.2, 9.1 | Preserve full-oracle cutoffs and independently complete effective admission; future negatives still need locality and candidate-influence authority. |
 | gomutant | 354 | R | 6.3, 7.2 | Advisory attribution cannot block unrelated commits or be enabled by a presentation callback. |
 | gomutant | 355 | R | 2.5, 6.4 | A validated window commits while successor preparation is blocked. |
 | gomutant | 356 | R | 2.5, 6.5 | Baselines survive before any finding; concurrent shared-bank deposits merge safely. |
@@ -101,7 +101,7 @@ fold at implementation carries every constituent obligation forward.
 | stipulator | 363 | A | 7.5 | One explicit evaluation feeds projections; historical reports cannot grant current evidence. |
 | pew | 232 | A | 2.6, 8.3, 9.2 | Reconcile live recording, subprocess, explain and requirement-home residue. |
 | pew | 252 | A | 5.1, 5.6, 7.1, 8.3 | Declaration/path/metadata/line-grammar folds preserve actual selected benchmark obligations. |
-| pew | 276 | A | 4.4, 4.5, 5.1, 9.3 | Generated premise/corruption/conditions tests use independent expectations and live record grammar. |
+| pew | 276 | A | 4.4, 4.5, 5.1, 5.1u, 9.3 | Generated premise/corruption/conditions tests use independent expectations and live record grammar; preparation, closing and asymmetric diagnostics retain their deciding cases. |
 | pew | 320 | A | 3.4, 4.3, 5.6, 7.4, 8.3 | Adopt each shared release without changing producer environment or native evidence semantics. |
 | pew | 364 | R | 7.6, 8.3 | Informational versus enforcing workflows expose their evidence policies and exits. |
 | shared | 330 | A | 2.3, 5.5, 8.3 | Caller frames are producer diagnostics, not proof a directory open was harmless. |
@@ -111,12 +111,12 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 49 source issues, excluding
+Each slug names a file beside this one. There are 51 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, physical snapshot dependencies, immutable selections, grammar/declaration fidelity, envelope admission, isolation, request identity and operation-owned closing. |
+| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, construction cancellation, physical snapshot dependencies, declaration fidelity, whole-envelope admission, synthetic-file isolation, typed judgment ownership and closing. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -161,15 +161,17 @@ this reconciliation document itself.
 | root-directory-input-with-empty-manifest | A; 2.2, 5.4, 8.3 | Logged open of / remains conservative; missing capture and caller-frame attribution are distinct. |
 | runtime-input-entries-implicit-context | R; 5.5 | Blocked roots/path work during finalize/adopt/convert/merge leaves through owning cancellation. |
 | runtime-inputs-dirty-unadopted | A; 2.3, 5.6, 9.4 | Working-tree reuse and historical-baseline provenance remain different consumer claims. |
+| runtime-pwd-without-a-recorded-dependency | R; 5.1t | Same retained build, different truthful runtime PWD: reusable evidence must distinguish or refuse the dependence, including historical missing support and same-directory controls. |
 | served-knob-strings-judged-by-consumer-grammars | R; 5.6, 8.3 | Remaining Pew nested/default prose judged by shared served bytes and independent literal anchors. |
 | static-input-root-unadopted | A; 2.3, 5.2, 5.6 | Unpinned static-root assertion cannot suppress a dependency; static certificate needs no fake receipt. |
 | sync-variable-judgments-one-shape | A; 2.4, 7.8 | Pool/memo completeness and attestation gates retain distinct proof grounds. |
 | unify-carrier-walks | R; 7.8 | Recursive type parameters, atomic pointers and signatures preserve openness/alias policy differences. |
+| unit-scratch-declarations-refuse-after-execution | R; 5.1t | Malformed namespace declarations refuse before frame/proof/execution work; valid declarations use the one existing grammar. |
 
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 55 source issues.
+There are 56 source issues.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -205,6 +207,7 @@ There are 55 source issues.
 | narrowing-exemption-and-freshness-clauses-judged-apart | A/X; 2.2, 6.2, 6.3 | Reach alone authorizes no omission; reuse refusal is not observed flakiness. |
 | never-executed-exemption-unaudited | A/X; 6.2, 9.1 | Historical negative buckets neither skip remeasurement nor establish equivalence. |
 | oracle-attribution-hides-post-commit-work | A; 6.3, 6.7, 7.2 | Slow per-test work cannot block another target's commit; partial work is not stable. |
+| oracle-admission-does-not-establish-the-full-set | R; 5.1s | Alias-shaped runnable tests, inherited skip aliases and each named killer's baseline disposition cannot disappear behind a full pattern or aggregate count; historical labels confer no missing evidence. |
 | package-crash-kill-omits-the-panic | R; 5.4, 8.3 | Package panic kill includes bounded message/frame without changing attribution. |
 | per-layer-counts-one-type | R; 6.6, 6.7, 8.3 | Unequal repo/local counts and coexisting selections discriminate swapped/collapsed counts. |
 | plan-cost-is-candidate-materialization | A; 7.7, 7.8 | Lazy construction retains exact candidate identities/extents/counts. |
@@ -241,7 +244,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 | check-summary-tally-names-one-invocation | R; 5.3, 8.3 | Unequal selected-invocation populations retain separate eligibility and outcome accounts. |
 | clause-structured-whole-claims | A; 2.4, 2.6, 5.3 | Scoped test/proof requirement's whole-claim default and explicit exception are deliberate. |
 | cli-test-binary-builds | R; 5.6, 9.3 | One binary build preserves real CLI tests; in-process pins remain mutation-sensitive. |
-| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | Attribute pre-exec parent high-water, compiler/linker and test-process peaks separately before changing completed-package estimates; the incoming Weaver correspondence is not proof of causality. |
+| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | Attribute pre-exec parent high-water, compiler/linker and test-process peaks separately before changing estimates; Weaver and concurrent Stash peak correspondences are not causal proof. |
 | cross-platform-resolution-views | C; 2.3, 5.2, 9.4 | Off-host declaration resolution grants no invented on-host witness result. |
 | dangling-empty-label-remedy-names-no-clause | R; 5.3, 8.3 | Malformed empty label remedy cannot unbind valid sibling claims. |
 | deadline-roster-head-unbounded | R; 5.3, 8.3 | Large roster's bound preserves useful failure residue and exact omitted account. |
@@ -266,7 +269,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 | proto-backend | C; 2.6, 9.4 | Real external proto consumer activates descriptor/prover work; absent backend grants nothing. |
 | prover-trust-tiers | C; 2.2, 9.4 | Heuristic result cannot silently occupy an analyzer-proof evidence tier. |
 | resolution-missing-go-export-cache | R; 5.2, 7.8, 8.3 | Disappeared export permits bounded refresh or actionable refusal, never stale typed data. |
-| resolver-child-resident-set | A; 7.7, 7.8 | Measure current child/parent retention after existing quiescence, with unchanged served population. |
+| resolver-child-resident-set | A; 7.7, 7.8, 8.3 | Measure current child/parent retention after quiescence, including concurrent-operation readings and the absent served resident account reported by Stash; hold workload/population constant. |
 | reviewed-row-sets-one-pattern | A; 2.4, 5.2, 7.3 | Exclusion/vouch/scratch revocation remains semantically distinct through shared mechanics. |
 | seeding-walk-unreached-routes | A; 2.3, 5.2, 7.8 | Dependency helper/interface driver reaches static certificate without pretending execution. |
 | structural-call-absence-verb | C; 2.6, 9.4 | Real constraint distinguishes type imports/transitive net from direct forbidden constructor. |
@@ -277,7 +280,7 @@ Each slug names the sibling `stipulator/docs/issues/` file. There are 39.
 
 ## Pew issue inventory and index-only obligations
 
-Each slug names the sibling `pew/docs/issues/` file. There are eight.
+Each slug names the sibling `pew/docs/issues/` file. There are nine.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -287,6 +290,7 @@ Each slug names the sibling `pew/docs/issues/` file. There are eight.
 | mutation-oracle-observation | R; 6.2, 6.6, 6.7, 9.1 | Every named interrupted/historically affected scope remeasured under complete deciding oracles. |
 | per-arm-noise-floors | A/X; 7.6, 8.1, 8.2 | Regression within historical spread still fails explicit tolerance; no automatic threshold increase. |
 | remote-bench-execution | C; 2.6, 9.4 | Real remote workflow binds build, receipt, machine lease and guards; disconnect releases ownership. |
+| remaining-producer-refusals-and-closing | R; 5.1u | Owned-query descendants cannot outlive bounded closing; absent A/B profile sides are unfulfilled, real failures operational; invalid explicit effort refuses before preparation. |
 | spec-wide-requirement-forming | R; 2.6, 8.3, 9.4 | Canonical behavior and bindable enforcement agree; no automatic evidence grants. |
 | train-riders-for-the-performance-evidence-plan | A/X; 2.1, 5.1, 8.2, 9.1 | Retain all native/adoption/assurance riders, reject automatic historical tolerance. |
 
