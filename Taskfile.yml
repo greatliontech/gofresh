@@ -8,11 +8,13 @@ tasks:
     desc: Build all packages
     cmds:
       - go build ./...
+      - go -C toolversion build ./...
 
   vet:
     desc: Static analysis
     cmds:
       - go vet ./...
+      - go -C toolversion vet ./...
 
   test:short:
     desc: "The fast tier: the engine's code without the engine over a tree (seconds; the inner-loop gate)"
@@ -28,6 +30,7 @@ tasks:
     desc: Tidy modules
     cmds:
       - go mod tidy
+      - go -C toolversion mod tidy
 
   check:
     desc: Vet + the fast tier

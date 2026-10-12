@@ -58,6 +58,8 @@ jobs:
       go-version: "1.27.1"
       pre: |
         for os in darwin openbsd windows; do GOOS=$os go vet ./...; done
+        go -C toolversion vet ./...
+        go -C toolversion mod tidy -diff
       short: true
       short-timeout: 5m
       full-timeout: 30m

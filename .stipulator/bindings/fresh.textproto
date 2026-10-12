@@ -2150,3 +2150,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "a11895dac710ce4aa3858e05956fafb1ff17229619acf7f68ed209f67c10eacb"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-tool-version"
+  content_hash: "71e284807d9ab4c0ec1763a614e0bf64bbd9bd162ba8a98fe6f1650153488f9d"
+  source_hash: "cea3265afcee96179a0c282bbd7538b438e41041fe89e69c2acacc8ead953e2c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestToolVersionModule"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5dfdcf2b60549585266d2a4f44292f3876377699e71a1c2d70854cff218aa678"
+}

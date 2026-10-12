@@ -64,6 +64,24 @@ a second home would mean a second implementation.
 - [explain.md](explain.md) — verdict derivation chains.
 - [guidance.md](guidance.md) — the tool-resident guidance format.
 
+## Executable identity
+
+**REQ-fresh-tool-version** (behavior): The shared executable-identity reader MUST
+report only the running binary's embedded build facts, without project discovery,
+environment sampling, filesystem queries, subprocesses or network requests. Its
+one-line identity carries the main module version, VCS revision, modified state,
+compiler version and linked Gofresh dependency identity. Empty or unavailable
+facts read `unknown`; the explicit development marker reads `devel`; absent VCS
+metadata never implies a clean build. A known modified state remains visible
+beside a release version. An available dependency inventory without Gofresh reads
+`not-linked`, distinct from unavailable metadata. Module replacement reports both
+the requested dependency version and the replacement path/version; a replacement
+without a version is explicitly local, never inspected for an inferred release.
+Metadata containing whitespace or output framing is quoted so it cannot create
+another line. Consumers prepend their own tool name and may state separately
+labelled format capabilities; neither a format number nor the current checkout
+is the executable version. Enforced by TestToolVersionModule.
+
 ## Vocabulary
 
 **subject** (term): the named Go symbol whose freshness is tracked — a function
