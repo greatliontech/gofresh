@@ -126,7 +126,13 @@ register.
   before pushing, and at every chunk close. During long work, fetch again
   at review returns and long-run/CI completion checkpoints. Inspect incoming
   issue changes and disposition them against the active roadmap; fetching
-  alone is not triage. Re-derive contracts across incoming code changes before
+  alone is not triage. At these checkpoints, review and commit completed
+  same-machine field-agent issue documents and their index entries too, with
+  their `Lands:` routed into the roadmap, then push them. An entry in the
+  obligation map does not publish an uncommitted report. Preserve the report's
+  evidence limitations and conditional scope; committing a filing is not
+  verification of its hypothesis or authorization to implement its request.
+  Re-derive contracts across incoming code changes before
   continuing in the affected repository. A fetch updates remote references,
   not an observing run's worktree: integrate only at a safe stopped boundary,
   never by auto-stashing or overwriting another actor's dirty work. Where

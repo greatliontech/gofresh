@@ -235,8 +235,7 @@ There are 55 source issues.
 ## Stipulator issue inventory
 
 Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 40, including the nested-module report already
-retained from the remote while local work prevents immediate integration.
+fetched `origin/main`. There are 40.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
