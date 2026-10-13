@@ -112,7 +112,9 @@ func (r Runner) Program(ctx context.Context, dir string, env []string, name stri
 // a failed sample) — never discarded behind the error. A failed
 // command's refusal carries go's stderr bounded to its head and tail,
 // so a refusal text a consumer keys a record on never grows with a
-// tree's diagnostics.
+// tree's diagnostics. On Linux, a contained collected run also ends the
+// remaining process group after the bounded drain, even if the leader exited
+// before cancellation. Prepared commands run by consumers own that cleanup.
 func (r Runner) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	cmd, err := r.Command(ctx, dir, env, args...)
 	if err != nil {
@@ -120,7 +122,7 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
+	err = runCollected(cmd, r.Containment != nil)
 	if err != nil {
 		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
 			return stdout.Bytes(), fmt.Errorf("go %s: %w", strings.Join(args, " "), err)

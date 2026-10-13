@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -336,8 +337,8 @@ func TestTakeEnvSnapshotServesTheSalvagedAnswer(t *testing.T) {
 // (REQ-fresh-go-command-policy).
 func TestSalvagedRefusesUnderACancelledContext(t *testing.T) {
 	// The shim writes its own pid beside its answer; the context is
-	// cancelled once that pid is gone — the leader exited and was
-	// reaped, so the runner is inside the hold its descendant keeps —
+	// cancelled once the leader exited (held waitable on Linux, reaped
+	// elsewhere), so the runner is inside its descendant's pipe hold —
 	// never on the answer alone, which the shell writes before it
 	// forks the holder and exits: a cancellation landing in that gap
 	// sweeps a live leader and answers nothing, a different case from
@@ -376,7 +377,14 @@ func TestSalvagedRefusesUnderACancelledContext(t *testing.T) {
 		}) {
 			return
 		}
-		if !wait(func() bool { return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) }) {
+		if !wait(func() bool {
+			if runtime.GOOS == "linux" {
+				data, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+				_, state, _ := strings.Cut(string(data), ") ")
+				return strings.HasPrefix(state, "Z ")
+			}
+			return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+		}) {
 			return
 		}
 		cancel()
@@ -384,15 +392,19 @@ func TestSalvagedRefusesUnderACancelledContext(t *testing.T) {
 	r := Runner{Containment: &Containment{WaitDelay: 3 * time.Second}}
 	out, err := r.Run(ctx, "", env, "env", "GOVERSION")
 	if ctx.Err() == nil {
-		t.Fatal("the leader was never seen reaped, so the cancellation never landed during the hold")
+		t.Fatal("the leader was never seen exited, so the cancellation never landed during the hold")
 	}
-	if !errors.Is(err, exec.ErrWaitDelay) || strings.TrimSpace(string(out)) != "go1.99.0" {
+	if runtime.GOOS == "linux" {
+		if !errors.Is(err, context.Canceled) || len(out) != 0 {
+			t.Fatalf("contained cancellation = %q, %v; want no answer", out, err)
+		}
+	} else if !errors.Is(err, exec.ErrWaitDelay) || strings.TrimSpace(string(out)) != "go1.99.0" {
 		t.Fatalf("run = %q, %v; want the answer beside the wait-delay form", out, err)
 	}
 	if Salvaged(ctx, err) {
 		t.Fatal("a cancelled context salvaged the answer")
 	}
-	if Salvaged(context.Background(), err) != true {
+	if Salvaged(context.Background(), exec.ErrWaitDelay) != true {
 		t.Fatal("a live context did not salvage the wait-delay form")
 	}
 	if _, err := r.SampleGoVersion(ctx, "", env); err == nil {

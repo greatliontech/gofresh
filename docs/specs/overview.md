@@ -367,7 +367,17 @@ that parses to its keys) and the context is live — a caller's
 cancellation is never answered from that form — and refuse a torn
 answer naming the form; gofresh's own package listing (the runner's
 List), which has no wholeness test, refuses that form outright with a
-refusal distinguishable from a served salvage. Enforced by
+refusal distinguishable from a served salvage. The contained collected form on
+Linux (`GOOS=linux`) ends its remaining process group after the leader exits
+and the bounded pipe drain finishes, including normal and failed leader exits and cancellation
+during the drain. The leader's waitable identity is held until every group
+signal has finished, then reaped; a recycled numeric group is never signalled.
+The caller leaves these children exclusively waitable by the runner and does
+not configure automatic child reaping. Failure to establish the waitable
+identity disables further group signals and refuses the collected answer.
+Prepared commands run by consumers leave post-wait cleanup
+to those consumers; other platforms retain their cancellation and drain
+limits. A cleanup refusal supplies no salvageable answer. Enforced by
 `TestEngineSpawnsThroughTheInstalledRunner`,
 `TestEngineSpawnSitesReadARunner`,
 `TestTakeEnvSnapshotServesTheSalvagedAnswer`,
@@ -375,6 +385,10 @@ refusal distinguishable from a served salvage. Enforced by
 `TestSalvagedRefusesUnderACancelledContext`,
 `TestProgramPreparesAConsumerCommandUnderThePolicy`,
 `TestProgramQuitsTheConsumersGroupOnTheNamedCause`,
+`TestCollectedRunSweepsAfterTheLeaderExits`,
+`TestCollectedRunHoldsIdentityThroughCancellationAndSweep`,
+`TestCollectedCleanupRefusalCannotAuthorizeSalvage`,
+`TestCollectedDrainAndOwnershipFailure`,
 `TestListRefusesTheSalvagedAnswer`, and
 `TestListingRefusesTheSalvagedAnswer`.
 
