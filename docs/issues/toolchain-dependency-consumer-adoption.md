@@ -1,7 +1,6 @@
 # Adopt native dependency evidence
 
-Lands: docs/plans/tooling-redesign.md 5.1u for Pew's runtime-input generation,
-5.2 for Stipulator and 5.4 for Gomutant.
+Lands: docs/plans/tooling-redesign.md 5.2 for Stipulator and 5.4 for Gomutant.
 
 Native fingerprints carry optional `toolchainContent` and `admissionPolicy`
 keys after `buildConfig`. Their omission preserves historical encoding, not
@@ -48,6 +47,11 @@ At each adoption:
 - Exercise ordinary and observed reuse, explicit purity, applicability
   extension, producer closing and restart. A same-version GOROOT edit must not
   reuse an old result, and missing historical evidence must remain missing.
+- Preserve the shared contained-query boundary when adopting its Linux
+  collected execution. It holds the exited leader waitable through pipe
+  draining and cleanup, before reaping. Prepared commands run directly by a
+  consumer still require that consumer's own cleanup; the library's collected
+  form does not silently change those lifetimes or other platforms' limits.
 
 The remaining consumer pins stay unchanged until these scoped adoptions. Their
 current binaries do not acquire new native-field support merely because the

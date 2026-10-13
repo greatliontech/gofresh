@@ -169,7 +169,7 @@
     reconcile its recordless premise and historical eligibility, and refuse
     malformed scratch declarations before producing work. Release before the
     affected consumer adoption; preserve legitimate runtime/build separation.
-  - [ ] 5.1u Complete Pew's remaining refusal and closing boundaries: contain
+  - [x] 5.1u Complete Pew's remaining refusal and closing boundaries: contain
     its environment-query children through preparation and completed-unit
     closing, classify legitimately absent A/B diagnostic sides as unfulfilled,
     and reject invalid explicit timing effort before listing or building.

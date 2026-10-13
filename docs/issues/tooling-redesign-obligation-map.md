@@ -152,7 +152,7 @@ this reconciliation document itself.
 | json-record-readers-one-home | A; 5.6, 9.2 | Strict key/trailing checks retain distinct manifest-byte and indented-fingerprint canonicality rules. |
 | loader-spawns-outside-the-runner | A; 2.4, 4.1, 7.1 | Actual loader children carry immutable policy and cancellation accounting; no assumed hook/driver escape. |
 | memo-scope-axes | A; 7.8 | Memo/read-path folds preserve discard/recompute invariance; cone/whole composition state remains distinct. |
-| toolchain-dependency-consumer-adoption | R; 5.1u, 5.2, 5.4 | Adopt runtime-input generation 3 without reconstructing omitted PWD evidence; native content/policy fields survive consumer formats, with static re-derivation distinct from re-execution. |
+| toolchain-dependency-consumer-adoption | R; 5.2, 5.4 | Adopt runtime-input generation 3 without reconstructing omitted PWD evidence; native content/policy fields survive consumer formats, with static re-derivation distinct from re-execution. |
 | net-url-parse-godebug-channel | R; 2.3, 3.2 | ParseQuery under urlmaxqueryparams and sibling Setenv; retain refusal until relevance is sound. |
 | per-file-memos-one-shape | R; 7.8 | Cold/warm/corrupt/concurrent memo cases agree and preserve completed entries. |
 | prints-default-one-home | R; 5.6, 8.3 | Remaining Pew predicate agrees with actual pflag rendering, including string "0" versus integer zero. |
@@ -279,18 +279,17 @@ fetched `origin/main`. There are 40.
 
 ## Pew issue inventory and index-only obligations
 
-Each slug names the sibling `pew/docs/issues/` file. There are ten.
+Each slug names the sibling `pew/docs/issues/` file. There are nine.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
 | derived-state-recompute-invariance-witness | A; 2.3, 3.2, 7.8 | Cold/warm/discarded derived state yields identical judgments under complete identities. |
 | guidance-purpose-column-second-enumeration | A; 2.4, 8.3 | Purpose/default changes cannot diverge between canonical table and served projections. |
-| git-go-recording-immediate-staleness | A; 5.1u, 7.7, 8.3 | Attribute the build-description difference and temporary executable dependency with reduced tool-owned cases; the repeated before/after-identified build narrows version ambiguity without proving cause, and unsupported outcome is a separate account. |
+| git-go-recording-immediate-staleness | A; 7.7, 8.3 | Preserve safe diagnostic provenance that can name a differing compilation input without disclosing its value; historical guard digests alone cannot establish that cause, and unsupported outcomes remain a separate account. |
 | mcp-surface | C/A; 8.3 | Existing CLI/JSON complete first; a concrete agent workflow precedes new transport. |
 | mutation-oracle-observation | R; 6.2, 6.6, 6.7, 9.1 | Every named interrupted/historically affected scope remeasured under complete deciding oracles. |
 | per-arm-noise-floors | A/X; 7.6, 8.1, 8.2 | Regression within historical spread still fails explicit tolerance; no automatic threshold increase. |
 | remote-bench-execution | C; 2.6, 9.4 | Real remote workflow binds build, receipt, machine lease and guards; disconnect releases ownership. |
-| remaining-producer-refusals-and-closing | R; 5.1u | Owned-query descendants cannot outlive bounded closing; absent A/B profile sides are unfulfilled, real failures operational; invalid explicit effort refuses before preparation. |
 | spec-wide-requirement-forming | R; 2.6, 8.3, 9.4 | Canonical behavior and bindable enforcement agree; no automatic evidence grants. |
 | train-riders-for-the-performance-evidence-plan | A/X; 2.1, 5.1, 8.2, 9.1 | Retain all native/adoption/assurance riders, reject automatic historical tolerance. |
 
