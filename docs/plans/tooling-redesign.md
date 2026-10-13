@@ -164,7 +164,7 @@
     load, measurement or write. Keep existing server identities truthful without
     introducing a new transport. Pin metadata variants and both actual CLI forms,
     update help/guidance, release and install clean builds.
-  - [ ] 5.1t Repair the shared native producing boundary: establish the PWD
+  - [x] 5.1t Repair the shared native producing boundary: establish the PWD
     dependency across identical builds and different runtime directories,
     reconcile its recordless premise and historical eligibility, and refuse
     malformed scratch declarations before producing work. Release before the

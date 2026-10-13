@@ -111,7 +111,7 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 51 source issues, excluding
+Each slug names a file beside this one. There are 49 source issues, excluding
 this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
@@ -161,12 +161,10 @@ this reconciliation document itself.
 | root-directory-input-with-empty-manifest | A; 2.2, 5.4, 8.3 | Logged open of / remains conservative; missing capture and caller-frame attribution are distinct. |
 | runtime-input-entries-implicit-context | R; 5.5 | Blocked roots/path work during finalize/adopt/convert/merge leaves through owning cancellation. |
 | runtime-inputs-dirty-unadopted | A; 2.3, 5.6, 9.4 | Working-tree reuse and historical-baseline provenance remain different consumer claims. |
-| runtime-pwd-without-a-recorded-dependency | R; 5.1t | Same retained build, different truthful runtime PWD: reusable evidence must distinguish or refuse the dependence, including historical missing support and same-directory controls. |
 | served-knob-strings-judged-by-consumer-grammars | R; 5.6, 8.3 | Remaining Pew nested/default prose judged by shared served bytes and independent literal anchors. |
 | static-input-root-unadopted | A; 2.3, 5.2, 5.6 | Unpinned static-root assertion cannot suppress a dependency; static certificate needs no fake receipt. |
 | sync-variable-judgments-one-shape | A; 2.4, 7.8 | Pool/memo completeness and attestation gates retain distinct proof grounds. |
 | unify-carrier-walks | R; 7.8 | Recursive type parameters, atomic pointers and signatures preserve openness/alias policy differences. |
-| unit-scratch-declarations-refuse-after-execution | R; 5.1t | Malformed namespace declarations refuse before frame/proof/execution work; valid declarations use the one existing grammar. |
 
 ## Gomutant issue inventory
 
