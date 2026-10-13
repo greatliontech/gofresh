@@ -291,7 +291,9 @@ uses that artifact under the runtime description; a compiling go command under
 the latter is not that execution. The form admits one subject and exactly one
 contributing process per unit; a second registration refuses. Registration fixes
 the process identity, capture path and observation declarations before execution,
-with an exclusively assigned capture protected through finalization. A relative
+with an exclusively assigned capture protected through finalization. Malformed
+scratch namespace declarations refuse before frame/proof preparation or reservation
+of the contribution, using the runtime-input namespace grammar. A relative
 capture path resolves against the admitted runtime directory; execution and
 finalization receive that same absolute coordinate, preserving a symlink/parent
 path's filesystem meaning rather than lexically cancelling its components.

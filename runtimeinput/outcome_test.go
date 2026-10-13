@@ -519,11 +519,11 @@ func TestOutcomeManifestRefusesInconsistentSupport(t *testing.T) {
 
 func TestManifestDigestPinsTheWireFold(t *testing.T) {
 	plain := manifest{Version: manifestVersion, Env: []envInput{{Name: "A", Digest: testEntryDigest}}, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "file"}, Digest: strings.Repeat("1", 32)}}, Unverifiable: []string{"reason"}}
-	if got := manifestDigest(plain); got != "e9b0bf7e90400968193363dbe4723a65" {
+	if got := manifestDigest(plain); got != "a6d0e48e8d04b4d61df704481c73cf04" {
 		t.Fatalf("identity-only wire digest = %q", got)
 	}
 	supported := manifest{Version: manifestVersion, Outcome: outcome.Method, Subjects: []string{supportedSubject}, Env: []envInput{{Name: "A", Digest: testEntryDigest}}}
-	if got := manifestDigest(supported); got != "64b54fca91577ab18bd60fe5b9b3690c" {
+	if got := manifestDigest(supported); got != "76792218db1627e7415a437133d478ad" {
 		t.Fatalf("supported wire digest = %q", got)
 	}
 }

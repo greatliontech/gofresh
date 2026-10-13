@@ -968,10 +968,8 @@ func TestEphemeralScratchAbsentAtIngestRecordsNothing(t *testing.T) {
 	}
 }
 
-// A PWD read admits recordless exactly when the frozen environment
-// carries PWD equal to the spawn directory — the value is then fully
-// determined by the frame identity the record already pins — and seals
-// process-local in every other posture (REQ-inputs-unbounded).
+// A truthful PWD read binds its actual environment value; the frame alone is
+// not a persisted dependency. Other postures retain their process-local refusal.
 func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
@@ -1003,8 +1001,8 @@ func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 	if unv {
 		t.Fatalf("truthful PWD sealed: %s", reason)
 	}
-	if len(d.EnvNames)+len(d.Paths)+len(d.Unverifiable) != 0 {
-		t.Fatalf("truthful PWD recorded: %+v", d)
+	if len(d.EnvNames) != 1 || d.EnvNames[0] != "PWD" || len(d.Paths)+len(d.Unverifiable) != 0 {
+		t.Fatalf("truthful PWD is not exactly one environment dependency: %+v", d)
 	}
 
 	for name, env := range map[string][]string{

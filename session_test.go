@@ -606,6 +606,7 @@ type sessionCheckRecord struct {
 	Runtime     RuntimeDescription
 	Subject     Subject
 	Fingerprint Fingerprint
+	Want        Status
 }
 
 // The parent starts this in a new process with an empty memo home. The stored
@@ -633,8 +634,12 @@ func TestSessionCheckerProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	verdict, err := snapshot.Check(ctx, record.Subject, record.Fingerprint)
-	if err != nil || verdict.Status != Valid {
+	want := record.Want
+	if want == "" {
+		want = Valid
+	}
+	if err != nil || verdict.Status != want {
 		t.Fatalf("record check: %+v %v", verdict, err)
 	}
-	t.Log("record valid in fresh process")
+	t.Logf("record %s in fresh process", want)
 }

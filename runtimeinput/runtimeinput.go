@@ -59,7 +59,9 @@ import (
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
-const manifestVersion = 2
+// Version 3 records truthful PWD reads. Earlier manifests cannot distinguish
+// an absent read from one discarded under the former frame-identity premise.
+const manifestVersion = 3
 
 const (
 	pathRel = "rel"
@@ -909,12 +911,10 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 	ephemeraMemo := map[string]bool{}
 	cwd := packageDir
 	cwdChanged := false
-	// PWD's runtime value is the spawn directory, which no env-name
-	// binding captures. When the frozen environment carries PWD equal to
-	// the package directory the process spawned in, the value is fully
-	// determined by the frame identity the record already pins, and the
-	// read admits recordless; any other posture seals
-	// (REQ-inputs-unbounded).
+	// A truthful frozen PWD can be bound as an environment input. The frame
+	// establishes this execution's directory, but is not a persisted runtime
+	// dependency: a later session can run the same build in another directory.
+	// Other postures retain the process-local refusal (REQ-inputs-unbounded).
 	pwdValue, pwdPresent := gotool.LookupEnv(normalized, "PWD")
 	pwdTruthful := pwdPresent && pwdValue == packageDir
 
@@ -949,10 +949,7 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 				addUnverifiable(&m, unverifiableSeen, "unrepresentable environment name")
 				continue
 			}
-			if gotool.EqualEnvKey(name, "PWD") {
-				if pwdTruthful {
-					continue
-				}
+			if gotool.EqualEnvKey(name, "PWD") && !pwdTruthful {
 				addUnverifiable(&m, unverifiableSeen, "process-local environment input: PWD")
 				continue
 			}

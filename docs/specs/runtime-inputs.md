@@ -20,7 +20,7 @@ at check time to detect a change and to name which input moved.
 **runtime-input manifest encoding** (term): the one canonical encoding is the unpadded
 base64url encoding of a compact JSON object whose keys, in order, are `v`, optional
 `outcome`, optional `subjects`, optional `env`, optional `paths`, and optional
-`unverifiable`; `v` is `2`, `unverifiable` is an
+`unverifiable`; `v` is `3`, `unverifiable` is an
 array of strings, `env` is an array of objects with keys `n` (the variable name) and
 `d`, and `paths` is an array of objects with keys `k`, `p`, `d`, and optionally `m`,
 where `k` is
@@ -54,6 +54,16 @@ malformed or duplicate identities, malformed digests, duplicate or unknown field
 invalid UTF-8, alternate ordering or escaping, trailing data, and unsupported
 versions rather than silently dropping evidence — exactly one schema is ever
 readable, and an encoding produced by an older tool fails validation and regenerates.
+
+Version 3 retains a truthful observed PWD as an ordinary environment identity
+and digest. Version 2 could omit such a read without retaining its producing
+directory, so no version-2 manifest establishes the complete dependency set,
+even when it appears empty. Checking, adoption, conversion, merge and outcome
+support admission reject it rather than adding a directory or upgrading its
+version from current analysis. The enclosing native fingerprint can retain the
+original opaque manifest for historical inspection and serialization; that
+readability grants no runtime-input or outcome authority. Records with no
+runtime-input manifest retain their independently governed evidence rules.
 
 `outcome` and `subjects` occur together: the former is the recognized method
 `gofresh/immutable-environment@1`, the latter a non-empty lexically sorted set of
@@ -503,10 +513,11 @@ recomputation from the persisted manifest reproduces the same reasons with or
 without the bracket in hand.
 
 **REQ-inputs-observation-disposition** (invariant): Runtime-manifest
-unverifiability MUST NOT be suppressible by an observability proof. Malformed or unrecognized
-records, incomplete observations, `stat` metadata, `chdir`, `PWD`, unrepresentable
-identities, unhashable values, external directories or symlink targets, and unknown
-or caller-supplied reasons all remain unverifiable. Thus proof can replace only the
+unverifiability MUST NOT be suppressible by an observability proof. Malformed or
+unrecognized records, incomplete observations, and recorded refusals for `stat`
+metadata, `chdir`, process-local `PWD`, unrepresentable identities, unhashable
+values, external directories or symlink targets, and unknown or caller-supplied
+reasons all remain unverifiable. Thus proof can replace only the
 closure-level conservatism for its admitted effects; the manifest must independently
 be complete, recognized, and fully hashable. A guard-covered read
 (REQ-inputs-guard-covered) is outside this invariant's subject matter: it never
@@ -1053,8 +1064,10 @@ excepted, REQ-inputs-external-dir-existence), a relative path under a
 working-directory change the run stream cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
 for each package process — MUST be treated as unverifiable rather than valid, since an
 input identity that cannot be pinned under the shared checking environment is not
-proof of a stable input. One `PWD` posture IS bounded and admits recordless: a
+proof of a stable input. One `PWD` posture is bounded: a
 frozen environment carrying `PWD` equal to the package directory the process spawned
-in — the value the subject reads is then fully determined by the frame identity the
-record already pins, so re-observing it adds no protection; any other posture,
+in records the name and digest of that actual value as an environment input.
+The frame binds this execution, not a persisted directory shared by future
+sessions; a changed PWD therefore moves the runtime-input guard independently
+of unchanged compilation inputs. Any other posture,
 including an absent or divergent `PWD`, seals as before.

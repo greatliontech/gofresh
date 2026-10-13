@@ -174,6 +174,11 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	}
 	process.BracketPaths, process.ExcludedPaths = slices.Clone(process.BracketPaths), slices.Clone(process.ExcludedPaths)
 	process.ScratchNamespaces = slices.Clone(process.ScratchNamespaces)
+	for _, namespace := range process.ScratchNamespaces {
+		if err := runtimeinput.ValidateScratchNamespace(namespace.Dir, namespace.Pattern); err != nil {
+			return Contribution{}, err
+		}
+	}
 	e := u.snapshot.session.engine
 	env, err := gotool.EnvForCommand(e.evidenceEnv(), dir)
 	if err != nil {
