@@ -95,7 +95,7 @@ discovery still inventories the whole package. Canonicalize recognized aliases
 before the selection-ownership judgment. Keep binary-argument arity/identity
 parsing distinct from this go-command flag policy.
 
-## Declaration and envelope fidelity — 5.2 / 7.8 / 9.2
+## Declaration fidelity — 5.2 / 7.8 / 9.2
 
 Stipulator's syntax-only test discovery requires a bare `*T` to come from a
 dot import, although Go also accepts `type T = testing.T` followed by
@@ -107,19 +107,6 @@ Its runnable-witness and `SymbolFile` paths use line-adjusted positions for
 physical test-file membership and ownership. A `//line generated.go:1` in a
 physical `_test.go` can demote a quick-driven witness or name another file.
 Separate physical positions from intentionally adjusted diagnostic positions.
-
-The witness envelope rejects `registrations: null`, but not null optional
-`observationExclusions` or `observationNamespaces`. Those decode to nil slices
-and can retain a valid record name. Pin per-file refusal under the declared
-optional-field grammar while preserving the native and ledger codecs' distinct
-rules. This is not authentication of a private store.
-
-The resolution envelope's `decodeRecord` performs only one decoder call.
-Appending another JSON value or trailing garbage to an otherwise valid named
-record leaves the first object and its computed name intact. Require whole-input
-admission in both loading and collection when replacing resolution certificates
-at 5.2b, with valid whitespace controls. Do not conflate this envelope grammar
-with the embedded native fingerprint's stricter canonical form.
 
 ## MCP resource publication — 5.5a, including the existing single-root server
 

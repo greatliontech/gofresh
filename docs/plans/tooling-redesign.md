@@ -180,6 +180,11 @@
   - [ ] 5.2 Migrate Stipulator's package unit and source-derived resolution
     certificates. Cover all selected views, declaration precedence, classifier
     changes, module mode, untagged toolchain pins and dotted package identities.
+    - [ ] 5.2p Refuse trailing data in source-resolution envelopes and null
+      optional witness arrays before changing certificate contents. Preserve
+      valid whitespace, omitted/empty arrays, per-record refusal and valid
+      siblings through loading and collection; keep refused records' ledgers
+      referenced until explicit collection removes their records.
     - [ ] 5.2a Carry complete selections into eager/lazy loads and certificate
       identities, including module mode and untagged toolchain pins; reconcile
       Go's runnable declaration inventory, physical source positions and longest

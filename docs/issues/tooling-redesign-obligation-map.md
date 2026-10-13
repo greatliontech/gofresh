@@ -116,7 +116,7 @@ this reconciliation document itself.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
-| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, construction cancellation, physical snapshot dependencies, declaration fidelity, whole-envelope admission, synthetic-file isolation, typed judgment ownership and closing. |
+| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, construction cancellation, physical snapshot dependencies, declaration fidelity, synthetic-file isolation, typed judgment ownership and closing. |
 | assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
 | attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
 | attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
@@ -232,7 +232,7 @@ There are 55 source issues.
 ## Stipulator issue inventory
 
 Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 40.
+fetched `origin/main`. There are 39.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -254,9 +254,8 @@ fetched `origin/main`. There are 40.
 | cerebro-scoped-discovery-cost | A; 5.2, 7.7, 7.8 | Attribute the identified scoped-discovery workload by subphase on cold and warm states before changing reuse or admission; a timed-out pass is not completion. |
 | generic-constraint-seeding-reuse | A; 5.2, 7.8 | Deterministic, runtime-seeded and unresolved generic method targets retain distinct classification; measure repeated traversal separately from precision. |
 | implemented-capability-acceptance | C; 7.5, 9.4 | Derive explicit partial capability acceptance separately from execution scope and report filtering, retaining global reds and suite-health limits; the consumer filing does not commission implementation. |
-| gofresh-corpus-pin-lag | R; 5.2 | Adopt the released native boundary under every declared selection, retaining static-certificate semantics and verifying the installed dependency. |
+| gofresh-corpus-pin-lag | R; 5.2d | Adopt the released package-producing form and complete build/runtime descriptions together, retaining static-certificate semantics and verifying the installed dependency. |
 | findings-store-historical-fleet-sweep | R; 9.1, 9.3 | The three historical records remain non-authoritative until a named complete-oracle scope remeasures them or they resolve; this is not authorization for a campaign. |
-| installed-binary-skew | R; 5.2 | Both installed binaries and long-lived readers identify the clean committed consumer after adoption. |
 | impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
 | invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
 | ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
