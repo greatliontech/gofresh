@@ -232,7 +232,7 @@ There are 55 source issues.
 ## Stipulator issue inventory
 
 Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 39.
+fetched `origin/main`. There are 40.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -242,7 +242,7 @@ fetched `origin/main`. There are 39.
 | check-summary-tally-names-one-invocation | R; 5.3, 8.3 | Unequal selected-invocation populations retain separate eligibility and outcome accounts. |
 | clause-structured-whole-claims | A; 2.4, 2.6, 5.3 | Scoped test/proof requirement's whole-claim default and explicit exception are deliberate. |
 | cli-test-binary-builds | R; 5.6, 9.3 | One binary build preserves real CLI tests; in-process pins remain mutation-sensitive. |
-| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | Attribute pre-exec parent high-water, compiler/linker and test-process peaks separately before changing estimates; Weaver and concurrent Stash peak correspondences are not causal proof. |
+| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | The controlled trivial-child reproduction establishes parent-peak inheritance on the report host. Attribute real post-exec driver/build/test needs before changing admission; earlier workload peak correspondences alone remain non-causal. |
 | cross-platform-resolution-views | C; 2.3, 5.2, 9.4 | Off-host declaration resolution grants no invented on-host witness result. |
 | dangling-empty-label-remedy-names-no-clause | R; 5.3, 8.3 | Malformed empty label remedy cannot unbind valid sibling claims. |
 | deadline-roster-head-unbounded | R; 5.3, 8.3 | Large roster's bound preserves useful failure residue and exact omitted account. |
@@ -250,6 +250,7 @@ fetched `origin/main`. There are 39.
 | discovery-exit137-memory-target | R; 7.7 | Identified workload/binary with process/host readings; exit137 alone proves no OOM. |
 | dotted-package-element-unresolvable | R; 5.2 | m and m.v2 resolve/capture/publish distinctly without whole-tree fallback. |
 | executed-and-resolution-reason-faces-unclassed | A; 5.2, 5.3, 8.3 | Typed execution/resolution/gofresh causes retain their actual authority. |
+| execution-timing-diagnostics | A; 5.3, 7.7, 8.3 | Reproduce fast, blocked and admission-waiting packages under cancellation; retain bounded, labelled timing and terminal-state diagnostics without promoting incomplete work to evidence or changing the verdict. The older-binary report does not establish current behavior. |
 | go-backend-load-path-pairs | A; 5.2, 7.8 | One membership result supplies ownership/refusal across malformed or escaping workspace paths. |
 | cerebro-scoped-discovery-cost | A; 5.2, 7.7, 7.8 | Attribute the identified scoped-discovery workload by subphase on cold and warm states before changing reuse or admission; a timed-out pass is not completion. |
 | generic-constraint-seeding-reuse | A; 5.2, 7.8 | Deterministic, runtime-seeded and unresolved generic method targets retain distinct classification; measure repeated traversal separately from precision. |
