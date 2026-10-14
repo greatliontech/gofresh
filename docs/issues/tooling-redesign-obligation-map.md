@@ -27,7 +27,7 @@ coverage, and locality alone cannot exclude compile-time mutant influence.
 
 ## Retained charters
 
-The inventory contains 72 open charters: 20 Gofresh, 28 Gomutant, 15
+The inventory contains 71 open charters: 20 Gofresh, 28 Gomutant, 14
 Stipulator, five Pew and four shared/unprefixed entries. Each is mapped once
 here; its issue rows below preserve independently deciding cases. A split or
 fold at implementation carries every constituent obligation forward.
@@ -90,7 +90,6 @@ fold at implementation carries every constituent obligation forward.
 | stipulator | 238 | A | 5.2, 5.5, 7.8 | Cancellation contains actual loader descendants; explain avoids unnecessary whole discovery. |
 | stipulator | 248 | R | 2.6, 8.3, 9.2 | Editorial correction follows live contracts, wire caps and typed accounts, not stale version literals. |
 | stipulator | 249 | A | 5.2, 5.3, 7.5, 7.8, 8.3 | Explicit evaluation preserves completion, NoOutcome, retry tiers, accounts and UTF-8 diagnostics. |
-| stipulator | 344 | R | 2.3, 5.2 | Another view, earlier declaration or classifier change invalidates an incomplete resolution certificate. |
 | stipulator | 345 | R | 2.4, 5.3, 7.4 | Timeout-looking values/positionals remain identity-bearing; only proven active budget tokens discharge. |
 | stipulator | 346 | R | 5.3 | Label/ordinal/multi-successor carries preserve clause identity or refuse. |
 | stipulator | 357 | R | 5.3 | A completed retry package persists before later retry cancellation. |
@@ -167,7 +166,7 @@ this reconciliation document itself.
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 55 source issues.
+There are 56 source issues.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -180,6 +179,7 @@ There are 55 source issues.
 | ephemeral-attestation-lifecycle | A; 2.2, 6.6, 9.2 | New uncommitted file then commit/rename/delete never invents producing provenance. |
 | ephemeral-empty-replacement-survives-as-baseline | R; 5.4, 9.4 | Reduced empty/comment guard deletions both reach the actual oracle; report remains unconfirmed. |
 | ephemeral-probe-writes-under-the-callers-tree | A; 2.5, 5.4 | Transient/persistent writes isolated, relative reads correct and cancellation cleans owned residue. |
+| ephemeral-test-discovery-misses-listed-test | R; 5.4, 9.3 | Establish the running tool, effective selection and source state beside Go's own listing, then measure the matching scoped oracle; neither an unmeasured probe nor ordinary test execution establishes mutation sensitivity. |
 | evidence-fault-rendered-as-dirty-provenance | R; 2.2, 5.4, 8.3 | Clean-tree missing-view/manifest faults name evidence, never fictional git dirtiness. |
 | explain-has-no-cli-face | R; 8.3 | CLI and MCP answer the same semantic manifest/refusal questions, including unelided causes. |
 | explicit-testdata-package-selection | R; 2.4, 5.4 | Explicit directory/import selects excluded wildcard package and persists attributable findings. |
@@ -230,7 +230,7 @@ There are 55 source issues.
 ## Stipulator issue inventory
 
 Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 38.
+fetched `origin/main`. There are 40.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -257,6 +257,7 @@ fetched `origin/main`. There are 38.
 | impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
 | invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
 | ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
+| mcp-go-export-compatibility-authoring | R; 5.5a, 9.3 | Establish the actual live MCP build and resolver selection; close only after compatible admission and the blocked binding succeed under that same identified server, not from CLI metadata alone. |
 | out-of-process-backends | C; 2.6, 9.4 | Real second-language backend before capability; persisted verdict is never fresh evidence. |
 | per-stream-color | R; 8.3 | Each stream's own TTY/NO_COLOR/TERM and JSON govern its styling independently. |
 | performance-evidence-axis | C/A; 2.2, 7.6, 9.4 | Fresh measurement alone cannot satisfy a performance requirement; explicit policy required. |
@@ -267,6 +268,7 @@ fetched `origin/main`. There are 38.
 | resolver-child-resident-set | A; 7.7, 7.8, 8.3 | Measure current child/parent retention after quiescence, including concurrent-operation readings and the absent served resident account reported by Stash; hold workload/population constant. |
 | reviewed-row-sets-one-pattern | A; 2.4, 5.2, 7.3 | Exclusion/vouch/scratch revocation remains semantically distinct through shared mechanics. |
 | seeding-walk-unreached-routes | A; 2.3, 5.2, 7.8 | Dependency helper/interface driver reaches static certificate without pretending execution. |
+| selection-certificate-preparation-repeated | A; 5.2e | Measure cold/warm scoped preparation, then consolidate immutable endpoint-local configuration without sharing opening and closing source observations or broadening per-owner failures. |
 | structural-call-absence-verb | C; 2.6, 9.4 | Real constraint distinguishes type imports/transitive net from direct forbidden constructor. |
 | structural-data-with-methods | R; 5.6, 9.3 | Exact fields plus value/pointer method sets reject extra or missing shape. |
 | supersede-carry-drops-clause-scope | R; 5.3 | Labels, ordinals and multi-successor carries preserve scope or refuse, never become whole grants. |

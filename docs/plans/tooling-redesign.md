@@ -198,7 +198,7 @@
       - [x] 5.2a.3 Resolve dotted package identities from declared import paths
         and retain independently selected nested module roots through scoped
         resolution, capture and publication.
-    - [ ] 5.2b Certify every dependency of the returned resolution: all selected
+    - [x] 5.2b Certify every dependency of the returned resolution: all selected
       views, earlier-declaration absence, seeding/classifier rules and native
       source/content/admission identities. Refuse malformed whole envelopes and
       re-derive historical incomplete certificates without fabricated execution.
@@ -213,7 +213,9 @@
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Attribute scoped discovery and certificate cold/warm costs before changing
-      sharing. Keep retry durability/tier/account obligations at 5.3 explicit,
+      sharing; fold Stipulator's selection-certificate-preparation-repeated
+      issue through endpoint-local selected-view preparation. Keep retry
+      durability/tier/account obligations at 5.3 explicit,
       and prevent another consumer-local reason parser during migration.
   - [ ] 5.3 Preserve Stipulator argument identity and clause-scoped supersede;
     retain per-group witness tiers and package-completion persistence during

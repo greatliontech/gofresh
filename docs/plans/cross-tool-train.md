@@ -216,7 +216,7 @@ here where they differ; historical evidence and unfinished work stay tracked.
 - [x] 343. stipulator: use the longest declared import path for dotted
       package identities in discovery, resolution, capture and publication;
       retain the external symbol grammar and fold this portion of 249.
-- [ ] 344. stipulator: make cached resolution certificates cover the
+- [x] 344. stipulator: make cached resolution certificates cover the
       selection-local and policy-wide facts their answers depend on.
       Preserve cross-selection seeding, first-declaring-view precedence
       and classifier identity across cache hits and upgrades. Pin edits
