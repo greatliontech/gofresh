@@ -89,14 +89,11 @@ func TestCollectedRunSweepsAfterTheLeaderExits(t *testing.T) {
 			deadline = time.Now().Add(time.Second)
 			for {
 				data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", child))
-				if os.IsNotExist(err) {
-					break
-				}
+				terminated, err := collectedDescendantTerminated(data, err)
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, state, _ := strings.Cut(string(data), ") ")
-				if strings.HasPrefix(state, "Z ") {
+				if terminated {
 					break
 				}
 				if time.Now().After(deadline) {
