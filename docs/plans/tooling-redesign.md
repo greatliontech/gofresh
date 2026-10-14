@@ -185,7 +185,7 @@
       valid whitespace, omitted/empty arrays, per-record refusal and valid
       siblings through loading and collection; keep refused records' ledgers
       referenced until explicit collection removes their records.
-    - [ ] 5.2a Carry complete selections into eager/lazy loads and certificate
+    - [x] 5.2a Carry complete selections into eager/lazy loads and certificate
       identities, including module mode and untagged toolchain pins; reconcile
       Go's runnable declaration inventory, physical source positions and longest
       declared package identity before certifying presence or absence.
@@ -195,7 +195,7 @@
       - [x] 5.2a.2 Derive declaration ownership, generated markers, witness
         admission and explanation positions from physical source, including
         scoped promoted methods and runnable linked declarations.
-      - [ ] 5.2a.3 Resolve dotted package identities from declared import paths
+      - [x] 5.2a.3 Resolve dotted package identities from declared import paths
         and retain independently selected nested module roots through scoped
         resolution, capture and publication.
     - [ ] 5.2b Certify every dependency of the returned resolution: all selected

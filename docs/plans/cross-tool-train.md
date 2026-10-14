@@ -209,11 +209,11 @@ here where they differ; historical evidence and unfinished work stay tracked.
       projection and validation. Pin cut-first/complete-second parent
       construction followed by sibling validation over the unchanged
       tree, and retain real-drift precedence. Release the correction.
-- [ ] 342. stipulator: resolve under the complete declared selection,
+- [x] 342. stipulator: resolve under the complete declared selection,
       including module mode and an explicit toolchain without tags.
       Align selection construction, keys, loading and precedence with
       the contract, adopting 340/341 first; fold this portion of 226.
-- [ ] 343. stipulator: use the longest declared import path for dotted
+- [x] 343. stipulator: use the longest declared import path for dotted
       package identities in discovery, resolution, capture and publication;
       retain the external symbol grammar and fold this portion of 249.
 - [ ] 344. stipulator: make cached resolution certificates cover the
@@ -4019,7 +4019,12 @@ in their repos.
       folding two rules (slice.go:156 by build identity vs seven sites
       by spelling). Preserve the lexical-then-resolved two-step
       workspace.go:41+:81 states.
-      Grown (2026-10-06, audit 318): the symbol-to-package derivation one rule — Backend.splitSymbol's longest-loaded-package answer (dotted-package-element-unresolvable moves here from 249); packageOf, check.scopeSubjects and records.SymbolMember fold onto it; served.go's childPatterns stops widening the load on an unparsable symbol (307.B's unfinished scope item).
+      The symbol-to-package derivation follows declared package identity;
+      scoped loading does not widen an unparseable symbol to the whole tree.
+      `check.scopeSubjects` splits test names and `records.SymbolMember`
+      names the final member, so neither is a package-boundary parser.
+      Recover the source report in Stipulator with
+      `git log --all -- docs/issues/dotted-package-element-unresolvable.md`.
       Audit 6 (2026-10-07): golang.go is 1,745 lines (298 added the
       walk's memory and path); witness-verdict-one-body-classifier and
       go-backend-load-path-pairs re-derived at open (bodyDrivesRunner is

@@ -27,7 +27,7 @@ coverage, and locality alone cannot exclude compile-time mutant influence.
 
 ## Retained charters
 
-The inventory contains 74 open charters: 20 Gofresh, 28 Gomutant, 17
+The inventory contains 72 open charters: 20 Gofresh, 28 Gomutant, 15
 Stipulator, five Pew and four shared/unprefixed entries. Each is mapped once
 here; its issue rows below preserve independently deciding cases. A split or
 fold at implementation carries every constituent obligation forward.
@@ -90,8 +90,6 @@ fold at implementation carries every constituent obligation forward.
 | stipulator | 238 | A | 5.2, 5.5, 7.8 | Cancellation contains actual loader descendants; explain avoids unnecessary whole discovery. |
 | stipulator | 248 | R | 2.6, 8.3, 9.2 | Editorial correction follows live contracts, wire caps and typed accounts, not stale version literals. |
 | stipulator | 249 | A | 5.2, 5.3, 7.5, 7.8, 8.3 | Explicit evaluation preserves completion, NoOutcome, retry tiers, accounts and UTF-8 diagnostics. |
-| stipulator | 342 | R | 5.2 | Module mode and untagged toolchain select the actual loaded view and its certificate. |
-| stipulator | 343 | R | 5.2 | Longest declared import path governs dotted symbols through publication. |
 | stipulator | 344 | R | 2.3, 5.2 | Another view, earlier declaration or classifier change invalidates an incomplete resolution certificate. |
 | stipulator | 345 | R | 2.4, 5.3, 7.4 | Timeout-looking values/positionals remain identity-bearing; only proven active budget tokens discharge. |
 | stipulator | 346 | R | 5.3 | Label/ordinal/multi-successor carries preserve clause identity or refuse. |
@@ -232,7 +230,7 @@ There are 55 source issues.
 ## Stipulator issue inventory
 
 Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 40.
+fetched `origin/main`. There are 38.
 
 | Slug | Disposition; destination | Deciding case |
 |---|---|---|
@@ -248,7 +246,6 @@ fetched `origin/main`. There are 40.
 | deadline-roster-head-unbounded | R; 5.3, 8.3 | Large roster's bound preserves useful failure residue and exact omitted account. |
 | decomposition-editorial-pass | R; 2.6, 5.2, 8.3 | Every sub-contract exception/gap/binding and evidence-tier change remains explicit. |
 | discovery-exit137-memory-target | R; 7.7 | Identified workload/binary with process/host readings; exit137 alone proves no OOM. |
-| dotted-package-element-unresolvable | R; 5.2 | m and m.v2 resolve/capture/publish distinctly without whole-tree fallback. |
 | executed-and-resolution-reason-faces-unclassed | A; 5.2, 5.3, 8.3 | Typed execution/resolution/gofresh causes retain their actual authority. |
 | execution-timing-diagnostics | A; 5.3, 7.7, 8.3 | Reproduce fast, blocked and admission-waiting packages under cancellation; retain bounded, labelled timing and terminal-state diagnostics without promoting incomplete work to evidence or changing the verdict. The older-binary report does not establish current behavior. |
 | go-backend-load-path-pairs | A; 5.2, 7.8 | One membership result supplies ownership/refusal across malformed or escaping workspace paths. |
@@ -260,7 +257,6 @@ fetched `origin/main`. There are 40.
 | impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
 | invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
 | ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
-| nested-module-freshness-root | R; 5.2a, 5.2d | Independently selected nested modules retain their accepted module root and workspace mode through resolve/capture/publish; a reduced fixture distinguishes module-local failure from unjustified pass-wide degradation. |
 | out-of-process-backends | C; 2.6, 9.4 | Real second-language backend before capability; persisted verdict is never fresh evidence. |
 | per-stream-color | R; 8.3 | Each stream's own TTY/NO_COLOR/TERM and JSON govern its styling independently. |
 | performance-evidence-axis | C/A; 2.2, 7.6, 9.4 | Fresh measurement alone cannot satisfy a performance requirement; explicit policy required. |
