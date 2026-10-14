@@ -189,6 +189,15 @@
       identities, including module mode and untagged toolchain pins; reconcile
       Go's runnable declaration inventory, physical source positions and longest
       declared package identity before certifying presence or absence.
+      - [x] 5.2a.1 Preserve Go's runnable discovery inventory and carry tags,
+        toolchain and module mode through eager/lazy resolution and capture;
+        retire records derived from the incomplete selection set.
+      - [x] 5.2a.2 Derive declaration ownership, generated markers, witness
+        admission and explanation positions from physical source, including
+        scoped promoted methods and runnable linked declarations.
+      - [ ] 5.2a.3 Resolve dotted package identities from declared import paths
+        and retain independently selected nested module roots through scoped
+        resolution, capture and publication.
     - [ ] 5.2b Certify every dependency of the returned resolution: all selected
       views, earlier-declaration absence, seeding/classifier rules and native
       source/content/admission identities. Refuse malformed whole envelopes and
