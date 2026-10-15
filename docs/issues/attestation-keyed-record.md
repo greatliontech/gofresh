@@ -7,11 +7,14 @@ checks, and two entries in View.Sibling's fact copy. The Sibling copy
 omission that reached a consumer e2e before any gofresh test
 (the packageProcessDischarges carry, fixed with the whole-fingerprint
 sibling-equality pin) is the demonstrated cost of the per-field
-plumbing. A third execution model would make the collapse mandatory:
-one attestation-keyed record (mode → discharges) threaded once, with
-the evidence encoding keeping the two existing field names for
-consumers.
+plumbing. A common record keyed by positive execution-model assertions could
+carry those facts once while preserving the published evidence fields and
+each assertion's distinct authority. This is a consolidation candidate, not
+an instruction to manufacture another assertion or rewrite historical support.
 
-Lands: when a third execution-model attestation is introduced — the
-collapse's own trigger; the structural memo discharges landed without
-one, so the two-field plumbing stays.
+Lands: docs/plans/tooling-redesign.md 7.1.
+
+The plan owns the two-mode consolidation judgment. A future third positive
+attestation makes the expansion question concrete only if such a capability
+is actually introduced. `GeneralExecution` is the absence of these positive
+assertions, not a third assertion and not a reason to add another discharge.

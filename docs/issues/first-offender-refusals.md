@@ -9,6 +9,10 @@ refusal for unknown subjects now names every offender at once
 "decided per declaration" shape and should refuse the same way — one
 batch-collecting helper, typed errors, deterministic order.
 
-Lands: a consumer narrows a batch by a Sibling or CheckBatch membership
-refusal (today none does; stipulator's served resolution narrows by the
-construction refusal only).
+Lands: docs/plans/tooling-redesign.md 5.2c.
+
+The obligation is already live in REQ-fresh-preparation: an unknown-subject
+batch refusal names every unknown subject once in request order. It is not
+conditional on a future consumer narrowing a batch. Preserve the separate
+kind/shape refusal precedence when consolidating membership collection; a
+map-backed request still needs a deterministic account of its full set.

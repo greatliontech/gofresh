@@ -1,10 +1,11 @@
 # go/types: `Named.unpack` races `Checker.isComplete` under concurrent package checking
 
-Lands: a listed toolchain whose `go/types.(*Checker).isComplete` reads
-a Named's `fromRHS` under the Named's lock (or whose `unpack` no
-longer writes it outside one) — checked by reading
-`src/go/types/cycles.go` and `named.go` of the release the fleet's
-gate pins; the consumers' race tiers turn back on at that pin.
+Lands: docs/plans/tooling-redesign.md 9.3.
+
+The active plan owns verification of the gate's actual toolchain and race
+capability. Restore affected race coverage when a listed pin eliminates the
+reported unsynchronized read/write pair, with the relevant workload checked;
+this filing does not assert that today's installed toolchain still has it.
 
 ## What was observed
 
@@ -27,38 +28,36 @@ runner, x/tools v0.47.0) failed its race tier on one report inside
   common package share that package's exported types, an instantiated
   generic among them.
 
-The same two sites, with the same locking, are in go1.27.0
-(`cycles.go:111` and `named.go`), so the listed toolchains carry it
-alike; the development fork is built on the same sources. The race is
-timing-dependent: stipulator's own policy runs the same package under
-the detector at every band-close self-check without having hit it, and
-gofresh's race tier (the closure package, four gate runs) has not hit
-it either — every consumer whose race tier loads packages through
-x/tools is exposed.
+The report also identified the same locking in go1.27.0
+(`cycles.go:111` and `named.go`) and the then-used development fork's base.
+It was timing-dependent: the recorded Stipulator self-checks and four
+Gofresh closure race runs had not hit it. Those historical passes do not
+refute the reported race, and those historical source checks do not establish
+the status of a later installed toolchain.
 
 ## Why it is the toolchain's
 
 No code of the fleet appears in either stack: the reader and the
 writer are go/types' own, driven by x/tools' documented concurrency.
-Nothing a consumer changes in its tree removes the race, and the race
-detector offers no exclusion by package.
+An application-source fix does not repair those toolchain sites. Judge a
+corrected pin or a justified loader change by the actual concurrent workload;
+do not label an unrelated test failure as this race.
 
-## Disposition at stipulator chunk 321 (2026-10-06)
+## Recorded gate response (2026-10-06)
 
 The gate's race tier judges the TREE's races; a red whose only report
 is the toolchain's judges nothing about the commit and blocks the
-release on a cause no commit can fix. stipulator's gate therefore runs
-its race tier OFF (the policy's own race invocations stay the tree's
+release on a toolchain cause. Stipulator's gate therefore disabled
+its race tier (the policy's own race invocations retained the tree's
 race evidence at the band-close self-check, as before the gate), and
-turns it back on when the pin named above lands. gofresh's race tier
-stays on while it passes — a pass is evidence of the tree and the
-toolchain alike; a red carrying only this report takes the same
-disposition. Reporting the race upstream is an external act the fleet's
-owner takes or declines; the sites above are the report's content.
+restoration depended on a corrected pin. Gofresh's race tier remained on.
+Those are historical dispositions, not a blanket authorization to disable
+another failing tier. Classify any new report against its actual stacks and
+toolchain, and retain unrelated race findings and assurance obligations.
 
-When the tier returns it runs sharded as gofresh's does (the gate's
-`race-shards` input): the partition judgment — every Test, Example
-and Fuzz function in exactly one shard — then moves to a home both
-callers read (the gate's own `go test -list` step over each shard's
+If the restored tier uses shards as gofresh's does (the gate's
+`race-shards` input), the partition judgment — every Test, Example
+and Fuzz function in exactly one shard — belongs in a home both
+callers can read (the gate's own `go test -list` step over each shard's
 regex, or a fleet package) rather than a second copy of gofresh's
 raceshards_test.go.

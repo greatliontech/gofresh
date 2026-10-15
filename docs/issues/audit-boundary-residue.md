@@ -1,12 +1,19 @@
 # Unclosed mutation and operation boundaries
 
-Lands: the component destinations in docs/plans/tooling-redesign.md below;
-delete after every component has landed or been refuted by its deciding case.
+Lands: docs/plans/tooling-redesign.md 5.2c.
 
 These are distinct obligations, not permission to broaden a repair into a
 second implementation trajectory. Except where explicitly measured below,
 the mechanisms are source-traced and their deciding regressions remain to be
 run. Existing execution-model, assertion and sampling limits remain governing.
+
+The shared `Session`/built-artifact singleton form already exists. Stipulator's
+engine constructor uses `gofresh.NewContext`; its physical declaration
+positions, full selection and dotted package identities, and source-resolution
+certificate dependencies have also landed. Those are controls for the remaining
+work, not repairs to repeat. The primary residual is the shared package-producing
+form and structured cause/authority account; secondary constituents below retain
+their own destinations and do not enlarge that form implicitly.
 
 ## Shaped mutation materialization and dependencies — 5.4, before shaped assurance
 
@@ -34,7 +41,7 @@ Pin a collision carrying independent behavior, not merely a pre-existing copy
 of the same blank import. Preserve exact candidate attribution and the original
 tree; this is part of safe shaped materialization before shaped assurance.
 
-## Remaining build-description adoption — 5.2 / 5.4
+## Remaining build-description adoption — 5.2d / 5.4
 
 Adopt the explicit build/runtime boundary and its complete-build guard together
 at the remaining producers and their checking surfaces. The shared contract is
@@ -51,11 +58,10 @@ preserve legitimate runtime differences, and pin later native checking under
 the same guard domain. Diagnostic producers retain identity-only evidence;
 their instrumentation cannot silently acquire ordinary outcome support.
 
-Stipulator's `newEngine(ctx, ...)` still calls `gofresh.New`, discarding the
-operation's context during construction queries. Adopt the context-owned
-constructor with the native session, and test an in-flight preparation query
-whose cancellation must return before any witness executes. The loader's
-separate containment limitation does not excuse this owned-query path.
+Preserve the now-context-owned Stipulator constructor while migrating its
+producer to the package form. Its existing use of `NewContext` does not itself
+establish complete build/runtime descriptions, retained artifacts or independent
+unit closing. The loader's separate containment limitation remains distinct.
 
 ## Declaration snapshot ownership — 5.4 / 5.5a
 
@@ -78,7 +84,7 @@ a held first loader and a cancelled waiter, without timer-based ordering.
 through `Selection()`, although execution has already materialized its frozen
 environment. Mutating either slice can report selection B over artifacts
 loaded under A. Constructor inputs and returned projections need owned values.
-These cases constrain 4.1's shared design and are enforced at Gomutant adoption.
+These cases constrain Gomutant's adoption of the existing shared design.
 
 ## Selection grammar fidelity — 5.3 / 5.4 / 7.4
 
@@ -88,25 +94,24 @@ path's significant bytes. Preserve Go's argument grammar and audit the matcher
 that independently splits the same input. Include repeated tags and quoted
 paths; this is not the already-recorded omitted-versus-empty selection case.
 
-Stipulator's `validateGoflags` refuses `-skip` but not Go's accepted
-`-test.skip` alias. A passing bound test beside an unbound failing test, with
-GOFLAGS selecting the latter out, can produce healthy package execution while
-discovery still inventories the whole package. Canonicalize recognized aliases
-before the selection-ownership judgment. Keep binary-argument arity/identity
-parsing distinct from this go-command flag policy.
+Stipulator's `validateGoflags` still reads `selectionGoflags`, which lists
+`skip` but not Go's accepted `test.skip` alias. The separate
+`selectionBinaryArgs` table includes `test.skip` but does not govern this
+GOFLAGS path. A passing bound test beside an unbound failing test, with
+GOFLAGS selecting the latter out, can leave discovery's full inventory beside
+partial execution. Preserve this alias-policy residual separately from the
+landed build-selection and declaration-certificate work. Canonicalize accepted
+aliases before judging selection ownership; keep binary-argument arity and
+identity distinct. Typed repetition identity is another question below.
 
-## Declaration fidelity — 5.2 / 7.8 / 9.2
+## Landed declaration controls retained at adoption
 
-Stipulator's syntax-only test discovery requires a bare `*T` to come from a
-dot import, although Go also accepts `type T = testing.T` followed by
-`func TestAlias(t *T)`. The alias-shaped test can run under Go but disappear
-from the selective obligation inventory. Match Go's syntactic inventory and
-let compilation decide type compatibility; preserve broken-package discovery.
-
-Its runnable-witness and `SymbolFile` paths use line-adjusted positions for
-physical test-file membership and ownership. A `//line generated.go:1` in a
-physical `_test.go` can demote a quick-driven witness or name another file.
-Separate physical positions from intentionally adjusted diagnostic positions.
+The alias-shaped runnable test (`type T = testing.T; func TestAlias(t *T)`),
+physical `_test.go` ownership under `//line`, dotted import identities and
+complete selected-view certificates are now covered by the completed 5.2a/5.2b
+work. Preserve those properties when migrating producers; source certificates
+do not become execution evidence and missing historical dependencies do not
+become current by decoding.
 
 ## MCP resource publication — 5.5a, including the existing single-root server
 
@@ -141,11 +146,11 @@ overwrite, applicability refresh and profile attachment semantics.
   same PASS/optional-CR completion marker. Use one recognizer when consolidating
   the producer readers; keep executor success, sample admission and profile
   validity separate. No current disagreement between those grammars is claimed.
-- **5.2 / 7.1:** The shared final judgment still exposes status and prose where
+- **5.2c / 7.1:** The shared final judgment still exposes status and prose where
   the contract requires an authority/cause account. Preserve that obligation at
   migration rather than growing another consumer-local reason parser. Separately,
-  `EnvSnapshot.JSON` and its parsed values remain two representations; make the
-  common representation immutable before extending its consumer exposure.
+  `EnvSnapshot.JSON` is mutable beside its parsed values; make the common
+  representation immutable before extending its consumer exposure.
 - **9.2:** Pew's older producer prose still describes a compiling go-test driver
   and one package transaction beside the retained-binary/per-arm clauses. Its
   toolchain prose conflates reported version with selected content. Reconcile

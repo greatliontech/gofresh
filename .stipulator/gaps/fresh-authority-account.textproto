@@ -2,8 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-authority-account"
-reason: "The shared contract distinguishes result-model applicability, claim authority and immutable producing evidence. Existing guards and producer premises enforce portions, but the unit-owned final judgment and its complete positive, negative and historical non-upgrade witnesses are not yet bound to these requirements."
+reason: "The singleton boundary and Pew adoption now enforce declared-model applicability and authority preservation for that form. Complete package/fleet adoption, the structured semantic authority account and clause-appropriate invariant evidence remain outstanding; the former first-arm implementation-absence diagnosis is retired."
 content_hash: "da53bc5e0d1a3139a36a54387d44baee62a1d95ba59767ba21d382613a45610f"
 source_hash: "853a44eb0b2877a8ec6c35f5ba1149145041b3644db340f9b5892ed5824e3a17"
-lands { manual { condition: "The session/snapshot/unit boundary is adopted by the first Pew measured arm and its result-model, authority-preservation and historical non-upgrade regressions pass." } }
+lands { manual { condition: "tooling-redesign 5.2c establishes the remaining shared package/model boundary and its structured authority account; affected consumer adoption and clause-appropriate positive, negative and historical non-upgrade evidence complete the requirement" } }
 excuses: GAP_EXCUSE_UNCOVERED

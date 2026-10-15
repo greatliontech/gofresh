@@ -29,6 +29,8 @@ closure tier) walk the same type-parameter, receiver, and parameter
 positions under the same carrier rule and are required by comment to
 agree, enforced by nothing; one walk would name the term for both.
 
-Lands: with the next change to the carrier rule itself — the three
-recursions diverge only when that rule moves, and the reachability
-scoping that narrows dynamic targets leaves it untouched.
+Lands: docs/plans/tooling-redesign.md 7.8.
+
+The shared form must preserve each caller's TypeParam cycle policy and the
+distinction between carrying a dynamic value and handing out an alias. No
+new admission follows merely from making the traversal common.

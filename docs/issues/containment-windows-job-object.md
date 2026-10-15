@@ -18,21 +18,24 @@ and installs its own job-object containment over it
 rides Containment — the fleet's one containment has two shapes on
 Windows.
 
-## The fork
+## Conditional consolidation
 
-- Containment grows a Job Object arm on Windows: every consumer's go
+- If a supported Windows consumer needs the stronger shared boundary,
+  Containment can grow a Job Object arm: every consumer's go
   command on Windows ends with its job (a stronger boundary than the
   tree kill), gofresh takes `golang.org/x/sys/windows` and the
   suspended-start/assign/resume dance, and a consumer's post-kill
   reading (the cancelled flag) needs a seam gofresh would have to
   expose.
-- gomutant keeps its own Windows containment: gofresh's Windows arm
+- Until that capability is justified, gomutant keeps its own containment:
+  gofresh's Windows arm
   stays the tree kill, and the oracle's job object stays a consumer
   shape beside it.
 
-The tradeoff is the fleet's Windows behaviour and gofresh's dependency
-surface against one containment implementation.
+Preserve assignment-before-execution, descendant cleanup, priority and
+cancellation attribution when deciding the common boundary. A tree kill
+cannot be relabelled as Job Object containment. The active plan owns the
+disposition against an actual Windows workflow; this doc does not commission
+a Windows capability merely to make the implementations symmetric.
 
-Lands: a Windows consumer's field report (derived at the 2026-09-29
-replan: no consumer runs on Windows; the Windows oracle keeps
-gomutant's own job object until one does).
+Lands: docs/plans/tooling-redesign.md 5.6.

@@ -11,18 +11,21 @@ culprit in the policy views" (stipulator's ExplainDynamicState walks
 every populated group's engine and view; every one returned an empty
 chain).
 
-View.ExplainDynamicState "re-loads the view's own package scope — test
-variants included — and re-runs the analysis with observation hooks
-armed". The descriptor's mutation is not in that scope: it is marked in
-the dependency's persisted facts (the generated package and the
-protobuf runtime that fills it), and the composition that refuses the
-witness reads those facts, not a re-derivation with hooks. So a culprit
-declared and mutated outside the view's own packages — the common shape
-for a dependency culprit — yields an empty chain, and the surface
-reports the culprit the check named as no culprit at all.
+That historical report remains an exact reproduction question, not a verified
+current defect. Its broad diagnosis is refuted by `explain.go`:
+`ExplainDynamicState` loads with `packages.LoadAllSyntax | packages.NeedModule`,
+and `explainCulprit` visits the loaded graph, collecting module-owned
+dependencies as well as roots and re-deriving their facts with hooks. It does
+not simply omit every dependency or answer only from cached dependency facts.
+
+Reproduce the named descriptor with the same selection, assertions and source
+generation on both paths. Compare the deciding culprit facts and explanation
+hooks, including composition-time decisions. REQ-explain-passive permits the
+ask to describe a later tree, so matching a historical verdict's name alone
+does not establish an explanation defect in the current tree.
 
 Expected: a chain for every culprit a verdict names, or a refusal
-naming why none derives ("the culprit is marked in dependency facts;
-re-derivation covers the view's packages"), never "not a culprit".
+naming a demonstrated reason none derives. Do not replace the missing chain
+with the disproved claim that dependencies lie outside the re-derivation.
 
-Lands: cross-tool train chunk 241 (explain's seam and hookset key).
+Lands: docs/plans/tooling-redesign.md 8.3.

@@ -115,7 +115,7 @@ What the self-host gate proves beyond the plain tests: the binding graph against
 ## 7. Known-failure register relevant to our own loop
 
 - **witness-selection-guard-masked-by-ineligible-red** — the empty-witness-selection diagnostic keys on any outcome; an ineligible leg's failed row masks the cause. *Lands: chunk 142.*
-- **process-output-utf8-marshal** — one invalid UTF-8 byte makes the whole `CheckResult` unmarshallable after the run. *Lands: first field marshal failure, or the next executor-diagnostics change set.*
+- UTF-8 diagnostics are enforced by Stipulator's `runResidue` scrubbing and `residue_test.go` invalid-byte/rune-boundary cases. Recover the former filing in the Stipulator repository with `git log --all -- docs/issues/process-output-utf8-marshal.md`; it is not a remaining executor defect.
 - **seeded-witness-serving-follows-direct-call-classifier** — a helper-indirected `rapid.Check` serves forever. *Lands: user decision.*
 - **clause-granular-binding-claims** — a multi-clause requirement reads green with a clause unenforced. *Lands: chunk 142.*
 - **content-hash-function-versioning** — a rebuild reds a tree that did not change. *Lands: chunk 143.*

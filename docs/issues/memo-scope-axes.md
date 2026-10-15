@@ -16,5 +16,16 @@ composition state (the flat fact map the fixed points read) — so each
 role carries fields the other never sets. Splitting the composition
 result into its own type makes each unrepresentable.
 
-Lands: docs/plans/tooling-redesign.md 7.8 for the remaining
-memo/read-path/derivation-result folds (retained charter 203).
+The selected content, admission-policy and source-spelling identities have
+already been completed for the affected memo claims. Preserve them in these
+mechanical folds: a shared container does not imply a shared dependency set.
+
+The closed toolchain-audit work also left its proposed per-judged-run standard
+source digest memo unresolved. Current content reads are part of establishing
+each generation, not merely waste. Measure repeated digest cost under 7.7
+before choosing reuse within an owned immutable generation; never share an
+answer across source generations on a version label, pathname or operation
+name alone. This is a cost question, not an already-demonstrated retention bug
+or a mandate to implement the previously proposed memo.
+
+Lands: docs/plans/tooling-redesign.md 7.8.

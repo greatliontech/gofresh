@@ -1,8 +1,7 @@
 # The two attribution splits could share one quoted-string-then-tail helper
 
-Lands: 243 (the vestigial/dead sweep — a fold of two parsers onto one shape).
+Lands: docs/plans/tooling-redesign.md 5.6.
 
-Surfaced by the review of chunk 315's third change set (2026-10-09).
 `splitBracketAttribution` (the moved-bracket reason: a quoted root
 consumed whole as one Go quoted string, then exactly ` [<list>]` to the
 end) and `splitAttribution` (the ` — ` path: the operation, its quoted
@@ -14,4 +13,6 @@ argument would make the two splits one grammar with two tails. The
 bare-root scan's iteration past the first ` [` (the prefix loop) serves
 only reasons composed before roots were quoted; it stays while such
 reasons can reach the split (a consumer's stored clause), and is the
-same filing's second item once they cannot.
+same filing's second item once they cannot. Preserve both historical bare-root
+handling and canonical re-key idempotence; sharing a quoted-string primitive
+does not make the two attribution tails interchangeable.

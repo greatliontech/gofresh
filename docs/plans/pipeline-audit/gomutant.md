@@ -106,7 +106,7 @@ Shape: 615 tests over 7 packages — root 370, `internal/engine` 116, `internal/
 - **ephemeral-blind-spots-stated-and-refused**, **ephemeral-deletion-probes-strand-imports**, **ephemeral-compiler-crash-retry**, **ephemeral-batch-wrapper-undiscoverable**. *Lands: chunk 140.*
 - **ephemeral-test-pkg-shorthand**. *Lands: chunk 138.*
 - **delta-line-survivor-view**. *Lands: chunk 139.*
-- **suite-shared-fixture-bracket-flake**, **rescore-mechanism-unification** (136), **run-scoped-services-through-options** (136), **ephemeral-attestation-lifecycle**, **windows-process-fact-arms-unexecuted**, **symbol-grammar-package-set-resolution**, **mcp-liveness-cancellation-witness**, **semantic-closure-in-the-carry-gate** — as filed.
+- **suite-shared-fixture-bracket-flake**, **rescore-mechanism-unification** (136), **run-scoped-services-through-options** (136), **ephemeral-attestation-lifecycle**, **windows-process-fact-arms-unexecuted**, **mcp-liveness-cancellation-witness**, **semantic-closure-in-the-carry-gate** — historical filings, reconciled by the active obligation map. Dotted-package ownership is enforced by Gomutant's loaded-package resolver and `packageof_test.go`; recover its former filing in that repository with `git log --all -- docs/issues/symbol-grammar-package-set-resolution.md`.
 
 ## 8. Cross-cutting shape
 

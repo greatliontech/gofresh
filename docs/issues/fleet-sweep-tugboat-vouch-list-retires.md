@@ -1,7 +1,6 @@
-# The fleet sweep's tugboat `--vouch` list: its stated retirement condition fired
+# Retire the fleet sweep's duplicate Tugboat vouch list
 
-Field report from tugboat (filed uncommitted in this tree, the
-standing channel). `scripts/fleet-sweep.sh` (lines 38–48) carries
+Field report from tugboat: `scripts/fleet-sweep.sh` carries
 tugboat's standing pew vouch list by hand with the comment that it
 "stays until tugboat's store carries benchmarks/vouches, at which
 point it" retires. tugboat commit b62d299 (2026-09-29, pushed) lands
@@ -11,7 +10,7 @@ both file homes with the identical six-entry set:
   judged verb over the store reads it; `--vouch` extends, never
   removes).
 - `vouches` at the tree root — gomutant's home (execution.md's
-  vouch-file clause, train chunk 246).
+  vouch-file clause).
 
 Entries: `github.com/zeebo/xxh3:key`, `pgregory.net/rapid:anyRuneGen`,
 `go.uber.org/goleak:_osStderr`,
@@ -20,18 +19,12 @@ Entries: `github.com/zeebo/xxh3:key`, `pgregory.net/rapid:anyRuneGen`,
 `google.golang.org/grpc:globalServerOptions` — the audited set the
 sweep mirrors today, byte-for-byte.
 
-The mirror is now the second home REQ-pew-vouch-source names as the
-drift hazard (an extra vouch in one copy suppresses a real
-unverifiable verdict on that surface alone). tugboat has not yet
-observed a judged run reading the files (its first whole-store
-`pew status` and first campaign of the resumption are the
-confirmation, this week); the sweep's next run over tugboat is the
-same confirmation from this side — if the store's `pew-vouches`
-audit row carries the six identities with the flag list removed, the
-list retires; if not, the file is not being read and that is a pew
-field report.
+The six-entry file exists in Tugboat's store. The mirror is the second home
+REQ-pew-vouch-source names as a drift hazard: an extra acceptance in one copy
+can suppress a refusal on that surface alone. Confirm the effective standing
+set through a non-measuring judgment with the flags omitted, then retire the
+script's duplicate list. File presence is source evidence, not a claim that
+such a no-flags confirmation has run. No benchmark or campaign is needed to
+answer which trust source the selected store reads.
 
-Lands: the sweep's next tugboat run showing the store's `pew-vouches` audit row
-carrying the six identities with the flag list gone — the script's own condition,
-confirmed from this side; the list retires in that run's fix commit (if the row
-does not carry them, the file is not read and that is a pew field report).
+Lands: docs/plans/tooling-redesign.md 7.3.

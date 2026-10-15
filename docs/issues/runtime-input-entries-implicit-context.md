@@ -1,14 +1,20 @@
-# runtimeinput's ctx-less entries run their Go commands under an implicit context
+# Runtime-input adoption and composition retain implicit contexts
 
-Adopt, Absolute, Relative, FromTestLog, Merge, Describe and Paths take
-no context, yet each runs `go env` (through the roots query) and the
-module-view revalidation under context.Background() internally — the
-same wrapper-passed-ambient-value shape the environment axis collapsed
-(one explicit-environment form per entry). A caller cancelling a
-freshness pass cannot stop these; a hung `go` under a broken toolchain
-holds the pass. One form per entry on the context axis — ctx first,
-the internal Background sites deleted — is the same collapse one
-release later; every consumer's call gains a ctx at its bump.
+The remaining context gap is in `FromState`, adoption, identity conversions
+(`Absolute`/`Relative`) and merge, including the revalidation and
+state-reconstruction work they reach. These paths can use private background
+contexts rather than the owning operation's caller context. A cancelled unit
+must not continue input or environment observation under that substitute.
 
-Lands: cross-tool train chunk 243 (the public-surface sweep — the API-surface chunk
-the earlier condition named; slotted at audit 261).
+`Describe` and `Paths` decode/project a manifest; they do not spawn `go env`.
+They are not evidence for the former claim that every context-less entry
+launches an environment query. The context-aware producing form already owns
+finalization under its closing context; preserve it while closing the
+remaining composition paths.
+
+Apply REQ-fresh-context and REQ-fresh-unit-exclusion at each observation
+endpoint. An explicit bounded closing phase is permitted; a concealed
+background continuation is not. Sharing within one coherent phase must not
+reuse an earlier endpoint's observation as a later validation.
+
+Lands: docs/plans/tooling-redesign.md 5.5.

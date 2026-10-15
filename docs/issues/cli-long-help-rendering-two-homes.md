@@ -1,17 +1,17 @@
-# The CLI long help's pointer join is a grammar each consumer spells
+# Pew's CLI long help omits the shared prose pointer
 
-A knobbed CLI verb's long help is the registration's knobless help
-followed by its prose pointer (`Registration.Help + "\n\n" +
-Registration.ProsePointer`), a join gomutant and stipulator each spell
-at their renderer and again in their coverage pins — a presentation rule
-the projection's owner could carry as one rendering (the registration's
-CLI long help), so the consumers read it as they read the usage and the
-schema renderings.
+A knobbed CLI verb's shared long-help projection is the registration's
+knobless help followed by its prose pointer. Gomutant and Stipulator already
+read that projection. Pew's `cmd/pew/guidance.go` still returns
+`GuidanceRegistration("cli", verb).Help`, and its guidance pin compares the
+Help-only form. The residual is the missing pointer, not a join still copied
+in all three consumers.
 
-The gofresh half landed at cross-tool train chunk 300 (2026-10-07):
 Registration.LongHelp is the one rendering (the help, a blank line,
 the prose pointer; the help alone on a Document's own projection).
 
-Lands: pew's bump reading gofresh's 300 release — pew 320 (gomutant's
-arm landed at 324, stipulator's at 290r) — where its CLI renderer and
-its pin read LongHelp and the join deletes.
+Lands: docs/plans/tooling-redesign.md 8.3.
+
+Make Pew's renderer and its drift pin read the shared long-help projection,
+with a literal pointer anchor. This is separate from the adopted Coverage lint
+and the remaining local default and served-string grammars.

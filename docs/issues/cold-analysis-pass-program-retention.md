@@ -30,4 +30,4 @@ records phase-local peaks and retained RSS after release, and attributes the
 remaining live objects before changing ownership. Preserve the same subjects,
 verdicts and deciding work; a refusal or skipped analysis is not a memory win.
 
-Lands: docs/plans/tooling-redesign.md 7.7 (retained charter 314).
+Lands: docs/plans/tooling-redesign.md 7.7.

@@ -35,6 +35,7 @@ operand's reading. Invariants preserved: the registration families stay
 sinks judged by storage; the parsed-input channels stay refused by name
 at every tier; the tier a refusal came from stays observable.
 
-Lands: with docs/issues/classb-arms-one-table.md's collapse (the same
-one-table shape for every audited package), or when a fifth flag
-surface site is added.
+Lands: docs/plans/tooling-redesign.md 7.1.
+
+The shared table is a consolidation obligation, not an admission expansion.
+Keep storage provenance and parsed-input refusal independent of symbol lookup.

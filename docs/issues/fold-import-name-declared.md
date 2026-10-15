@@ -2,7 +2,7 @@
 
 The maximal tier's per-file scan is syntactic: it binds an unnamed
 import to an identifier derived from the import path — the last
-element, past a trailing major-version element since chunk 117
+element, past a trailing major-version element
 (math/rand/v2 binds rand). A package whose declared name differs from
 its path in any other way — a dotted last element (gopkg.in/yaml.v3
 declares yaml), a renamed package clause — binds the wrong identifier,
@@ -29,7 +29,7 @@ Fix shape: the fold reads the declared name from the loaded package
 walk tier supplies the name map — either way one source, never a
 second path-shape rule.
 
-Lands: when a classified or always-external package's declared name
-differs from its path's last element (a toolchain or dependency
-change the audited-set audit walks), or with the next maximal-tier
-change.
+Lands: docs/plans/tooling-redesign.md 7.8.
+
+Preserve the current fail-closed collision behavior until declared-name
+metadata establishes the actual bindings; a path heuristic is not that evidence.

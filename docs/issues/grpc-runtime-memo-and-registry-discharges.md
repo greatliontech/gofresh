@@ -3,9 +3,9 @@
 ## Problem
 
 The grpctransport benchmark enumeration (2026-08-17, 209 residual
-culprits after every shipped discharge, classification on record in
-the consumer's waiver rationale) left two classes no current channel
-covers: 19 content-invariant lazy memos (protobuf impl's
+culprits after the then-shipped discharges, classification on record in
+the consumer's waiver rationale) left two classes the reported channels did not
+cover: 19 content-invariant lazy memos (protobuf impl's
 aberrant/legacy caches, needsInitCheckMap, lazyUnmarshalOptions, the
 descopts lazy fills, hpack's lazyRootHuffmanNode, transport's
 ioBufferPoolMap — get-or-compute fills from immutable inputs, the
@@ -18,9 +18,9 @@ purity waiver that retires when this lands.
 
 ## Shape
 
-The chartered structural get-or-compute discharge subsumes the memo
-class (the audited memoization set's entries retire to it per the
-spec's own retirement sentence); channelz wants a named audited entry
+The structural get-or-compute proof is a candidate for the memo
+class (the audited memoization set's entries retire only when the proof
+actually covers them); channelz needs a separately justified audited entry
 under the single-subject attestation (subject-own registry — the
 attestation-gated discipline the mapping set carried before its
 attestation-free deepening; channelz is genuinely subject-dependent,
@@ -29,11 +29,12 @@ current attestation-free one). The 188 init-only-in-fact
 identities from the same enumeration are vouch-shaped and need no
 engine change.
 
-Lands: the memo class with docs/issues/immutable-after-construction-objects.md
-(the nineteen memos hold carriers — message types, options, Huffman
-nodes — so the data memo that landed does not reach them, and the
-carrier form needs the object-immutability fixpoint); the channelz
-registry as a rider on the same chunk (cross-tool train chunk 193,
-derived 2026-09-29: a named audited entry under the single-subject
-attestation — the attestation-gated subject-own-registry discipline
-the spec already carries).
+The nineteen reported memos hold carriers — message types, options and
+Huffman nodes — so the carrier-free data memo does not establish their
+immutability. Coordinate with `immutable-after-construction-objects.md`,
+including external aliases and writers. Keep channelz's subject-dependent
+authority separate; neither the old enumeration nor a successful benchmark
+licenses a general registry discharge. Re-census the exact dependency versions
+before retiring the consumer's waiver.
+
+Lands: docs/plans/tooling-redesign.md 7.8.

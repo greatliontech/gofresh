@@ -2,8 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-listing-memo"
-reason: "Existing memo keys and their legacy witnesses do not enforce the amended complete-dependency contract: selected toolchain content and dependent admission policy are not fully represented, and canonical closure equivalence alone does not reproduce source-position-bearing payloads. Current consent preserves existing witnesses, not a claim that these added obligations are implemented."
+reason: "The identified selected-content, admission-policy and source-coordinate omissions have been repaired with claim-specific scope and filesystem dependencies. The remaining obligation is complete cold/warm/discarded-cache equivalence coverage, including property or analyzer evidence where the requirement demands it. This record no longer alleges a currently demonstrated implementation contradiction."
 content_hash: "94056b0d04077148af8b9f44e2ecc989561ce7e4ee5f35f13f7bfac3f016a377"
 source_hash: "a934fd55fa5c5ff5bddc7eed7ca07021de8ec4a7da6c97995919c8e78359e090"
-lands { manual { condition: "Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." contradicted: true } }
+lands { manual { condition: "Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." } }
 excuses: GAP_EXCUSE_UNCOVERED

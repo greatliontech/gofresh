@@ -1,28 +1,25 @@
-# The printed-default predicate lives in three consumers
+# Pew retains a local printed-default predicate
 
 REQ-guidance-render's CLI lint takes, per registered knob, whether the
 flag library prints a default for it (guidance.Registered's value); a
 consumer derives that fact from pflag's own printing rule — the zero
 value of the flag's type prints nothing, so a string "0" prints while
 an int 0 does not, with pflag's fallback set of zero spellings for
-other types. stipulator (internal/cmd/guidance_test.go), gomutant (its
-CLI registration test), and pew (cmd/pew/guidance_test.go) each carry
-the same type switch, each pinned or unpinned on its own.
+other types. Gomutant and Stipulator read the shared predicate. Pew's
+`cmd/pew/guidance_test.go` still carries `zeroDefault` and passes its inverse
+to the already-adopted shared Coverage judgment.
 
-The collapse: one fleet home taking the two strings pflag exposes —
-`guidance.PrintsDefault(flagType, defValue string) bool` — needing no
-pflag dependency in gofresh, pinned once at every type's cliff, and
-read by each consumer's registration walk.
+The existing fleet home takes the two strings pflag exposes —
+`guidance.PrintsDefault(flagType, defValue string) bool` — without a pflag
+dependency in gofresh. Its type-cliff pins preserve the printing rule. Read it
+from Pew's registration walk in place of the last local switch.
 
 Invariants preserved: the lint's fact keeps pflag's rule exactly; a
 consumer's registration carries the same value it does today.
 
-The gofresh half landed at cross-tool train chunk 300 (2026-10-07):
-guidance.PrintsDefault(flagType, defValue) is the table, pinned at
-every type's cliff.
+Lands: docs/plans/tooling-redesign.md 5.6.
 
-Lands: pew's bump reading gofresh's 300 release — pew 320 (gomutant's
-arm landed at 324, stipulator's at 290r) — where its registration walk
-reads PrintsDefault and the last type switch deletes.
-
-Rider (audit 332): guidance.PrintsDefault mirrors pflag v1.0.9 with no oracle in gofresh (no pflag dependency; the pin compares literals) — each consumer's bump pins PrintsDefault against pflag's own rendering for every flag type it registers, so a pflag move reds at the consumer.
+Keep the consumer's independent comparison against pflag's actual rendering
+for every registered flag type. The shared table covers pflag's own value
+types, not an arbitrary custom concrete type reporting the same type name.
+Coverage-lint adoption is complete and is not part of this residual.

@@ -18,8 +18,16 @@ delete it. A destination at 9.4 alone is a disposition gate, not implementation
 authorization. Several destinations mean several obligations, not a choice
 to implement only one.
 
-Each final column states a deciding regression or measurement still required
-at its destination. A source inspection or a field report is not an executed
+Each issue row names its current source file, whose body supplies the source-trace
+basis and remaining deciding obligation. The bold first destination is its exact
+open primary slot; separately named constituents are additional obligations,
+not alternative primaries. Completed slots record preservation controls only.
+The 149 source issues comprise 48 Gofresh, 52 Gomutant, 40 Stipulator and nine
+Pew files, excluding each README and this map. Conditional capabilities retain
+their explicit activation conditions through 9.4; a mapping grants no capability
+implementation or measurement by itself.
+
+A source inspection or a field report is not an executed
 reproduction. Existing tests may supply part of that evidence, but their names
 or presence do not establish their effectiveness. In particular, exit 137
 does not establish OOM, historical campaign prefixes do not establish complete
@@ -34,270 +42,274 @@ fold at implementation carries every constituent obligation forward.
 
 | Owner | Charter | Disposition | Destination | Deciding obligation |
 |---|---|---|---|---|
-| gofresh | 102 | A | 7.8, 8.2 | Unreached declaration edits preserve only a proven slice; relevant edits invalidate; no automatic noise threshold. |
-| gofresh | 175 | A | 2.3, 7.8 | Source and strategy changes cannot disguise each other through subject precision. |
-| gofresh | 191 | A | 2.3, 3.2 | Relevant GODEBUG changes are guarded, proven irrelevant or refused, including in-process changes. |
-| gofresh | 192 | R | 7.8 | A referenced dependency closure contributes reachable effects without direct-call syntax. |
-| gofresh | 193 | A | 2.2, 7.8 | Writable/unaccounted aliases and post-construction writes defeat admission; safe sharing of a proven immutable object is a positive control; registry models remain distinct. |
-| gofresh | 202 | A | 4.1, 7.1, 7.8 | One owner carries model/audit/cut facts; retain sound algorithms instead of relocating them for its own sake. |
-| gofresh | 203 | A | 3.2, 7.8 | Content/admission changes invalidate dependent facts; memo-only changes need not invalidate compatible evidence. |
-| gofresh | 204 | A | 3.2, 7.1 | Every consumer and dependency identity follows the one immutable admission inventory. |
-| gofresh | 206 | A | 3.4, 5.6, 9.3 | Independent fixture/property oracles and actual platform/CI premises enforce the contracts. |
-| gofresh | 240 | A | 2.3, 2.6, 7.4, 9.2 | Guard/cache/provenance/resource and native-record clauses agree with the governing semantics. |
-| gofresh | 241 | A | 4.1, 5.2, 5.5, 7.8 | Loading/cancellation name uncontained children; two checkouts with the same package/variable but different escape paths never share explanation hooks. |
-| gofresh | 242 | A | 5.6, 7.1 | Construction mechanics become internal only after actual consumer capabilities are accounted for. |
-| gofresh | 243 | A | 5.5, 5.6, 9.2 | Cancellation, codec/quoting distinctions and binding retargets survive removal of verified vestiges. |
-| gofresh | 255 | R | 7.8, 8.3 | Explain names the invoke and reached sink without claiming over-approximated execution occurred. |
-| gofresh | 260 | R | 7.8 | Iterator yield binding and closed standard invokes gain precision without dropping reachable effects. |
-| gofresh | 295 | A | 2.2, 2.4, 7.3 | Process-identity assertions have exact scope, ownership and revocation; liveness is not automatically irrelevant. |
-| gofresh | 314 | A/X | 7.7 | Measure actual cold and retained sets; do not rebuild existing completed-package SSA release. |
-| gofresh | 347 | A | 6.1, 6.2 | Reconcile locality checkpoint with live identities, sibling/mixed validation and influence limits. |
-| gofresh | 348 | A | 8.1 | Historical support validation observes no current inputs and preserves original producing identity. |
-| gofresh | 361 | R | 2.5, 5.5 | All evidence composition honors its unit's cancellation and closing interval. |
-| gomutant | 95 | C | 6.7, 9.4 | Recovery works without MCP Tasks; protocol adoption awaits actual SDK/client capability. |
-| gomutant | 187 | A | 2.5, 5.4, 5.5 | Isolated probe writes preserve input identity and contain descendants on cancellation. |
-| gomutant | 188 | R | 2.4, 5.4 | Explicit testdata package loading differs from wildcard filtering and persists attributable evidence. |
-| gomutant | 209 | A | 2.6, 5.1v, 8.3, 9.2 | Live contracts cover observation contributors, enumeration, running-binary identity, bounds and sideline grammar. |
-| gomutant | 212 | A | 5.4, 6.6 | Licensed splices conserve candidates, attribution, buckets and disposition history. |
-| gomutant | 214 | A | 5.4, 7.1, 7.4, 7.8 | Complete catalog, run-owned spawn facts, memory boundaries and lazy materialization preserve results. |
-| gomutant | 216 | A | 4.2, 5.4, 7.8 | One judgment's projections agree; same-phase sharing never grants missing input evidence. |
-| gomutant | 217 | R | 6.6, 9.2 | Duplicate/null/trailing-data refusals survive historical record migration. |
-| gomutant | 218 | A | 7.8 | Repeated reports reuse coherent entry facts, invalidated by changed content or policy. |
-| gomutant | 219 | A | 5.6, 6.4, 6.7, 9.3 | Real run wiring, transport, platform, fixture and binding obligations remain independently witnessed. |
-| gomutant | 220 | A | 5.6, 7.1, 8.3, 9.2 | Request/path/row/bounder/I/O folds retain one semantic rule and reader-specific projections. |
-| gomutant | 233 | R | 5.5a, 6.7 | Tokenless root-qualified recovery survives lost replies, restarts and render expiry. |
-| gomutant | 245 | A | 5.4, 7.1, 7.2 | Unit ownership replaces coordination copies without changing deterministic membership. |
-| gomutant | 254 | A/X | 2.2, 2.4, 6.2, 6.3, 7.3 | Explicit purity and cause separation remain; reach-only omission and reuse-as-flakiness are rejected. |
-| gomutant | 256 | R | 2.4, 6.6, 9.2 | Replace/withdraw and ephemeral lifecycle preserve selection-specific historical authority. |
-| gomutant | 258 | A | 5.4, 5.5, 8.3 | Subject and record faults remain distinct; human explanation and contained git failures name their causes. |
-| gomutant | 267 | A | 6.3, 6.7, 8.3 | Live vocabularies, structured dispositions, panic detail and cumulative counters survive finalization. |
-| gomutant | 268 | A | 2.6, 9.4 | Re-census and split live subcontracts without losing consent, scope or enforcement. |
-| gomutant | 269 | R | 5.1s, 5.4, 6.2 | Early oracle admission retains named baseline dispositions; the later stream consolidation preserves corrupt/truncated refusal and build/crash/retry precedence. |
-| gomutant | 294 | A | 2.6, 5.4, 9.4 | An external oracle reads the materialized mutant and carries an explicit support/terminal model. |
-| gomutant | 296 | A/X | 2.6, 6.3, 9.4 | Flip evidence is named; no quarantined test silently disappears from the claimed full oracle. |
-| gomutant | 302 | R | 6.5, 6.6, 7.7 | Selection variants coexist across both layers and all lifecycle/reuse paths; choose format from live version. |
-| gomutant | 313 | A/X | 2.4, 7.3 | Reject omnibus/additive selection policy; justify each surviving standing declaration's authority home. |
-| gomutant | 349 | A | 5.1s, 6.1, 6.2, 9.1 | Preserve full-oracle cutoffs and independently complete effective admission; future negatives still need locality and candidate-influence authority. |
-| gomutant | 354 | R | 6.3, 7.2 | Advisory attribution cannot block unrelated commits or be enabled by a presentation callback. |
-| gomutant | 355 | R | 2.5, 6.4 | A validated window commits while successor preparation is blocked. |
-| gomutant | 356 | R | 2.5, 6.5 | Baselines survive before any finding; concurrent shared-bank deposits merge safely. |
-| gomutant | 362 | R | 6.7 | Non-candidate events cannot reset counters; rendering preserves the committed typed prefix. |
-| stipulator | 176 | A | 2.4, 2.6, 5.3 | Whole-claim policy, scoped supersede, malformed-clause repair and placement retain explicit author intent. |
-| stipulator | 185 | A | 5.2, 5.6, 9.2 | Store/ledger folds preserve strict record admission and concurrent GC safety. |
-| stipulator | 225 | A | 5.6, 8.3 | Reference identities, Unicode bounds, enum vocabulary and per-stream styling stay semantically distinct. |
-| stipulator | 226 | A | 5.2, 5.5a, 7.1, 7.8 | Complete selection, workspace ownership, classification and reviewed declarations remain coherent. |
-| stipulator | 228 | A | 5.2, 5.3, 5.6, 9.3 | Independent generated body/record tests, exact data methods and efficient real CLI coverage. |
-| stipulator | 238 | A | 5.2, 5.5, 7.8 | Cancellation contains actual loader descendants; explain avoids unnecessary whole discovery. |
-| stipulator | 248 | R | 2.6, 8.3, 9.2 | Editorial correction follows live contracts, wire caps and typed accounts, not stale version literals. |
-| stipulator | 249 | A | 5.2, 5.3, 7.5, 7.8, 8.3 | Explicit evaluation preserves completion, NoOutcome, retry tiers, accounts and UTF-8 diagnostics. |
-| stipulator | 345 | R | 2.4, 5.3, 7.4 | Timeout-looking values/positionals remain identity-bearing; only proven active budget tokens discharge. |
-| stipulator | 346 | R | 5.3 | Label/ordinal/multi-successor carries preserve clause identity or refuse. |
-| stipulator | 357 | R | 5.3 | A completed retry package persists before later retry cancellation. |
-| stipulator | 358 | R | 5.3 | Race/plain groups retain their own evidence tier when correlated. |
-| stipulator | 359 | R | 5.3, 7.5, 8.3 | Resolution and witness publication accounts survive subsequent operational failure. |
-| stipulator | 363 | A | 7.5 | One explicit evaluation feeds projections; historical reports cannot grant current evidence. |
-| pew | 232 | A | 2.6, 8.3, 9.2 | Reconcile live recording, subprocess, explain and requirement-home residue. |
-| pew | 252 | A | 5.1, 5.6, 7.1, 8.3 | Declaration/path/metadata/line-grammar folds preserve actual selected benchmark obligations. |
-| pew | 276 | A | 4.4, 4.5, 5.1, 5.1u, 9.3 | Generated premise/corruption/conditions tests use independent expectations and live record grammar; preparation, closing and asymmetric diagnostics retain their deciding cases. |
-| pew | 320 | A | 3.4, 4.3, 5.6, 7.4, 8.3 | Adopt each shared release without changing producer environment or native evidence semantics. |
-| pew | 364 | R | 7.6, 8.3 | Informational versus enforcing workflows expose their evidence policies and exits. |
-| shared | 330 | A | 2.3, 5.5, 8.3 | Caller frames are producer diagnostics, not proof a directory open was harmless. |
-| shared | 360 | R | 7.7, 7.8 | Attribute cold/warm/first-result/lost-work/RSS costs without counting refused work as speed. |
-| shared | 365 | A/X | 8.1, 8.2 | Historical support is checked independently; observed variation cannot raise tolerance automatically. |
-| shared | 366 | R | 6.6, 6.7, 9.1–9.4 | Complete Pew assurance only after scope reconciliation, recoverability and final native formats. |
+| gofresh | 102 | A | **7.8**; constituent 8.2 | Reconcile the sliced-closure checkpoint under proven reach and maximal fallback; no automatic noise floor or reserved field adoption. |
+| gofresh | 175 | A | **7.8** | Canonical member precision needs complete dependencies and a licensed applicability transformation; shaped hashes cannot be erased to bridge strategies. |
+| gofresh | 191 | A | **7.8** | The runtime-relevance contract is settled; net/url parsing remains refused until process and in-process GODEBUG effects are accounted for. |
+| gofresh | 192 | A | **7.8** | addObject already scans dependency values before filtering; reduce reference-only nested closure reach before choosing summaries. |
+| gofresh | 193 | A | **7.8**; constituent 9.2 | Prove whole reachable-object immutability, external aliases and writes; keep carrier memos, channelz and clause decomposition distinct. |
+| gofresh | 202 | A | **7.1**; constituents 5.2c, 7.8, 8.3 | Carry model/audit/cut and typed cause facts once. Verdict's semantic cause boundary remains absent despite completed singleton work; precision requires separate proof. |
+| gofresh | 203 | A | **7.8**; prerequisite 7.7 for cost changes | Preserve completed dependency identities while folding memo mechanics; condition the unfulfilled standard-source digest memo limb of closed 315 on measured cost and immutable-generation ownership. |
+| gofresh | 204 | A | **7.1** | Existing ReceiverMethod ladder stays; consolidate receiver/flag/class-B/harness inventories without merging observable effects and outcome authority. |
+| gofresh | 206 | A | **9.3**; constituents 5.6, 7.7 | Re-census independent fixture/property oracles, API roots, hook ownership and real platform/CI premises; no old count is a fresh inventory. |
+| gofresh | 240 | A | **9.2**; constituents 7.4, 8.3 | Reconcile guard/cache/provenance/native-format clauses, distinct resource controls, sub-rule bindings and gap conditions against current semantics. |
+| gofresh | 241 | A | **7.1**; constituents 5.5, 7.8, 8.3 | One owned load policy, tree-qualified explain hooks and semantic culprit account; actual loader containment remains a capability boundary. |
+| gofresh | 242 | A | **7.1** | Internalize construction only after current consumer capability census; retain needed vocabulary, aliases and binding identity. |
+| gofresh | 243 | A | **5.6**; constituents 5.5, 9.2 | Retire verified unused APIs with their contracts; preserve distinct codec/quoting rules and live cancellation obligations. |
+| gofresh | 255 | R | **8.3** | Name invoke site, operand and reached sink without claiming an over-approximated edge executed. |
+| gofresh | 260 | A | **7.8** | Existing iterator positives do not settle exact SplitSeq/SHA cases; preserve closedness, target completeness and audit boundaries. |
+| gofresh | 295 | A | **7.3** | Exact process-identity assertions need root/subject scope and revocation; a liveness read is behavior-bearing, not automatically irrelevant. |
+| gofresh | 314 | A/X | **7.7** | Current cold/warm/retained and shared-page measurements precede ownership changes; completed-group release already exists. |
+| gofresh | 347 | A | **6.1**; constituent 6.2 | Reconcile checkpoint identities, mixed/sibling validation and discharge rejection; locality alone proves no candidate non-influence. |
+| gofresh | 348 | A | **8.1** | Record-only support validation observes no current inputs, preserves original identity and distinguishes compatibility from authenticity. |
+| gofresh | 361 | R | **5.5** | FromState/adoption/conversion/merge use the owning unit's context; preserve independent closing observations. |
+| gomutant | 95 | C | **6.7**; conditional census 9.4 | Recovery does not wait for Tasks; adopt Tasks only when SDK and consuming client actually support the protocol. |
+| gomutant | 187 | A | **5.4**; constituent 5.5 | Overlay source isolation does not contain relative writes; own scratch execution and its actual input identity/cancellation. |
+| gomutant | 188 | R | **5.4** | Explicit testdata selection must load independently of wildcard filters and preserve persisted attribution. |
+| gomutant | 209 | A | **8.3**; constituent 9.2 | Reconcile live contributor, binary identity, catalog, bounds and sideline contracts; completed version/INV work is not reopened. |
+| gomutant | 212 | A/X | **5.4**; constituents 5.6, 6.6 | Conserve candidates, attribution and dispositions on admitted paths only; delete retired drift helpers rather than restore changed-oracle composition. |
+| gomutant | 214 | A | **7.4**; constituents 5.4, 7.1, 7.8 | Bind run-owned spawn facts and complete catalogs; preserve resource-policy distinctions and measure lazy materialization first. |
+| gomutant | 216 | A | **7.8** | Share classified evidence facts within one coherent endpoint; preserve body/shaped policy and verify-on-reuse. |
+| gomutant | 217 | R | **9.2** | Current version 16 and readable historical paths preserve duplicate/null/trailing-data refusal without re-encoding away defects. |
+| gomutant | 218 | A | **7.8** | Entry-state sharing keys all decisive content/policy/evidence inputs; physical file stat alone does not certify verdicts. |
+| gomutant | 219 | A | **9.3**; constituents 5.6, 6.4, 6.7 | Re-census fixture, binding, real transport/platform and run-wiring gaps with independent assertions. |
+| gomutant | 220 | A | **5.6**; constituents 5.5a, 8.3, 9.2 | Fold live request/path/I/O/install helpers without restoring retired producers or conflating count populations. |
+| gomutant | 233 | R | **6.7**; constituent 5.5a | Bounded root-qualified state in the machine-local home survives tokenless lost replies, restart and render expiry. |
+| gomutant | 245 | A | **5.4**; constituents 7.1, 7.2 | Decompose the live unit loop and Tree roles, preserving deterministic membership and stable observer ownership. |
+| gomutant | 254 | A/X | **6.3**; constituents 6.2, 7.3 | Actual flips, reuse refusals and explicit assertions stay distinct; no reach-only exemption or old scheduler estimate returns. |
+| gomutant | 256 | R | **6.6**; constituent 9.2 | Findings replace/withdraw and ephemeral lifecycle retain selection-specific history and original producing provenance. |
+| gomutant | 258 | A | **5.4**; constituents 5.5, 8.3 | Record-wide evidence failure is not git dirtiness or a subject observation; preserve completed-process unions and actionable causes. |
+| gomutant | 267 | A | **8.3**; constituents 6.3, 6.7 | Live vocabularies, structured dispositions, panic detail and population-aware row projections; keep closing/recovery ownership explicit. |
+| gomutant | 268 | A | **9.4** | Re-census live subcontracts and split without losing consent, citations or evidence strength; historic counts and removed carve-outs are not work. |
+| gomutant | 269 | R | **5.4** | Consolidate live stream judgments with corrupt/truncated refusal, build/crash/retry precedence and generated outcome controls; no coverage-schedule breaker. |
+| gomutant | 294 | A | **5.4** | Settle external-oracle capability, artifact, contributor and terminal/support model before implementation; nested compiler must receive the mutant. |
+| gomutant | 296 | A/X | **6.3** | Name real test flip evidence; any explicit changed-oracle workflow remains separate and remeasured, never an automatic omission. |
+| gomutant | 302 | R | **6.6**; constituents 6.5, 9.2, 9.3 | Coexisting selections across both layers and lifecycle; choose format after live version 16, preserve baseline and authorized self-campaign scopes separately. |
+| gomutant | 313 | A/X | **7.3** | Derive one home for justified standing declarations; reject omnibus policy, additive selections and repository resource defaults. |
+| gomutant | 349 | A | **6.2**; constituents 6.1, 9.1 | Landed full-oracle/admission controls remain; future negatives need locality plus influence proof and affected-history remeasurement. |
+| gomutant | 354 | R | **6.3**; constituent 7.2 | Synchronous advisory attribution cannot block unrelated commits or be enabled by callback presence. |
+| gomutant | 355 | R | **6.4** | A validated window commits beside blocked successor preparation; real bound wiring retains deterministic membership. |
+| gomutant | 356 | R | **6.5** | Independently validated baseline deposits survive before findings and merge under shared-bank serialization. |
+| gomutant | 362 | R | **6.7** | Non-candidate events preserve cumulative counters; final merge and render failure preserve the committed typed prefix. |
+| stipulator | 176 | A | **5.3** | Deliberately amend legal whole-claim defaults; scoped supersede, malformed-clause remedies and binding placement preserve author intent. |
+| stipulator | 185 | A | **5.6**; constituent 9.2 | Remaining record/ledger mechanics preserve existing full coordinates, atomic/exclusion spans and refused-record ledger protection. |
+| stipulator | 225 | A | **5.6**; constituent 8.3 | Reconcile reference identity, live enum/Unicode/cap folds and vestiges; per-stream styling remains reader-owned. |
+| stipulator | 226 | A | **7.8**; constituents 5.2d, 5.2e | Workspace ownership, two body scans and query lifetimes remain; completed selection/physical/module/certificate work stays closed. |
+| stipulator | 228 | A | **5.6**; constituent 9.3 | Eight CLI build sites, ambient controls, independent body/record generators and exact-method shape evidence. |
+| stipulator | 238 | A | **5.5**; constituents 7.1, 7.8 | Actual loader descendants and policy-scoped explain costs require an owned boundary, not a hook the loader lacks. |
+| stipulator | 248 | R | **8.3**; constituent 9.2 | Reconcile live cap/account/format and decomposition contracts without stale literals or fictitious enforcement. |
+| stipulator | 249 | A | **7.5**; constituents 5.2c, 5.2e, 5.3, 7.8, 8.3 | One explicit evaluation; independent package prefixes, tiers, NoOutcome and typed publication accounts remain visible on errors. |
+| stipulator | 345 | R | **5.3**; constituent 7.4 | Ambiguous timeout-looking values/positionals and repetition remain identity-bearing unless their actual role permits discharge. |
+| stipulator | 346 | R | **5.3** | Label/ordinal/multi-successor carry preserves scope or refuses; ordinary retarget's fixed key does not fix supersede. |
+| stipulator | 357 | R | **5.3** | A completed retry package persists before later retry cancellation. |
+| stipulator | 358 | R | **5.3** | Race/plain served groups retain their own evidence tier in correlation. |
+| stipulator | 359 | R | **5.3**; constituents 7.5, 8.3 | Quiesce already publishes; retain its notices and witness accounts across later failures. |
+| stipulator | 363 | A | **7.5** | One explicit evaluation feeds non-measuring projections; filtered reports or persisted verdicts grant no current evidence. |
+| pew | 232 | A | **8.3**; constituent 9.2 | Reconcile live README/spec/default/stream/purpose homes; existing IDs and native formats are not recreated. |
+| pew | 252 | A | **5.6**; constituents 7.1, 8.3 | Re-census path/module/GC/metadata/progress copies; wider inactive-tag GC inventory is intentional. |
+| pew | 276 | A | **9.3**; constituents 7.8, 9.1 | Extend existing native-premise and fuzz evidence with independent corruption/conditions/topology/policy controls; preserve exact campaign ledger. |
+| pew | 320 | A | **5.6**; constituents 7.4, 8.3 | Remaining default/served-string/help and resource adoption only; completed producer/query/retained-executable migration stays closed. |
+| pew | 364 | R | **7.6**; constituent 8.3 | Enforcing defaults remain complete/require/compatible; informational comparison, confidence, reader scope and exits stay explicit. |
+| shared | 330 | A | **8.3**; constituent 5.5 | Diagnostic caller-frame grammar releases godst → Gofresh → consumers; no authority to ignore an input and no dependency on 314. |
+| shared | 360 | R | **7.7**; constituent 7.8 | Current cold/warm/retained and boundary peaks precede ownership changes; existing releases/gates are not missing by assumption. |
+| shared | 365 | A/X | **8.2**; constituents 8.1, 7.6 | Admit and describe historical variation; preserve explicit tolerances, never automatic floors. |
+| shared | 366 | R | **9.1**; constituents 9.2, 9.3, 9.4; prerequisites 6.6, 6.7 | Preserve every campaign population/excluded delta; native-premise property is landed. Measurement requires explicit authorization. |
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 49 source issues, excluding
-this reconciliation document itself.
+Each slug names a file beside this one. There are 48 source issues, excluding
+README and this reconciliation document itself.
 
-| Slug | Disposition; destination | Deciding case |
+| Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
 |---|---|---|
-| audit-boundary-residue | A; 5.2, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 7.8, 9.2 | Remaining component cases preserve build agreement, construction cancellation, physical snapshot dependencies, declaration fidelity, synthetic-file isolation, typed judgment ownership and closing. |
-| assembly-fixtures-amd64-only | C; 9.3, 9.4 | Actual non-amd64 runner/report; unsupported fixtures cannot count as coverage. |
-| attestation-keyed-record | A; 2.4, 2.5, 4.1 | Siblings preserve distinct model discharges; no third model invented to justify a map. |
-| attribution-mask-width | C/A; 7.7, 7.8 | Measured over-64-subject hotspot; wider masks preserve attribution and cancellation. |
-| attribution-splits-one-quoted-string-helper | R; 5.6, 9.2 | Framing/quotes/malformed tails and legacy fixed points preserve their distinct grammar. |
-| binary-roots-single-mask-union | A; 7.7, 7.8 | Binary union equals existing roots including startup/TestMain; subject projections remain separate. |
-| children-budget-bounded-by-available | A; 2.4, 2.6, 7.4 | Soft family target cannot authorize unavailable physical room or needlessly halve small-host capacity. |
-| classb-arms-one-table | A; 7.1, 7.8 | Fold and SSA agree on effect/entropy/body-cut meaning for every classified row. |
-| cli-long-help-rendering-two-homes | R; 5.6, 8.3 | Remaining Pew help/pointer join equals shared projection for knobbed and knobless verbs. |
-| closed-value-ladders-one-source | R; 7.8 | Collected targets cannot grant closure when operand judgment refuses unknown cells. |
-| closure-sub-contract-granularity-residue | R; 2.6, 9.4 | Independent clauses retain their own consent, bindings and wrapped citations. |
-| cold-analysis-pass-program-retention | A/X; 7.7 | Reject retain-all premise; measure residual cold working set after existing per-group releases. |
-| containment-windows-job-object | C; 5.4, 5.6, 9.4 | Windows-native cancel/fork/job lifecycle, preserving stronger existing oracle containment. |
-| dependency-nested-closures-outside-the-drain | A; 7.8 | Dependency function value carries nested effects; summaries or traversal retain the std boundary. |
-| direct-call-site-index-one-source | R; 7.8 | Generic calls and stored functions retain different provenance under correct variant scope. |
-| discharge-reason-channel-one-source | A; 2.2, 7.1, 8.3 | Remedy derives from actual admitted model, not a broader unused assertion channel. |
-| dispatch-admissions-one-predicate | R; 7.8 | Computed/invoke/operand routes preserve identical safety conditions. |
-| entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable | A; 2.2, 7.8 | TLS reach alone proves neither entropy irrelevance nor supported network outcomes. |
-| explain-no-chain-for-a-dependency-culprit | R; 7.1, 8.3 | Named dependency culprit yields its chain or explicit scope limit, not false absence. |
-| first-offender-refusals | R; 2.5, 4.1, 7.1 | All decidable missing subjects/invalid records named deterministically before costly work. |
-| fixture-tier-parallelism | A; 7.7, 9.3 | Broader per-test scheduling needs measured benefit, equal completed workloads and shared-env/memo/hook ownership; sequential fixture reuse alone establishes none of these concurrency premises. |
-| flag-surface-one-table | R; 7.1, 7.8 | Registration remains storage-judged; unknown Parse/default-set reads stay refused. |
-| fleet-sweep-tugboat-vouch-list-retires | C; 2.4, 7.3 | File supplies the same six effective identities before flag mirror removal. |
-| fold-import-name-declared | A; 7.8 | Legal same-basename imports with different declared names; classified renamed package cannot evade scan. |
-| generated-proto-discharge-single-subject-only | A; 2.2, 7.8 | Audited descriptor fill versus mutable local runtime/handwritten variable under each execution model. |
-| go-types-named-unpack-races-iscomplete | C; 9.3, 9.4 | Actual pinned Named locking fixes the documented race before gate restoration. |
-| grpc-runtime-memo-and-registry-discharges | A; 2.4, 7.8 | Invariant memo fills versus subject-dependent channelz registry; distinct proof grounds. |
-| guidance-lint-zero-default-spelling | R; 5.6, 8.3 | Remaining Pew zero/derived defaults survive projection without linting absent registrations. |
-| harness-admission-families-one-table | R; 3.2, 7.1 | Static/dynamic/body-cut/outcome consumers all follow family changes and receiver distinctions. |
-| immutable-after-construction-objects | A; 7.8 | Unaccounted or writable escapes, mutable returns and later writes defeat proof; sharing an already-proven immutable object does not. |
-| in-module-generated-descriptor-writes-have-no-discharge | A; 2.4, 7.8 | Generated audited cluster distinguished from handwritten and unsupported-generator state. |
-| invoke-targets-narrowed-by-operand | A; 7.8 | Proven local SHA-256 operand narrows; unknown/shared/promoted routes retain conservative targets. |
-| iterator-calls-and-std-invokes-open-the-closure | A; 7.8, 9.4 | Reproduce both reported SplitSeq and hash.Sum shapes against live SSA/RTA before claiming resolution. |
-| json-record-readers-one-home | A; 5.6, 9.2 | Strict key/trailing checks retain distinct manifest-byte and indented-fingerprint canonicality rules. |
-| loader-spawns-outside-the-runner | A; 2.4, 4.1, 7.1 | Actual loader children carry immutable policy and cancellation accounting; no assumed hook/driver escape. |
-| memo-scope-axes | A; 7.8 | Memo/read-path folds preserve discard/recompute invariance; cone/whole composition state remains distinct. |
-| toolchain-dependency-consumer-adoption | R; 5.2, 5.4 | Adopt runtime-input generation 3 without reconstructing omitted PWD evidence; native content/policy fields survive consumer formats, with static re-derivation distinct from re-execution. |
-| net-url-parse-godebug-channel | R; 2.3, 3.2 | ParseQuery under urlmaxqueryparams and sibling Setenv; retain refusal until relevance is sound. |
-| per-file-memos-one-shape | R; 7.8 | Cold/warm/corrupt/concurrent memo cases agree and preserve completed entries. |
-| prints-default-one-home | R; 5.6, 8.3 | Remaining Pew predicate agrees with actual pflag rendering, including string "0" versus integer zero. |
-| registration-audit-walk-helper-unification | R; 7.8 | Shared iteration preserves each caller's escape/gate policy. |
-| resident-walk-counts-a-vfork-child-twice | A; 2.4, 7.7 | Shared-address-space child versus independent equal-sized child; reject value-equality heuristic. |
-| root-directory-input-with-empty-manifest | A; 2.2, 5.4, 8.3 | Logged open of / remains conservative; missing capture and caller-frame attribution are distinct. |
-| runtime-input-entries-implicit-context | R; 5.5 | Blocked roots/path work during finalize/adopt/convert/merge leaves through owning cancellation. |
-| runtime-inputs-dirty-unadopted | A; 2.3, 5.6, 9.4 | Working-tree reuse and historical-baseline provenance remain different consumer claims. |
-| served-knob-strings-judged-by-consumer-grammars | R; 5.6, 8.3 | Remaining Pew nested/default prose judged by shared served bytes and independent literal anchors. |
-| static-input-root-unadopted | A; 2.3, 5.2, 5.6 | Unpinned static-root assertion cannot suppress a dependency; static certificate needs no fake receipt. |
-| sync-variable-judgments-one-shape | A; 2.4, 7.8 | Pool/memo completeness and attestation gates retain distinct proof grounds. |
-| unify-carrier-walks | R; 7.8 | Recursive type parameters, atomic pointers and signatures preserve openness/alias policy differences. |
+| audit-boundary-residue | A; **5.2c**; constituents 5.2d, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 9.2 | Verdict still lacks semantic cause/authority data. Retain shaped symlink/quoted-replace/probe-name isolation, physical snapshot/cancelled waiter/selection-slice cases, GOFLAGS aliases, resource-index publication, GC cancellation, count identity, mutable snapshot bytes and buffer-cost cases; completed 5.2a/b controls stay closed. |
+| assembly-fixtures-amd64-only | C; **9.3**; trigger census 9.4 | Three assembly fixtures have only amd64 bodies. A selected non-amd64 gate or supported workload triggers equivalent bodies or explicit scoping; cross-vet is not execution. |
+| attestation-keyed-record | A; **7.1** | Two positive model assertions duplicate fields/scopes/copies; a sibling omission was repaired. Consolidate without inventing a third assertion or changing discharge authority. |
+| attribution-mask-width | A; **7.7**; constituent 7.8 | subjectMask is uint64; the 16/32/64 timing curve is historical. Widen only after a current hotspot measurement, preserving attribution and cancellation granularity. |
+| attribution-splits-one-quoted-string-helper | R; **5.6**; constituent 9.2 | Two quoted-prefix parsers have distinct tails. Share the primitive while retaining legacy bare roots, malformed tails and canonical re-key fixed points. |
+| binary-roots-single-mask-union | A; **7.8**; measurement 7.7 | Binary-root union uses attributed per-root walks. Prove complete-root/instantiation equivalence before a single-union fold; preserve per-subject attribution and existing release. |
+| children-budget-bounded-by-available | A; **7.4**; constituent 9.2 | Soft-target complement mis-sizes physical admission both ways. Reconcile resident/control clauses without selecting either rejected arithmetic alternative. |
+| classb-arms-one-table | A; **7.1**; constituent 7.8 | Per-package effect arms duplicate their gate's inventory. Preserve refusal precedence; entropy body-cut/kind changes require separate compatibility and proof. |
+| cli-long-help-rendering-two-homes | R; **8.3** | Pew guidanceHelp returns Help, not LongHelp, and its pin agrees with that omission. Adopt the pointer projection with a literal anchor; shared lint already works. |
+| closed-value-ladders-one-source | A; **7.8** | closedDynamicTargets already gates collection on closedness. Fold duplicated value/cell traversal without misdiagnosing an unsafe collector admission. |
+| closure-sub-contract-granularity-residue | R; **9.2** | Escape/discharge/audited-set bundles and base pacing remain independently editable rules. Re-census and split with consent, bindings and wrap-aware cites preserved. |
+| cold-analysis-pass-program-retention | A/X; **7.7** | Observability already deletes completed and empty-root groups; rooted discharge release also exists. Attribute current cold/warm phase peaks and retained objects before changing ownership. |
+| containment-windows-job-object | C; **5.6**; trigger census 9.4 | Shared taskkill and Gomutant's stronger job object are different boundaries. Common capability requires an actual supported Windows consumer need; retain assignment, priority and kill attribution. |
+| dependency-nested-closures-outside-the-drain | A; **7.8** | addObject scans SSA before the dependency filter. Reduce the exact reference-only nested-value refusal against direct and first-party controls; no general missing dependency scan is established. |
+| direct-call-site-index-one-source | A; **7.8** | The shared field/memo index unwraps generic and parenthesized callees; init-only helpers still require direct identifiers. Share facts without silently widening init-region/escape policy; pin deliberate precision changes separately. |
+| discharge-reason-channel-one-source | A; **7.1**; constituents 5.2c, 8.3 | composeDynamicState repeats verb/channel composition. Carry the deciding channel semantically into Verdict, not through another remedy-string parser. |
+| dispatch-admissions-one-predicate | A; **7.8** | Resolved, invoke and held-target routes encode one admission differently; no wrong-valid witness is established. Preserve indexed-target/operand conditions in the common predicate. |
+| entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable | A; **7.8** | Tugboat's historical 828/1098 histogram does not prove nonce irrelevance. Reduce exact versus enumerated reach; preserve network/liveness refusals and no TLS-wide grant. |
+| explain-no-chain-for-a-dependency-culprit | A; **8.3**; constituent 7.1 | Explain already visits module-owned dependencies. Reproduce the named descriptor under matching selection/assertions/generation and inspect composition hooks; do not repeat the refuted omission diagnosis. |
+| first-offender-refusals | R; **5.2c** | Sibling/prepareRecorded still stop at one offender, with map-order nondeterminism. Collect the full unknown set deterministically while preserving kind/shape precedence. |
+| fixture-tier-parallelism | A; **7.7**; constituent 9.3 | Setenv/memo/hook/explain owners constrain concurrency. Current equal-population measurements and ownership, not sequential fixture reuse, decide any scheduling expansion. |
+| flag-surface-one-table | R; **7.1** | Four flag-name policies and fold/walk ladders overlap. Consolidate lookup while retaining storage-judged registration and parsed-input refusal. |
+| fleet-sweep-tugboat-vouch-list-retires | R; **7.3** | Both Tugboat files contain the six mirrored identities. Confirm the effective set non-measuring with flags omitted before deleting the script mirror; file presence is not that confirmation. |
+| fold-import-name-declared | A; **7.8** | Maximal fold derives import names from paths; renamed same-basename packages refuse conservatively. Read declared-name metadata, preserving collision refusal until established. |
+| generated-proto-discharge-single-subject-only | A; **7.8** | generatedProtoOut is single-subject-gated. Prove package-process shared-state/alias/runtime conditions before widening, preserving audited versions and generated headers. |
+| go-types-named-unpack-races-iscomplete | C; **9.3**; trigger census 9.4 | Recorded Named.fromRHS read/write race belongs to the toolchain. Restore affected race coverage only on a listed corrected pin with actual workload evidence; share shard judgment if needed. |
+| grpc-runtime-memo-and-registry-discharges | A; **7.8** | Nineteen historical carrier memos are not carrier-free data; channelz is subject-dependent. Re-census exact versions and prove each class before retiring the consumer waiver. |
+| harness-admission-families-one-table | R; **7.1** | Four harness families repeat predicate/constructor/body-cut/dynamic inventories; immutableEnvironmentMethod also consumes them. Observable effect and outcome support remain distinct. |
+| immutable-after-construction-objects | A; **7.8** | Constructor-retained writable aliases defeat private-field arguments. Prove the whole graph/fixpoint, later writes and escapes before trimming rapid's vouch. |
+| in-module-generated-descriptor-writes-have-no-discharge | A; **7.8** | Own-code generated descriptors already have the single-subject channel. The residual is package-process eligibility, not local vouches or a generic generated-marker grant. |
+| invoke-targets-narrowed-by-operand | A; **7.8** | Interface invoke keeps the full enumerated projection. Prove operand/method-set completeness; unknown, empty or unscanned promoted targets keep fallback. |
+| iterator-calls-and-std-invokes-open-the-closure | A; **7.8** | Existing iterator positives do not reproduce pb's SplitSeq return-flow or SHA Sum refusal. Reduce both under current SSA/RTA before selecting a refinement. |
+| json-record-readers-one-home | A; **9.2**; constituent 5.6 | Manifest raw-byte and fingerprint compacted canonicality differ. Share strict primitives without accepting malformed historical bytes or upgrading support. |
+| loader-spawns-outside-the-runner | A; **7.1**; constituent 5.5 | packages.Config has no spawn hook; non-nil Env currently pins policy. One seam must retain environment/directory/cancellation and expose the actual exclusion, not a forbidden driver workaround. |
+| memo-scope-axes | A; **7.8**; measurement 7.7 | Parallel read/memo and cone/pass result shapes remain after dependency repairs. Closed 315's digest-memo proposal requires measured repeated cost and immutable-generation ownership first. |
+| toolchain-dependency-consumer-adoption | R; **5.2d**; constituent 5.4 | Native content/policy fields and generation-3 PWD must survive producer/checker adoption. Completed source certificates stay static; never synthesize missing historical runtime evidence. |
+| net-url-parse-godebug-channel | A; **7.8** | ParseQuery's recorded GODEBUG result change and in-process Setenv require runtime-relevance authority. Retain parsing refusal until both channels are covered. |
+| per-file-memos-one-shape | R; **7.8** | Effect, ledger and canonical memos duplicate load/pending/merge mechanics. Preserve each complete key, recomputation equivalence and concurrent completed entries. |
+| prints-default-one-home | R; **5.6** | Pew retains zeroDefault beside adopted Coverage. Replace it with PrintsDefault while retaining independent pflag type-cliff checks and concrete-type limits. |
+| registration-audit-walk-helper-unification | R; **7.8** | Break/literal/classifyArg walks overlap; resolveEnvAudit already folded. Share traversal only with each gate, target and fail-closed policy preserved. |
+| resident-walk-counts-a-vfork-child-twice | A; **7.7** | Summed RssAnon/RssShmem can double-count vfork and persistent shared mappings. Measure actual kernel quantities; equal counters or minimum samples prove no ownership. |
+| root-directory-input-with-empty-manifest | A; **8.3**; constituents 5.5, 5.4 | Testlog lacks caller PC/purpose; `/` open stays conservative. Separate diagnostic frame work from Gomutant's record-wide copied refusal; manifest neighbours are no caller evidence. |
+| runtime-input-entries-implicit-context | R; **5.5** | FromState/adoption/conversions/merge can reach private background work; Describe/Paths are projections. Use unit contexts and independent closing observations. |
+| runtime-inputs-dirty-unadopted | A; **5.6** | No fleet production CommitInspector/Dirty adopter; Gomutant uses git directly. Recheck callers and retire API, clause and bindings together, not provenance semantics. |
+| served-knob-strings-judged-by-consumer-grammars | R; **5.6** | Pew's cliUsage/firstClause remain after shared lint adoption; Stipulator adopted Served and Gomutant's direct comparison conforms. Keep independent literal anchors. |
+| static-input-root-unadopted | A; **5.6** | WithStaticInputRoot has only its tests across four repos. Recheck and retire the unused option and clause together; do not manufacture an adopter. |
+| sync-variable-judgments-one-shape | A; **7.8** | Pool and memo use walks differ in completeness and receiver rules. Share mechanics without merging attestation-gated pool and unconditional carrier-free proof. |
+| unify-carrier-walks | R; **7.8** | Three recursions retain TypeParam cycle and signature/alias differences; atomic transparency already shared. Preserve those policies and openness-term attribution. |
 
 ## Gomutant issue inventory
 
 Each slug names the sibling `gomutant` repository's `docs/issues/` file.
-There are 56 source issues.
+There are 52 source issues, excluding README.
 
-| Slug | Disposition; destination | Deciding case |
+| Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
 |---|---|---|
-| attest-has-no-replace-or-withdraw | R; 2.4, 6.6, 9.2 | Explicit replace/withdraw preserves history and affects only selected survivor. |
-| baseline-measurement-banks-only-at-the-first-commit | A; 2.5, 6.5 | Restart before first finding retains validated baseline; separate documents merge shared bank. |
-| campaign-silent-past-its-deadline | R; 5.5, 6.7 | Deadline during final evidence work returns bounded ending with committed prefix. |
-| check-red-fleet-sweep | R; 5.4 | Mutation-basis and candidate-conservation requirements obtain their required evidence class without deleting deciding witnesses or granting historical counts authority. |
-| engine-run-scoped-oracle-value | A; 5.4, 7.1, 7.4 | Concurrent probes/campaigns retain their own bounds and environments. |
-| enumeration-lag-gate-unstated | R; 2.6, 5.4 | Effective tags/configuration affect enumeration and its before-measurement refusal. |
-| ephemeral-attestation-lifecycle | A; 2.2, 6.6, 9.2 | New uncommitted file then commit/rename/delete never invents producing provenance. |
-| ephemeral-empty-replacement-survives-as-baseline | R; 5.4, 9.4 | Reduced empty/comment guard deletions both reach the actual oracle; report remains unconfirmed. |
-| ephemeral-probe-writes-under-the-callers-tree | A; 2.5, 5.4 | Transient/persistent writes isolated, relative reads correct and cancellation cleans owned residue. |
-| ephemeral-test-discovery-misses-listed-test | R; 5.4, 9.3 | Establish the running tool, effective selection and source state beside Go's own listing, then measure the matching scoped oracle; neither an unmeasured probe nor ordinary test execution establishes mutation sensitivity. |
-| evidence-fault-rendered-as-dirty-provenance | R; 2.2, 5.4, 8.3 | Clean-tree missing-view/manifest faults name evidence, never fictional git dirtiness. |
-| explain-has-no-cli-face | R; 8.3 | CLI and MCP answer the same semantic manifest/refusal questions, including unelided causes. |
-| explicit-testdata-package-selection | R; 2.4, 5.4 | Explicit directory/import selects excluded wildcard package and persists attributable findings. |
-| external-oracle-for-tagged-and-subprocess-targets | A; 2.6, 5.4 | Browser/nested go execution reads the materialized mutant under an explicit model. |
-| face-test-fixture-duplicated | A; 5.6, 9.3 | Shared scenario construction retains independent expected CLI/MCP projections. |
-| findings-judge-minutes-class-over-a-real-document | R; 7.7, 7.8 | Cold/warm real-document phase costs with identical judged population. |
-| findings-records-keyed-by-symbol-alone | R; 6.6 | Integration kill and default survivor coexist through every lifecycle/reuse path. |
-| findings-row-projections-one-shape | A; 6.7, 8.3 | Absent/computed-empty delta and layer/reason/omission semantics agree across faces. |
-| gofresh-corpus-pin-lag | R; 5.4 | Adopt the released native boundary with target/window ownership, then verify the clean installed consumer's dependency. |
-| git-go-native-oracle-reuse | A; 5.4, 7.7, 7.8, 8.3 | Reproduce generic native-oracle scratch, testing-context and unavailable-subject refusals after admission repair/adoption; keep placement, attribution and reuse distinct, without commissioning git-go work or promoting historical counts. |
-| installed-binary-dirty-build | R; 4.6, 5.6, 9.3 | Both binaries and live MCP process identify the clean committed repair. |
-| interned-table-entries-admit-duplicate-keys | R; 6.6, 9.2 | Historical table upgrades preserve duplicate-key refusal instead of erasing duplicates. |
-| knob-terse-clause-per-face | R; 2.4, 8.3 | Four named clauses plus nested fields retain face-neutral meaning and explicit form/defaults. |
-| layer-recheck-whole-reason-unwitnessed | A; 2.3, 5.4 | External symlink relink changes verdict-bearing target fact despite equal refusal clause. |
-| list-bounders-one-helper | A; 6.7, 8.3 | Zero/bound/over-bound exact omission counts; retired scheduler renderers stay retired. |
-| mcp-liveness-cancellation-witness | R; 5.5a, 6.7 | Failed ping write cancels work; idle session and transport/cancel cause remain attributable. |
-| mcp-render-bound-discards-the-response | R; 6.7 | Post-commit expiry preserves run ID, layer/counts/rows and incomplete-render status. |
-| mcp-residue-sheds-unwitnessed | R; 6.7, 8.3 | Final-only shed appears on success and post-write error on both faces. |
-| mcp-run-observability | R; 5.5a, 6.7 | Tokenless lost reply/restart recovers root-qualified state; preflight measures nothing. |
-| mcp-sheds-and-carries-as-prose | A; 6.7, 8.3, 9.2 | Structured position/operator/reason/derivation with exact omissions; human projection separate. |
-| mcpserver-witnesses-unbound | R; 2.6, 9.3 | Reconcile all 18 issue-listed declarations against live clauses; no automatic binding. |
-| narrowing-exemption-and-freshness-clauses-judged-apart | A/X; 2.2, 6.2, 6.3 | Reach alone authorizes no omission; reuse refusal is not observed flakiness. |
-| never-executed-exemption-unaudited | A/X; 6.2, 9.1 | Historical negative buckets neither skip remeasurement nor establish equivalence. |
-| oracle-attribution-hides-post-commit-work | A; 6.3, 6.7, 7.2 | Slow per-test work cannot block another target's commit; partial work is not stable. |
-| package-crash-kill-omits-the-panic | R; 5.4, 8.3 | Package panic kill includes bounded message/frame without changing attribution. |
-| per-layer-counts-one-type | R; 6.6, 6.7, 8.3 | Unequal repo/local counts and coexisting selections discriminate swapped/collapsed counts. |
-| plan-cost-is-candidate-materialization | A; 7.7, 7.8 | Lazy construction retains exact candidate identities/extents/counts. |
-| probe-unit-build-failure-retries-every-batch | X/A; 6.2, 5.4 | No removed schedule producer rebuilt; live stream unit-build failure remains correctly classified. |
-| process-identity-reads-have-no-discharge-channel | A/X; 2.2, 2.4, 7.3 | Explicit exact assertion and revocation; changed process identity may affect behavior. |
-| protodb-changed-run-commits-within-the-hour | A; 7.7, 9.3 | Named full-oracle workload's first durable target measured honestly against field expectation. |
-| purity-assertion-run-surface | A; 2.4, 5.4, 7.3 | Operation assertion recorded/root-scoped/revocable; no implicit acceptance or forged invoke explanation. |
-| retired-oracle-drift-helper-tests | A; 5.6 | Remove unconsumed forward-reference and drift-count helpers while preserving full-oracle, conservation, history and attestation coverage on admitted paths. |
-| run-faces-assemble-rows-twice | A; 6.7, 8.3 | Same persisted semantic result projects consistently including post-write failure. |
-| run-seams-snapshotted-per-run | A; 5.4, 7.1, 7.2 | Concurrent immutable observers do not cross; subscription cannot enable execution. |
-| seam-swap-helper-for-tests | R; 5.6, 9.3 | Nested swaps restore actual previous value after failure/cleanup. |
-| self-campaign-oracles-cost-a-day | A; 6.2, 6.6, 6.7, 9.3 | Preserve named changed scope and full oracles; historical banked prefix is not completion. |
-| semantic-closure-in-the-carry-gate | A; 2.2, 2.3, 7.8 | Independent sibling edit versus relevant dependency/strategy move discriminated without laundering. |
-| serve-path-posture-keying | R; 5.4, 6.6 | Recorded posture owns its judgment; current posture cannot lend it a different view. |
-| store-report-path-walk | A; 7.8 | Coherent cached parse avoids duplicate reads; changed content/policy invalidates it. |
-| symbol-grammar-package-set-resolution | R; 5.4, 7.1 | Dotted package paths resolve by declared packages and do not grant a false single-package model. |
-| unstable-test-quarantine | A/X; 2.6, 6.3, 9.4 | Sole killer that flips cannot disappear from a claimed full oracle; any changed scope is explicit. |
-| vmm-finding-admission-refusals | A; 3.2, 5.4, 7.8 | Closed receiver/carrier fixtures separate eligible precision from unsupported execution. |
-| window-bounds-wiring-unwitnessed | R; 6.4, 9.3 | Real run over 64 candidates discriminates worker ceiling and execution bound independently. |
-| windows-process-fact-arms-unexecuted | C; 5.4, 9.3 | Actual Windows exit/job kill/assignment/resume; compile success is not execution evidence. |
-| divergence-reason-stamped-on-every-evidence-subject | A; 2.2, 5.4 | One record/subject fault does not rewrite unrelated producing manifests or reasons. |
-| root-coordinate-one-spelling | A; 2.4a, 5.5a, 7.1 | Symlinks, .. and concurrent roots preserve evidence-root/process-cwd distinctions. |
+| attest-has-no-replace-or-withdraw | R; **6.6**; constituent 9.2 | Findings still refuse existing dispositions; ephemeral replacement is separate. Add explicit history-preserving replace/withdraw across selections and layers. |
+| baseline-measurement-banks-only-at-the-first-commit | A; **6.5** | Baseline deposits wait for a finding and document locks do not serialize the tree-shared bank. Give complete validated baselines independent deposits and concurrent merge protection. |
+| campaign-silent-past-its-deadline | R; **6.7** | rep.stop precedes ledger.Finish; historical overrun itself is unreproduced. Retain cadence/counters through closing and identify the actual blocking phase. |
+| check-red-fleet-sweep | R; **5.4**; constituent 5.6 | Sweep reports two property/analyzer requirements with example-only bindings. Diagnose live classifications without lowering the bar or treating historical counts as evidence. |
+| engine-run-scoped-oracle-value | A; **5.4**; constituents 7.2, 7.4 | Spawn inputs still threaded beside bounds. Bind immutable operation facts, retain separate mutant transactions, and repair MiB overflow and omitted/empty selection semantics. |
+| ephemeral-attestation-lifecycle | A; **6.6**; constituent 9.2 | Digest matching is not prune/retarget. Preserve dirty/new-file producing provenance through file/oracle/selection lifecycle; no silent re-anchoring. |
+| ephemeral-empty-replacement-survives-as-baseline | R; **5.4** | Current replacement handling distinguishes nil/source; reported empty/comment verdict and wrong-file attribution remain unreproduced. Capture exact bytes/tool/source and full oracle. |
+| ephemeral-probe-writes-under-the-callers-tree | A; **5.4**; constituent 5.5 | Overlay execution uses real package cwd; arbitrary relative writes remain reachable. Own scratch and cleanup, preserving relative input identity; rapid failfile suppression is already resolved. |
+| ephemeral-test-discovery-misses-listed-test | R; **5.4**; constituent 9.3 | Weaver synctest and causal-token probes measured nothing despite Go listings; alias admission repair does not establish their cause. Reproduce with effective tool/selection/source identity before measuring edits. |
+| evidence-fault-rendered-as-dirty-provenance | R; **5.4**; constituent 8.3 | Non-staged evidence refusal still stamps Dirty. Separate missing-view/manifest failure from git provenance and from intentionally shared process observations. |
+| explain-has-no-cli-face | R; **8.3** | MCP explain exists; CLI inventory lacks it. Project the same semantic reader while retaining recorded/judged and unsupported-policy distinctions. |
+| explicit-testdata-package-selection | R; **5.4** | Wildcard load excludes testdata; explicit resolver only searches loaded packages. Support directory/import forms through persisted attribution without widening filters or running blocked VMM campaigns. |
+| external-oracle-for-tagged-and-subprocess-targets | A; **5.4** | Full groups do not propagate overlays to nested compilers or browser oracles. Settle capability/artifact/contributor/terminal model before implementation; preserve baseline symmetry and unreached account. |
+| face-test-fixture-duplicated | A; **5.6**; constituent 9.3 | Faces still compose similar modules/evidence; twenty-three is historical. Share setup, not expected projections or fabricated evidence. |
+| findings-judge-minutes-class-over-a-real-document | A; **7.7**; constituent 7.8 | viewsFor already shares posture-qualified sets. Attribute current cold/warm load, supplemental view, manifest and render cost for the same document. |
+| findings-records-keyed-by-symbol-alone | R; **6.6**; constituent 9.2 | Version 16 parser remains symbol-unique. Coexist complete selections on both layers and all lifecycle paths; changed oracles require whole remeasurement, not revived drift composition. |
+| findings-row-projections-one-shape | A; **8.3**; constituent 6.7 | InspectedRecord has three face shapes. Preserve absent/empty delta, routed layer, policy issue and historical/current distinctions in common projections. |
+| gofresh-corpus-pin-lag | R; **5.4** | Source issue records go.mod v0.115.1; version-only bump is insufficient. Adopt complete target/window production/checking and verify installed identities. |
+| git-go-native-oracle-reuse | A; **5.4**; constituents 7.7, 7.8, 8.3 | Policy-2 run 989784171e8a482d (45 targets, 661 candidates) is history. Reduce scratch/testing-context/unavailable-subject refusals separately from dirty placement and flips; no git-go campaign commissioned. |
+| installed-binary-dirty-build | R; **9.3** | Source audit identifies clean 1e5ff06 files; live MCP process and next sweep remain unknown. Close on actual file/process provenance, not an assumed restart. |
+| interned-table-entries-admit-duplicate-keys | R; **9.2** | Historical 11–13 and content-keyed 14–16 paths require known-object duplicate checks. Preserve malformed bytes until admission and no history upgrade. |
+| knob-terse-clause-per-face | R; **8.3** | Four reported lines and nested schema fields still leak face prose. Use neutral terse clauses, explicit list/default semantics and served-byte refusal at every depth. |
+| layer-recheck-whole-reason-unwitnessed | A; **5.4** | Existing external directories take placedOutside, not the missing/unknown recheck. Establish a reachable fixture and its actual unchanged placement before claiming any whole-reason comparison is load-bearing. |
+| list-bounders-one-helper | A; **8.3** | Scheduler/no-signal producers are removed. Re-census live bounders with exact caps and omitted counts; delete dead helpers rather than restore old producers. |
+| mcp-liveness-cancellation-witness | R; **6.7** | Keepalive configuration has no ping-write-failure witness; idle and transport/context-race facts remain. Inject actual faults and retain committed recovery account. |
+| mcp-render-bound-discards-the-response | R; **6.7** | PersistedRiding error text still loses typed Summary. Preserve partial structured rows/run/root/counts and explicit incomplete rendering under bounded machine-local recovery. |
+| mcp-residue-sheds-unwitnessed | R; **6.7** | Final-merge shed append lacks a nonempty face fixture. Pin actual residue on success and post-write failure, not only ledger helpers. |
+| mcp-run-observability | R; **6.7**; constituent 5.5a | Tokenless capped return payload is not durable recovery. Retain both-layer run state, preflight distinction, lost-reply/restart handling and project identity. |
+| mcp-sheds-and-carries-as-prose | A; **8.3**; constituent 6.7 | runOut exposes string dispositions while CLI JSON has derivation fields. Publish structured facts, declare wire changes and retain them through closing. |
+| mcpserver-witnesses-unbound | R; **9.3** | All eighteen issue-listed tests remain live/unbound in the audit. Read each against its actual clause and policy before binding; presence alone grants nothing. |
+| narrowing-exemption-and-freshness-clauses-judged-apart | A/X; **6.3**; constituent 6.2 | Old covering scheduler is gone. Reuse/volatile-input refusal is not a measured flip; future negatives need independent locality and influence authority. |
+| never-executed-exemption-unaudited | A/X; **6.2**; constituent 9.1 | Historical wisp case-tag observations do not authorize omissions. Recover affected population, retain full fallback and arithmetic control, never resurrect the scheduler audit. |
+| oracle-attribution-hides-post-commit-work | A; **6.3**; constituents 6.7, 7.2 | commitAndAttribute synchronously probes tests; callbacks/derived mode alter advisory execution. Move off unrelated commits and preserve partial/failed/unknown work plus cumulative counters. |
+| package-crash-kill-omits-the-panic | A; **8.3**; constituent 5.4 | The historical report showed FAIL alone; current filtered outputTail retains unnamed panic output. Reproduce real event attribution, including named-test panic output, and preserve bounded diagnostics and differential classification. |
+| per-layer-counts-one-type | A; **8.3**; constituent 6.6 | Lifecycle pair, inspection pair and total/subset differ. Preserve physical/merged/commit populations, unequal-count controls and declared wire changes. |
+| plan-cost-is-candidate-materialization | A; **7.7**; constituent 7.8 | imports.Process is already conditional. Remeasure rendering/dedup/import cost over equal candidates before lazy materialization; actual identities/discards must agree. |
+| process-identity-reads-have-no-discharge-channel | A/X; **7.3**; constituent 6.3 | Static purity does not cover observed /proc input. Exact root/subject permission and revocation precede admission; liveness remains behavior-bearing and no tests disappear. |
+| protodb-changed-run-commits-within-the-hour | A; **7.7**; constituents 6.5, 6.4, 6.7 | Original acceptance remains unmeasured; per-batch producer is retired. Recover workload/oracle/tool identities before an authorized first-result comparison; no campaign grant here. |
+| purity-assertion-run-surface | A; **7.3**; constituents 5.5a, 5.4 | Run exposes variable vouches, not whole-run permission. Derive exact recorded root/subject authority and withdrawal; assertions prove no execution/locality/non-influence. |
+| retired-oracle-drift-helper-tests | A; **5.6** | Forward-reference/drift helpers have test callers only. Remove them while preserving admitted-path conservation, withdrawn-killer, history, anchoring and contradiction controls. |
+| run-faces-assemble-rows-twice | A; **6.7**; constituent 8.3 | Both faces cut/assemble after merge using Routing.Of. Share the projection without re-judging placement; keep partial rows/account on later errors. |
+| run-seams-snapshotted-per-run | A; **7.2**; constituent 5.4 | Package seams are read by run goroutines; tests are sequential. Stable operation composition needs ownership at snapshot entry too; callbacks never commission work. |
+| seam-swap-helper-for-tests | R; **5.6**; constituent 7.2 | Manual swaps still own cleanup. Re-census and restore actual prior values; common helper does not make concurrent global mutation safe. |
+| self-campaign-oracles-cost-a-day | A; **9.3**; constituents 6.6, 6.7, 7.7 | Recover original 46-target scope and later 42/89 prefix separately. Full-oracle@3 requires original deciding tests; old 457 kills/443 open are history, not completion or campaign authority. |
+| semantic-closure-in-the-carry-gate | A; **7.8** | Package-maximal hash over-sheds on siblings; shaped hash erasure launders real edits. Keep current domain/pin distinctions until an explicit subject-semantic transformation is proven. |
+| store-report-path-walk | A; **7.8** | Report path still differs from write routing. Measure residual work and key shared entry facts on full content/policy/evidence generation, not stat alone. |
+| unstable-test-quarantine | A/X; **6.3** | Real window flips and advisory/reuse labels differ. Name test/evidence/scope; explicit quarantine changes the oracle and requires separate whole remeasurement. |
+| vmm-finding-admission-refusals | A; **5.4**; constituents 7.8, 9.3 | Audit-key half closed; file/testing receiver/carrier refusals remain distinct. Reduce tool-owned fixtures and verify installed CLI/MCP identities; paused consumer observations are not new runs. |
+| window-bounds-wiring-unwitnessed | R; **6.4**; constituent 9.3 | Direct gatherer pins do not discriminate real run cliffs. Exercise >64 candidates and execution bound while independent closing preserves deterministic membership. |
+| windows-process-fact-arms-unexecuted | C; **9.3**; trigger census 9.4 | Job-kill test already exists; actual Windows runner/caller capability is prerequisite. Execute assignment/resume/kill/timeout arms there; compilation is not that evidence. |
+| divergence-reason-stamped-on-every-evidence-subject | A; **5.4** | Stale RuntimeAttribution is cleared and drift producer retired; analysis-unavailable still overwrites per-subject reasons with one record fault. Preserve shared process union and separate failure account. |
+| root-coordinate-one-spelling | A; **5.5a**; constituent 7.1 | Root-side containment compositions remain. Scope cwd, locks/trust/cache/records per request while retaining lexical/resolved and evidence-root/process-directory distinctions. |
 
 ## Stipulator issue inventory
 
-Each slug names the sibling `stipulator/docs/issues/` file in the checkout or
-fetched `origin/main`. There are 40.
+Each slug names the current sibling `stipulator/docs/issues/` file. There are
+40 source files, excluding README.
 
-| Slug | Disposition; destination | Deciding case |
+| Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
 |---|---|---|
-| aborted-pass-publishes-unaccounted | R; 5.3, 7.5, 8.3 | Quiescence publication survives later cancel alongside accurate witness remainder. |
-| bindings-per-requirement-file-derivation | A; 2.4, 5.3 | Bind and supersede share placement while preserving explicit file and clause intent. |
-| check-pass-shares-the-verification-ladder | A; 5.2, 7.5 | One evaluation feeds readers; missing evidence never triggers hidden execution/deletion. |
-| check-summary-tally-names-one-invocation | R; 5.3, 8.3 | Unequal selected-invocation populations retain separate eligibility and outcome accounts. |
-| clause-structured-whole-claims | A; 2.4, 2.6, 5.3 | Scoped test/proof requirement's whole-claim default and explicit exception are deliberate. |
-| cli-test-binary-builds | R; 5.6, 9.3 | One binary build preserves real CLI tests; in-process pins remain mutation-sensitive. |
-| completed-package-peak-admission | A; 2.4, 7.4, 7.7 | The controlled trivial-child reproduction establishes parent-peak inheritance on the report host. Attribute real post-exec driver/build/test needs before changing admission; earlier workload peak correspondences alone remain non-causal. |
-| cross-platform-resolution-views | C; 2.3, 5.2, 9.4 | Off-host declaration resolution grants no invented on-host witness result. |
-| dangling-empty-label-remedy-names-no-clause | R; 5.3, 8.3 | Malformed empty label remedy cannot unbind valid sibling claims. |
-| deadline-roster-head-unbounded | R; 5.3, 8.3 | Large roster's bound preserves useful failure residue and exact omitted account. |
-| decomposition-editorial-pass | R; 2.6, 5.2, 8.3 | Every sub-contract exception/gap/binding and evidence-tier change remains explicit. |
-| discovery-exit137-memory-target | R; 7.7 | Identified workload/binary with process/host readings; exit137 alone proves no OOM. |
-| executed-and-resolution-reason-faces-unclassed | A; 5.2, 5.3, 8.3 | Typed execution/resolution/gofresh causes retain their actual authority. |
-| execution-timing-diagnostics | A; 5.3, 7.7, 8.3 | Reproduce fast, blocked and admission-waiting packages under cancellation; retain bounded, labelled timing and terminal-state diagnostics without promoting incomplete work to evidence or changing the verdict. The older-binary report does not establish current behavior. |
-| go-backend-load-path-pairs | A; 5.2, 7.8 | One membership result supplies ownership/refusal across malformed or escaping workspace paths. |
-| cerebro-scoped-discovery-cost | A; 5.2, 7.7, 7.8 | Attribute the identified scoped-discovery workload by subphase on cold and warm states before changing reuse or admission; a timed-out pass is not completion. |
-| generic-constraint-seeding-reuse | A; 5.2, 7.8 | Deterministic, runtime-seeded and unresolved generic method targets retain distinct classification; measure repeated traversal separately from precision. |
-| implemented-capability-acceptance | C; 7.5, 9.4 | Derive explicit partial capability acceptance separately from execution scope and report filtering, retaining global reds and suite-health limits; the consumer filing does not commission implementation. |
-| gofresh-corpus-pin-lag | R; 5.2d | Adopt the released package-producing form and complete build/runtime descriptions together, retaining static-certificate semantics and verifying the installed dependency. |
-| findings-store-historical-fleet-sweep | R; 9.1, 9.3 | The three historical records remain non-authoritative until a named complete-oracle scope remeasures them or they resolve; this is not authorization for a campaign. |
-| impure-siblings-never-earn-a-proof | A; 4.2, 5.2, 7.7 | Isolation alone grants no outcome support; supported getenv versus unsupported file operation. |
-| invocation-folds-two-shapes | A; 5.3 | Whole/selective/solo contributions retain all outcomes and health without double counts. |
-| ledger-store-as-a-record-kind | A; 5.2, 5.6, 9.2 | Content agreement, atomic install and younger-ledger GC protection survive mechanical fold. |
-| mcp-go-export-compatibility-authoring | R; 5.5a, 9.3 | Establish the actual live MCP build and resolver selection; close only after compatible admission and the blocked binding succeed under that same identified server, not from CLI metadata alone. |
-| out-of-process-backends | C; 2.6, 9.4 | Real second-language backend before capability; persisted verdict is never fresh evidence. |
-| per-stream-color | R; 8.3 | Each stream's own TTY/NO_COLOR/TERM and JSON govern its styling independently. |
-| performance-evidence-axis | C/A; 2.2, 7.6, 9.4 | Fresh measurement alone cannot satisfy a performance requirement; explicit policy required. |
-| process-output-utf8-marshal | R; 5.3, 8.3, 9.2 | Invalid bytes/split rune serialize bounded diagnostics without changing verdict. |
-| proto-backend | C; 2.6, 9.4 | Real external proto consumer activates descriptor/prover work; absent backend grants nothing. |
-| prover-trust-tiers | C; 2.2, 9.4 | Heuristic result cannot silently occupy an analyzer-proof evidence tier. |
-| resolution-missing-go-export-cache | R; 5.2, 7.8, 8.3 | Disappeared export permits bounded refresh or actionable refusal, never stale typed data. |
-| resolver-child-resident-set | A; 7.7, 7.8, 8.3 | Measure current child/parent retention after quiescence, including concurrent-operation readings and the absent served resident account reported by Stash; hold workload/population constant. |
-| reviewed-row-sets-one-pattern | A; 2.4, 5.2, 7.3 | Exclusion/vouch/scratch revocation remains semantically distinct through shared mechanics. |
-| seeding-walk-unreached-routes | A; 2.3, 5.2, 7.8 | Dependency helper/interface driver reaches static certificate without pretending execution. |
-| selection-certificate-preparation-repeated | A; 5.2e | Measure cold/warm scoped preparation, then consolidate immutable endpoint-local configuration without sharing opening and closing source observations or broadening per-owner failures. |
-| structural-call-absence-verb | C; 2.6, 9.4 | Real constraint distinguishes type imports/transitive net from direct forbidden constructor. |
-| structural-data-with-methods | R; 5.6, 9.3 | Exact fields plus value/pointer method sets reject extra or missing shape. |
-| supersede-carry-drops-clause-scope | R; 5.3 | Labels, ordinals and multi-successor carries preserve scope or refuse, never become whole grants. |
-| undecodable-manifest-records-dropped-silently | A; 5.2, 8.3, 9.2 | Bad manifest names re-execution cause without entering pass/flip evidence. |
-| witness-verdict-one-body-classifier | A; 5.2, 7.8 | First declaring view's class plus seeding union covers every selected proof/fuzz/value/helper route. |
+| aborted-pass-publishes-unaccounted | R; **5.3**; constituent 7.5 | Quiesce already publishes/releases; both verifyrun and check discard results on operational errors, and the MCP handler can discard an error-accompanying result. Preserve durable resolution/witness accounts beside incomplete work. |
+| bindings-per-requirement-file-derivation | A; **5.3** | Bind defaults by second ID segment; supersede lacks an explicit file form. Derive one placement policy with explicit-file/clause intent and collision refusal. |
+| check-pass-shares-the-verification-ladder | A; **7.5**; constituent 5.3 | Check and verifyrun assemble separately; Run/Scoped/Gaps still measure. One explicit evaluation plus non-measuring readers must close declared gaps, not rename the measuring ladder. |
+| check-summary-tally-names-one-invocation | R; **5.3**; constituent 8.3 | TestRun deduplicates subjects, so a scalar matching one leg proves no omitted leg. Add labelled per-invocation eligibility/NoOutcome/tier accounts with unequal overlapping populations. |
+| clause-structured-whole-claims | A; **5.3** | Whole claims are currently legal. Deliberately amend default tests/proves refusal with manifest opt-out, retaining whole implements and existing-record hygiene. |
+| cli-test-binary-builds | A; **5.6**; constituent 7.7 | Eight current build sites and four ambient helpers remain. Share same-identity artifacts while retaining fixture isolation, actual CLI coverage and overlay-sensitive in-process pins. |
+| completed-package-peak-admission | A; **7.7**; constituents 5.3, 7.4 | Host gate, isolation registration and origins exist. Controlled trivial-child Maxrss inherits parent peak on the report host; attribute post-exec driver/build/test needs before correcting estimates. |
+| cross-platform-resolution-views | C; **9.4** | Trigger: a policy needs off-host resolution-only hygiene. Current off-host execution refusal stands; typed foreign declarations confer no witness execution. |
+| dangling-empty-label-remedy-names-no-clause | R; **5.3**; constituent 8.3 | ResolveClause rejects empty label but remedy omits the selector and can remove valid siblings. Name the malformed record path, preserving ordinary scoped unbind. |
+| deadline-roster-head-unbounded | R; **5.3**; constituent 8.3 | streamState.roster can consume runResidue's budget. Bound head/residue with omitted counts; byte scrubbing/rune cuts already exist and are not reopened. |
+| decomposition-editorial-pass | R; **8.3**; constituents 9.2, 9.4 | Source list identifies dangling antecedents, exceptions, bundled obligations and misplaced bindings. Reconcile each against current clauses, including evidence-tier effects, without restoring superseded producer prose. |
+| discovery-exit137-memory-target | A; **7.7**; constituent 5.2e | Discovery precedes executor admission; soft ceiling is not a hard cap. Attribute current parent/resolver/children cold/warm phases; exit137 alone supplies no OOM diagnosis. |
+| executed-and-resolution-reason-faces-unclassed | A; **5.3**; constituents 5.2c, 8.3 | Uncacheable is typed but executed/resolution reasons are strings. Mint classes at composition and preserve Gofresh-owned causes rather than parse passed-through prose. |
+| execution-timing-diagnostics | R; **5.3**; constituent 7.7 | Decoder/admission/start/reap paths retain no package/test timeline. Pin fast/blocked/waiting cases and partial cancellation account separately from reusable evidence. |
+| go-backend-load-path-pairs | A; **7.8**; constituent 5.2e | Workspace and attribution readers differ; HasPrefix(rel,"..") rejects ..foo. Preserve portable/escaping-path controls; complete selection/physical/dotted certificates already landed. |
+| cerebro-scoped-discovery-cost | A; **5.2e**; constituents 7.7, 7.8 | Identified c9ea6cd scoped check timed out in discovery; current complete-certificate paths need subphase attribution, not renewed selection repairs or assumed current reproduction. |
+| generic-constraint-seeding-reuse | A; **7.8**; measurement 7.7 | Deliberate unresolved constraint-method refusal differs from concrete Origin and abstract interface handling. Prove deterministic/seeded/unresolved targets and measure traversal separately. |
+| implemented-capability-acceptance | C/A; **7.5**; conditional census 9.4 | Current report/execution/acceptance scopes differ. Derive the unmet eleven-requirement workflow preserving global reds and suite health; filing leaves implementation uncommissioned. |
+| gofresh-corpus-pin-lag | R; **5.2d**; prerequisite 5.2c; constituent 5.2e | Source now pins v0.116.3 but observe.go retains legacy production and omitted auto-PGO is uncovered. Adopt full package/build/runtime/artifact/closing path; dependency bump alone is not closure. |
+| findings-store-historical-fleet-sweep | R; **9.3**; constituents 9.1, 9.2 | Three reported local records/two attestations remain historical despite an empty repo document. Inventory merged layers and disposition only an explicitly authorized complete-oracle scope. |
+| impure-siblings-never-earn-a-proof | A; **5.2c**; constituents 5.2d, 5.2e, 5.3 | Singleton proof selection does not support two observing siblings. Specify actual package contributors/processes; reject the old isolate-each-once substitute. |
+| invocation-folds-two-shapes | A; **5.3** | assembleInvocation and SelectionResult.absorb duplicate common appends. Preserve distinct process/tier/health facts and retry durable prefixes, not already-implemented registration. |
+| ledger-store-as-a-record-kind | A; **5.6**; constituent 9.2 | Full ledger coordinates, WriteAtomic, exclusion and encoder errors already work. Fold remaining scan/admission/collection with lazy reads and refused-record/concurrent-install protection. |
+| mcp-go-export-compatibility-authoring | R; **5.5a**; constituent 9.3 | Source has patched loader but live MCP provenance is unknown. Closure requires compatible resolution and the blocked claim on the same identified server; no Weaver retry authorized here. |
+| out-of-process-backends | C; **9.4** | Trigger: a specific second-language backend is planned. Go self-exec resolver already exists; define actual cross-language authority/cancellation protocol only on activation. |
+| per-stream-color | R; **8.3** | Package-init switch requires both streams terminal. Judge each stream independently with NO_COLOR/TERM and structured-output controls. |
+| performance-evidence-axis | C/A; **9.4**; constituents 8.1, 8.2, 7.6 | Trigger: concrete performance requirement and deciding workflow. Current ladder has no performance class; freshness supplies neither threshold nor covered status. |
+| proto-backend | C; **9.4** | Trigger: actual external proto consumer requiring descriptor evidence. No backend registered; do not restore twelve unverifiable claims. Preserve import determinism, full prover scope and backend-qualified keys. |
+| prover-trust-tiers | C; **9.4** | Trigger: concrete heuristic proposed as prover. Current structural recognition is no license for likely-fault results to inherit analyzer-proof rank. |
+| resolution-missing-go-export-cache | R; **5.2e**; constituent 5.3 | Typed loads already refuse errors. Attribute vanished disposable exports and bounded same-selection refresh/refusal; never lend stale typed data or claim cause established. |
+| resolver-child-resident-set | A; **7.7**; constituents 5.2e, 5.3 | Quiesce release/shared host gate exist. Measure current discovery/parent/child and Stash execution-parent shape, including concurrent operation identity; don't wait for another report. |
+| reviewed-row-sets-one-pattern | A; **5.2d**; constituent 5.2e | Exclusion/vouch/namespace validation and serving gates exist in parallel. Share lifecycle only with distinct trust/revocation and full native descriptions; reconcile matcher ownership. |
+| seeding-walk-unreached-routes | A; **7.8** | Dependency helpers/interfaces are outside current declaration contract; named function values already participate. Deliberate reachability refinement must cover seeded/deterministic/unresolved cases under complete selections. |
+| selection-certificate-preparation-repeated | A; **5.2e**; constituent 7.8 | Inventory, fingerprint and certificate endpoints repeat immutable configuration. Measure cold/warm then share endpoint-local setup, never opening/closing file observations. |
+| structural-call-absence-verb | C; **9.4** | Trigger: a concrete requirement cannot be proven by existing signature/import verbs. Direct NoCall cannot prove all indirect construction absent; preserve that scope and counterexamples. |
+| structural-data-with-methods | R; **5.6**; constituent 9.2 | ExportedData permits no methods; native Fingerprint needs exact fields and value/pointer methods. Add only equally strong shape evidence; codec semantics remain separate. |
+| supersede-carry-drops-clause-scope | R; **5.3** | dispose.go construction and duplicate key omit scope. Preserve representable label/ordinal/multi-successor claims or refuse; retarget's resolved key does not repair this path. |
+| undecodable-manifest-records-dropped-silently | R; **5.2e**; constituent 9.2 | loadEntry drops runtime-invalid variants without reason while retaining ledger refs. Account bounded refusal beside valid siblings, never introduce their outcomes into serving/flip evidence. |
+| witness-verdict-one-body-classifier | A; **7.8** | classifyWitness and bodyFactsOf are two scans; bodyDrivesRunner is gone. Share per-view facts with resolved class/seeding union and explanation positions kept distinct. |
+| historical-proof-admission-current-strategy | R; **5.2e**; constituent 9.2 | validObservation requires current ObservationRTA at load despite structural-readability clause/native codec. Establish canonical complete-envelope fixture first; keep decode/readability/reuse distinct and never upgrade support. |
 
 ## Pew issue inventory and index-only obligations
 
-Each slug names the sibling `pew/docs/issues/` file. There are nine.
+Each slug names the sibling `pew/docs/issues/` file. There are nine, excluding README.
 
-| Slug | Disposition; destination | Deciding case |
+| Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
 |---|---|---|
-| derived-state-recompute-invariance-witness | A; 2.3, 3.2, 7.8 | Cold/warm/discarded derived state yields identical judgments under complete identities. |
-| guidance-purpose-column-second-enumeration | A; 2.4, 8.3 | Purpose/default changes cannot diverge between canonical table and served projections. |
-| git-go-recording-immediate-staleness | A; 7.7, 8.3 | Preserve safe diagnostic provenance that can name a differing compilation input without disclosing its value; historical guard digests alone cannot establish that cause, and unsupported outcomes remain a separate account. |
-| mcp-surface | C/A; 8.3 | Existing CLI/JSON complete first; a concrete agent workflow precedes new transport. |
-| mutation-oracle-observation | R; 6.2, 6.6, 6.7, 9.1 | Every named interrupted/historically affected scope remeasured under complete deciding oracles. |
-| per-arm-noise-floors | A/X; 7.6, 8.1, 8.2 | Regression within historical spread still fails explicit tolerance; no automatic threshold increase. |
-| remote-bench-execution | C; 2.6, 9.4 | Real remote workflow binds build, receipt, machine lease and guards; disconnect releases ownership. |
-| spec-wide-requirement-forming | R; 2.6, 8.3, 9.4 | Canonical behavior and bindable enforcement agree; no automatic evidence grants. |
-| train-riders-for-the-performance-evidence-plan | A/X; 2.1, 5.1, 8.2, 9.1 | Retain all native/adoption/assurance riders, reject automatic historical tolerance. |
+| derived-state-recompute-invariance-witness | R; **7.8** | Shared dependency enforcement is adopted; the retained gap no longer carries a contradiction flag. Existing strategy pins are not independent discard/recompute controls; compare completed facts and separately pin budget availability. |
+| guidance-purpose-column-second-enumeration | A; **8.3** | §12 purpose prose duplicates guidance while flag/default pins cover neither text. Preserve the spec's first-row purpose requirement in any collapse. |
+| git-go-recording-immediate-staleness | A; **7.7**; constituent 8.3 | Retained executable fixed at 7683672; build-environment cause unproved without full descriptions. Add safe field-name attribution, not value disclosure or guard removal. |
+| mcp-surface | C/A; **8.3**; trigger census 9.4 | Existing ab/status/stat JSON and progress work. Run/gc structure needs a named reader; new transport requires a concrete workflow unmet by CLI/JSON/progress. |
+| mutation-oracle-observation | R; **9.1**; constituent 9.3; prerequisites 6.6, 6.7 | Current oracle repair completes no historical campaign. Recover every population, missing ID and excluded delta below before explicitly authorized full-oracle remeasurement. |
+| per-arm-noise-floors | A/X; **8.2**; constituents 8.1, 7.6 | Historical spread proves no harmless noise. Describe admitted lineage/conditions and preserve explicit tolerance; enforcing defaults and confidence remain separate policy work. |
+| remote-bench-execution | C; **9.4** | Trigger: both provisioned host and real measurement workflow. Re-derive retained artifacts/receipts/ownership before transport; historical SSH/gRPC sketch is not a mandate. |
+| spec-wide-requirement-forming | R; **8.3** | IDs already exist outside §13. Census actual missing/duplicate homes, including recovery/status pairs, preserving strength/cites/bindings rather than blanket conversion. |
+| train-riders-for-the-performance-evidence-plan | A/X; **9.4**; constituents 5.6, 7.4, 7.6, 7.8, 8.2, 8.3, 9.1, 9.3 | Current handoff distinguishes completed Session/native/retained/query/metric work from path/GC/guidance/resource/default/assurance residues. Preserve every live constituent and historical report without reopening completed 5.1. |
 
 The README's five inline upgrade paths are also retained: VTA precision
 (7.8: demonstrated closed-dispatch refusal without missed effects), avoiding
 standard-body loads by escape proof (7.7–7.8: equal decisions at measured lower
 cost), declaration hashing (7.8: irrelevant versus reachable edits), persistent
-closure memo (3.2/7.8: use the existing owner with complete identities, not a
-redundant Pew store), and same-identity sample merge (2.6/7.6/9.4: conditional
+closure memo (7.8: use the existing owner with complete identities, not a
+redundant Pew store), and same-identity sample merge (9.4: conditional
 workflow with explicit lineage, conditions and independence assumptions).
+
+The additional README-only tracking obligation is Gofresh's
+`docs/plans/pipeline-audit/README.md`: its delete-on-close condition names Band P,
+whose 154–157 entries are closed. Primary destination: **9.4**. Reconcile all four
+historical reports (`gofresh.md`, `gomutant.md`, `stipulator.md`, `pew.md`) against
+the retained obligations, promote any still-load-bearing rationale and retarget
+citations before retiring the tracking directory. This is neither an immediate
+whole-directory deletion nor permission to revive the reports' obsolete defects.
+It is additional to Pew's five inline obligations, not a 150th source issue.
 
 Pew's campaign issue retains the complete scope ledger: the blocked chunk-11
 delta; runs `1e11674dc9cefba4` and `e8423761e551fb96`; twelve hand probes
@@ -307,46 +319,202 @@ fingerprint `82f26be60d13cf04`; the JSON-rendering run; metric registry
 original target population and excluded delta. Installation of the repaired
 oracle closes none of their unfinished measurements.
 
+| Retained scope | Historical population/account | Remaining scope recovery |
+|---|---|---|
+| Performance-evidence 11 delta at `a41d8ee` | A/B execution and historical profile-comparison delta; named probes passed, no campaign completion claimed | Recover the entire delta; probes are not its campaign. |
+| `1e11674dc9cefba4` | Budget 4, 44 targets, 171 selected candidates; stopped at 75m30s with 6 targets banked, 24 generated, 11 kills, 1 discard, 12 open | Retain measured prefix and all 38 unmeasured targets; no summary/pass. |
+| `e8423761e551fb96` | Four targets, 16 generated, 15 kills, one `gc.go:41:5` force-false survivor | Separate narrower scope; force-false is not established equivalent under repaired child coverage. |
+| Twelve hand probes | Ten kills, two reasoned equivalent admission-duplicate probes | Preserve individual dispositions, never promote to campaign coverage. |
+| newStatCmd/validateOptions/Compare | Three targets, 24 candidates, three local records, 22 kills, no open; deadline during final evidence work | Recover run ID and exact invocation; retain unproven freshness and missing completion. |
+| `82f26be60d13cf04` | 22 targets, 1,064 candidates; three attempts, no committed target before 30-minute deadline; proof budget 30 seconds | Recover all 22 symbols; no banked kill/survivor judgment. |
+| JSON-rendering campaign | Sole target banked, two kills; silent around eight minutes, ten-minute command cap, thirty-minute shell kill | Recover run ID/symbol/invocation; banked prefix is not a finished summary. |
+| `a6d4f75aaf58cae4` | Five metric functions, budget 4, jobs 4, thirty-minute cap, 332 unproven subjects; stopped in baselines with nothing committed | Resolve historical HEAD and exact five symbols; retain the excluded non-registry delta. |
+| `9eeabef27df54358` | Analyze/Decode, two derived oracle packages, eight candidates requested; four attempts, 224 unproven subjects, no commit | Retain both functions/packages and the excluded profile delta; probes remain separate. |
+
+Missing IDs are recovery obligations, not invented executions. At 9.1 map each
+renamed/removed historical subject explicitly; 9.3 requires authorization for
+the named scope after 6.6/6.7. Neither a fresh `--changed HEAD` nor a cheaper
+oracle inventory substitutes for any original population.
+
+## Raw gap-record routing
+
+This tracking ledger reads the raw `.stipulator/gaps/*.textproto` records, not
+an evaluated gap list or coverage verdict. It contains **96 distinct requirement
+IDs exactly once in the tables below: Gofresh 72, Gomutant 3, Stipulator 15 and
+Pew 6**. Each row's bold destination is an existing open primary slot in
+`tooling-redesign.md`; a grouped row routes each explicitly named ID there.
+The source for each ID is its owner's gap directory and the filename obtained
+by removing `REQ-` and adding `.textproto`. Those spellings match the records'
+`requirement_id` fields; aliases and historical shorthand are not extra gaps.
+
+`C` means the raw manual condition contains `contradicted: true`; `N` means it
+does not. `S` denotes Gomutant's unchanged machine-owned `covered: self`
+condition, whose stored value is that row's own requirement ID. These are record
+facts, not judgments of open/due/resolved status or implementation conformance.
+In particular, removing an obsolete contradiction diagnosis does not discharge
+the retained evidence obligation. No gap is fired, deleted or excused more
+broadly by this ledger, and clause consent/content/source pins are unchanged.
+
+Evidence remains clause-specific. Behavior regressions, invariant properties
+and structural/analyzer proofs are not interchangeable: preserve the actual
+clause's required class and scope, including an analyzer-only demand where
+recorded. An example, source trace, declaration of a generator, existing binding
+or this routing table grants no higher evidence class. A source claim that a
+mechanism landed is separate from an executed witness and its sensitivity;
+closure requires the deciding evidence, not inference from filenames or flags.
+The named implementation slot carries its own enforcement obligation; 9.3 is
+not authorization for an otherwise unapproved witness run or campaign.
+
+### Gofresh: 72 records
+
+The first 38 IDs retain their individual assurance obligations at 9.3. Shared
+wording in their records does not merge their claims or promote example pins.
+
+| Requirement ID | Primary open slot | Raw flag | Record basis and deciding evidence |
+|---|---|---|---|
+| REQ-closure-coverage | **9.3** | N | Example anchors remain; complete the closure-coverage invariant with property/analyzer evidence. |
+| REQ-closure-identity-strategy | **9.3** | N | Constant-composition example is not a for-all over derivation changes; preserve move-by-construction evidence. |
+| REQ-closure-mutable-local | **9.3** | N | Retain named mutable-local examples and supply the clause's invariant evidence. |
+| REQ-closure-observability-analysis | **9.3** | N | Example observability cases do not establish the complete analysis invariant. |
+| REQ-closure-observability-audited-set | **9.3** | N | Complete audited-set invariant evidence rather than promoting its example inventory. |
+| REQ-closure-observability-batch-equivalence | **9.3** | N | Establish batch equivalence with the required property/analyzer class. |
+| REQ-closure-observability-cause-order | **9.3** | N | Preserve example precedence controls and quantify the cause-order rule. |
+| REQ-closure-observability-dispatch | **9.3** | N | Complete invariant evidence for dispatch, retaining conservative negative controls. |
+| REQ-closure-observability-flag-registration | **9.3** | N | Establish the registration invariant beyond its named examples. |
+| REQ-closure-observability-harness-logging | **9.3** | N | Harness logging examples remain anchors, not the complete invariant witness. |
+| REQ-closure-observability-property-harness | **9.3** | N | Supply property/analyzer evidence for the property-harness admission rule itself. |
+| REQ-closure-observability-reflect-exclusion | **9.3** | N | Establish the reflection-exclusion invariant with its independent refusal controls. |
+| REQ-closure-observability-subtest-driver | **9.3** | N | Complete subtest-driver invariant evidence, preserving the existing examples. |
+| REQ-closure-observability-toolchain-key | **9.3** | N | Listed-content examples do not establish the complete toolchain-key invariant. |
+| REQ-closure-observability-unsafe | **9.3** | N | Supply the unsafe-boundary invariant's required evidence class. |
+| REQ-closure-observability-writer-sink | **9.3** | N | Preserve writer/sink anchors and complete the invariant proof obligation. |
+| REQ-closure-shared-dynamic-state | **9.3** | N | Module-fixture examples remain; complete property/analyzer evidence over the governing carrier rules. |
+| REQ-closure-shared-dynamic-state-atomic | **9.3** | N | Establish the atomic sub-contract's carrier invariant, not merely the base's examples. |
+| REQ-closure-shared-dynamic-state-audited-discharges | **9.3** | N | Complete audited-discharge invariant evidence without merging distinct authority grounds. |
+| REQ-closure-shared-dynamic-state-carrier-free | **9.3** | N | Quantify the carrier-free sub-contract beyond module-fixture anchors. |
+| REQ-closure-shared-dynamic-state-escape-narrowings | **9.3** | N | Supply invariant evidence for the escape-narrowing rules and their fail-closed boundaries. |
+| REQ-closure-shared-dynamic-state-mutation-shape | **9.3** | N | Record calls for a property generator over dynamic-global mutation and assertion-separation shapes. |
+| REQ-closure-shared-dynamic-state-reachability | **9.3** | N | Module-fixture reachability pins need the carrier-walk property/analyzer evidence. |
+| REQ-closure-shared-dynamic-state-receiver-proof | **9.3** | N | Complete the receiver-proof invariant's own evidence, preserving example controls. |
+| REQ-fresh-coherent-view | **9.3** | N | Coherent-view examples remain; establish the complete invariant. |
+| REQ-fresh-commit-independent | **9.3** | N | Supply property/analyzer evidence for commit independence, not a version-only inference. |
+| REQ-fresh-fingerprint-data | **9.3** | N | The structural clause has TestFingerprintDataShape as an example; the recorded demand is an analyzer proof. |
+| REQ-fresh-observation-conjunction | **9.3** | N | Complete observation-conjunction invariant evidence beyond example cases. |
+| REQ-fresh-observation-data | **9.3** | N | Record-form examples after the refusal-clause fold leave the observation-data property obligation. |
+| REQ-fresh-preparation | **9.3** | N | Generate input-decidable refusal classes and complete unknown-subject batch accounts; examples alone do not quantify them. |
+| REQ-guard-view-lifetime | **9.3** | N | Complete guard/view-lifetime invariant evidence while retaining its examples. |
+| REQ-inputs-bracket-coverage | **9.3** | N | Supply the bracket-coverage invariant's property/analyzer evidence. |
+| REQ-inputs-observable-read-set | **9.3** | N | Establish the observable-read-set invariant, retaining producer and unsupported-read controls. |
+| REQ-inputs-observation-coherence | **9.3** | N | Complete observation-coherence invariant evidence beyond example anchors. |
+| REQ-inputs-observation-disposition | **9.3** | N | Establish the disposition invariant without treating partial evidence as a complete observation. |
+| REQ-inputs-path-congruence | **9.3** | N | Supply property/analyzer evidence for path congruence. |
+| REQ-purity-observation-separation | **9.3** | N | Record calls for a dynamic-global mutation/assertion-separation generator; purity is not observed support. |
+| REQ-vouch-input | **9.3** | N | Example parsing/refusal/engine-reduction pins do not cover the structural identity grammar; supply its required property/analyzer evidence. |
+| REQ-closure-dynamic-state-memo, REQ-closure-effect-scan-memo, REQ-closure-listing-memo, REQ-closure-observability-memo, REQ-closure-scan-memo, REQ-closure-testing-scan-memo, REQ-guard-cache | **7.8** | N | Seven retained records: selected-content, admission and source-coordinate omissions are repaired. Complete claim-specific cold/warm/discarded-cache equivalence, including same-version content and layout-only position dependencies, with each clause's required evidence class. |
+| REQ-fresh-dependency-identities, REQ-fresh-observation-compatibility | **7.8** | N | Two retained native-dependency records: enforcement landed; complete invariant evidence over historical missing support, integrity/membership, source-drift precedence and representation-only changes. These and the seven memo/cache records no longer allege their obsolete contradictions. |
+| REQ-closure-observability-guard-pinned | **7.8** | C | Actual root/accessor admission still relies on the former version-pins-root premise. Guard behavior-relevant root values and covered content or refuse, retaining receiver/startup/dynamic/mutation exclusions and invariant evidence. |
+| REQ-inputs-guard-covered | **7.8** | C | Actual GOROOT-path omission remains broader than recorded claim coverage. Preserve observations/refusals for uncovered data, changed roots/content and symlink topology, separately from module/build-cache rules. |
+| REQ-fresh-applicability-transform | **7.8** | N | Local endpoint/seal and generated batching controls exist, but not the full cross-consumer invariant. Complete justified transformations without changing producing history; record-only support is the separate 8.1 constituent, not old PE 8. |
+| REQ-guard-runtime-relevance | **7.8** | N | Measurement-only field encoding pins do not establish code-result relevance. Jointly witness admitted operations, explicit assertions and native input evidence, including in-process state changes; the raw record is not contradicted. |
+| REQ-fresh-static-certificate | **9.3** | N | Native enforcement and Stipulator's complete selected-view certificate landed. Reconcile full invariant evidence for membership, precedence, classifiers and composition; no additional consumer certificate violation is established. |
+| REQ-fresh-progress | **9.3** | N | Implementation excludes diagnostic payload from memo/hash inputs; supply a witness that changes payload while discriminating memo stability. This behavior obligation is not automatically a new invariant class. |
+| REQ-fresh-producing-evidence | **8.1** | N | Preserve established producing identity through remaining unit adoption and independently verify record-only support with no current runtime read, identity substitution, trust promotion or authenticity inference. |
+| REQ-fresh-unit-roster, REQ-fresh-unit-bindings, REQ-fresh-unit-close | **5.2c** | N | Singleton/Pew roster, binding and sealing controls landed. Complete package/fleet coverage of missing/late/conflicting contributions, failed/cancelled close, independent siblings, cut/drift precedence and publication/history, with invariant evidence. |
+| REQ-fresh-result-model, REQ-fresh-authority-account | **5.2c** | N | Singleton declared-model applicability and authority preservation landed; package/fleet adoption, structured semantic authority and complete invariant evidence remain. Do not reopen the first arm. |
+| REQ-fresh-verdict | **5.2c** | C | Public verdict still mainly exposes status/prose. Release semantic causes, scope and accepted authority independent of rendering, preserving test-variant projection and integrity-bound history; 7.1 is the broader owner constituent. |
+| REQ-fresh-final-evidence-selection | **5.2c** | C | Singleton automatic final selection landed, but legacy consumers still select ordinary/observed checking. Migrate package/fleet paths without missed producing support, unlicensed transformations or loss of explicit analysis policy/full inventories. |
+| REQ-fresh-observation-lifecycle | **5.2c** | C | Producing-time preparation and closing exist for the singleton. Package/fleet lifecycle and full property/analyzer evidence remain; preserve both actual lifecycle contradictions rather than inferring completion from one consumer. |
+| REQ-fresh-unit-exclusion, REQ-fresh-producer-view | **5.5** | N | Existing singleton and sibling checks are controls. Complete owning-unit exclusion through preparation, execution, close and publication/consumption, inherited provenance and independent sibling/cut/drift evidence. |
+| REQ-inputs-context | **5.5** | C | Finalization/check pins cover only part of the family. Remove context-free/background adoption/conversion/merge work under explicit owning and bounded closing phases, without partial-result or hidden-continuation grants. |
+| REQ-control-authority, REQ-control-execution-description | **7.4** | C | Admit each control once under its operation owner; preserve overflow, typed/raw arguments, omitted/empty selection, real producer environment, default-consuming build inputs and observer-does-not-execute regressions across affected faces. |
+| REQ-control-request-project, REQ-control-project-isolation | **5.5a** | C | Existing servers are launch-root scoped. Implement qualified cwd/resources/handles, default compatibility and bounded concurrent root-local state, preserving shared physical admission and trust isolation. |
+| REQ-control-trust-source | **7.3** | N | Standing trust exists, but A/B sourcing and root scope need independent missing/malformed/revoked/different-side/output-placement and concurrent-project controls. |
+| REQ-inputs-absent-asserted | **5.2d** | C | Remaining bare-fingerprint paths treat absent input fields as implicit no-input assertion. Separate proven input-free, explicit-none, missing capture and supported empty execution; never backfill historical support. |
+| REQ-guidance-single-source | **9.4** | N | Conditional trigger: Gofresh gains its own serving surface. Existing consumers own their guidance obligations; their adoption does not activate this library-local condition. Preserve it without commissioning a surface. |
+
+### Gomutant: three records
+
+| Requirement ID | Primary open slot | Raw condition | Record basis and deciding evidence |
+|---|---|---|---|
+| REQ-core-attributed-kills | **5.4** | S | Adoption bound examples; live attributed-kill/stream/model obligations still need the clause's property/analyzer class. |
+| REQ-result-export | **9.2** | S | Example export pins do not supply the invariant/structural proof class across final native/envelope forms. |
+| REQ-target-model | **5.4** | S | Preserve complete target/transformed-executable model controls and supply the required proof class, not example promotion. |
+
+These three covered-self conditions remain machine-owned and unchanged; this
+table does not replace them with manual plan triggers or judge them covered.
+
+### Stipulator: fifteen records
+
+| Requirement ID | Primary open slot | Raw flag | Record basis and deciding evidence |
+|---|---|---|---|
+| REQ-go-owned-processes | **5.5** | C | Parent-hosted loader cancellation ends go list but does not sweep its descendants. Retain the actual containment contradiction until owned process-tree regressions on supported platforms establish the boundary. |
+| REQ-evidence-witness-freshness-inputs | **5.2d** | C | Omitted PGO consumes default.pgo without its input guard. Cover omitted/explicit auto, off/path, missing/unreadable profiles, selected module/workspace builds and producing/serving paths. |
+| REQ-evidence-inspection, REQ-gap-list, REQ-gap-resolved-pruned | **7.5** | C | Reader paths can still execute stale witnesses. Explicit evaluation must feed non-measuring readers with current/stale/missing/NoOutcome/partial and safe deletion accounts on both faces. |
+| REQ-core-one-execution | **7.5** | N | Existing examples and the record's construction argument do not quantify the invariant: no reachable operation executes test work outside accepted policy. Preserve that evidence demand through evaluation migration. |
+| REQ-check-preparation | **9.3** | N | Named no-child example pins cover refusal classes; a generated malformed-input property/analyzer witness must quantify the preparation invariant. |
+| REQ-backend-surfaces | **5.6** | N | Import/interface satisfaction is not surface-set exactness. Supply structural exhaustiveness evidence without granting a larger backend capability. |
+| REQ-core-proto-io, REQ-model-graph, REQ-proto-inprocess, REQ-proto-no-option-linkage, REQ-proto-provers, REQ-proto-shape-hash, REQ-proto-symbol | **9.4** | N | Seven distinct records retain the same external-consumer trigger: an importing module or non-Go user needs wire evidence that existing Go/shape witnesses cannot provide. Preserve every clause's full descriptor/prover obligation; census routing neither fires that trigger nor commissions a backend. |
+
+### Pew: six records
+
+| Requirement ID | Primary open slot | Raw flag | Record basis and deciding evidence |
+|---|---|---|---|
+| REQ-pew-comparison-policies, REQ-pew-regression-gate, REQ-pew-runconditions-provenance | **7.6** | C | Enforcing commands still inherit informational partial/report/report defaults. Establish complete/require/compatible admission and explicit exceptions, preserving missing-both-side/stale/unknown/conditions/scope and exit precedence, with informational comparison available. |
+| REQ-pew-statistical-options | **7.6** | C | Ordinary confidence remains independent of alpha. Derive it while preserving numeric limits, rendered intervals and significance/magnitude authority; any expert interval needs a real scoped workflow. |
+| REQ-pew-verb-defaults | **7.6** | C | Table distinguishes informational/enforcing defaults but command admission has not adopted contextual resolution; pin overrides and rendered effective defaults. |
+| REQ-pew-derived-state | **7.8** | N | Shared content/admission repair is adopted. Independent completed cold/warm/discarded-cache, same-version content and source-coordinate controls remain, separate from budget availability and historical backfill; no missing-enforcement contradiction is asserted. |
+
+The reconciliation is 72 + 3 + 15 + 6 = 96. Within Gofresh the primary-slot
+totals are 40 at 9.3, 13 at 7.8, eight at 5.2c, three at 5.5, two each at
+7.4 and 5.5a, and one each at 8.1, 7.3, 5.2d and 9.4. Raw contradiction
+flags remain on eleven Gofresh, five Stipulator and five Pew records; none of
+Gomutant's three records uses that manual flag. These counts describe stored
+declarations only, not evaluated coverage, firing or resolution.
+
 ## Migration components and preservation
+
+The destinations here are remaining open reconciliation slots. Completed
+Pew producer-premise and native/profile work supplies preservation controls;
+it is not reauthorized unfinished work at its former 4.x/5.1 destinations.
 
 | Source/component | Disposition; destination | Deciding case / constraint |
 |---|---|---|
-| gofresh 5bf9023 CoverageLocal inventory and harness projection | A; 6.1–6.2 | Arithmetic positive; env/files/children/startup/TestMain/callback negatives; influence separate. |
-| 5bf9023 locality record, capture and validation | A; 2.3, 2.5, 6.1 | Complete identities and unit-owned preparation; no caller stage switch made canonical. |
-| 5bf9023 caller-discharge refusal | R; 6.1–6.2 | Vouch, single-subject and package-process assertions cannot establish coverage locality. |
-| 5bf9023 mixed validation and sibling obligations | A; 3.3, 5.5, 6.1 | Missing attachment before observation; shared analysis, closing runtime read and actual drift retained. |
-| 5bf9023 record-only support validation | A; 2.3, 8.1 | No current observations; original producing subject and compartment, no purity-to-support promotion. |
-| 5bf9023 exact-current strategy comparison | A; 3.2, 8.1 | Recognized historical compatibility distinguished from equality with today's implementation constant. |
-| 5bf9023 locality/support tests and fuzz grammar | R/A; 6.1, 8.1 | Keep native positives and corruption controls; independently rerun after integration. |
-| 5bf9023 proposed clauses and bindings | A/X; 2.6, 6.1, 8.1 | Removed View.validateCoverageLocality binding replaced; final mixed/discharge witnesses accounted for. |
-| 5bf9023 reserved ObservationRTA @42 | X; 3.2, 6.1 | Main @43/dynamic-state @39 retain repaired SSA/RTA; derive combined identities, never copy literal. |
-| gofresh 35996d7 handoff | A/X; 2.1, 9.4 | Preserve unfinished work/evidence caveats; reject superseded order, old DST blocker and automatic floors. |
-| gofresh chunk-102-wip 08be384 sliced closure | A; 7.8 | Reached constants/initializers/imports/embeds move identity; unknown reach keeps maximal floor. |
-| 08be384 late SlicedClosure record/API, @25→@26 | X/A; 2.3, 7.8, 9.2 | No verbatim old field/version/type adoption; current native endpoint and compatibility contract governs. |
-| 08be384 monotonicity claim and tests | A; 2.3, 7.8 | Unchanged-tree example is not a universal proof under current canonical comments/compartments. |
-| dirty wt315 harness clauses/tests/records | A; 2.1, 9.4 | Compare against landed repaired-build admission; preserve history, not obsolete all-DST refusal. |
-| dirty wt315 unstaged movedKeys `if first` | X; 2.1 | Reject loss of closest-chain minimization; preserve residue until deliberately disposed. |
-| dirty wt315r3 harness seeds/digests/tests | A; 2.1, 9.4 | Landed seeds and repaired chains supersede old rows; no reuse as current admission evidence. |
-| dirty wt315r3 Fatalf→Errorf | X; 2.1, 9.3 | Row-harvesting change is not permission to weaken production canary. |
-| pew migration 1f8df13 TestObservationPremisesProperty | A; 4.4–4.5 | Real property driver, native getenv positive, isolated premise mutations, review and binding. |
-| 1f8df13 draw grammar and 18 premise modes | R/A; 4.4 | Preserve normal failure/identity-only/missing or borrowed support, frame, process, env, completion and log. |
-| 1f8df13 cancellation/environment duplication | R/A; 2.4, 4.4 | Independent boundary refusals; normalization cannot choose a convenient duplicate winner. |
-| 1f8df13 non-OS-exit scope | R; 4.5 | Separate actual process terminal tests; synthetic completion choice is not an OS witness. |
-| 1f8df13 facade versus adapter and composition cases | R/A; 4.4, 5.5 | Both boundaries tested; duplicate same-process idempotence and conflicting/distinct processes stay separate. |
-| pew chunk-15-wip 6fcc847 pew-slice proposal | A; 7.8, 8.2 | Independently justified declaration precision, maximal fallback; no new field merely for a rejected floor. |
-| 6fcc847 pew-profile digest / pew-attribution | A; 2.2, 5.1, 9.2 | Current native profile binding; corrupt/substituted companion refused; attribution is not outcome support. |
-| 6fcc847 fixed CPU/memory filenames and closed-key inventory | X/A; 5.1, 9.2 | Keep current content-addressed ownership and native grammar, not obsolete fixed pairs or three added keys. |
-| 6fcc847 default-on boolean profiling | X; 2.4, 8.3 | Current opt-in kind-valued capture retained; unrequested profiles do no work. |
-| 6fcc847 independent diagnostic invocation | R; 5.1 | Diagnostic executions never enter the timing distribution. |
-| 6fcc847 mandatory CPU/allocation pair, count one | A; 5.1 | Requested kinds and budgets govern; each missing requested kind remains an obligation. |
-| 6fcc847 leading-frame attribution heuristic | X/A; 2.2, 5.1 | Useful description, never authority for missing execution/completion/outcome support. |
-| 6fcc847 capture failure refuses statistical arm | X/A; 5.1, 7.6, 8.3 | Preserve usable statistics with separate requested-diagnostic report/exit disposition. |
-| 6fcc847 atomic companions, confinement, historical git objects | R/A; 5.1, 8.1, 9.2 | No falsely complete partial publication or current-file repair of missing historical evidence. |
-| 6fcc847 same-code lineage filter | A; 8.1, 8.2 | Original support, applicability and lineage completeness beyond equal guards/closure. |
-| 6fcc847 largest successive shift, four points, max(threshold,floor) | X; 7.6, 8.2 | Neither estimator, minimum history nor automatic tolerance elevation is approved. |
-| 6fcc847 named bar/provenance and removal of deferral text | A/X; 7.6, 8.2, 8.3 | Actual explicit tolerance separate from descriptive historical variation. |
-| 6fcc847 profile diff and status attribution | R/A; 5.1, 8.3 | Diagnostic comparison cannot change statistical verdict; missing/invalid/unrequested remain distinct. |
-| 6fcc847 INV-13/14/15 | A; 2.6, 5.1, 7.6 | Retain binding integrity, policy transparency and companion isolation in current canonical requirements. |
+| gofresh 5bf9023 CoverageLocal inventory and harness projection | A; **6.1**; constituent 6.2 | Arithmetic positive; env/files/children/startup/TestMain/callback negatives; influence separate. |
+| 5bf9023 locality record, capture and validation | A; **6.1** | Complete identities and unit-owned preparation; no caller stage switch made canonical. |
+| 5bf9023 caller-discharge refusal | R; **6.1**; constituent 6.2 | Vouch, single-subject and package-process assertions cannot establish coverage locality. |
+| 5bf9023 mixed validation and sibling obligations | A; **6.1**; constituent 5.5 | Missing attachment before observation; shared analysis, closing runtime read and actual drift retained. |
+| 5bf9023 record-only support validation | A; **8.1** | No current observations; original producing subject and compartment, no purity-to-support promotion. |
+| 5bf9023 exact-current strategy comparison | A; **8.1** | Recognized historical compatibility distinguished from equality with today's implementation constant. |
+| 5bf9023 locality/support tests and fuzz grammar | R/A; **6.1**; constituent 8.1 | Keep native positives and corruption controls; independently rerun after integration. |
+| 5bf9023 proposed clauses and bindings | A/X; **6.1**; constituent 8.1 | Removed View.validateCoverageLocality binding replaced; final mixed/discharge witnesses accounted for. |
+| 5bf9023 reserved ObservationRTA @42 | X; **6.1** | @42 and the comparison's @43/dynamic-state @39 are historical inputs, not current adoption instructions; derive live combined identities. |
+| gofresh 35996d7 handoff | A/X; **9.4** | Preserve unfinished work/evidence caveats; reject superseded order, old DST blocker and automatic floors. |
+| gofresh chunk-102-wip 08be384 sliced closure | A; **7.8** | Reached constants/initializers/imports/embeds move identity; unknown reach keeps maximal floor. |
+| 08be384 late SlicedClosure record/API, @25→@26 | X/A; **7.8**; constituent 9.2 | No verbatim old field/version/type adoption; current native endpoint and compatibility contract governs. |
+| 08be384 monotonicity claim and tests | A; **7.8** | Unchanged-tree example is not a universal proof under current canonical comments/compartments. |
+| dirty wt315 harness clauses/tests/records | A; **9.4** | Compare against landed repaired-build admission; preserve history, not obsolete all-DST refusal. |
+| dirty wt315 unstaged movedKeys `if first` | X; **9.4** | Reject loss of closest-chain minimization; preserve residue until deliberately disposed. |
+| dirty wt315r3 harness seeds/digests/tests | A; **9.4** | Landed seeds and repaired chains supersede old rows; no reuse as current admission evidence. |
+| dirty wt315r3 Fatalf→Errorf | X; **9.4**; constituent 9.3 | Row-harvesting change is not permission to weaken production canary. |
+| pew migration 1f8df13 TestObservationPremisesProperty | R; **9.1**; constituent 9.3 | Native producer-premise property is landed at a22c333; preserve/extend its driver, getenv positive and independent premise mutations, not repeat implementation. |
+| 1f8df13 draw grammar and 18 premise modes | R; **9.3** | Preserve normal failure/identity-only/missing or borrowed support, frame, process, env, completion and log. |
+| 1f8df13 cancellation/environment duplication | R; **9.3** | Independent boundary refusals remain controls; normalization cannot choose a convenient duplicate winner. |
+| 1f8df13 non-OS-exit scope | R; **9.3** | Retain actual process terminal controls separately; synthetic completion choice is not an OS witness. |
+| 1f8df13 facade versus adapter and composition cases | R/A; **5.5**; constituent 9.3 | Preserve adopted boundary controls and independently close remaining composition paths; same-process idempotence and conflicting/distinct processes stay separate. |
+| pew chunk-15-wip 6fcc847 pew-slice proposal | A; **7.8**; constituent 8.2 | Independently justified declaration precision, maximal fallback; no new field merely for a rejected floor. |
+| 6fcc847 pew-profile digest / pew-attribution | A; **9.2** | Preserve current native profile binding and corruption controls; attribution is not outcome support. |
+| 6fcc847 fixed CPU/memory filenames and closed-key inventory | X/A; **9.2** | Keep current content-addressed ownership and native grammar, not obsolete fixed pairs or three added keys. |
+| 6fcc847 default-on boolean profiling | X; **8.3** | Current opt-in kind-valued capture retained; unrequested profiles do no work. |
+| 6fcc847 independent diagnostic invocation | R; **9.3** | Retain completed producer separation: diagnostic executions never enter timing distributions. |
+| 6fcc847 mandatory CPU/allocation pair, count one | A; **9.3** | Preserve requested-kind/budget and missing-kind controls, not the obsolete mandatory pair. |
+| 6fcc847 leading-frame attribution heuristic | X/A; **8.3** | Useful description, never authority for missing execution/completion/outcome support. |
+| 6fcc847 capture failure refuses statistical arm | X/A; **7.6**; constituent 8.3 | Preserve usable statistics with separate requested-diagnostic report/exit disposition. |
+| 6fcc847 atomic companions, confinement, historical git objects | R/A; **8.1**; constituent 9.2 | Preserve completed ownership; no falsely complete partial publication or current-file repair of historical evidence. |
+| 6fcc847 same-code lineage filter | A; **8.1**; constituent 8.2 | Original support, applicability and lineage completeness beyond equal guards/closure. |
+| 6fcc847 largest successive shift, four points, max(threshold,floor) | X; **8.2**; constituent 7.6 | Neither estimator, minimum history nor automatic tolerance elevation is approved. |
+| 6fcc847 named bar/provenance and removal of deferral text | A/X; **8.2**; constituents 7.6, 8.3 | Actual explicit tolerance separate from descriptive historical variation. |
+| 6fcc847 profile diff and status attribution | R; **8.3** | Preserve completed comparison controls: diagnostics cannot change statistical verdict; missing/invalid/unrequested remain distinct. |
+| 6fcc847 INV-13/14/15 | A; **9.4**; constituent 7.6 | Reconcile binding integrity, policy transparency and companion isolation with current canonical requirements. |
 
 All named branches and dirty worktrees remain preserved. Neither mapping nor
 rejection of a mechanism authorizes deleting a checkpoint. Unfinished review,
@@ -369,14 +537,14 @@ vertical is not permitted by completing this verification step.
 
 | Boundary | Source evidence | Destination and deciding regression |
 |---|---|---|
-| Positive oracle-memory overflow | Gomutant OracleMemoryBytesFromMiB shifts int64 without a maximum check; 2^43 becomes negative/disabled, 2^44 becomes zero/derived. | 2.4, 5.4, 7.4: maximum accepted conversion and next value on both faces, refusal before load/lock/spawn; distinct zero and disabled controls. |
-| Typed count versus raw arguments | Stipulator validateConfig admits raw -test.count; testCommandArgs appends it after typed count/BYPASS. | 2.4, 5.3: actual repetitions for conflicting, duplicate, two-token and invalid count forms; one admitted meaning, no silently defeated cache intent. |
-| Runtime-only argument partition | Stipulator identityArgs strips a timeout-looking token independently of whether it is a custom flag's value or follows --. | 2.4, 5.3: behavior-bearing custom string/positional values retain different identities; actual timeout discharge needs an unambiguous active option. |
-| Explicit-empty selection | Gomutant MCP tags:[] and omission both inherit ambient tags; explicit target/oracle emptiness already has different semantics. | 2.4, 5.4, 7.2: omitted/clear/nonempty across CLI/MCP and ambient tags; retain explicit-empty target and oracle inventories. |
-| Internal empty test selection | Stipulator ExecuteSelection accepts an empty package row; testCommandArgs emits no -run for it. No public producer of that row established. | 2.4, 5.2: trace reachable callers first; nil versus empty must not accidentally request a whole package. |
-| Diagnostic A/B trust | Pew prepareABProfiles reaches invocationVouches fallback and each side's own benchmarks/vouches without an A/B source control. | 2.4, 5.1, 7.3: define the source; divergent/missing/malformed/revoked side declarations, no trust transfer via output path. |
-| Auto-PGO | Go reads default.pgo when PGO is omitted, while Stipulator contributes no profile input; two valid profile contents produced identical native fingerprints and a later native check answered valid. Explicit auto/path controls answered stale on buildconfig. | 2.4 verified; 5.2 repairs default-consuming build inputs and adds lasting producer/publication/record-serving regressions, including missing/unreadable profiles and workspace scope. |
-| Callback selects work | Gomutant emitOracleGuidance starts per-test execution only with a Guidance callback and derived oracle. | 6.3, 7.2: subscription and oracle derivation do not choose diagnostic workload. |
+| Positive oracle-memory overflow | Gomutant OracleMemoryBytesFromMiB shifts int64 without a maximum check; 2^43 becomes negative/disabled, 2^44 becomes zero/derived. | **5.4**; constituent 7.4: maximum accepted conversion and next value on both faces, refusal before load/lock/spawn; distinct zero and disabled controls. |
+| Typed count versus raw arguments | Stipulator validateConfig admits raw -test.count; testCommandArgs appends it after typed count/BYPASS. | **5.3**: actual repetitions for conflicting, duplicate, two-token and invalid count forms; one admitted meaning, no silently defeated cache intent. |
+| Runtime-only argument partition | Stipulator identityArgs strips a timeout-looking token independently of whether it is a custom flag's value or follows --. | **5.3**: behavior-bearing custom string/positional values retain different identities; actual timeout discharge needs an unambiguous active option. |
+| Explicit-empty selection | Gomutant MCP tags:[] and omission both inherit ambient tags; explicit target/oracle emptiness already has different semantics. | **5.4**; constituent 7.2: omitted/clear/nonempty across CLI/MCP and ambient tags; retain explicit-empty target and oracle inventories. |
+| Internal empty test selection | Stipulator ExecuteSelection accepts an empty package row; testCommandArgs emits no -run for it. No public producer of that row established. | **5.2c**: trace reachable package-producing callers first; nil versus empty must not accidentally request a whole package. |
+| Diagnostic A/B trust | Pew prepareABProfiles reaches invocationVouches fallback and each side's own benchmarks/vouches without an A/B source control. | **7.3**: preserve completed producer controls while settling the justified source; divergent/missing/malformed/revoked declarations and no output-path trust transfer. |
+| Auto-PGO | Go reads default.pgo when PGO is omitted, while Stipulator contributes no profile input; two valid profile contents produced identical native fingerprints and a later native check answered valid. Explicit auto/path controls answered stale on buildconfig. | **5.2d**: adopt complete build inputs and lasting producer/publication/record-serving regressions, including missing/unreadable profiles and workspace scope; completed 5.2a/b certificates are not reopened. |
+| Callback selects work | Gomutant emitOracleGuidance starts per-test execution only with a Guidance callback and derived oracle. | **6.3**; constituent 7.2: subscription and oracle derivation do not choose diagnostic workload. |
 
 ### Reproduction boundaries and positive controls
 
@@ -449,6 +617,14 @@ particular, native selected-content and admission-policy dependencies now have
 their own evidence and memo identities, while consumer certificate adoption and
 the separately tracked memo-version refinements remain. Supplied-observation
 merge still does not establish the complete contributor roster or unit ownership.
+
+The completed singleton boundary is not the minimal package-producing form at
+5.2c. Typed semantic causes are still absent from `gofresh.Verdict`; that
+5.2c/7.1 boundary remains required so consumer migration does not introduce
+another parser over reason prose. Stipulator's completed 5.2a/b selection,
+physical-source, module ownership and certificate work remains a preservation
+control; package production, full descriptions and historical admission remain
+at their open 5.2c/d/e destinations.
 
 Keep producing evidence and a licensed applicability endpoint distinct. Static
 certificates have source/configuration/classifier dependencies without a fake

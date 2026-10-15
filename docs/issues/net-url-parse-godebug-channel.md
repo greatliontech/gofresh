@@ -10,14 +10,14 @@ code-result capture and compare skip it), and the registry is
 re-derived in-process by any `Setenv("GODEBUG", …)`, which a sibling
 subject can perform under a bracket that never sees it. So the
 parsing half of net/url stays refused while the escaping and
-composition half is admitted by symbol (chunk 123); the charter's
+composition half is admitted by symbol; the historical report's
 `url.Parse` — the field's ~23 refusals — is not lifted.
 
-Demonstrated: `url.ParseQuery("a=1&b=2")` yields two values under the
+The recorded reproduction: `url.ParseQuery("a=1&b=2")` yields two values under the
 default and an error under `GODEBUG=urlmaxqueryparams=1`, with every
 code-result guard unchanged between the two processes.
 
-Two lifting shapes, both changing what a guard means:
+Two candidate mechanisms require a complete authority argument:
 
 1. GODEBUG joins the code-result guard (`buildConfigOSEnvKeys` or a
    new key of the runtime-config guard captured for CodeResult) —
@@ -29,7 +29,12 @@ Two lifting shapes, both changing what a guard means:
    input (the value each admitted read observed), so a moved setting
    stales the record like any observed input.
 
-Either widens the guard model; which, and whether the field mass
-(~23) earns it, is the user's.
+REQ-guard-runtime-relevance already requires behavior-affecting runtime
+configuration to be accounted for in a code result. Derive the implementation
+from that contract, including in-process mutation and shared-process scope;
+neither a start-of-process environment comparison alone nor an unobserved
+effective setting licenses admission. The parsing operations remain refused
+until that authority exists. The report's count does not make this a product
+decision or justify a blanket parsing admission.
 
-Lands: cross-tool train chunk 191
+Lands: docs/plans/tooling-redesign.md 7.8.

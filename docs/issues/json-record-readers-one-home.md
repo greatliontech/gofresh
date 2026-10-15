@@ -20,7 +20,10 @@ fingerprint compares compacted bytes (nested in a parent document that
 may indent it) — the collapsed reader carries the whitespace rule as a
 caller's choice, never one policy for both.
 
-Lands: cross-tool train chunk 243 (audit 285, 2026-09-29, sharpened: the manifest
-decoder has no duplicate-key and no null rule — runtimeinput.go:2583–2602 catches
-them incidentally as 'non-canonical manifest encoding' where the record names the
-key; one reader, one refusal ladder).
+The manifest's canonical re-encode rejects duplicate/null shapes without the
+fingerprint reader's field-specific diagnostics. Preserve that acceptance
+boundary while deciding whether the common primitives should improve the
+diagnostic account; do not silently accept non-canonical historical bytes or
+infer producing support from successful decoding.
+
+Lands: docs/plans/tooling-redesign.md 9.2.

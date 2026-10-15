@@ -206,10 +206,16 @@
       for the actual contributing subjects and processes. Preserve the existing
       singleton form, independent package closing and separate retry executions;
       reuse immutable preparation facts without merging mutable transactions.
+      Complete decidable batch-membership refusals and the structured cause,
+      scope and authority account needed by this form; diagnostic wording is a
+      projection, never a replacement for those facts. Isolation alone supplies
+      no operation-outcome support.
     - [ ] 5.2d Adopt complete build/runtime descriptions and retained artifacts
       together, including omitted auto-PGO dependencies and caller-owned
       construction cancellation. Migrate producing, finalizing, checking and
       publication paths without carrying a degraded legacy adapter as completion.
+      Carry reviewed declarations and their withdrawal/narrowing rules through
+      those paths without merging assertion, exclusion and namespace authority.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Attribute scoped discovery and certificate cold/warm costs before changing
@@ -217,15 +223,47 @@
       issue through endpoint-local selected-view preparation. Keep retry
       durability/tier/account obligations at 5.3 explicit,
       and prevent another consumer-local reason parser during migration.
+      Reconcile structurally readable historical proofs with native
+      compatibility judgment; separate refused-record diagnostics from eligible
+      evidence. Exercise disappearing export-cache inputs and bounded safe
+      refresh or actionable refusal without preserving stale typed answers.
   - [ ] 5.3 Preserve Stipulator argument identity and clause-scoped supersede;
     retain per-group witness tiers and package-completion persistence during
     drift retries. Publish operation accounts even when a later step fails.
+    - [ ] 5.3a Parse actual argument roles for identity and timeout attribution,
+      including custom values, positionals, `--`, duplicate/two-token forms and
+      typed-count versus raw-count precedence. Retain behavior-bearing values.
+    - [ ] 5.3b Preserve label/ordinal/multi-successor scope or refuse the carry;
+      settle whole-claim defaults and explicit exceptions, binding placement,
+      and malformed-label remedies together with their existing-record rules.
+    - [ ] 5.3c Publish each completed retry package independently; retain every
+      group's rigor, invocation/process identity and NoOutcome account before
+      deduplicating subjects. Fold whole/selective/solo contributions losslessly.
+    - [ ] 5.3d Carry typed publication and execution accounts through operational
+      failures and cancellation on both faces. Retain bounded queued/build/test
+      timing and diagnostic rosters without turning incomplete work into evidence.
   - [ ] 5.4 Migrate Gomutant's target/window unit without lending base-program
     support to transformed executables. Preserve conservative identity-only
     evidence where the execution model has no admitted outcome method.
+    - [ ] 5.4a Reconcile effective discovery with Go's own inventory under the
+      same captured binary, source and selection. Preserve the admitted alias,
+      skip and named-baseline controls; refuse positive memory-conversion
+      overflow and distinguish omitted from explicitly empty selections before
+      loading or spawning.
+    - [ ] 5.4b Preserve physical mutation/input identity through symlinked
+      materialization, local replacements, explicit testdata and isolated oracle
+      writes. An external oracle needs its own artifact, contributor, terminal
+      and attribution model before implementation; command success alone is not
+      mutation evidence. Retain full-oracle dispatch and historical-policy refusal.
+    - [ ] 5.4c Consolidate live stream and evidence judgments with generated
+      corrupt/truncated/build/crash controls. Separate record-wide evidence
+      faults from git provenance and per-subject observations. Do not restore
+      removed scheduling producers or unlicensed changed-oracle composition.
   - [ ] 5.5 Make observation finalization, adoption, conversion and merge
     cancellable under their owning unit. Share evaluation only within a
     coherent phase, not across observation endpoints.
+    Establish actual loader-descendant containment with process-tree witnesses;
+    an owned runner does not contain children the loader launches outside it.
     - [ ] 5.5a Implement the request-scoped project context on the existing
       Gomutant and Stipulator MCP surfaces. Scope cache identities, declarations,
       trust, stores, locks, progress and diagnostics correctly across concurrent
@@ -290,7 +328,10 @@
     served fraction and peak/retained memory on representative workloads.
     Explain each cost before changing ownership or admission. Do not rebuild
     existing per-package SSA release, equate GC targets with physical room,
-    infer OOM from exit 137, or count skipped work as a speed improvement.
+      infer OOM from exit 137, or count skipped work as a speed improvement.
+    Distinguish inherited wait-status high-water from post-exec driver/build/test
+    needs, and shared address-space/page accounting from independent equal-sized
+    children. Neither equal counters nor a repeated sample proves shared ownership.
   - [ ] 7.8 Share parsing/loading/proofs under complete generation identities;
     reject decisive source/guard mismatches before unnecessary refinement.
     Preserve full-inventory requests and explicit applicability transformations;
@@ -306,9 +347,15 @@
     Complete existing workflows; add a Pew MCP transport only for a concrete
     driving-agent workflow, not surface symmetry alone.
 - [ ] 9. Close performance evidence and reconcile every retained obligation.
-  - [ ] 9.1 Complete Pew performance-evidence 11.3 and 12, reconciling all
-    interrupted campaign scopes under repaired oracles and extending the
-    already-established producer-premise evidence.
+  - [ ] 9.1 Recover and reconcile the outstanding scope of Pew
+    performance-evidence 11.3 and 12, including all
+    interrupted campaign scopes under repaired oracles and preserving the
+    already-established producer-premise evidence. Final compatibility,
+    authorized execution and retirement complete at 9.2, 9.3 and 9.4.
+    Recover missing original target/oracle inventories and tree identities;
+    historical `--changed HEAD` never denotes today's tree by substitution.
+    Preserve excluded deltas, interrupted prefixes and unknown run identities
+    separately. Final multi-selection and long campaigns follow 6.6 and 6.7.
   - [ ] 9.2 Settle final native/envelope formats and compatibility. Preserve
     structurally readable history, refuse reuse without required support and
     regenerate explicitly; never backfill historical proof or outcome support.
@@ -317,5 +364,9 @@
     Stipulator witness runs are not implicitly authorized by this plan.
   - [ ] 9.4 Re-census retained cross-tool charters and checkpoints against the
     completed work, mapping every remaining obligation before deleting plans.
-    Re-audit after twelve landed commit-sized units or a band close, whichever
-    first; the displayed phases do not bypass that gate.
+      Re-audit after twelve landed commit-sized units or a band close, whichever
+      first; the displayed phases do not bypass that gate.
+    Reconcile and retire the completed pipeline-audit tracking directory only
+    after promoting its surviving rationale and routing every residual. Preserve
+    conditional platform/protocol/backend capabilities under observable triggers;
+    inventory completeness does not commission their implementation.

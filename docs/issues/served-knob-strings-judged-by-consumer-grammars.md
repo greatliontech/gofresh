@@ -2,15 +2,11 @@
 
 REQ-guidance-single-source says a consuming repo's binding compares
 each served knob string with the projection — the package's
-served-bytes judgment (Document.Served, landed at cross-tool train
-chunk 300) its form — never through a grammar of its own. Two
-consumers still derive the string with a local grammar and compare
-against that: stipulator's internal/cmd/guidance_test.go cliUsage (cuts
-only a trailing " (default …)" where the projection strips every one
-by depth) and firstClause, and its internal/mcpserver/guidance_test.go
-firstClause; pew's
-cmd/pew/guidance_test.go cliUsage and firstClause (the latter
-decrements parenthesis depth unguarded where Clause floors at zero).
+served-bytes judgment (`Document.Served`) its form — never through a grammar
+of its own. Stipulator has adopted that judgment. Pew's
+`cmd/pew/guidance_test.go` still compares against local `cliUsage` and
+`firstClause` grammars (the latter decrements parenthesis depth unguarded
+where Clause floors at zero).
 gomutant's two bindings compare the served string with the projection
 directly — the property itself, conformant; Served is the one form
 available to them.
@@ -23,5 +19,8 @@ independence belt stipulator 169 established — the grammars delete.
 gomutant needs nothing: its direct comparison is the property; Served
 is available to it, not owed.
 
-Lands: pew's bump behind gofresh 300 — pew 320, where its grammars
-delete (stipulator's deleted at 290r).
+Pew already calls the shared Coverage lint. Coverage enumerates names and
+checks default spellings; that adoption does not remove these separate
+served-string grammars.
+
+Lands: docs/plans/tooling-redesign.md 5.6.

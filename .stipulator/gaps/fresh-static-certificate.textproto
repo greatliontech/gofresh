@@ -2,8 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-static-certificate"
-reason: "The complete-dependency rule governs native analysis memos as well as consumer resolution and classification certificates. Native toolchain-content/admission dependencies and the cross-selection consumer certificate both need enforcement; neither alone covers the requirement."
+reason: "Native dependency enforcement and Stipulator's all-selected-view resolution/classification certificate have landed. Full invariant evidence across source membership, precedence, classifier changes and certificate composition remains to be reconciled. No additional consumer certificate violation is established by this record."
 content_hash: "8e5ac2b508018d9352c68d46a62808dfb144c2c9dbc596c278714e06b1ae167d"
 source_hash: "6340ab5984afcd55d373a49ec09c3d086e22834689c1092ce79f0171bbc5595c"
-lands { manual { condition: "Native analysis memo/proof reuse enforces complete toolchain-content and admission-policy dependencies, and Stipulator's resolution/classification certificates enforce all selected views, declaration precedence and classifier identity with bound deciding regressions." } }
+lands { manual { condition: "tooling-redesign 9.3: property or analyzer evidence covers the complete static-certificate invariant, preserving all contributing source, configuration, precedence, classifier and native dependency identities without granting execution authority" } }
 excuses: GAP_EXCUSE_UNCOVERED

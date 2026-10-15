@@ -7,17 +7,19 @@ the object-closed discharge covers interface variables whose every
 store is an audited immutable construction (`errors.New`, a reflect
 type, a constant), never a struct the package itself defines.
 
-The property is provable: a struct type S is immutable after
-construction when its fields are all unexported, every method in its
-method set is proven read-only by the receiver-effect proof (the
-once-filled memo included), no field of S is assigned or address-taken
-outside a composite literal or a proven method, no conversion into S
-exists, and every method's result hands out no mutable reach or is
-itself an immutable-after-construction type. Then every *S value is
-immutable whatever expression produced it, a package-level *S variable
-is object-closed — escapes are not mutation, method calls are the
-proof's, rebinding stays mutation — and the discharge is the engine's
-own verdict, no attestation, no record.
+The desired property is immutability of every reachable part after
+construction, not merely private fields and read-only methods. A constructor
+can store a pointer, slice, map or interface supplied by a caller that retains
+a writable alias; a private field then changes without any method on the
+containing object writing it. The proof must close external aliases, all
+construction inputs, reachable mutable storage and exported escape paths as
+well as method effects, writes, conversions and returned values. Private
+fields alone do not justify that every value of the type is immutable.
+
+Only an established whole-object proof could make escapes harmless while
+retaining rebinding as mutation. Its evidence and compatibility consequences
+follow the canonical derived-fact rules, not the earlier proposal's assertion
+that a new discharge would need no record change.
 
 What blocks it today is a fixpoint across three judgments. The
 receiver-effect proof refuses the receiver in a call-argument position
@@ -25,9 +27,9 @@ receiver-effect proof refuses the receiver in a call-argument position
 deferring to the callee parameter's leak-free fact, and that proof
 (`boundValueLeakFree`) counts a parameter stored into a composite
 literal as an escape — `filter` stores `g` into `&filteredGen{g: g}`.
-Both refusals dissolve under one rule: a value handed into the
-construction of an immutable-after-construction type is not leaked,
-because no holder of the constructed object can reach it. So the
+Resolving both refusals requires proving that a value handed into another
+construction acquires no uncontrolled mutable alias; calling the resulting
+type immutable cannot be the premise of its own proof. The
 immutability of S depends on the proofs of S's methods, which depend on
 the leak-freeness of the functions they call, which depends on the
 immutability of the types those functions construct — a per-package
@@ -37,7 +39,7 @@ composition, and a new fact (immutable type keys) in the persisted
 record.
 
 The consumers' standing rapid vouch (`pgregory.net/rapid:anyRuneGen`)
-cannot be trimmed before this lands; the chunk-99 close-out records
-that deviation.
+cannot be trimmed merely from the private-field argument. Retire it only
+after the exact admitted dependency and reachable object graph are covered.
 
-Lands: cross-tool train chunk 193
+Lands: docs/plans/tooling-redesign.md 7.8.

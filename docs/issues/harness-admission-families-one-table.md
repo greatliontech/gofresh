@@ -17,4 +17,8 @@ constructor, one body-cut term, one dynamic-target arm, and one
 inventory walk — a fifth family becomes a table row, and a missing
 site becomes unrepresentable.
 
-Lands: cross-tool train chunk 204 (audit 332/335: the table beside the auditset tables — 3361645's immutableEnvironmentMethod is the seventh spelling site; the passive 'next family' trigger retired).
+The outcome inventory's `immutableEnvironmentMethod` is another consumer of
+the family classification. Sharing the table must preserve the distinction
+between an observable harness effect and an admitted outcome method.
+
+Lands: docs/plans/tooling-redesign.md 7.1.

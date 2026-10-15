@@ -21,12 +21,13 @@ REQ-fresh-coherent-view's explicit-environment rule forbids. The one
 seam holds three things: the environment (pin `cfg.Env != nil` there),
 the directory, and the process boundary.
 
-Closing shapes for the boundary, to be decided at the seam: an upstream
-spawn hook on `x/tools`'s loader (a `GOPACKAGESDRIVER` that is the
-runner is foreclosed as the spec stands — REQ-fresh-coherent-view
-refuses every external driver, and `EnvForPackages` pins it off), or
-the loader's children stated as the policy's declared exclusion in the
-substrate paragraph and in each consumer's boundary clause.
+The loader exclusion is already stated in REQ-fresh-go-command-policy and
+the substrate paragraph. The residual is one owned loading seam preserving
+the complete environment/directory/cancellation contract and making that
+exclusion explicit to consumers. A stronger spawn boundary needs a capability
+the loader actually supplies (for example an upstream hook), not another
+consumer wrapper that cannot reach its children. An external
+`GOPACKAGESDRIVER` remains refused by REQ-fresh-coherent-view; it is not a
+permitted shortcut to containment.
 
-Lands: cross-tool train chunk 241 (the one typed-load seam — the site
-the loader's spawn is confined to).
+Lands: docs/plans/tooling-redesign.md 7.1.

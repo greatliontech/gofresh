@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-progress"
-reason: "the clause states that a Detail-bearing phase's payload enters no memoized, hashed surface; the code holds it (the memoized reason is a constant, the walk-order-dependent provenance rides the event alone) but no witness pins the memo's stability against the payload"
+reason: "The diagnostic payload is excluded from memoized and hashed evidence by the implementation, but the clause still needs a witness discriminating memo stability from payload changes."
 content_hash: "2afb9acec924c4b265ad28bbfd02e7be88e48575b2f2d4aadf8590e404b2d3b5"
 source_hash: "9c34bba2b07a01506b77b2d8cfa1f9dfd5319980cb24dafcce7f84e74643fc7c"
-lands { manual { condition: "a memo-stability witness for the diagnostic payload lands with the test-surface chunk (cross-tool train chunk 206)" } }
+lands { manual { condition: "tooling-redesign 9.3: a memo-stability witness establishes that diagnostic payload changes do not move memoized or hashed evidence" } }

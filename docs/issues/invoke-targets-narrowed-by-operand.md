@@ -19,6 +19,8 @@ keeping the projection whole. The subject walk's scan then resolves
 such an invoke by the operand alone exactly as it resolves a computed
 call.
 
-Lands: cross-tool train chunk 260 (audit 285, 2026-09-29: the field report
-iterator-calls-and-std-invokes-open-the-closure fired this doc's arm; the
-circular trigger with dispatch-admissions-one-predicate retired).
+Lands: docs/plans/tooling-redesign.md 7.8.
+
+The historical sweep is a precision report, not a current reproduction or an
+unsoundness claim. Prove operand and method-set completeness before narrowing;
+unknown targets keep the conservative projection.

@@ -223,38 +223,37 @@ here where they differ; historical evidence and unfinished work stay tracked.
       confined to another selected view and introduction of an earlier
       declaring view; refuse old records lacking the required evidence.
 - [ ] 345. stipulator: keep ambiguous binary arguments identity-bearing.
-      Pin a custom flag whose value spells `-test.timeout=...`, ordinary
-      timeout edits and unknown forms, without inferring token roles from
-      a prefix. Fold the runtime-bound identity correction into its clause.
+      Active destination: tooling-redesign **5.3**; constituent 7.4.
+      Pin timeout-looking custom values, positionals after `--`, unknown
+      forms and ordinary timeout controls. Discharge only proven active
+      budget tokens; reconcile typed/raw repetition and its record identity.
 - [ ] 346. stipulator: preserve clause scope through supersede or refuse
-      an unresolvable carry. Pin label/ordinal changes, multiple successors
-      and whole-claim contrasts; fold this correctness portion of 176.
+      an unresolvable carry. Active destination: tooling-redesign **5.3**.
+      Include resolved clause identity in duplicate detection; pin labels,
+      ordinals, missing/colliding clauses, multiple successors and whole
+      contrasts. Ordinary retarget's repair does not fix supersede.
 - [ ] 347. gofresh: reconcile the locality portion of
-      checkpoint 5bf9023 against the current released evidence model and
-      340. Re-derive mixed-selection validation, sibling obligations,
-      discharge rejection and missing-attachment ordering.
-      Derive memo and recorded-compatibility identities from
-      the integrated rules: neither the checkpoint's reserved @42 nor
-      released @43 is reusable blindly, and unchanged proof semantics
-      should not be invalidated merely to add a memoized projection.
-      Repair obsolete bindings, prove the post-integration tree, converge
-      review and release. Retain the checkpoint until that work lands.
+      checkpoint 5bf9023. Active destination: tooling-redesign **6.1**;
+      constituent 6.2. Re-derive mixed validation, independent siblings,
+      discharge rejection and missing-attachment ordering against live
+      identities, not reserved strategy literals. Reconcile bindings and
+      generated controls; locality alone grants no candidate non-influence.
+      Preserve the checkpoint until independently verified integration.
 - [ ] 348. gofresh: separately reconcile checkpoint 5bf9023's record-only
-      support validation. Preserve original producing identity and trust
-      class, perform no current observation or authenticity inference,
-      and reject malformed or unsupported records. Complete its bindings,
-      regressions and independent review before release.
+      support validation. Active destination: tooling-redesign **8.1**.
+      Preserve original producing identity and trust class; perform no
+      current observation or authenticity inference. Distinguish recognized
+      compatibility from current-strategy equality, reject malformed or
+      unsupported records, and complete bindings and independent controls.
 - [ ] 349. gomutant: require sound negative-coverage authority before
-      omitting an oracle batch. Cover self-reexecuting mutated children,
-      environment-dependent coverage/scored executions, and compile-time
-      candidate influence outside the covered block. Use the released
-      locality evidence only within its stated scope; unknown negatives
-      execute the whole oracle, with a positive arithmetic narrowing
-      control retained. Version or invalidate affected coverage banks and
-      findings on every serve, extension and splice route; remeasure the
-      affected narrowed survivors. Preserve the full oracle of record and
-      the explicitly stated runtime-sampling limit. This unblocks Pew's
-      performance-evidence 12.1 coverage obligation.
+      any omission. Active destination: tooling-redesign **6.2**;
+      constituents 6.1 and 9.1. Preserve landed full-oracle admission and
+      historical cutoffs; independently establish complete harness/locality
+      and candidate-influence premises, including child execution, runtime
+      environment and compile-time influence. Unknown negatives run the
+      full oracle; retain the arithmetic positive and sampling limit.
+      Recover affected historical populations for authorized remeasurement;
+      neither old banks nor the removed scheduler confer authority.
 - [x] 350. pew: derive requested profile obligations from the benchmark
       inventory, including benchmarks absent on both recording sides.
       Pin one fulfilled diagnostic beside an unrecorded requested benchmark
@@ -271,83 +270,89 @@ here where they differ; historical evidence and unfinished work stay tracked.
       witness as the required evidence class and converge independent
       review. Do not close the property gap on file presence alone.
 - [ ] 354. gomutant: remove best-effort instability attribution from the
-      path blocking other measured targets' commits. Expose the current
-      test, repeat and completed count; distinguish partial, failed and
-      unknown attribution from stable evidence, preserving its completed
-      prefix on interruption. Fold this portion of 267.
+      path blocking other measured targets' commits. Active destination:
+      tooling-redesign **6.3**; constituent 7.2. Expose test/repeat/completed
+      progress, preserve partial work and distinguish unknown/failed from
+      stable. Callback presence and explicit/derived oracle provenance
+      cannot silently commission or suppress advisory execution.
 - [ ] 355. gomutant: close a measured window after its own validation and
-      confirmation obligations without waiting for successor preparation.
-      Amend the existing horizon clause before moving the boundary; pin a
-      completed window beside a blocked next preparation and retain drift
-      refusal and deterministic membership.
+      confirmation. Active destination: tooling-redesign **6.4**.
+      Pin a completed window beside blocked successor preparation; preserve
+      drift refusal and deterministic tree/order/worker membership. Exercise
+      real run wiring at both candidate and execution-bound cliffs.
 - [ ] 356. gomutant: give passing baselines independently validated durable
-      deposits, and serialize/merge bank writes at their shared tree scope
-      across distinct findings files. Amend the baseline-completion clause
-      first; pin restart before any finding and concurrent deposits through
-      separate documents. Preserve all producer and oracle evidence. Fold
-      the baseline portion of 302, leaving its selection format separate.
+      deposits. Active destination: tooling-redesign **6.5**. Establish each
+      deposit's complete producing evidence and closing validation, then
+      serialize shared-tree bank merges across different findings documents.
+      Pin restart before any finding and concurrent deposits; pre-baseline
+      proof rows alone are insufficient and old coverage banks stay retired.
 - [ ] 357. stipulator: use the package completion path for drift retries
-      as well as first executions; preserve completed packages across a
-      later retry's cancellation. Fold the corresponding 249 work without
-      creating a second publication protocol.
+      as well as first executions. Active destination: tooling-redesign
+      **5.3**. Preserve completed packages across a later retry's cancellation
+      through the existing package publication boundary, not a second protocol.
 - [ ] 358. stipulator: keep race/plain attribution on each served group
-      record; pin the same subject serving from both admitted tiers and
-      preserve the race grant in correlation.
+      record. Active destination: tooling-redesign **5.3**. Pin one subject
+      serving from both admitted tiers and preserve each grant in correlation.
 - [ ] 359. stipulator: preserve resolution and witness publication
-      accounts across operational failures on both surfaces, including
-      publication at quiescence followed by execution cancellation. Fold
-      the corresponding 249 work into one operation account.
+      accounts on errors. Active destination: tooling-redesign **5.3**;
+      constituents 7.5 and 8.3. Quiesce already publishes and releases the
+      resolver; retain its notices through later RunTests errors and
+      cancellation, distinguishing durable records from incomplete work.
 - [ ] 360. Measure the remaining preparation barriers on the
-      corrected trees. Attribute cold/warm costs separately to typed
-      loading, SSA, digesting, validation, parent/child residency and
-      build/run peaks; do not assume the already-present per-package SSA
-      release is missing. Re-derive 314, 241, 238 and the memory reports
-      from measured ownership; distinguish physical admission capacity
-      from collection targets. Do not diagnose exit 137 as OOM without
-      attribution. Slot demonstrated reductions as commit-sized chunks
-      before the final campaign, without changing scope semantics.
+      current trees. Active destination: tooling-redesign **7.7**;
+      constituent 7.8. Attribute cold/warm loading, SSA, digests, validation,
+      first durable result, interruption loss and served fraction over equal
+      completed populations. Separate retained RSS from peaks, parent from
+      children and pre-exec inheritance from driver/build/test needs. Existing
+      program release, resolver quiescence and shared admission are controls,
+      not missing mechanisms. Collection targets are not physical room;
+      exit 137 alone is no OOM diagnosis. Change ownership only from evidence.
 - [ ] 361. gofresh: settle cancellation ownership for observation
-      composition and revalidation, including context-free conversion,
-      adoption and merge paths. Preserve guard semantics and bound the
-      documented work between cancellation checks; release before the
-      consumer adaptations. Fold this portion of 243; the separate loader
-      boundary remains 241/238, re-derived from 360.
+      composition and revalidation. Active destination: tooling-redesign
+      **5.5**. Cover FromState, adoption, conversion and merge without hidden
+      background continuation; preserve guard semantics, bounded checks and
+      independent opening/closing observations. Existing owned finalization
+      stays intact; loader containment is a separate constituent of 241/238.
 - [ ] 362. gomutant: keep cumulative counters through audit events,
-      maintain cadence through finalization and preserve the committed
-      structured summary on render expiry. Fold these response-lifecycle
-      corrections from 267; the persistent run-state protocol remains 233.
+      final merge and rendering. Active destination: tooling-redesign **6.7**.
+      Non-candidate events cannot reset counters; expiry and post-write errors
+      preserve committed typed rows, run/root identity, layer counts and an
+      incomplete-render account. Coordinate with bounded recovery in 233.
 - [ ] 363. stipulator: share one live evaluation across requested
-      projections where policy permits, keeping report filters distinct
-      from execution scope and retaining invocation/process identity in
-      failures. Fold the corresponding 249 orchestration work, preserving
-      the prohibition on persisted verification verdicts as inputs.
+      projections. Active destination: tooling-redesign **7.5**. Make
+      evaluation explicit and inspections non-measuring; keep acceptance,
+      execution and report scopes distinct. Missing/NoOutcome/partial facts
+      neither grant a pass nor permit evidence-based deletion; retain
+      invocation identity and prohibit persisted verdicts as evidence inputs.
 - [ ] 364. pew: reconcile entry guidance, exit classifications and the
-      complete measurement/profile/comparison workflow with the current
-      canonical contract. Keep CLI and machine output tailored to their
-      readers; settle genuinely new machine-reader product scope explicitly.
+      enforcing workflow. Active destination: tooling-redesign **7.6**;
+      constituent 8.3. Implement complete/require/compatible enforcing
+      defaults, preserving informational comparison, explicit partial scope,
+      requested metrics and exit precedence. Derive confidence from alpha
+      unless a concrete independent workflow justifies its separate control;
+      new machine-reader forms require actual unmet reader needs.
 - [ ] 365. Settle the historical-floor policy without presenting an
-      empirical envelope as proof of harmless noise. Before any approved
-      implementation, define lineage, complete history, source/guard and
-      support admission, candidate overlap, fallback, and the observable
-      sensitivity tradeoff; use 348's record-only judgment for native
-      support. A policy decision is not an inferred measurement result.
+      empirical envelope as harmless noise. Active destination:
+      tooling-redesign **8.2**; constituents 8.1 and 7.6. Report admitted
+      variation with population, lineage, conditions, candidate overlap and
+      missing history/support visible. Use record-only native support checks
+      and explicit tolerances; never automatically raise a threshold from
+      historical spread or turn an insufficient history into a safe floor.
 - [ ] 366. Finish Pew performance-evidence 11.3 and 12 on the settled
-      tree, after executing retained charters 302 and 233 in that order.
-      Charter 302 precedes the final multi-selection campaigns: both layers,
-      reuse/splice/extension, lifecycle commands and reports keep distinct
-      resolved selections. Use the next format identity after the live
-      version, never the old charter's reserved 14-to-15 transition.
-      Charter 233 precedes the final long campaigns, retaining bounded useful
-      progress and the identity of committed work without a progress token.
-      Reconcile every interrupted campaign's actual scope under the
-      repaired oracle, verify the generated premise obligation, settle
-      historical-floor policy without presenting an empirical envelope as
-      proof of harmless noise, reconcile guidance and final formats,
-      complete the authorized gates and campaigns, retire resolving
-      artifacts and install the clean committed tool. Re-census the
-      retained numbered charters against the completed work before
-      resuming them; no remaining contract obligation disappears with a
-      superseded ordering or consumed handoff.
+      tree. Active destination: tooling-redesign **9.1**; constituents
+      9.2, 9.3 and 9.4, after 6.6/6.7. Recover every target/candidate
+      population, missing run ID and excluded delta in Pew's
+      docs/issues/mutation-oracle-observation.md: a41d8ee, 1e11674dc9cefba4,
+      e8423761e551fb96, the twelve distinct hand probes, the
+      newStatCmd/validateOptions/Compare run, 82f26be60d13cf04, the JSON
+      run, a6d4f75aaf58cae4 and 9eeabef27df54358. Renames and removals
+      need explicit obligation mappings; today's changed scope is no
+      substitute. The native producer-premise property already landed;
+      extend its evidence rather than repeat it. Final measurement requires
+      explicit authorization and complete deciding oracles; partial history
+      grants no completion. Settle formats, guidance and descriptive history,
+      reconcile all retained obligations, then retire resolving artifacts
+      and install clean tools. No reserved version or automatic floor applies.
 
 Standing rule from the ruling (restated 2026-09-07, binding on every
 chunk): the tools' self-checks — `stipulator check` over a repo and
@@ -490,7 +495,7 @@ code moves.
       `go test -short ./...` is the seconds-class tier; `task
       test:short`; CI keeps the full tier; the dangling CI-seat
       pointer (`.github/workflows/ci.yaml:39` cites a
-      docs/issues/ci-seat-for-the-check-verdict that does not exist)
+      nonexistent CI-seat issue; current home: this plan's Standing doctrine)
       resolved — the check verdict's seat is the weekly sweep and the
       chunk close-out, stated where the pointer was. Measurement:
       none.
@@ -609,7 +614,7 @@ verdict, and records the measured wall against the audit's baseline.
       CLI `ephemeral` and `findings --judge` and the tree load get
       the phases, ticks, and interruption summary `run` has;
       `run`'s coverage-probe phase ticks and projects (FOLDS gomutant
-      docs/issues/probe-phase-cost-invisible.md; deletes at close).
+      recovery: `git log --all -- docs/issues/probe-phase-cost-invisible.md`; deletes at close).
       Knobs: `--progress-interval`, the two baseline leashes,
       `windowBudget`, and the schedule minimums derived from the
       bank's measured durations; `--json` and `--jsonl` one name; the
@@ -671,18 +676,18 @@ verdict, and records the measured wall against the audit's baseline.
       doctrine — every MCP verb re-audited: minimum strings/tokens
       that keep the LLM on point, suggestions attached to every
       refusal/verdict where derivable. FOLDS gomutant
-      docs/issues/actionable-unverifiable-refusals (each unverifiable
+      recovery: `git log --all -- docs/issues/actionable-unverifiable-refusals.md` (each unverifiable
       reason names its discharge channel — vouch/directive/
       restructure) and stipulator
-      docs/issues/pin-forms-shape-guidance (shape-moved guidance and
+      recovery: `git log --all -- docs/issues/pin-forms-shape-guidance.md` (shape-moved guidance and
       the ids-form answer mislead exactly when shapes mismatch); both
       docs delete at close.
 
 ## Band C — ergonomics, robustness, consolidation
 
 - [x] 128. gomutant: serve carve-out consolidation (gomutant
-      docs/issues: fold-growth-into-generalized-drift,
-      consolidate-reidentification-and-bucket-policy) — growth is a
+      recovery: `git log --all -- docs/issues/fold-growth-into-generalized-drift.md`
+      and `git log --all -- docs/issues/consolidate-reidentification-and-bucket-policy.md`) — growth is a
       strict special case of generalized drift; one re-identification
       helper, one advisory-bucket policy; same subsystem as the
       landed 103 (gomutant 2ba8841), whose windowScores bundle and
@@ -692,7 +697,7 @@ verdict, and records the measured wall against the audit's baseline.
       (gomutant c4093cb..4400573; gofresh 40317df; dispositions in
       the commit records; the campaign-scale residue was ruled and
       resolved in chunk 137 (successor residue: gomutant
-      docs/issues/own-face-gate-suite-decomposition.md), and
+      recovery: `git log --all -- docs/issues/own-face-gate-suite-decomposition.md`), and
       suite-shared-fixture-bracket-flake redeferred on its sharpened
       instrumentation trigger).
 - [x] 137. gomutant: survivor-oracle narrowing + campaign economics
@@ -707,7 +712,7 @@ verdict, and records the measured wall against the audit's baseline.
       candidates, audit share ~10.8% ≤ 1/8, first window
       value-ordered; stopped at 3h33m priced-upfront. Own-face gates
       stay on ephemeral probes; the fork's unchartered (a) half files
-      as gomutant docs/issues/own-face-gate-suite-decomposition.md
+      as Gomutant recovery: `git log --all -- docs/issues/own-face-gate-suite-decomposition.md`
       (user decision); probe-phase visibility files for 136. Six
       converged loops; dispositions in the commit records.
 - [x] 114. stipulator: runner-environment inspectability — landed
@@ -734,8 +739,8 @@ verdict, and records the measured wall against the audit's baseline.
       replan's standing rule; the checkbox closes there)
       stipulator: verdict and serving integrity (field-response,
       bldc reports 2026-09-03; stipulator
-      docs/issues/check-green-over-witness-failure.md +
-      docs/issues/property-suite-witness-serving.md). 141.1 reproduces
+      recovery: `git log --all -- docs/issues/check-green-over-witness-failure.md` +
+      `git log --all -- docs/issues/property-suite-witness-serving.md`). 141.1 reproduces
       the green-over-named-failure shape against the current verdict
       fold — the witness path judges no suite health by design, so the
       question is what a witnessFailureHeadings entry must do to the
@@ -748,7 +753,7 @@ verdict, and records the measured wall against the audit's baseline.
       arms, no DST legs.
 - [x] 138. gomutant: workspace-relative path resolution
       (field-response, consumer reports 2026-09-03; gomutant
-      docs/issues/bracket-path-module-relative-in-workspace.md) — a
+      recovery: `git log --all -- docs/issues/bracket-path-module-relative-in-workspace.md`) — a
       relative --bracket-path resolves against the invocation's --dir
       (or workspace root), one declared surface for every module's
       oracles, so an in-tree file spelled relatively never joins onto
@@ -759,23 +764,23 @@ verdict, and records the measured wall against the audit's baseline.
       directory is an admissible bracket path — a replace module
       outside the repository is one declared surface, never an
       enumeration of its files. RIDES gomutant
-      docs/issues/ephemeral-test-pkg-shorthand.md — ephemeral
+      recovery: `git log --all -- docs/issues/ephemeral-test-pkg-shorthand.md` — ephemeral
       --test-pkg accepts a relative package directory resolved
       against the loaded set, matching the --dir default. Both docs
       delete at close. Measurement surface: diagnostics/CLI
       resolution only — no pew arms, no DST legs.
 - [x] 140. gomutant: ephemeral probe integrity (field-response, bldc
-      reports 2026-09-03; gomutant docs/issues:
-      ephemeral-deletion-probes-strand-imports — an imports fix runs
+      reports 2026-09-03; Gomutant recovery:
+      `git log --all -- docs/issues/ephemeral-deletion-probes-strand-imports.md` — an imports fix runs
       over the mutant before compiling (a probe declares no import
       intent), the result saying which happened;
-      ephemeral-blind-spots-stated-and-refused — a target file no
+      `git log --all -- docs/issues/ephemeral-blind-spots-stated-and-refused.md` — a target file no
       measured test compiled is a REFUSAL, never a survivor, and the
       three blind spots enter the ephemeral guidance with the
       mutate-the-guard's-input workaround beside them;
-      ephemeral-compiler-crash-retry — a compiler signal death retries
+      `git log --all -- docs/issues/ephemeral-compiler-crash-retry.md` — a compiler signal death retries
       once or marks "compiler crashed — re-run to confirm";
-      ephemeral-batch-wrapper-undiscoverable — the {"edits": [...]}
+      `git log --all -- docs/issues/ephemeral-batch-wrapper-undiscoverable.md` — the {"edits": [...]}
       wrapper named in guidance and refusal, or the bare array
       accepted). Four docs delete at close. Measurement surface:
       probe-path diagnostics only — no pew arms, no DST legs.
@@ -783,14 +788,14 @@ verdict, and records the measured wall against the audit's baseline.
       snapshot's external-input refusal is one instance of the
       prepare-stage invariant 156 lands; the field report's doc rides
       156's close.
-- [x] 115. pew: verdict-surface batch (pew docs/issues:
-      gitblob-linked-worktree-object-lookup — pew run fails in linked
-      worktrees; ab-worktree-placement-escape — operator escape +
-      startup sweep; verdict-ladder-shared-admissibility — the
+- [x] 115. pew: verdict-surface batch (Pew recovery:
+      `git log --all -- docs/issues/gitblob-linked-worktree-object-lookup.md` — pew run fails in linked
+      worktrees; `git log --all -- docs/issues/ab-worktree-placement-escape.md` — operator escape +
+      startup sweep; `git log --all -- docs/issues/verdict-ladder-shared-admissibility.md` — the
       status/stat admissibility ladder collapses to one shared
       function with the per-side working-tree input) — three docs
       delete at close. RIDES: pew
-      docs/issues/repo-level-vouch-source.md — a reviewed vouch file
+      recovery: `git log --all -- docs/issues/repo-level-vouch-source.md` — a reviewed vouch file
       beside the store replaces hand-mirrored flag lists; doc deletes
       at close. Deviations: the gitblob doc (user decision) folded —
       one option on the open call, no judgment; `--vouch` flags
@@ -801,7 +806,7 @@ verdict, and records the measured wall against the audit's baseline.
       invocation-owned admission and package-batch judgment.
 - [x] 142. stipulator: clause-granular binding claims (bldc report
       2026-09-03; stipulator
-      docs/issues/clause-granular-binding-claims.md) — a binding
+      recovery: `git log --all -- docs/issues/clause-granular-binding-claims.md`) — a binding
       names the clause it witnesses (ordinal or spec-admitted label),
       and coverage reports the unclaimed clauses of an otherwise-bound
       requirement as a distinct "bound, clauses unclaimed" bucket —
@@ -817,12 +822,12 @@ verdict, and records the measured wall against the audit's baseline.
       (witness-selection-guard-masked-by-ineligible-red) landed as
       its own change set.
 - [x] 143. stipulator: consent provenance (bldc report 2026-09-03;
-      stipulator docs/issues/content-hash-function-versioning.md) — a
+      Stipulator recovery: `git log --all -- docs/issues/content-hash-function-versioning.md`) — a
       hash-function move is its own recorded state ("rehash",
       bulk-re-pinnable without editorial consent) or the pin records
       the declaring document's blob hash beside the content hash, so
       a re-consent over unchanged text is self-evidently that. RIDES
-      docs/issues/pin-req-unchanged-text-wording.md ("text unchanged;
+      Stipulator recovery: `git log --all -- docs/issues/pin-req-unchanged-text-wording.md` ("text unchanged;
       nothing to re-consent" over "pins current"). Both docs delete
       at close. Measurement surface: none. Deviations: the second
       option landed, but VCS-free — a consent-source digest over the
@@ -833,18 +838,18 @@ verdict, and records the measured wall against the audit's baseline.
       record's source pin; the named form's no-op names its reason
       (text unchanged / no records / attestation stale).
 - [x] 144. stipulator: CLI query parity (bldc report 2026-09-03;
-      stipulator docs/issues/cli-verify-view-path-and-explain.md) —
+      Stipulator recovery: `git log --all -- docs/issues/cli-verify-view-path-and-explain.md`) —
       CLI verify gains --view/--path and the explain verb lands on
       the CLI, so "what claims this symbol" is a query, never a grep
       over the record format. RIDES
-      docs/issues/normative-keyword-lint-timing-and-remedy.md (a lint
+      Stipulator recovery: `git log --all -- docs/issues/normative-keyword-lint-timing-and-remedy.md` (a lint
       entry point compiling the corpus at the amendment; the remedy
       in the message). Both docs delete at close. Measurement
       surface: none.
       RIDER (bldc report 2026-09-02, slotted at 114 close): the
       attestation-cell refusal and explain-on-uncovered name the
       reclassification remedy (stipulator
-      docs/issues/attestation-refusal-names-no-reclassification.md;
+      recovery: `git log --all -- docs/issues/attestation-refusal-names-no-reclassification.md`;
       doc deletes at close). Deviations: the rider landed as a kind
       hint stating the IR's kind definitions, never a reclassification
       instruction (the tool computes remediations, never prescribes
@@ -853,10 +858,10 @@ verdict, and records the measured wall against the audit's baseline.
       narrows the verification summary on both surfaces.
 
 - [x] 145. stipulator: spec-graph authoring (bldc reports 2026-09-03;
-      stipulator docs/issues/refines-multiple-targets.md — refines
+      Stipulator recovery: `git log --all -- docs/issues/refines-multiple-targets.md` — refines
       admits a target list, canonical form ordering it, impact and
       coverage reading every edge — +
-      docs/issues/supersede-removed-source-one-step.md — the
+      Stipulator recovery: `git log --all -- docs/issues/supersede-removed-source-one-step.md` — the
       removed-source supersede is one step: a dispose mode or compile
       admitting a supersedes edge into the tombstones-or-pending
       set). Both docs delete at close. Measurement surface: none.
@@ -871,7 +876,7 @@ verdict, and records the measured wall against the audit's baseline.
       tombstone overlay, the historical HEAD corpus); coverage reads
       no edges and no spec clause asks it to (plan-only wording);
       "tombstones-or-pending set" names no mechanism — the overlay is
-      it. Filed: stipulator docs/issues/remedy-spellings-one-source.md
+      it. Filed: Stipulator recovery: `git log --all -- docs/issues/remedy-spellings-one-source.md`
       (user decision).
 - [x] 136. cross-tool: retroactive automation-and-consolidation audit
       (user directive 2026-08-29; the automation-over-configuration
@@ -933,7 +938,7 @@ verdict, and records the measured wall against the audit's baseline.
       close.
 - [x] 139. gomutant: delta-line survivor view (field-response,
       consumer report 2026-09-03; gomutant
-      docs/issues/delta-line-survivor-view.md) — a --changed
+      recovery: `git log --all -- docs/issues/delta-line-survivor-view.md`) — a --changed
       campaign's summary and result rows gain a changed-lines filter
       (survivors on the delta's added lines counted and listed
       distinctly from the symbol's pre-existing remainder), and
@@ -944,12 +949,12 @@ verdict, and records the measured wall against the audit's baseline.
       is a triage-gate call at 139.1. Measurement surface: no new pew
       arms; whole-store pew status at close re-judges the findings
       reader arms if the records shape moves. FOLDS:
-      gomutant docs/issues/legacy-overlay-read-deletes-attestations.md
+      Gomutant recovery: `git log --all -- docs/issues/legacy-overlay-read-deletes-attestations.md`
       — preserve unsupported older overlays and their authored
       equivalence reasoning while refusing to serve them; doc deletes
       at close.
 - [x] 131. stipulator: one identity walk, two windows (stipulator
-      docs/issues/identity-walk-two-trackers.md) — attachment and
+      recovery: `git log --all -- docs/issues/identity-walk-two-trackers.md`) — attachment and
       extent answer "whose block is this" via two independent reset
       tables in two packages; collapse to one walk producing both
       windows so the subset relationship is structural; doc deletes
@@ -987,10 +992,10 @@ strategy bump.
       classification (was SEP 1; ~1,096 in the charter histogram) —
       an init formatting into a provably-local pure sink is value
       computation. FOLDS at this chunk: gofresh
-      docs/issues/audit-key-mechanism-consolidation.md (four parallel
+      recovery: `git log --all -- docs/issues/audit-key-mechanism-consolidation.md` (four parallel
       spellings of the audit lookup/refuse mechanism — this is the
       band's first audited-set change) and
-      docs/issues/nodwarf5-toolchain-audit-key-mismatch.md (release,
+      Gofresh recovery: `git log --all -- docs/issues/nodwarf5-toolchain-audit-key-mismatch.md` (release,
       selection, and baked-experiment matching must use the actual
       audited toolchain identity); docs delete at close.
 - [x] 120. gofresh: math/big joins the audited-pure set (was SEP 2;
@@ -1003,9 +1008,9 @@ strategy bump.
 - [x] 123. gofresh: maximal-tier pure-shape selector audits (was SEP
       5; ~23) — net/url.Parse, time.Time, path/filepath.Ext.
 - [x] 124. gofresh: enumeration targets tightened (was SEP 10;
-      gofresh docs/issues/enumeration-targets-over-approximated.md,
+      Gofresh recovery: `git log --all -- docs/issues/enumeration-targets-over-approximated.md`,
       already deleted — history in git). RIDES: gofresh
-      docs/issues/range-over-func-yield-closure.md — admit the
+      recovery: `git log --all -- docs/issues/range-over-func-yield-closure.md` — admit the
       range-desugared yield callback as a closing caller and flip the
       corpus pin deliberately in the same change set; doc deletes at
       close.
@@ -1026,7 +1031,7 @@ strategy bump.
       (*encoding/json.MarshalerError).Error, the invoke form); resolve
       the site's operand through the closed-value walk under the local
       projection, as the subject walk's resolved sites do, before the
-      RTA fallback. RIDES docs/issues/dynamic-target-init-exemption.md
+      RTA fallback. RIDES Gofresh recovery: `git log --all -- docs/issues/dynamic-target-init-exemption.md`
       (its field report arrived at 125; the recorded exemption shape is
       refused — a standard closure's body is never walked, so the
       fallback's refusal is the sound answer for a target the operand
@@ -1098,7 +1103,7 @@ strategy bump.
       errInboundClosed/frameAccounting classes, 96 witnesses at the
       2026-08-26 measure. Coordinates with the audited-pooling-set
       owner before touching the discharge. RIDES: gofresh
-      docs/issues/sibling-reason-families-name-their-channels.md
+      recovery: `git log --all -- docs/issues/sibling-reason-families-name-their-channels.md`
       (external-syscall and caller-supplied-dynamism reasons dead-end;
       the shared-dynamic-state naming pattern applies at these
       composition sites); doc deletes at close. Release, then
@@ -1135,17 +1140,16 @@ in their repos.
       gomutant): rapid's failfile directory and the test working
       directory
       isolated into the probe's temp dir), an attested survivor's verdict
-      line and MCP row say so (ephemeral-attested-survivor-invisible.md),
+      line and MCP row say so (Gomutant recovery: `git log --all -- docs/issues/ephemeral-attested-survivor-invisible.md`),
       and the attestation is keyed on the mutated file's post-edit content
-      hash rather than the edit text (ephemeral-attestation-keyed-on-edit-
-      text.md); three docs delete at close.
+      hash rather than the edit text (Gomutant recovery: `git log --all -- docs/issues/ephemeral-attestation-keyed-on-edit-text.md`); three docs delete at close.
 - [x] 161. stipulator: a gap can say "contradicted by design until a
-      condition fires" (stipulator docs/issues/gap-cannot-say-contradicted.md)
+      condition fires" (Stipulator recovery: `git log --all -- docs/issues/gap-cannot-say-contradicted.md`)
       — a `contradicted` gap state reported distinctly from unwitnessed,
       resolving only on an explicit fire, never on a passing witness while
       unfired; doc deletes at close.
-- [x] 162. gofresh: the repo-level vouch convention (gomutant docs/issues/
-      repo-level-vouch-source.md) — the engine sources a repository's
+- [x] 162. gofresh: the repo-level vouch convention (Gomutant recovery:
+      `git log --all -- docs/issues/repo-level-vouch-source.md`) — the engine sources a repository's
       reviewed dynamic-state vouch file (pew's grammar and precedence:
       flags extend, never remove) for every consumer; gofresh spec change;
       release, then consumer bumps ride and pew's store-owned file
@@ -1203,7 +1207,7 @@ in their repos.
       close (its test-binary half moved to 228 by audit 196).
       (263: MERGED into 225 — one rendering layer, one commit shape.)
 - [x] 173. pew: the flag usage strings rendered from the guidance
-      document (pew docs/issues/guidance-knobs-and-verb-table.md) — pew's
+      document (Pew recovery: `git log --all -- docs/issues/guidance-knobs-and-verb-table.md`) — pew's
       REQ-pew-guidance already names the document the authoritative
       superset and gofresh's REQ-guidance-render its projection, so every
       flag usage literal (the --vouch text triplicated, --bench-dir in two
@@ -1261,25 +1265,15 @@ in their repos.
       evidence).
       Delegated: the verdict path, row decode, vouch threading and explain row per validity key → performance-evidence chunk 8, after the canonical record at 7; `ab --out` per package and the artifact's keys → chunk 11 (the handoff doc).
 - [ ] 176. stipulator: whole-requirement test claims on clause-structured
-      requirements are refused by default (stipulator docs/issues/
-      clause-structured-whole-claims.md; user ruling 2026-09-07) — a
-      `tests`/`proves` claim naming no clause on a requirement that
-      declares clauses refuses at write time and reads as a hygiene
-      violation for existing records, `implements` claims stay whole, a
-      corpus manifest opt-out keeps a corpus that accepts whole claims
-      honest about it; doc deletes at close.
-      (263: merges with supersede-carry-drops-clause-scope and
-      dangling-empty-label-remedy-names-no-clause — one clause-scope
-      semantics decision; measurable only after 270 (zero clause-structured
-      requirements today).)
-      Audit 287 (2026-09-29): the note 'measurable only after 270
-      (zero clause-structured requirements today)' is FALSE —
-      REQ-evidence-ladder (evidence.md:148) carries a five-item
-      payload list, i.e. five clauses, and coverage.textproto:145
-      holds a whole-requirement tests claim on it
-      (internal/coverage.TestPolicyDefaults) — the exact false-green
-      channel 176 closes; it follows 270 for scale only.
-      Rider (2026-10-06, audit 318): bindings-per-requirement-file-derivation lands here (its Lands said so; the entry did not) — cerebro's hand-move on every supersede.
+      requirements need an explicit default policy. Active destination:
+      tooling-redesign **5.3**. Amend today's legal whole tests/proves grant
+      to default refusal with a manifest opt-out; implements remains whole.
+      Cover authoring and existing-record hygiene. Preserve representable
+      clause scope through supersede or refuse, include scope in duplicate
+      detection, and name a malformed empty-label record without unbinding
+      valid siblings. Derive bind/supersede placement once, retaining explicit
+      file intent and collision refusal. The four current issue bodies are
+      the deciding cases; ordinary retarget's fixed clause key stays intact.
 - [x] 177. pew: `--json` on run, ab, and gc (pew docs/issues/
       mcp-surface.md; user ruling 2026-09-07) — the progress channel half
       landed with REQ-pew-progress (every verb's 30 s cadence line); the
@@ -1300,8 +1294,8 @@ in their repos.
       (236: RIDES 250 — it adds a capture-group key segment, a
       whole-store re-execution; batched with the bump's own restale.)
 
-- [x] 184. stipulator: one terse clause per face (stipulator docs/issues/
-      knob-terse-clause-per-face.md) — a knob's document line carries a
+- [x] 184. stipulator: one terse clause per face (Stipulator recovery:
+      `git log --all -- docs/issues/knob-terse-clause-per-face.md`) — a knob's document line carries a
       clause per surface where the faces' spellings differ, the render
       picks its face's, the cross-face prose leaves the parenthesis; the
       two-surfaces ruling applied to knob prose; doc deletes at close.
@@ -1313,67 +1307,37 @@ in their repos.
       landed the document half and parked knob-terse-clause-per-face for
       the consumer bumps — the face pick is the bump's.
 - [ ] 185. stipulator: the ledger store as a record kind (stipulator
-      docs/issues/ledger-store-as-a-record-kind.md) — recordstore.Name gains
-      the one-segment form, the compartment ledger sub-store becomes a
-      nested store (its temporary, scan, atomic write, and sweep the
-      core's; the concurrent-install sparing rule stays its own); the
-      two hand-rolled copies of recordstore.Digest (derive.go's group
-      digest, telemetry.go's home digest beside its own Root call) read
-      the core's; doc deletes at close.
-      (236: verified — six duplicated primitives, the two Digest copies
-      (227 takes those), the naming blocker exact; adds C15: the
-      mirrored entry/Record field lists in both stores, where a field
-      added to Record and forgotten in entry stops persisting silently.)
-      (263: grows — the composition above recordstore is rewritten per kind
-      (open→Names→Read→decode→append; open→Sweep) in resolutioncache and
-      witnesscache, each record spelled three times — 236's C15, exact.)
-      Audit 287 (2026-09-29): grows — the compartment-ledger sub-store
-      hand-rolls recordstore (witnesscache.go:358/:393/:425/:457); the
-      record decode ladder differs per kind and the fail-closed rule
-      is the one that differs (witnesscache.go:337 refuses trailing
-      bytes; resolutioncache.go:120 omits it and derives the
-      content-name check from the decoded record, so appended bytes
-      survive into a served resolution); two hand validFingerprint
-      ladders over one gofresh type; recordstore.fingerprintDigest
-      takes any; undecodable-manifest-records-dropped-silently
-      re-slotted here (a decode-ladder behaviour, not 249's
-      decomposition).
-      Rider (2026-10-06, audit 318): 79f2638 touched resolutioncache (SourceTiers/Admits) — re-verify the trailing-bytes premise at open.
+      docs/issues/ledger-store-as-a-record-kind.md). Active destination:
+      tooling-redesign **5.6**; constituents 5.2e and 9.2. Fold remaining
+      scan/name/content/collection and entry/record projections only where
+      their rules agree. Preserve full provenance and binding coordinates,
+      lazy ledger reads, referenced refused records and concurrent-install
+      protection under shared exclusion. Digest/WriteAtomic/encoder-error and
+      strict envelope repairs already exist. Account for rejected runtime
+      variants and the historical-strategy load discrepancy at 5.2e; neither
+      decoding nor mechanical sharing upgrades historical support.
 - [x] 186. gomutant: the execution window's cost models in one home
-      (gomutant docs/issues/window-cost-models-one-home.md) — a windowcost
+      (Gomutant recovery: `git log --all -- docs/issues/window-cost-models-one-home.md`) — a windowcost
       home stating the three questions (membership, order, execution),
       their permitted inputs, and the constants beside the invariants that
       tie them; the partition stays a function of tree + order + worker
       count; doc deletes at close.
 - [ ] 187. gomutant: mutant runs outside the caller's tree (gomutant
-      docs/issues/ephemeral-probe-writes-under-the-callers-tree.md) — the
-      tree-write mechanism is one on both paths (go test runs each binary
-      in the real package directory: run.go's probe and campaign
-      executors alike), so REQ-mut-overlay's "a mutant run must not write
-      into the tree" is breached by every relatively writing test; the
-      probe takes the scratch channel shaped candidates already run
-      through, its cost stated per probe; the campaign path opens with
-      the fork settled explicitly rather than implemented narrowly — two
-      whole-tree copies per candidate is not a campaign cost, so either
-      a cheaper containment (a run directory the binary is spawned in)
-      lands or the spec's promise is qualified to name the campaign
-      residual, the latter the user's call (an issue doc at the open);
-      the promise is never narrowed silently; doc deletes at close.
-      Derived (2026-10-06, audit 317): the user's-call text struck — REQ-mut-overlay's MUST (no write into the tree) stands breached by every relatively writing probed test, and the spec wins by default: containment (a run directory or a scratch copy) with the cost stated; moved up directly after 302 as correctness.
-      Audit 6 (2026-10-07): containment moves the oracle's working
-      directory and gofresh's observation resolves relative inputs
-      against it (pew's 'relative runtime input after working-directory
-      change') — observation construction: reported to the evidence-
-      model owner before implementing; ephemeral-probe-writes-under-the-
-      callers-tree's fork framing retired (the 317 derivation:
-      containment, the spec wins).
+      docs/issues/ephemeral-probe-writes-under-the-callers-tree.md).
+      Active destination: tooling-redesign **5.4**; constituent 5.5.
+      Contain arbitrary transient and persistent oracle writes through an
+      owned execution boundary, preserving actual cwd, relative inputs,
+      transformed-artifact identity and complete oracles. Cover cancellation
+      and descendants; state measured cost without weakening the no-write
+      contract or restoring coverage omissions. Rapid failfile suppression
+      is already resolved; deleting residue afterward is not containment.
 - [ ] 188. gomutant: explicit fixture package selection loads a testdata
       package (gomutant docs/issues/explicit-testdata-package-selection.md)
-      — an explicit oracle selector or campaign target under testdata is
-      loaded on demand through loading, test selection, mutation
-      application, and attribution, tree-escape and build-selection
-      refusals preserved; both spellings pinned; the persisted
-      campaign/freshness boundary stated; doc deletes at close.
+      — Active destination: tooling-redesign **5.4**. Distinguish explicit
+      directory/import loading from wildcard package filters, covering test
+      selection, mutation and persisted attribution without source copies or
+      artificial modules. Preserve tree-escape, selection and no-test refusals;
+      use tool-owned fixtures, not an unauthorized VMM campaign.
 - [x] 190. gofresh: the analyzing frontend named once — the canonical member
       form is a go/scanner token stream and the ledger's parse a
       go/parser one, so the analyzing toolchain is an input to the fold;
@@ -1387,50 +1351,31 @@ in their repos.
       construction (deleted with its prose if no test-only non-Go
       compiled input is constructible, else pinned) in the same strategy
       bump, so consumers re-measure once; both docs delete at close.
-- [ ] 191. gofresh: GODEBUG joins the code-result guard (gofresh
-      docs/issues/net-url-parse-godebug-channel.md) — the process-level
-      channel captured for every result kind, the in-process Setenv
-      channel poisoned as shared dynamic state (a subject mutating GODEBUG
-      marks every GODEBUG-reading admission in the binary), net/url's
-      parsing half then admitted by symbol; doc deletes at close.
-      (234: carries a spec amendment — GODEBUG leaves the measurement
-      guard for the code guard, REQ-guard-runtimeconfig and
-      REQ-fresh-guard-set amended — and a release: every consumer store
-      re-measures once.)
-      Audit 6 (2026-10-07): GODEBUG joining the code guard changes the
-      fingerprint record's guards (REQ-fresh-fingerprint-record) —
-      fingerprint serialization: reported to the evidence-model owner
-      before implementing, after their plan's chunk 5.3 settles the
-      record.
+- [ ] 191. gofresh: account for behavior-affecting GODEBUG (gofresh
+      docs/issues/net-url-parse-godebug-channel.md) through a sound
+      runtime-relevance judgment. Active destination: tooling-redesign
+      **7.8**. Account for process-level settings and in-process Setenv in
+      shared processes; start-environment equality alone is insufficient.
+      Derive guards or observations from the canonical contract, retain
+      net/url parsing refusal until proven, and release any evidence-format
+      change before consumer adoption.
 - [ ] 192. gofresh: dependency closures reached by reference (gofresh
-      docs/issues/dependency-nested-closures-outside-the-drain.md) — the
-      dependency facts carry a per-function effect summary the drain
-      consults for a referenced dependency function, so a dependency's
-      nested closure reached only by reference has its effects seen
-      without walking standard bodies; doc deletes at close.
+      docs/issues/dependency-nested-closures-outside-the-drain.md).
+      Active destination: tooling-redesign **7.8**. addObject already scans
+      dependency values before filtering. Reduce the exact nested-value
+      path against direct-call and first-party controls before choosing a
+      summary or traversal refinement; preserve standard audit boundaries.
 - [ ] 193. gofresh: immutability after construction as a proven property
-      (gofresh docs/issues/immutable-after-construction-objects.md) — the
-      per-package fixpoint over types (all fields unexported, every
-      method read-only, no outside assignment or address-taking, no
-      conversion, results hand out no mutable reach), a value handed
-      into such a construction not leaked, immutable type keys a new
-      persisted fact; the consumers' rapid vouch trimmed at their bumps;
-      gomutant docs/issues/vmm-finding-admission-refusals.md rides it;
-      doc deletes at close.
-      Rider (derived 2026-09-29): the channelz registry as a named
-      audited entry under the single-subject attestation — the
-      attestation-gated subject-own-registry discipline the spec
-      already carries, one table row plus the audit of grpc's channelz
-      db (gofresh
-      docs/issues/grpc-runtime-memo-and-registry-discharges.md's
-      second half; the consumer's enumeration-backed
-      waiver retires when both halves land).
-      Audit 285 (2026-09-29): grows — the decomposition's FOURTH
-      bundle: the surviving base REQ-closure-observability-analysis
-      (closure.md:1257–1297) still contains a distinct
-      benchmark-pacing clause with no sub-ID, cited as prose at eight
-      sites (closure-sub-contract-granularity-residue.md names three
-      bundles; the fourth joins it).
+      (gofresh docs/issues/immutable-after-construction-objects.md).
+      Active destination: tooling-redesign **7.8**; constituent 9.2.
+      Prove reachable storage, construction inputs, external writable aliases,
+      method/parameter effects, conversions, returns and later writes without
+      a circular immutable-type premise. Re-census carrier memos and the
+      separately subject-dependent channelz registry; retire rapid/runtime
+      vouches only when the exact versions and graphs are covered. Preserve
+      VMM reduced refusal controls. Split independently editable closure
+      bundles, including base benchmark pacing, with their own consent,
+      bindings and wrap-aware citations; no admission follows from a split.
 
 ## Band R — re-audit (the standing rule; recurs at every band close or twelve chunks)
 
@@ -1489,73 +1434,29 @@ in their repos.
       deleted; the two fixture packages under internal/ rehomed under
       closure/fixtures; the three-hop testvariant alias chain cut to one;
       one release; pew's one call moves at its bump.
-- [ ] 203. gofresh: one memo scope, one versioning rule (gofresh
-      docs/issues/memo-scope-axes.md, per-file-memos-one-shape.md) — eight
-      persistent memo classes render their scope four ways and only the
-      listing memo carries a record version; AnalysisScope the one
-      source, every memo versioned by the one rule; docs delete at close.
-      (234: grown — nine memo classes, two record versions
-      (listingmemo, scanEntryVersion), three per-file memo shapes; the
-      canonical-digest memo serves silently while its eight siblings
-      report — its Served summary is the regression anchor.)
-      (261: grows — REQ-closure-scan-memo and REQ-closure-listing-memo are
-      unbound and ungapped, the only such ids beside REQ-fresh-caller-pins;
-      their witnesses land here.)
-      Audit 285 (2026-09-29): grows — (a) the set↔scope coupling:
-      ObservationRTA moved @30→@40 and effectScanStrategy @19→@21
-      across 116–123 and 180–182 with nothing coupling an audited-set
-      edit to the memo scope; a NARROWING of a fold-consulted table
-      without an effect-scan bump serves a warm memo's admissions the
-      narrower set no longer grants — a wrong pass
-      (recovery: git log --all -- docs/issues/audited-set-versions-decoupled.md); (b)
-      the per-file memos' three parallel triples
-      (closure/filememo.go:88–98; per-file-memos-one-shape); (c) the
-      memo classes' Served names as literals with no set, and the
-      progress phase names spelled at eight emitters beside unitPhases
-      — one exported phase set (unit + fact/diagnostic; gomutant's 286
-      A6 reads it); (d) the digest field-join rule's two spellings
-      (length-prefixed %d:%s vs \x00 joins) — one injectivity rule;
-      (e) the memo-scope pins read their own constants as the oracle
-      (viewscope_test.go:20–33, closure/scope_test.go:12–41 — a
-      swapped strategy constant moves got and want together): the
-      rule's enforcement gets a literal anchor here. NARROWS:
-      REQ-closure-listing-memo is bound
-      (bindings/closure.textproto:1565); only REQ-closure-scan-memo
-      remains unbound/ungapped. Repair memo-scope-axes.md's Lands line
-      at open (a dangling half-sentence).
-      Grown (2026-10-06, audit 316): two persistent memos of one go list question — closure/listingmemo.go (content digests, listingRecordVersion + shape, serves off unix) and toolchainsource.go's listing memo (stat stamps, sourceDigestsVersion, never off unix) — one served-listing rule with one record-versioning rule, or the reason GOROOT warrants stamps stated (the digests never memoized; a stale record never decides selection); the scanmemo pins reading scanEntryVersion; REQ-closure-scan-memo is bound (that item done).
-      Audit 6 (2026-10-07): ObservationRTA is two things at once — the
-      recorded proof's compatibility identity (view.go's refusal) and
-      the proof memo's payload version (AnalysisScope.ProofStrategy) —
-      so 3361645's @41, versioning an Observability field no record
-      stores, refuses every consumer's recorded proof once at its bump
-      (gomutant 324, stipulator 290r): a memo record version apart from
-      the recorded strategy under the one versioning rule, REQ-fresh-
-      observation-compatibility's 'a proof rule that can change a
-      disposition' the identity's only mover (an input to the evidence-
-      model owner: if @41 is their 'versioned judgment', REQ-closure-
-      outcome-inventory must say recorded proofs are what it versions);
-      the memo key spelled three ways (gotool.MemoKey's NUL join,
-      listingScope's hashed identity re-parsing GOFLAGS,
-      toolchainSourceScope's raw identity) folds under the injectivity
-      rule; the ~70 `@N` narrative lines in gofresh.go and
-      closure/effectmemo.go become the one bump rule (gomutant 211's
-      shape).
+- [ ] 203. gofresh: reconcile memo ownership and versioning (gofresh
+      docs/issues/memo-scope-axes.md and per-file-memos-one-shape.md).
+      Active destination: tooling-redesign **7.8**; cost changes require
+      7.7 first. Preserve completed selected-content/admission/source-position
+      dependencies while sharing per-file containers and per-pass reads;
+      separate cone composition from whole-pass state. Reconcile listing
+      scopes/stamps, injective keys, payload versions versus recorded-proof
+      compatibility, served summaries and phase vocabulary. Use independent
+      literal/property controls, retaining existing scan/listing bindings.
+      Replace stale version narratives with the actual bump rules. Closed
+      315's unfulfilled standard-source digest memo is conditional cost work:
+      measure repeated reads, then reuse only within a proven immutable
+      generation, never by version/path/operation name alone. Do not reopen
+      its completed audit, release or traversal tests.
 - [ ] 204. gofresh: auditset's receiver side as one table — the five
-      parallel method tables and their predicates one package-keyed
-      map behind the one ladder, as symbolTables already is; BoundedToken
-      rehomed out of the audited-set package.
-      Audit 285 (2026-09-29): narrowed — the one ladder landed at 181
-      (auditset.ReceiverMethod); five tables (syncMethods,
-      memoMethods, poolMethods, reflectMethods, timeMethods) and five
-      predicates remain, BoundedToken in auditset with two callers.
-      Audit 6 (2026-10-07): harness-admission-families-one-table
-      retargeted here from its passive trigger (3361645's
-      immutableEnvironmentMethod is the seventh spelling site, beside
-      auditedHarnessLogging/auditedHarnessPacing with literal
-      testing.Run/B.N; the commit's own review found a B.N mismatch —
-      the duplication's measured cost): the table beside the auditset
-      tables. Ahead of the held 202.
+      parallel method tables retain distinct receiver/authority rules.
+      Active destination: tooling-redesign **7.1**; constituent 7.8.
+      Preserve the existing ReceiverMethod ladder while folding inventories
+      and rehoming BoundedToken. Include flag, class-B and harness-family
+      table obligations: every fold/static/dynamic/body-cut/outcome reader
+      follows one inventory, but storage proofs, observable effects and
+      outcome methods remain distinct. Entropy refinements require separate
+      compatibility proof, not an incidental admission expansion.
 - [x] 205. gofresh + consumers: one guidance plumbing — an exported
       embed-accessor shape and a Progress diagnostic sink in gofresh; at
       each consumer's next bump the three identical accessors read it,
@@ -1570,43 +1471,19 @@ in their repos.
       format — guidance.Knob.Clause() exported here; stipulator's
       KnobClause folds at 250, pew's 173 consumes at 253; 184's RULE
       stays with the user.)
-- [ ] 206. gofresh: the test surface — one file-map fixture writer for
-      the seven copies, the per-test cache-home settings collapsed onto
-      the package TestMains, the shared helpers out of view_test.go, the
-      ambiguity arm pinned once, the reference effect scan's budget
-      stated; the four package-global hook surfaces and the process-
-      global memo root under one seam (fixture-tier-parallelism's
-      precondition); the TestTier2 names renamed for the tiers the spec
-      names.
-      (234: grown — eight fixture writers; SetMemoRoot's three
-      forwarding homes fold in; the 65 production tier2* identifiers
-      renamed for the tiers the spec names, beside the test names.)
-      Audit 285 (2026-09-29): grows — the fixture surface is twelve
-      sites (eight map→tree writers + four inline copies), 70
-      XDG_CACHE_HOME settings over two identical TestMains, tier2 at
-      73 production occurrences; apisurface_test.go:25's hand-listed
-      roots omit guidance/, shapecorpus/, shortgates/;
-      fixture-tier-parallelism retargeted here (its trigger reads as
-      met at the recorded closes — closure 798–812s beside root
-      390–398s — state the per-package reading or fire it). LOSES
-      sampler-failed-sample-memo-unpinned (resolved at 281.C; `git log
-      --all -- docs/issues/sampler-failed-sample-memo-unpinned.md`, gofresh)
-      to 281.
-      Grown (2026-10-06, audit 316): the toolchain-key gap fires — the row-chain admission is a for-all a generated-rows property witnesses (sixteen content-key pins exist); cgoEnabled(t) duplicated across the root and closure test packages; gotool/contain_test.go's TestContain* names refer to the deleted Contain/Apply; apisurface_test.go's hand-listed roots omit resident/ (reads GOMEMLIMIT by design — state the exemption); the canary's row table is the hand mirror 315 retires.
+- [ ] 206. gofresh: consolidate equivalent verification setup while
+      preserving independent oracles. Active destination:
+      tooling-redesign **9.3**; constituents 5.6 and 7.7. Re-census writers,
+      cache-home/memo-root/hook ownership, shared helpers, ambiguity controls,
+      reference-scan budget and obsolete tier names. Preserve independent
+      assertions and complete API-root coverage including resident's explicit
+      environment exception. Extend generated chain/content controls where
+      still missing; reconcile actual cgo/non-amd64/race premises and current
+      CI timings/records-pin policy. Broader scheduling requires measured
+      equal-population benefit and safe ownership; no historical count or
+      completed fixture-sharing change proves that premise.
 
 ## Band H — gomutant under the emergent shape (chartered by audit 195)
-      (261: measured — tier2* now 69 production occurrences; four global hook
-      surfaces; 23 files use t.Setenv; SetMemoRoot's two-hop chain confirmed.)
-
-      Audit 6 (2026-10-07): ci.yaml's full-timeout comment carries
-      2026-08-27 numbers (closure 544s, 'headroom ~3.3x', 'core count a
-      measured non-factor' — 0dafb1d measured 1244s serialized, 3361645
-      819s; stipulator 321 retracted the non-factor), the race-timeout
-      comment names a 60m cap against 100m, the shards' 'first run is
-      the measurement' is past (r 17m53s, o-z 13m22s, abd-i 10m32s, cj-n
-      8m21s), the records tier pins stipulator v0.66.1 against v0.71.x
-      releases: restated from CI's own figures; the doctrine states when
-      the records pin moves. Ahead of the held 202.
 - [x] 208. gomutant: three correctness faults the audit found — the
       baseline path classifies a build failure by matching the harness
       output for "[build failed]" (a passing baseline whose test prints
@@ -1649,62 +1526,28 @@ in their repos.
       vanished identifier; gitref "never execs git"), the sideline
       name's ordinal arm no store has ever taken and the per-version
       narrative recording bumps with no code arm.
-- [ ] 209. gomutant: the spec chunk — execution.md's "a launched
-      candidate contributes its observation even when compilation
-      rejection discards it" contradicts results.md and the code
-      (amended to results.md's rule); the load-time toolchain floor
-      stated beside the skew refusal; the tree-root vouches file and
-      the sideline name grammar stated as contract; REQ-exec-run-status's
-      decision grammar admits `candidates` on a served decision (results
-      already requires the count); REQ-exec-oracle-run's six contracts
-      and REQ-result-stale's three carve-outs split into sibling ids so
-      an edit re-consents its own rule; re-consented through the tool.
-      (235: grown — A1 the INV-RESULT-CANDIDATE-CONSERVATION pointer names
-      a deleted test (the two INV ids are the only spec ids with no
-      stipulator binding: bind their witnesses, so a rename can never
-      dangle again); A6 the cancellation boundary stated (which reads
-      poll ctx); A7 the sidelined legacy-entry name `<stem>.legacy-v<n>.json`
-      and the tree-root `vouches` file's module-root reach stated as
-      encodings; the versions 4–9 inline arms judged against the fleet's
-      oldest live document (version 10) — grandfathering for documents
-      none can find is a pre-v1 clean-break verdict.)
-      (262: grows — INV-MUT-COMPREHENSIVE and INV-RESULT-CANDIDATE-CONSERVATION
-      bound, the catalogue inventory derived through spectable instead of a
-      74-entry hand map; REQ-result-version-surface's server side (the
-      Implementation literal names no binary identity or document range);
-      the envelope numbers stated once (REQ-mcp-explain's four unpinned);
-      the served decision's candidates count; the sideline name grammar.
-      The seven-clause decomposition leaves for 268.)
-      Audit 286 (2026-09-29): grows — the INV binding half (neither
-      project invariant has a binding; grep INV- over .stipulator
-      returns nothing); OldestReadableDocumentVersion = 4 with one arm
-      for 4–10 and no fixture at 5–10; the v13 success path exercised
-      by nothing (the only v13 test asserts a refusal); gomutant's own
-      tracked document is version 11 with zero findings (the measured
-      datum); type document (findings.go:763) has one test caller and
-      a comment contradicting findings.go:769.
-      Grown (2026-10-06, audit 317): the served guidance's history prose ('seconds-class where it was minutes-class') restated as contract; word numerals in REQ-mcp-surfaces' CLI column keyed to digits and the table refusing word numerals (rewrittenExemptionRoster, idleTreeRelease keyed); the fired gap mcp-resident-set pruned at 317's chore.
-      Audit 6 (2026-10-07): narrows: the INV binding half → 324, the
-      legacy floor → 302; keeps mutation.md:30's sentence for 324.
-- [ ] 212. gomutant: one splice — driftFindingCounts, extendFindingCounts,
-      and spliceFindingCounts share their opening, their scores walk, and
-      their tally tail (47 lines identical between two) and differ only
-      in which candidate subset re-measured; one splice over a
-      re-measured index set with a carry policy, the four splice*Finding
-      wrappers following; invariants: candidate conservation, carried
-      survivors keeping their buckets, kill attribution completeness;
-      after 209's sibling split names the carve-outs.
-      Audit 286 (2026-09-29): grows — the three FindingCounts writers
-      differ in six ways, the one to settle as the invariant:
-      kill-attribution policy (extend/splice degrade via
-      killsComplete; drift ABORTS the run at run.go:5641 — two
-      policies over an input class REQ-result-export says is
-      tolerated); the negative-count reconcile absent in extend; the
-      byOperator value type; missing-operator handling
-      (error/error/append); unstableForBuckets hoisted vs in-loop;
-      attestation shedding (returned/dropped/carried).
+- [ ] 209. gomutant: reconcile reader contracts and the candidate
+      contributor account against actual producer admission.
+      Active destination: tooling-redesign **8.3**; constituent 9.2.
+      Reconcile live cancellation boundaries, served candidate counts,
+      catalog inventory, tree-root vouch reach, sideline encodings, server
+      executable/document-range identity and envelope constants with their
+      enforcement. Replace historical speed prose with an honest contract.
+      Completed CLI version and INV-to-REQ work stays closed; remaining
+      evidence-class obligations are not discharged by bindings alone.
+      Readable-history floor/fixtures belong with 302 and decomposition with
+      268, under the current version 16 and full-oracle policy.
+- [ ] 212. gomutant: consolidate admitted candidate-result composition;
+      historical drift helpers are not an approved composition model.
+      Active destination: tooling-redesign **5.4**; constituents 5.6 and 6.6.
+      Re-census admitted fresh/candidate-local/extension paths and consolidate
+      their conservation, operator/count checks, kill attribution, survivor
+      buckets and disposition carries/sheds. Retire unconsumed drift helpers
+      and mechanism-only claims while preserving changed-oracle, withdrawn-
+      killer, history and contradiction regressions. Changed oracle evidence
+      requires whole remeasurement; no old splice producer is restored.
 - [x] 210. gomutant: the vouch file at the tree root and gofresh's
-      grammar (gofresh docs/issues/vouch-file-consumer-homes.md's gomutant
+      grammar (Gofresh recovery: `git log --all -- docs/issues/vouch-file-consumer-homes.md`, gomutant
       arm) — every engine opens WithDir(module dir), so in a go.work tree
       the tree-root vouches file governs nothing (fail-closed today);
       the root file read once through gofresh's ReadVouchFile and its
@@ -1729,152 +1572,71 @@ in their repos.
       seams + SwapGoVersionSamplerForTest with no non-test caller.)
 - [ ] 214. gomutant: the engine's catalog and spawn fan (gomutant
       docs/issues/engine-run-scoped-oracle-value.md)
-      — five variant emitters of one token shape and ~35 family-rank
-      literals across seven files become one table the emitters and the
-      inventory test read; eight spawn entries into runMutantBase and
-      three into the probe become one request struct; docs delete at
-      close.
-      (235: C6's dead engine entries fold in — LoadContext,
-      DeclaredSymbols, TestsOf, PackageOf, PackagePath with zero
-      references; Load, PackageContext, ValidateOracle, SplitRapidPkgs,
-      RunMutant/RunMutantEnv/RunMutantObserved, TestProbe test-only.)
-      (262: grows — the eight `go test -json` decoders' non-correctness
-      residue after 269 lands the one stream walk; the observation-merge
-      degradation rule twice (root and engine); the per-file init ordinal
-      rule three times; the dead forwarders and test-only exports in
-      internal/engine incl. the whole Mutants/MutantsContext pair.)
-      Audit 286 (2026-09-29): grows — mergeFindingObservationsContext
-      (run.go:5083) and mergeRuntimeEvidenceContext
-      (internal/engine/run.go:930) are one function in two packages;
-      only the root one attributes the divergence, so a merge failure
-      reached through the engine loses 'diverging inputs'; four engine
-      exports with no caller (engine.LoadContext,
-      Tree.DeclaredSymbols, Tree.TestsOf, Tree.PackagePath).
-      Grown (2026-10-06, audit 317): the oracle memory derivation reads resident.HostMemory's total with the fleet's one floor and REQ-exec-oracle-memory states the composition of the two halvings (the parent's Available/2, the oracles' Total/(2·jobs)) — MemTotal kept: the recorded ceiling serves directionally; one GOFLAGS -tags parse (selection.go, enumerationcheck.go).
-      Audit 6 (2026-10-07): the oracle tree's memory bound is spelled
-      twice — MemTotal/(2·jobs) (engine/memlimit) vs gofresh's
-      Reading.ChildrenBudget()/jobs, which children-budget-bounded-by-
-      available names as gomutant's GOMEMLIMIT: decided at open (the
-      recorded ceiling serves directionally either way), after gofresh
-      240's clause correction (not 314); plan-cost-is-candidate-
-      materialization slotted here — the catalog-table fold is its
-      change set.
+      — Active destination: tooling-redesign **7.4**; constituents 5.4,
+      7.1 and 7.8. Bind run-owned bounds/environment once, preserve concurrent
+      operation isolation and explicit memory/width/command/oracle/analysis
+      policy, and refuse overflowing MiB conversions. Distinguish collection
+      targets from physical admission instead of selecting either old formula
+      by precedent. Consolidate live catalog ranks/emitters, init ordinals,
+      merge attribution and shared Go flag grammar; preserve quoted values
+      and explicit-empty selection. Remove verified dead engine entries.
+      Measure current candidate materialization before lazy construction,
+      preserving exact sources, identities, extents and discard/dedup behavior.
 - [ ] 216. gomutant: one classified evidence check — evidencePrecheck
-      with evidencePairsValid (boolean) and inspectContext (classified)
-      run the same five checks in different order and strictness; the
-      boolean derives from the classified one.
-      (235: refined — evidencePrecheck rides the run's runtimeMemo while
-      inspectContext calls runtimeinput.CurrentEnvContext directly: the
-      inspection path pays outside the memo; the empty-manifest order
-      divergence is unreachable, both fields being required.)
-      (262: grows — the evidence serve-check ladder twice
-      (evidenceSetMatchesContextWithCurrent / shapedEvidenceMatchesContext,
-      the operator-set/timeout/memory/regime list two copies).)
-      Audit 286 (2026-09-29): grows —
-      evidenceSetMatchesContextWithCurrent and
-      shapedEvidenceMatchesContext (freshness.go:2023/2056) 80%
-      identical, the shaped one minting newCurrentRuntimeMemo() so no
-      test's current stub drives it (a seam-injectability gap);
-      evidencePrecheck (:758) and inspectContext (:849) walk one
-      ladder with precheck alone comparing state.Reason and refusing
-      an empty manifest.
-      Audit 6 (2026-10-07): runtimeMemo's sequenceKey (order-sensitive,
-      PWD kept, nothing malformed judged) folds onto gotool.MemoKey
-      after 324; the verify-on-reuse step stays gomutant's.
+      and inspection projections agree where they ask the same question.
+      Active destination: tooling-redesign **7.8**. Reconcile body/shaped
+      policy, resource/regime and runtime-state checks under complete keys;
+      share only endpoint-coherent work and retain verify-on-reuse and whole
+      compared reasons. Preserve shaped-path injection and independent
+      refusal controls; a common memo key grants no absent evidence.
 - [ ] 217. gomutant: record-parse discipline — LoadExemptions and
-      LoadEphemeralAttestations read with plain Unmarshal where the
-      findings document refuses duplicate keys, trailing data, and nulls
-      under the same "a malformed record refuses" clauses; one decoder;
-      inlineFindingFields gains the inventory test its sibling has and
-      the five tags it omits.
-      (235: narrowed — exemptions.go and ephemeralattest.go fold onto
-      decodeKnownObject; the baseline bank stays lenient by contract.)
-      Audit 6 (2026-10-07): restated: three decoding disciplines fold to
-      one — decodeKnownObject (refuses duplicate keys and nulls),
-      LoadExemptions' json.Decoder with DisallowUnknownFields (admits
-      both), LoadEphemeralAttestations' plain Unmarshal — the bank
-      lenient by contract.
+      LoadEphemeralAttestations need their own contract's complete refusal
+      ladder. Active destination: tooling-redesign **9.2**. Reconcile unique
+      keys, nulls, unknown fields and trailing data in inline, nested and
+      interned historical/current records, with field-inventory controls.
+      Current writer version is 16; preserve malformed input until judgment,
+      valid siblings and readable history without upgrading policy/support.
+      Keep the bank's deliberately lenient contract distinct.
 - [ ] 218. gomutant: the store's report path (gomutant docs/issues/
-      store-report-path-walk.md) — Store.Layer walks the full manifest
-      per record at six sites and keeps the first reason; the two memos
-      of one entry (cache, judged) one entry-state record the report path
-      consults; doc deletes at close.
-      (235: anchored — Store.Layer/LayerReasons recompute
-      CommittableReasons past the write path's judged memo; two
-      per-symbol memos beside it.)
-- [ ] 219. gomutant: the test surface — one fixture home (the 37 CopyFS
-      sites, three fixtureDir declarations, twelve git-fixture builders,
-      53 inline example modules), the byte-identical face cache-isolation
-      tests and the eight per-face scenario rewrites one face-scenario
-      table that pins the faces decide alike (the net that would have
-      caught 207's four divergences), with the stated limit that the
-      root package's in-package tests keep their unexported reach.
-      (235: grown — 38 CopyFS sites, 145 inline module declarations,
-      34 git inits, ~12 fixture builders, three test-only packages, one
-      seam name on both faces; runs AFTER 244 so the face-scenario table
-      pins the collapsed shape — it is the net that would have caught
-      244's fact divergences.)
-      (262: grows — 328 of 879 tests unbound; 165 inline go.mod bodies, 21
-      hand-rolled runGit closures beside internal/gitfixture, 48 seam
-      save/restore pairs, cacheisolation_test.go ×3, the two faces' identical
-      stretch helpers; the vacuous memory-floor pin, the unpinned
-      envelope.streamed, the seam-default and grammar tables with no
-      completeness guard; the face-seam parity; REQ-mcp-explain's numbers
-      join the envelope pin. After 267.)
-      Audit 286 (2026-09-29): the writer-side fixture isolation SPLITS
-      OUT as 301 (directly after 283); the remainder grows with
-      envelope.streamed = 100 and the four Analysis* prose strings,
-      wire-visible with no anchor.
-      Grown (2026-10-06, audit 317): the two covered adoption-sweep gaps (REQ-result-export, REQ-target-model) witnessed; mcp-liveness-cancellation-witness (the transport-seam injection); split 219a fixture home + face-scenario table / 219b witness and binding gaps.
-      Audit 6 (2026-10-07): the wall-clock heartbeat pin
-      TestHeartbeatCarriesTheReadingInTheFleetsWords (60 ms against a 5
-      ms cadence; its second arm wants one beat) — beats observed, never
-      clocked, 323's rule; git maintenance off in the one fixture home
-      for every writer this chunk touches — gitfixture.Command and Init
-      (336: the hermetic git command and the repository's own
-      no-maintenance rule and identity) are the seed the 21 runGit
-      closures fold onto.
+      store-report-path-walk.md). Active destination: tooling-redesign
+      **7.8**. Measure residual report work beyond existing caches; share
+      entry facts only under complete content, layer/document, policy and
+      external-evidence identities. Read write routing for placement, retain
+      requested current judgment and full inventory; stat alone is insufficient.
+- [ ] 219. gomutant: reconcile verification setup and witness gaps
+      against current source. Active destination:
+      tooling-redesign **9.3**; constituents 5.6, 6.4 and 6.7. Re-census
+      fixture/copy/git/cache/seam helpers and share setup with independent
+      face expectations and unexported root reach intact. Preserve existing
+      writer isolation and hermetic git maintenance controls. Reconcile all
+      eighteen issue-listed unbound MCP witnesses and actual export/model,
+      envelope/phase/grammar/memory gaps against current clauses. Pin real
+      window cliffs, nonempty residue sheds, whole-state external relinks,
+      failed ping writes and post-write recovery. Observe heartbeat events,
+      not wall-clock counts. Windows-native execution requires an actual
+      runner/caller; keep its trigger through 9.4, never count cross-builds
+      as execution. Clean binary files do not identify a live MCP process.
 - [ ] 220. gomutant: the named smalls — the ephemeral option tuple onto
-      EphemeralRequest; longestBaselineFor reading the bank key through
-      its composer; PackageSkip.Dark carrying the whole skip-radius
-      predicate; documentlock_other's missing ensureLockIgnore;
-      Coverage.Merge's receiver mutation behind a value signature; the
-      three edit value types stay (two are wire-pinned).
-      (235: grown — Store.Load reads past ctx (contextio the one
-      cancellation-aware reader, its package doc stating the boundary;
-      21 raw ReadFile/WriteFile sites); C6's dead root and gitref entries
-      (UpdateDocument, Tree.Fresh/FreshFor, Tree.DynamicStateVouches,
-      Load/LoadContext, Export; gitref ChangedSurface/ChangedPaths/Show);
-      C7 the `Context` suffix dropped once no non-Context sibling
-      survives (stipulator retarget for the bindings); C10 the
-      estimate's absent-never-zero rule spelled three times.)
-      (262: narrows — the two row-projection issues leave for 267; the
-      absent-never-zero item dissolved (EstimateProjected is a string, one
-      reader); keeps the root's dead exports, the face preamble ×6 and the
-      loading event ×7, the tool-owned path vocabulary ×7, DarkPackages
-      computed twice.)
-      Audit 286 (2026-09-29): grows — rootCoordinate
-      (gomutant.go:416–423) is gotool.Coordinate line for line
-      (root-coordinate-one-spelling gets its owner; two more
-      open-coded degrading ladders at ephemeral.go:375 and
-      ephemeralattest.go:182; pew's CommandDir is the same copy — a
-      252 note); closureRow (bank.go:283–292) a second wire form of
-      five fingerprint-record keys in gofresh's spellings; ten
-      test-only exports, the go.sum stipulate/structural v0.2.0
-      residue, the 'machine-local runtime input' prefix composed at
-      store.go:271 and matched at :1084.
-      Grown (2026-10-06, audit 317): the CLI's five roster bounds one policy the faces read and the surfaces pin keys (merged with list-bounders-one-helper: one bounder, one remainder grammar; every rendered list names its omitted count); the install-and-report helper one root helper; the Taskfile installs to both homes; sheds the two row-projection docs to 267.
+      EphemeralRequest and other surviving duplicated mechanics.
+      Active destination: tooling-redesign **5.6**; constituents 5.5a,
+      8.3 and 9.2. Re-census bank-key composition, skip-radius/DarkPackages,
+      lock-ignore, receiver mutation, context-aware I/O, preambles/path
+      vocabulary, install/report helpers and native wire copies. Retain
+      distinct wire edit forms and lexical/resolved absent-path containment.
+      Remove verified dead/test-only exports and obsolete drift/coverage
+      helpers with bindings retargeted. Common list bounds retain exact
+      omissions and their actual populations; run/findings row projections
+      remain 267's. No removed schedule or estimate producer returns.
 - [ ] 233. gomutant: MCP campaign observability (from
-      mcp-run-observability, 2026-09-09) — a long campaign's caller must
-      distinguish progress, a slow phase, completion, and cancellation
-      without a progress token or retained notifications: a run-state
-      record beside the findings document (the run's identity, the
-      current stretch, the target in flight, elapsed, committed count)
-      the caller can read while the run lives and after it ends, and a
-      preflight form of run on the MCP face (the CLI's --plan); the
-      surface question the visibility ruling decides — never a silent
-      wait.
-      Re-aimed (2026-10-06, audit 317): the run-state record lives in the tree's machine-local state home as the exit log does since 312 (`$XDG_STATE_HOME/gomutant/repos/<tree key>/`), never beside the findings document; its path named on the run's boundary lines; mcp-render-bound-discards-the-response rides unchanged.
+      docs/issues/mcp-run-observability.md). Active destination:
+      tooling-redesign **6.7**; constituent 5.5a. Provide bounded tokenless
+      recovery in the resolved tree's machine-local state home, not the repo:
+      run/root identity, active work, both-layer counts and terminal account
+      survive lost replies/restarts. Make non-measuring preflight reachable
+      or explicitly direct to it; distinguish its counters from execution.
+      Preserve committed structured output on render expiry/post-write error;
+      a heartbeat proves neither progress nor completion. Tasks capability
+      is conditional, not a prerequisite for this recovery.
 
 ## Band R, second run — re-audit at twelve landed chunks (190, 208, 221, 207, 223, 201, 229, 211, 222, 198, 186, 224; chartered at 224's tick, 2026-09-10)
 
@@ -1896,26 +1658,13 @@ in their repos.
       handling (229), the verdict path, the store; same output; closes
       with the cross-repo replan (the lane below it re-sequenced).
 - [ ] 238. stipulator: the parent-hosted engine loads' owned boundary
-      (the contradicted gap on REQ-go-owned-processes, declared at 222)
-      — the analysis engines the served backend hosts spawn the package
-      loader's go list in the parent's process group, so a cancelled
-      load ends its go list and not the loader's descendants: the
-      mechanism decision (the engines in the resolver child, or a
-      group-isolated loader spawn gofresh offers) and the gap's close.
-      (236: after 226's clause split — its gap over-excuses four met
-      mechanisms until REQ-go-owned-processes is split.)
-      (263: behind 272 — gofresh 265 supplies the group-isolated loader
-      spawn.)
-      Audit 287 (2026-09-29): behind 270, not 226 — the clause split
-      moved to 270 at the third band; this note replaces 236's.
-      Corrected (2026-10-06, audit 318): its gap waits on gofresh 241 (x/tools has no spawn hook — loader-spawns-outside-the-runner), not on gofresh 265 or stipulator 270; neither contradicted gap has fired.
-      Audit 6 (2026-10-07): the dynamic-state explain hosted in the
-      resolver child (an explaindynamic op beside explainwitness over
-      the child's selection views) — ExplainDynamicState runs
-      LoadCapture plus a whole discovery (43 minutes cold on bldc) and a
-      parent-hosted groupEngine to explain one culprit, the very load
-      this chunk's gap names; 'derived against the same policy-scoped
-      views the verdicts derive over' preserved.
+      remains distinct from contained runner children. Active destination:
+      tooling-redesign **5.5**; constituents 7.1 and 7.8. Establish actual
+      loader descendant cancellation under a capability the loader supplies;
+      no existing runner hook reaches those children. Reconcile the declared
+      gap only with that boundary. Attribute dynamic-state explain's whole-
+      discovery cost and share or host its load only while preserving the
+      same policy-scoped views, generation-qualified hooks and caller context.
 - [x] 239. gofresh: the environment, toolchain, and go-command policy
       exported (234 C1/A1/A5) — gofresh owns the whole policy and
       publishes none of it: internal/processenv (Normalize, ForCommand,
@@ -1932,149 +1681,48 @@ in their repos.
       (237: also exports the verdict reason vocabulary as constants —
       pew's §7.9 rule keys on the bare literal "test variants" across
       the repo boundary.)
-- [ ] 240. gofresh: the spec corrections 234 found (A2 the memo key
-      names "the commit" no memo keys on — REQ-guard-cache and
-      REQ-guard-recompute; A4 ErrViewSealed the fourth typed refusal on
-      the capture seam, pinned by identity beside its siblings; the
-      go-command policy the substrate paragraph names since 239 stated
-      as a requirement with the gotool pins as its enforcement
-      pointers — today no REQ id, so no binding tracks it). Spec only;
-      re-consented.
-      (261: grows — REQ-fresh-caller-pins, a caller-side MAY, gets its
-      declared gap; the base ids' redundant gap records and the one
-      base-bound test (TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit)
-      slot onto their sub-ids; 200's cite rule applied in closure/*.go and
-      purity.md:126 — the purity.go/dynamicstate.go half rides 202.)
-      Audit 285 (2026-09-29): grows — (a)
-      REQ-fresh-go-command-policy's reader enumeration is closed at
-      three where gofresh spawns five (the listing at
-      closure/closure.go:1240, guard.Capture's go version at
-      guard/guard.go:169) and the fleet answers the fourth three ways;
-      the spec half here, the listing reader's salvage decision at
-      281; (b) the cite rule's scope is every file but
-      purity.go/dynamicstate.go — four bare-base cites in the root
-      (gofresh.go:480, :593, :855, :883) and the closure/ list in the
-      record; (c) three 200 sub-IDs (-guard-pinned, -unsafe,
-      -writer-sink) bind one witness
-      (closure.TestReadOnlyObservabilityProof) — addressable ids need
-      their own; 26 clauses fleet-wide are single-witness; (d)
-      REQ-fresh-fingerprint-data's 'never a second encoding' vs pew's
-      row projection (275's accepted deviation): state the projection
-      obligation — a projecting consumer validates through the
-      published ladder (pew's Validate call rides 291) — and complete
-      the constituents
-      (singleSubjectDischarges/packageProcessDischarges are unnamed);
-      (e) REQ-fresh-progress states the fact/diagnostic phase set; (f)
-      one pass over the 43 gap records: 40 carry one boilerplate
-      condition — each clause's own witness shape stated.
-      Grown (2026-10-06, audit 316): the overview's substrate paragraph and Documents list name the resident package; REQ-fresh-resident-readings gains its Enforced-by pointers (eight bindings exist); REQ-closure-observability-toolchain-key's opening set↔scope sentence split into its own sub-id (203 enforces it); the pre-310 vocabulary's doc half (toolchainkey_test.go, effectmemo.go, VersionListing's and dynamicstate.go's 'toolchain release' docs); REQ-fresh-caller-pins the one unbound, ungapped id; the thirty-seven boilerplate gap conditions (f). Loses UnsetEnv to 327 and (a) as done at 281 (2dbbc6f deleted the guard's go version spawn, 53b9e1d named List) — spec and records only.
-      Audit 6 (2026-10-07): children-budget-bounded-by-available
-      retargeted here from 314 (stipulator 290.2b refuted the admission
-      sentence both ways; ChildrenBudget has no consumer reader — the
-      one planned reader, gomutant 214's oracle bound, is a handed-down
-      target): REQ-fresh-resident-readings' 'a consumer admits a spawn
-      against the budget less the children's held set' struck, the
-      budget stated as an oracle tree's target; REQ-fresh-toolchain-skew
-      (now the judged-run memo's home: MemoKey's PWD limb, RunMemo, the
-      holder's rules — instanced by runtimeinput.Roots too) and REQ-
-      fresh-go-command-policy (one 44-line sentence) split under 200's
-      mechanics — a judged-run memo id both instances bind, a snapshot-
-      sampler sub-id — with a no-append rule (no new fact enters either
-      paragraph before the split); 3361645's clause vocabulary ('audited
-      Linux toolchain selection' → the toolchain-source audit); item
-      (d), the fingerprint-data projection, is fingerprint serialization
-      — reported to the evidence-model owner before implementing. Ahead
-      of the held 202.
-- [ ] 241. gofresh: one typed-load seam (234 C2/A6/A7) — four
-      packages.Load sites with four hand-built configs (viewload.go the
-      designated seam; explain.go, maximal.go, internal/program) merge
-      into loadView's config builder parameterized by mode, so explain
-      re-derives under the load REQ-fresh-coherent-view describes and
-      the GOPACKAGESDRIVER refusal holds at every site; the explain
-      hookset's tree-blind match key (pkgPath.varName across two
-      checkouts of one module in one process) keyed by the view's tree
-      or its guarantee restated to what the guard holds.
-      (261: grows — explain's load gains NeedForTest (REQ-explain-passive's
-      test variants) and internal/program's config builds from the policy's
-      environment, not a raw one.)
-      Audit 285 (2026-09-29): stands —
-      loader-spawns-outside-the-runner is the one undischarged half of
-      REQ-fresh-go-command-policy's exception (cfg.Env != nil pinned
-      nowhere); explain.go:122 skips buildflags.Validate where
-      closure/viewload.go:75 treats it as part of the pass.
-      Grown (2026-10-06, audit 316): explain-no-chain-for-a-dependency-culprit named here (its Lands said so); loses one-memo-shape to 327.
-      Audit 6 (2026-10-07): gofresh.Chain's Kind {culprit, store, edge,
-      refusal} and Arm {mutation, escape, environment-audit} are
-      documented closed sets a consumer already extends (stipulator
-      298's witness/call/driver kinds and seeding arms): the kinds typed
-      and stated open to consumer chains (REQ-explain-vocabulary);
-      CulpritFromReason's regex over gofresh's prose becomes a
-      structured culprit exported with the verdict (the RefusalClause
-      precedent) — stipulator's reasons.go keys three verdict prefixes
-      as literals. Ahead of the held 202.
-- [ ] 242. gofresh: closure/ an internal package (234 C7) — a public
-      package with zero external importers publishing Hasher and forty
-      methods, AnalysisScope, the memo loaders, the attribution entries
-      as API with no installed base; closure/ → internal/closure with
-      the public vocabulary (closure/testvariant) kept reachable through
-      the root aliases (verify at open that every consumer touch goes
-      through them). BREAKING API; pre-v1 clean break.
-      Audit 285 (2026-09-29): its 'zero external importers' premise is
-      FALSE — stipulator/internal/backends/golang/normalize.go:610
-      reads closure.ToolchainSelectionNotice (legitimately, from its
-      own capture): the internalization keeps that entry reachable
-      through a root alias. 242 and 243 LAND TOGETHER (one symbol set
-      after 202; two passes double the binding retargets).
-      Grown (2026-10-06, audit 316): the pre-310 vocabulary renamed once on the public surface — Hasher's selectionResolved/selection ('two-axis'), selectionDegradation, the 'toolchain-selection audit:' notice and its source-path suffix (view.go appends ' (closure/toolchainaudit.go)' to every notice), SelectionAudited/SelectionNotice/SelectionAttribution/AttributeSelection — the spec's one concept is the toolchain-source audit.
-      Audit 6 (2026-10-07): gains a reader (audit 335): 3361645's
-      immutableEnvironmentMethod reads h.SelectionAudited() — the
-      pre-310 vocabulary this chunk renames; 240 takes the clause
-      wording.
-- [ ] 243. gofresh: the vestigial sweep 234 found (C10) — guard's
-      invalidKind (zero references in four repos); ScanPureDirectives
-      exported with no production caller in any repo (the exported face
-      of REQ-purity-directive: adopt or delete, the clause following);
-      Engine.analysisBudget's one unreachable read (the filed
-      analysis-budget issue rides). One commit through the loop.
-      (261: grows — the surface set spelled twice in guidance (surfaces +
-      knownSurface); the dead public surface beyond the three: runtimeinput
-      Dirty/CommitInspector, shortgates' Walk/Check/WalkReport/Report/Failer
-      (four consumers call Pin alone — the sweep decides), WithStaticInputRoot,
-      ErrViewSealed/ErrAnalysisUnavailable undiscriminated, shapecorpus
-      Entry.BenchFiles. After 202: the tier's move under closure/ redraws the
-      boundary 242 and 243 sweep.)
-      Rider (derived 2026-09-29): REQ-inputs-dirty's CommitInspector and
-      the testlog ingest's static-input-root acceptance RETIRE with their
-      clauses (gofresh docs/issues/runtime-inputs-dirty-unadopted.md,
-      static-input-root-unadopted.md) — pre-v1, no installed base, no
-      consumer selects either, gomutant's baseline provenance reads git
-      itself and works: dead public surface, not a fork.
-      Audit 285 (2026-09-29): grows — the manifest decoder has no
-      duplicate-key and no null rule (runtimeinput.go:2583–2602; a
-      duplicated or null key is caught incidentally as 'non-canonical
-      manifest encoding' where the record names the key) —
-      json-record-readers-one-home sharpened; the dead set grew by
-      four (gotool.EnvReader.Taken, gotool.ParseEnvDocument —
-      unexport, guidance.KnobUsage/Registration.Knobs,
-      Document.DescribeSchema reached only through MustDescribeSchema,
-      runtimeinput.ModuleRelPaths whose only reader is the dead
-      Dirty), zero-reader forwarders
-      gotool.Run/SampleGoVersion/TakeEnvSnapshot,
-      Containment.Quit/Grace with no gofresh reader,
-      guidance.go:63/:65 spelling one two-element set twice,
-      Fingerprint.Validate a one-line forwarder three internal sites
-      bypass; shapecorpus.Entry.BenchFiles comes OFF the list
-      (pew/cmd/pew/canary_test.go:26 reads it);
-      runtime-input-entries-implicit-context and the two retire riders
-      stand. Lands together with 242; 295 no longer waits on it.
-      Narrowed (2026-10-06, audit 316): the gotool dead set (package-level Run/SampleGoVersion/TakeEnvSnapshot forwarders, EnvReader.Taken, ParseEnvDocument, Containment.Quit/Grace with no reader) moves to 327.
-      Audit 6 (2026-10-07): runtimeinput's four name-quoting rules
-      (representableReasonName, memberListName, the walk's %q,
-      attributed's Quote) join json-record-readers-one-home or state why
-      each differs; 3361645's exports
-      closure.Observability.OutcomeMethod and
-      ImmutableEnvironmentOutcomes routed through a root alias or
-      confirmed internal before the move.
+- [ ] 240. gofresh: reconcile memo/recomputation, provenance, resource
+      and native-record contracts.
+      Active destination: tooling-redesign **9.2**; constituents 7.4 and
+      8.3. Reconcile against current canonical semantics, not obsolete commit-
+      only keys, source-audit vocabulary or completed spawn/API work. Preserve
+      typed capture refusals, caller-pin responsibility, model-discharge and
+      native projection constituents, progress vocabulary and resident links.
+      Distinguish GC targets/child limits from physical admission. Split
+      toolchain-skew/go-command-policy bundles before adding facts; retain
+      memo/snapshot rules and distinct enforcement. Re-census base/sub-ID
+      bindings, independent guard/unsafe/writer witnesses, wrap-aware citations
+      and clause-specific gap triggers; no old row count proves completeness.
+- [ ] 241. gofresh: typed loading needs one policy and explicit ownership,
+      not an assumed common lifetime across every loading path.
+      Active destination: tooling-redesign **7.1**; constituents 5.5, 7.8
+      and 8.3. Preserve non-nil policy environment, directory, build-flag
+      validation, test variants, driver refusal and cancellation at every
+      load. State the loader's actual containment limitation. Qualify explain
+      hooks by tree/generation so identical package/variable names cannot
+      borrow another checkout's facts. Reproduce the dependency-culprit report
+      without the disproved blanket omission premise. Carry structured
+      culprit/cause facts and deliberately open consumer chain vocabulary;
+      preserve passive later-tree semantics and independent endpoints.
+- [ ] 242. gofresh: internalize the public construction surface only
+      after an actual consumer capability census.
+      Active destination: tooling-redesign **7.1**; constituent 5.6.
+      Internalize analysis-scope/load/memo mechanics only after preserving
+      used source-audit, outcome and test-variant vocabulary through a
+      coherent public boundary. Reconcile content-audit names and diagnostics;
+      retarget every binding/cite and coordinate 243's verified removals.
+      Neither zero importers nor a specific alias shape is assumed.
+- [ ] 243. gofresh: retire verified vestiges and duplicate primitives
+      after current four-repository caller tracing.
+      Active destination: tooling-redesign **5.6**; constituents 5.5 and
+      9.2. Retire unused Dirty/CommitInspector and static-input-root APIs
+      with their clauses, references and bindings; do not invent adopters.
+      Re-census guard/purity/shortgate/guidance forwarders and duplicate
+      surface inventories, preserving live consumer capabilities and already
+      removed gotool forms. Share JSON/quoted-string primitives only while
+      preserving raw versus compacted canonicality, distinct tails, legacy
+      bare roots and idempotent re-keying. Observation composition context
+      work remains 361's, not an excuse to delete its semantic boundary.
 - [x] 244. gomutant: the face-parity residue (235 C2/C3/C4/C12 +
       A3/A4/A5) — 207 landed one rendering seam and left the run
       epilogue written twice (the attest snapshot, the shed-dedup key at
@@ -2093,35 +1741,15 @@ in their repos.
       the CLI and 50 on MCP — decide whether 20 is contract). One
       epilogue, one dispatch, one walk in the root package; both faces
       renderers.
-- [ ] 245. gomutant: runCounted's decomposition (235 C1; design —
-      derived 2026-09-29: a decomposition along the named seams under
-      the three invariants is engineering with no external tradeoff;
-      slotted directly before 212 so the chunks that reason about the
-      whole function do so once) — 2,723 lines and thirty nested closures with two named
-      phases and a 200-line epilogue; a campaign value carrying the run's
-      constants with the closures as methods along the natural seams
-      (options/bounds/repository, resolution, views/modes, per-target
-      preparation, the driver, the epilogue); invariants: the
-      deterministic preparation-and-decision order, the window
-      partition's input set, the commit horizon. 212, 213, and 233 each
-      reason about the whole function until it lands.
-      (262: grows — 215 merges in: Tree.Run is a 14-line wrapper and the
-      2,713-line function 215 named IS runCounted; 215's distinct half — 77
-      methods on a five-field Tree across seven roles — and the file homes
-      (run.go 6,591 lines across seven concepts; four concepts spread over
-      four to eight files each, incl. the input-validation refusals against
-      REQ-exec-preparation's one stage) come with it; run-seams-snapshotted-
-      per-run lands here.)
-      Audit 286 (2026-09-29): grows — 213's charter item did not land:
-      seven unexported observer seams stay on the exported Options
-      (afterExecution, aggregate, producer, proofAttempt, dispatched,
-      executedScope, confirmScoped) and seams.go:13–15 states the
-      false universal; the run value is their home. runCounted is now
-      2,795 lines with 47 closures.
-      Audit 6 (2026-10-07): seams.go's universal corrected (seven hooks
-      stay on the exported Options: run.go:360–411 — every seam field
-      has a production reader and a test writer, none dead); runCounted
-      is 2,855 lines.
+- [ ] 245. gomutant: decompose the live run loop and Tree roles by their
+      actual ownership boundaries. Active destination:
+      tooling-redesign **5.4**; constituents 7.1 and 7.2. Give immutable
+      options/bounds/root, resolution, views, target preparation, driver and
+      epilogue explicit owners; reconcile Tree roles and file homes. Preserve
+      deterministic preparation/decision and window membership while adopting
+      independent closing. Give run and inspection observers stable owned
+      lifetimes, including synchronization of snapshot entry; do not delete
+      live seams or let subscriptions trigger execution.
 - [x] 246. gomutant: the gofresh bump — five releases behind at v0.99.0
       (235 C8; 210 dissolves in; 205 rides) — the consumer arms
       reachable now: ParseDynamicStateVouches deleted for
@@ -2150,78 +1778,33 @@ in their repos.
       policy refuses at construction on one face, at first answer on
       the other; one publishes resolution records, the other none) —
       one form per verb, stated.
-- [ ] 248. stipulator: the spec corrections 236 found + one message —
-      A6 the seven cap values across four packages are contract the
-      spec never states (the same reason map cut at 5 on the wire and 8
-      on the terminal with different remainder semantics): one cap
-      policy stated and pinned as the sibling tool's envelope is; A7
-      the root-discovery message spelled four times (only the MCP's
-      names the upward search) → one; A8 evidence.md's version bump
-      chain is process record → the version is 8, prior versions fail
-      closed; A9 the resolution-cache format names no version value.
-      (263: grows — the reason-tally cap policy merged from 225 (two
-      reductions with caps 5 and 8 and different remainders: one rule, a
-      per-reader bound) and the "not a stipulator repository" message ×4
-      re-deriving manifest absence; 225 and 248 land together.)
-      (270: grows — the decomposition's editorial residue, stipulator
-      docs/issues/decomposition-editorial-pass.md: the dangling
-      antecedents across the splits, a base reading as an exceptionless
-      universal, paragraphs holding several obligations under one
-      keyword (further splits with their witnesses already distinct),
-      a duplication across sub-paragraphs, the loader prose against its
-      gap's reason, six bindings pinning a rule no sentence of their
-      family states; the doc deletes at close.)
-      Audit 287 (2026-09-29): grows — evidence.md:549–565 narrates the
-      version chain (process record in the spec); the cap census is
-      ten across six packages (execute.go:40, envreport.go:48/:55,
-      facts.go:332, mcpserver/compile.go:47, gap.go:148,
-      response.go:69, views/check.go:16/:221/:226) with
-      REQ-mcp-response-contract stating forms and no values; the four
-      'stipulator repository' spellings (corpus/root.go:25,
-      cmd/root.go:170/:207, mcpserver/server.go:133).
-      Grown (2026-10-06, audit 318): the publish account typed in the backend and prose on both faces (served.go flattens it to strings; the MCP face re-parses by prefix; the CLI renders every per-symbol typed line unbounded — about a thousand after a strategy bump) → one typed account message each face projects under the one cap policy, 'advisory, never a verdict input' preserved.
-      Audit 6 (2026-10-07): REQ-policy-toolchain-pin says the read is
-      `go env GOVERSION`; the code reads the snapshot's GOVERSION from
-      `go env -json` — restate.
-- [ ] 249. stipulator: the monoliths (236 C1/C12) — runWitnesses
-      (570 lines, ~40 locals, five closures, seven nested loop stages)
-      split by the stages its comments name, preserving
-      REQ-policy-cancellation's unit of persistence and
-      REQ-evidence-freshness-degrade; coverage.Evaluate (349 lines) and
-      compile.resolve (331 lines) decomposed likewise. After 226 has
-      thinned the package. 337 filed the executed-reason account and
-      the resolution notices as unclassed string vocabularies beside the
-      typed uncacheable face (stipulator
-      executed-and-resolution-reason-faces-unclassed): one table shape
-      per face, explain's answer a clause question — runWitnesses holds
-      both accounts.
-      (263: grows — check.Run repeats verifyrun's capture → symbols →
-      served-backend ladder and hand-builds the backend map (the one site
-      247.C's BackendSet did not reach) — check-pass-shares-the-verification-
-      ladder lands here (a derivable design, un-parked); five compile-refusal
-      ladders and five id-list validation ladders, corpus membership spelled
-      two ways; process-output-utf8-marshal's executor-diagnostics trigger
-      fired at 223.B3 — lands here. Premise corrected: runWitnesses lives in
-      witnessrun.go, which 226 does not thin.)
-      Rider (2026-09-29 replan): the no-outcome count beside the outside count, and a result-level line when an execution reached no expected witness (247's relayed candidate) — derived from the never-silent rule (a counted remainder, never a dropped one); lands with check.Run's ladder.
-      Rider (derived 2026-09-29): the selective form isolates unasserted impure siblings to earn their observation proofs (stipulator docs/issues/impure-siblings-never-earn-a-proof.md) — one solo process per impure subject once, against two re-executions on every later run; the isolation pass already spawns solo processes with owned observations for denied tests, so the mechanism exists and the cost is repaid on the first served run.
-      Rider (tugboat field report 2026-09-29, stipulator docs/issues/check-summary-tally-names-one-invocation.md): the summary face's witnessed tally per invocation — one line per invocation stating its eligibility and its served/executed/uncacheable split (the never-silent rule: a leg executed and never accounted for reads as absent); lands with check.Run's ladder.
-      Audit 287 (2026-09-29): grows — premises re-measured:
-      runWitnesses 573 lines, coverage.Evaluate 400 (up from 349 —
-      271.B added to it), compile.resolve 332, check.Run 254, a new
-      sibling prepareWitnessGroups 153; check.go:169 hand-builds the
-      backend map where golang.BackendSet is the one spelling (the
-      site 247.C missed) and the policy backend set is spelled three
-      times (cmd/policy.go:32 a registry in the CLI package,
-      check.go:227, derive.go:475); the per-invocation tally rider
-      gets its clause home (check.go:207–222 sets one scalar over
-      every invocation; neither REQ-check-witness-selection nor
-      REQ-check-verdict states a per-invocation account).
-      Grown (2026-10-06, audit 318): opens by inverting the verifyrun→check dependency (check.Run cannot join the shared ladder today: an import cycle; check-pass-shares-the-verification-ladder is otherwise unbuildable); the three folds of a package's runs (assembleInvocation, SelectionResult.absorb, execMerge.addUnit) one — finalizeRun's double run on the hook path and its idempotence guard are redundant state; aborted-pass re-derived at open; measured: runWitnesses 580 lines, check.Run 267, prepareWitnessGroups 185; invocation-folds-two-shapes and aborted-pass named here (their Lands said so; the entry did not).
-      Audit 6 (2026-10-07): re-verified: the check → verifyrun import
-      cycle is real in production (verifyrun.go:15); runWitnesses 575
-      lines, check.Run 258, Evaluate 397, resolve 328. Same timing rule
-      as 226.
+- [ ] 248. stipulator: reconcile live reader and record contracts,
+      including the remaining decomposition residue. Active destination:
+      tooling-redesign **8.3**; constituent 9.2. State/pin per-reader caps
+      and omitted counts, one root-discovery account and typed publication
+      projections that never become verdict inputs. Replace version history
+      with actual format/compatibility rules. Work through every remaining
+      item in docs/issues/decomposition-editorial-pass.md: antecedents,
+      exceptions, loader gap, normative bundles, duplicate/misplaced sentences,
+      bindings and evidence-tier consequences. Preserve completed selection
+      and certificate contracts; distinguish editorial corrections from
+      semantic amendments, including snapshot provenance and historical proof
+      readability. Coordinate shared vocabulary/cap mechanics with 225.
+- [ ] 249. stipulator: witness, check, coverage and compilation
+      orchestration need explicit evaluation ownership.
+      Active destination: tooling-redesign **7.5**; constituents 5.2c,
+      5.2e, 5.3, 7.8 and 8.3. Resolve the check/verifyrun dependency cycle
+      around one explicit evaluator and non-measuring readers, preserving
+      suite health, scoped policy and unknown/deletion limits. Fold live
+      backend/ID/corpus/refusal/report assembly, not distinct producing
+      transactions. Keep retry package durability, per-group tiers,
+      NoOutcome and unequal per-invocation accounts; retain publication at
+      quiescence through later errors. Mint executed/resolution cause classes
+      at composition and preserve Gofresh-owned causes. Add bounded diagnostic
+      timelines and roster/residue allocation while retaining existing UTF-8
+      scrubbing. Package-producing support belongs to 5.2c/d, not automatic
+      isolate-each-once proofs. Bounded export refresh and scoped discovery
+      measurements remain separate from valid-current evidence grants.
 - [x] 250. stipulator: the gofresh bump — v0.101.0 → current (three
       releases behind, two breaking; v0.101.1's canonical strategy @2
       restales every witness record) — riding gofresh 239's release so
@@ -2241,67 +1824,18 @@ in their repos.
       row per key {spelling, mandatory, omittable, audit, display name}
       read by the writer, the shape check, the foreign-key check,
       admission, the ignore set, the audit notes, and one test builder.
-- [ ] 252. pew: the hygiene sweep (231's other half; 237 P4/P7/P8) — one
-      containment predicate and one longest-existing-prefix resolver
-      (pathWithin ≡ withinRoot, five inline Rel+IsLocal containments,
-      resolveExistingPrefix ≡ moduleBenchDir's walk ≡ CommandDir's
-      weaker variant); the vestigial
-      six (store List/recordingFromPath, gitblob.State, ExecuteBinary
-      with no caller, Execute's one seam, checkOne once 174 lands); two
-      full store walks in gc; ab's count check twice. After 174 and 251.
-      (264: grows — two rules for a package's declared benchmarks
-      (selectedBenchmarks constraint-aware, sourceBenchmarks constraint-blind;
-      ab enumerates side A with one and side B with the other); ab's
-      guard-agreement treats two empty values as agreement where compare
-      refuses them as missing — one guard-set judgment both surfaces;
-      Destinations' "one derivation" false for Write (refreshRecording a live
-      caller); stat's fallback pkgMeta partial (ImportPath/Name/TestGoFiles
-      unset); the stretch vocabulary twenty bare literals across five verbs
-      (213's collapse); the metric set spelled three times (knownUnits,
-      higherIsWorse, unitOrder — one registry on 251's pattern); twelve
-      one-caller config writers over the registry; two module resolvers;
-      the vestige set verified present: ExecuteBinary, recordingFromPath,
-      RepositoryState.Root, isPewRecording dead; gitblob.State, Store.List,
-      run.Execute, checkOne test-only; equalExcept's excluded and Demux's
-      extra dead generality; RunIn and ReproducibleAtWithin vestigial exports.
-      environment-normalized-once stays here but is built over gofresh 265's
-      setter (after 275); format-rung-two-readers leaves for 275.)
-      Audit 288 (2026-09-29): grows, after 291 — FIRST the conformance
-      half: ab's seven git stages are bare exec.Command
-      (ab.go:543–701), so REQ-pew-interruption's 'any stage on the
-      verb's path' does not hold there (a Ctrl-C during git worktree
-      add neither ends the verb nor kills the child) — raised from
-      hygiene; then C1 the metric set spelled three (four) times
-      (stat.go:101 knownUnits, compare.go:168/:572/:74) → one registry
-      on 251's pattern (unit, worse direction, rank, gateable; §10.1's
-      sec/op default preserved); C2 one containment predicate, seven
-      spellings plus two longest-existing-prefix resolvers; C3 two
-      module resolvers (gc.go:212 GOMOD vs stat.go:681 go list -m
-      -json — a third subprocess form §11 does not list); C5 the
-      writer census corrected (seven named single-key writers + two
-      inline, all from run.go's two composers; Destinations' 'one
-      derivation' false for its second caller); C6 the vestige list
-      corrected (dead: recordingFromPath, ExecuteBinary,
-      isPewRecording; test-only: store.List, gitblob.State,
-      run.Execute, checkOne with a false doc; dead capability:
-      equalExcept's excluded, RunIn's dir; LIVE contrary to 264:
-      RepositoryState.Root, run.Demux, ReproducibleAtWithin); C7 the
-      audit-note renderers; the CommandDir = gotool.Coordinate copy
-      (286 C1); A6 sourceBenchmarks vs selectedBenchmarks one rule.
-      Delegated: the git stages → performance-evidence 11, environment-normalized-once → 2, the metric set and audit notes → 9; the residue — seven containment spellings, two module resolvers, the vestige set (ExecuteBinary, recordingFromPath, run.Execute, gitblob.State, checkOne, equalExcept's unused parameter), the stretch literals, the writer census, the declared-benchmarks rule, stat's partial pkgMeta — stands after that plan closes.
-      Audit 6 (2026-10-07): narrows (audit 335): loses the writer census
-      (→ the plan's 7.2, whose envelope replaces the projection),
-      checkOne (→ 8.3) and the dead recordingFromPath/equalExcept (the
-      handoff doc corrected: isPewRecording is live); keeps the seven
-      filepath.IsLocal containments + pathWithin ≡ withinRoot,
-      resolveExistingPrefix ≡ moduleBenchDir's walk, the two module
-      resolvers (gc.go's GOMOD read; stat.go's go list -m -json), the
-      degrading CommandDir wrapper, the stretch literals, the declared-
-      benchmarks rule, stat's partial pkgMeta,
-      run.Execute/ExecuteBinary, gitblob.State; gains pewMarked's re-
-      implementation of benchfmt's key-line rule beside rawFormatValid,
-      the chunk join and RecordingKeyNamespace — one raw-line classifier
-      the registry owns — if the plan's 7.2 does not fold it.
+- [ ] 252. pew: retain one semantic rule per surviving
+      path/module/store/progress concern.
+      Active destination: tooling-redesign **5.6**; constituents 7.1 and
+      8.3. Re-census containment and longest-existing-prefix resolution,
+      module metadata, duplicate GC walks, cancellation between destructive
+      units, progress composition, completion-marker/raw-line grammars and
+      actual wrappers/vestiges. Preserve active A/B selection and intentionally
+      wider inactive-tag GC inventory, both using benchmarksInFiles; do not
+      misclassify that difference as a parser defect. Git containment, metric
+      registry, native envelope and producer adoption are already complete.
+      Fold only demonstrated duplicates, preserving distinct refresh/profile/
+      overwrite and guard-missing semantics and independent expectations.
 - [x] 253. pew: the gofresh bump after 239's and 205's releases — the
       go-tool consumer arm (pew/internal/gotool's six importers and its
       divergent dir policy onto gofresh's exported policy with 239's
@@ -2309,35 +1843,21 @@ in their repos.
       reason vocabulary consumed as constants, guidance.Knob.Clause
       consumed (173 follows). The store re-measures once at the bump.
 - [ ] 254. gomutant: the gitfs run-surface asks (field reports
-      6d98001, triaged at 244's open) — the caller's whole-run purity
-      assertion (gofresh WithAssumePure, REQ-purity-directive's
-      "global assertion") on both faces, recorded on the evidence as
-      vouches are; and the estimate event's narrowing ground: when the
-      covering/exempt decision does not engage, the event names why
-      (fewer than two probed batches, the batch whose coverage verdict
-      is absent and on what ground, an all- or none-reaching
-      partition, the schedule minimums) on both faces, with the spec
-      stating that freshness facts never withhold the exemption (reach
-      keys it; instability relabels after scoring). After 246.
-      Rider (derived 2026-09-29 from gomutant fe44f4d): a reuse fact
-      never scores as instability — instability is a verdict flipping
-      between runs of one tree, an unverifiable observed input (a
-      volatile /proc read) is a reuse blocker on the record's layer;
-      conflating them withholds a survivor verdict for a reason that
-      has nothing to do with whether the test flips. REQ-result-
-      exemptions' rule narrows to the flip evidence; the observed input
-      keeps the record machine-local and says so on both faces
-      (gomutant
-      docs/issues/process-identity-reads-have-no-discharge-channel.md's
-      scoring half; its declaration half is gofresh 295).
-      Narrowed (2026-10-06, audit 317): 304's EstimateNoSignal names the group-level no-signal reasons; the residue is the per-candidate partition ground (all- or none-reaching), the whole-run purity assertion, the reuse-vs-instability rider.
+      on purity and attribution) retain distinct authority questions.
+      Active destination: tooling-redesign **6.3**; constituents 6.2 and
+      7.3. Name actual execution flips independently of reuse/volatile-input
+      refusals and placement; partial, failed or unknown advisory work is not
+      stability. Derive root/subject-scoped recorded purity permission and
+      revocation separately. Future negatives need complete locality and
+      influence authority; removed scheduler estimates, batch audits and
+      reach-only exemptions are rejected, not unfinished implementation.
 - [ ] 256. gomutant: the document face's attest gains `--reattest`
-      (the guard the ephemeral face applies since 160: a standing
-      disposition replaced only with the flag, the prior reason kept
-      on the record) and a withdraw form returning the survivor to
-      open with the withdrawal reason recorded — the attestation
-      history reads forward like the document; both faces. After 254.
-      Grown (2026-10-06, audit 317): the ephemeral attestation record's lifecycle — its rows (Files, TestPkg, Run) followed by prune and retarget as 283.C follows the exemption record's (ephemeral-attestation-lifecycle, fired at 282/283).
+      and explicit withdrawal with retained reasons. Active destination:
+      tooling-redesign **6.6**; constituent 9.2. Preserve selected record and
+      both-layer ownership, previews and history on both faces. Extend file/
+      oracle/selection lifecycle to ephemeral attestations without silently
+      re-anchoring dirty/new-file producing provenance or upgrading execution
+      policy. Existing ephemeral replacement does not satisfy findings lifecycle.
 - [x] 257. gomutant: a delta campaign's freshness proofs bounded by
       the delta (field report freshness-proofs-stall-on-large-record-
       sets, 2026-09-19: a `run --changed` over a 292-record document
@@ -2355,44 +1875,19 @@ in their repos.
       is the ready mechanism nothing calls, and subjectViewSet.observed is
       the unbounded union the report names.)
 - [ ] 258. gomutant: the evidence walk's faults stamp their own clause
-      (field report evidence-fault-rendered-as-dirty-provenance,
-      2026-09-20: a fault in the evidence walk — an evidence subject with
-      no view, an unreadable runtime-input manifest — stamps the finding
-      dirty on a non-staged run and returns no reason, so the portable
-      line reads the flag as git drift and `findings` stops at that
-      clause; expected: the fault names the subject and the manifest as
-      the staged run already reports it, and "dirty worktree provenance"
-      means git-visible drift alone) and explain's CLI face (field
-      report explain-has-no-cli-face: a read verb with structured input
-      the CLI can take, the same class as findings — both faces, per
-      the two-surfaces doctrine). After 209.
-      (259: grows — the post-splice divergence arm stamps ONE target-side
-      runtime reason onto every evidence subject beside their untouched
-      manifests (gomutant
-      docs/issues/divergence-reason-stamped-on-every-evidence-subject.md):
-      pb's 243 identical subjects with empty manifests
-      were that stamp; the attributed reason now names the target-side
-      process the stamp copies.)
-      (257: reproduced over pb's archive-only oracle — a non-staged run's
-      scratch residue moved the bracket and the record stamped dirty with
-      no reason, the report's exact shape; stampUnverifiable is now the
-      one evidence-wide stamp the divergence arm and the budget-cut
-      validation share, the per-subject attribution this chunk's.)
-      Audit 286 (2026-09-29): grows — gomutant.gitOutputContext
-      (provenance.go:391) is a bare cmd.Output(): stderr discarded, no
-      ctx.Err() precedence, so a cancelled provenance read surfaces as
-      'commit provenance unavailable … exit status 1' — the
-      dirty/commit layer of
-      evidence-fault-rendered-as-dirty-provenance; the correctness
-      half here (cancellation named, stderr carried); the one-home
-      half rides gofresh 281's non-go containment.
-      Grown (2026-10-06, audit 317): one contained, stderr-carrying git runner below the root over gofresh's Runner.Program (provenance.go's gitOutputContext and gitref's outputContext fold; gitref.Show deleted).
+      rather than dirty git provenance. Active destination: tooling-redesign
+      **5.4**; constituents 5.5 and 8.3. Keep record-wide unavailable evidence
+      separate from each subject's observation and preserve the intentional
+      completed-process union. RuntimeAttribution clearing is already repaired
+      and changed-oracle splicing retired; analysis-unavailable stamping remains
+      the live case. Carry actionable missing-view/manifest and cancellation/
+      stderr causes through current contained readers. Add CLI explain as a
+      projection of the semantic reader with recorded/judged distinctions.
 - [ ] 255. gofresh: a downgrade reason names its invoke site — a
-      "reaches <sink>" reason composed through an interface invoke
-      names the call expression and its operand type in the subject
-      beside the reached sink (REQ-closure-refusal-channels' principle:
-      a reason names its channel), so a consumer tells an
-      over-approximated interface invoke from a real reach. After 206.
+      semantic diagnostic, not a claim of observed execution.
+      Active destination: tooling-redesign **8.3**. Carry call expression, operand
+      type and reached sink so consumers distinguish conservative invoke
+      enumeration from an established path; do not parse prose for authority.
 - [x] 259. gofresh: the runtime-input classification's origin and the
       root input (field report root-directory-input-with-empty-manifest,
       2026-09-20: a pb campaign's records carry `external directory
@@ -2410,29 +1905,16 @@ in their repos.
       process observations carry one, classifyPath's `/` reason names none —
       never a second origin concept.)
 - [ ] 260. gofresh: the iterator's yield bound at the range statement
-      (field report iterator-calls-and-std-invokes-open-the-closure's
-      first half: a range over `strings.SplitSeq` reaches the analyzer's
-      computed-call widening, where closure.md already names the range
-      statement's binding of the yielded function — a conformance fault
-      of the analyzer against its own clause; the report's invoke half
-      — a std-constructed `hash.Hash` behind an interface operand
-      reported outside RTA — rides invoke-targets-narrowed-by-operand's
-      landing). After 240.
-      Audit 285 (2026-09-29): grows to BOTH halves of its own field
-      report — the invoke half (writeMember dispatches hash.Hash.Sum
-      refused outside RTA) fired the arm
-      dispatch-admissions-one-predicate and
-      invoke-targets-narrowed-by-operand named; both docs retarget
-      here (their triggers were circular);
-      closed-value-ladders-one-source and
-      registration-audit-walk-helper-unification re-slot onto
-      unify-carrier-walks alone.
+      and standard interface targets need exact reductions.
+      Active destination: tooling-redesign **7.8**. Reproduce pb's SplitSeq return
+      flow and local SHA-256/Hash.Sum shapes against current SSA/RTA; existing
+      iterator positives preclude the old blanket conformance diagnosis.
+      Preserve operand closedness, target/method-set completeness, promoted
+      body and audit limits. Fold dispatch predicates and value/cell traversal
+      only with their distinct fail-closed policies; uncertain targets keep
+      the full conservative projection.
 
 ## Band I — stipulator under the emergent shape (chartered by audit 196)
-
-      Audit 6 (2026-10-07): an analyzer change bumps ObservationRTA, the
-      constant the outcome inventory now rides (203's split): reported
-      to the evidence-model owner at open. Ahead of the held 202.
 - [x] 261. gofresh: coherence re-audit (the third re-audit band, fired
       by the twelfth landed chunk since 234–237: 239, 244, 247, 231,
       200, 213, 227, 205, 246, 250, 253, 251) — read-only, whole
@@ -2487,85 +1969,37 @@ in their repos.
       Items, gomutant does not), and the two knob→usage grammars;
       184's rule stays the user's. Rides 265's release.
 - [ ] 267. gomutant: the run's reader-facing vocabularies one source on
-      both faces and the tail cadence (262 A2/A3/A4/A7/A8 + C8): the phase
-      and decision-action vocabularies REQ-exec-run-status states become
-      named constants read by every emitter, the renderer, the tally, and
-      both faces (213's stretch treatment applied to the two older
-      vocabularies), pinned against the clause; the CLI's cadence lives
-      through the final merge and the render (rep.stop() precedes
-      ledger.Finish today — a run silent for minutes after its last
-      decision), or the clause states the line's end; the faces read
-      RunTallies (a Measured field) instead of recounting; the bound
-      refusal one implementation (validateRunBounds) both faces; the
-      preparation stretch on every MCP tool that holds the lock; the two
-      row-projection issues (run-faces-assemble-rows-twice,
-      findings-row-projections-one-shape) land here. Before 219.
-      Rider (2026-09-29 replan): the structured face's sheds and carries as structured rows, not prose (gomutant mcp-sheds-and-carries-as-prose) — the MCP face is the agent's, structured by the two-surfaces doctrine; BREAKING wire, declared at the tick.
-      Audit 286 (2026-09-29): grows — analysisVocabulary
-      (grammar.go:200–213) misses gofresh's live diagnostic phases
-      toolchain-unaudited and listing-unmodelled, which reach the
-      operator raw on both faces (gofresh 203 exports the whole phase
-      set; the map's completeness pinned against it); the bound
-      refusal three implementations with divergent wording
-      (validateRunBounds vs the CLI's two copies; the CLI's timeout in
-      no library rule; MCP none); rep.stop() before ledger.Finish
-      (internal/cmd/run.go:375/398 — minutes of silence); only run
-      primes a preparation stretch on MCP; the lifecycle verbs two
-      drivers and two renderers with the CLI lacking the 'prefix
-      matched nothing' answer the MCP schema states; the loading
-      preamble at seven CLI sites + report.go:101 vs MCP's one
-      constant; the liveness ticker twice.
-      Grown (2026-10-06, audit 317): one row projection carrying layer, reason and delta on both faces — run-faces-assemble-rows-twice, findings-row-projections-one-shape and per-layer-counts-one-type land here (their Lands moved from 220); a symbol in both layers counts once per layer.
-      Audit 6 (2026-10-07): gains campaign-silent-past-its-deadline
-      (slotted here from 'awaiting triage' — the stopped-reporting half
-      is this chunk's rep.stop() before ledger.Finish, cmd/run.go:375 vs
-      :398; opens by reproducing the 'not returned within the deadline's
-      close-out' half against REQ-exec-cancellation — fixed here or
-      refuted with the reproduction; pew's mutation-oracle-observation
-      is its twin), the bound refusal's fourth site
-      (mcpserver/server.go:491, a range check with a different
-      predicate), and the explain row in the five-site row assembly.
-- [ ] 268. gomutant: the seven mega-requirements decomposed into
-      per-sub-contract ids under 200's recorded mechanics (262 A10):
-      REQ-result-stale (2,917 words, 12 bindings), REQ-exec-run-status
-      (2,219/56), REQ-exec-ephemeral (1,772/30), REQ-result-layers
-      (1,559/31), REQ-exec-oracle-run (1,252/31), REQ-exec-attribution
-      (1,242/13), REQ-attest-survivor (1,113/17) — one uppercase keyword
-      per paragraph, bindings retargeted to the sub-rule they witness,
-      every cite (wrap-aware) retargeted, byte-preservation by word-diff.
-      After 209.
-      Audit 286 (2026-09-29): grows to TEN requirements —
-      REQ-mut-operators FIRST (1,975 words / 2 bindings; it contains
-      INV-MUT-COMPREHENSIVE and the 35-row catalogue whose ten named
-      tests are unbound), REQ-result-lifecycle (921/14 after 282),
-      REQ-result-export (906/9 after version 14), REQ-mcp-surfaces
-      (714/3), REQ-exec-plan-only (404/3); the charter's figures
-      moved: REQ-result-layers 31→40 bindings, REQ-exec-run-status
-      56→68.
-      Grown (2026-10-06, audit 317): REQ-exec-analysis-budget's proof-unit lifecycle (membership, derivation, release, the serial pass, the lookahead holdings) split out of the budget clause as a run-loop contract; measured: REQ-result-stale 3,056 words/15 bindings, REQ-exec-run-status 2,581/76, REQ-result-lifecycle 1,027, REQ-mcp-surfaces 816/3.
-      Audit 6 (2026-10-07): retargets the INV bindings when it
-      decomposes the requirements (none bound today; grep INV- over
-      .stipulator is empty).
-- [ ] 269. gomutant: one test-stream walk (262 C1) — internal/engine/run.go's
-      eight `go test -json` decoders, each with its own truncated-stream
-      policy (break, ignore, empty, an io.EOF sentinel, false, error) and
-      a kill path walking one buffer four to five times, collapse onto
-      parseTestStream's "read once; a stream that cannot be read has no
-      verdict"; invariants: the crash-truncated attribution
-      (REQ-core-attributed-kills), the build-fail event's precedence
-      (208), the compiler-crash retry. A correctness chunk: after 257.
-      Audit 286 (2026-09-29): count corrected — SEVEN go test -json
-      decoders in internal/engine/run.go (:291, 1204, 1226, 1271,
-      1288, 1303, 1359) with FIVE truncated-stream policies;
-      firstFailingTest and buildRejected read one mutant stream under
-      opposite policies.
-      Grown (2026-10-06, audit 317): REQ-core-attributed-kills' property witness (a generator over outcome streams) — its keystone invariant has two example bindings and no property.
-      Audit 6 (2026-10-07): eight `go test -json` decoders
-      (engine/run.go:291, 1147, 1204, 1226, 1271, 1288, 1303, 1359),
-      four failing open on a truncated stream — buildRejected reads a
-      corrupt stream as an executed verdict (soundness); its 'complete
-      stream' predicate is the completion receipt's raw material:
-      reported to the evidence-model owner at open.
+      both faces. Active destination: tooling-redesign **8.3**;
+      constituents 6.3 and 6.7. Re-census phases/actions, resource refusals,
+      loading/preparation and lifecycle empty-match accounts; use semantic
+      facts with reader-specific rendering. Preserve cumulative cadence
+      through final merge/render and establish historical deadline-overrun
+      cause independently. Project run/findings/explain rows once with routed
+      layer, reason, absent/empty delta and correct physical/merged/commit
+      populations. Publish structured sheds/carries and derivation facts,
+      declaring wire changes; carry them through partial recovery. Retain
+      bounded panic/frame output, exact list omissions and face-neutral terse
+      knob clauses at every depth. A removed scheduler has no vocabulary to
+      rebuild; callback presence grants no execution authority.
+- [ ] 268. gomutant: decompose the live bundled requirements into
+      addressable current subcontracts. Active destination: tooling-redesign
+      **9.4**. Re-census mutation operators/basis, stale-result admission,
+      run status, ephemeral execution, layers, oracle execution, attribution,
+      attestations, lifecycle, export, MCP surfaces, preflight and analysis
+      budget/proof-unit lifecycle. Preserve normative strength and every
+      constituent's bindings/consent/citations through the split, with
+      wrap-aware and normalized-text checks. Historical counts and removed
+      drift carve-outs are not current scope; retain completed INV-to-REQ work
+      and reconcile any remaining evidence-class deficiency explicitly.
+- [ ] 269. gomutant: one test-stream judgment — internal/engine/run.go's
+      live readers need consistent authority. Active destination:
+      tooling-redesign **5.4**. Re-census decoders and consolidate corrupt,
+      truncated, build-rejected, package-crash and test-attributed outcomes,
+      preserving baseline disposition and compiler-crash retry precedence.
+      A malformed stream cannot become a passing verdict or fabricated
+      completion receipt. Add independent generated outcome-stream evidence
+      for attributed kills and bounded crash diagnostics. The removed
+      coverage-schedule producer and its batch-build breaker stay retired.
 - [x] 270. stipulator: the corpus's mega-requirements decomposed into
       per-sub-contract ids on gofresh 200's mechanics (263 A1) —
       REQ-evidence-witness-freshness (one 306-line paragraph, ~20
@@ -2682,38 +2116,17 @@ in their repos.
       Invariants kept: the nil-env-inherits contract, the typed
       environment refusal distinct from the skew refusal, the cancelled
       sample never memoized. The store re-measures once.
-- [ ] 276. pew: the generator surface (264 A11/A12) — 276 tests, zero
-      Fuzz, zero rapid, on the fleet's most generator-shaped surfaces:
-      §9's stream-corruption grammar (REQ-pew-sample-completeness's
-      "detection boundary" is a for-all claim with three example
-      anchors), the ledger encode/decode round trip, the run-conditions
-      grammar, liftOversizedConfig, the --pin derivation ladder;
-      REQ-pew-progress (one binding for seven stretches) and
-      REQ-pew-sha-independence (one) thickened; the eight pins built over
-      a bare gofresh.New() rebuilt through buildEngine (production never
-      builds an engine without WithoutRepositoryVouches). Bound by
-      adjacency, its own commits. After 232.
-      Audit 288 (2026-09-29): grows — premise re-verified after 230
-      (zero Fuzz, zero rapid tree-wide; 230's fixed-seed
-      inverse-property loop on the chunk grammar, chunk_test.go:17, is
-      the pattern the other surfaces follow); the id-citation sweep
-      (eight of 22 requirement ids named by no test —
-      REQ-pew-closure-soundness, -validity-verdict, -derived-state,
-      -sha-independence, -closure-noncall, -mutable-local,
-      -regression-gate, -sample-completeness — several witnessed
-      without the cite); the self-oracle pins
-      (guidance_test.go:62–68/:99–101 against the same memoized
-      document; knobs_test.go:70 derivePin against run.DerivePin); the
-      eight bare-engine pins bypassing buildEngine; the generator
-      VEHICLE stated at open (rapid is not in pew's go.mod — extend
-      the seeded-loop pattern, or a dependency ask).
-      Narrowed (2026-10-06, audit 319): liftOversizedConfig no longer exists (deleted at 230); performance-evidence 1 added the one Fuzz (native fuzzing, no dependency) and 3.2 the long-line regressions; the residue — §9's corruption grammar, the ledger round trip, the conditions grammar, the pin ladder, the eleven uncited ids, the self-oracle pins (guidance_test.go, knobs_test.go), the six bare gofresh.New() engines in tests — stands after that plan closes.
-      Audit 6 (2026-10-07): narrows (audit 335): loses the ledger round
-      trip (→ the plan's 7.3); the store-side fuzz is the plan's 3;
-      counts updated — fourteen of 28 REQ ids uncited by any test, eight
-      bare gofresh.New engines in tests, the self-oracle guidance/knob
-      pins, §9's stream-corruption grammar and the pin ladder example-
-      only.
+- [ ] 276. pew: complete independent generated assurance over the
+      current producer and record surfaces. Active destination:
+      tooling-redesign **9.3**; constituents 7.8 and 9.1. Extend existing
+      native-envelope, corruption, comparison, profile and A/B generators
+      with independent stream/conditions/topology/policy and pin-ladder
+      expectations; retain actual process terminal and asymmetric diagnostic
+      controls. Native producer-premise evidence already landed. Re-census
+      binding gaps, self-oracles and production-engine construction rather
+      than reuse old counts. Exercise completed cold/warm/discarded facts
+      separately from budget availability. Exact campaign scopes remain 366's
+      ledger and require explicit authorization, not a dependency bump.
 - [x] 277. gomutant: a delta run's preparation scales with the delta
       (pb's second field report at 257's close: over a 308-record document a one-target and
       a 73-target `--changed` run spend the same first quarter hour — the
@@ -2748,7 +2161,7 @@ in their repos.
       277 in the lane; the twelfth landed chunk since Band R3.
 - [x] 283. gomutant: Store.Update returns the layer it routed each
       record to (gomutant
-      docs/issues/store-update-returns-its-routing.md, filed at 282's
+      recovery: `git log --all -- docs/issues/store-update-returns-its-routing.md`, filed at 282's
       banked-line review) — the write's
       routing the one source the ledger, the tallies and Finish read,
       the post-write re-classification through the store's predicate
@@ -2881,7 +2294,7 @@ in their repos.
       gofresh.NewToolchainProvenance; the MCP server holds one
       gotool.Sampler and one runtimeinput.Roots per served operation
       (never per process —
-      docs/issues/mcp-server-holds-one-toolchain-sampler-per-process.md
+      recovery: `git log --all -- docs/issues/mcp-server-holds-one-toolchain-sampler-per-process.md`
       lands here) and passes the memo on every ProducerIngest; any
       series parse of its own folds onto
       gotool.LanguageSeries/ParseGoVersion.
@@ -2997,49 +2410,30 @@ in their repos.
       coverage.go:727 looks behind it — a per-row class set beside the
       reported bucket, no new concept.
 - [ ] 294. gomutant: the external-oracle mode (gomutant docs/issues/
-      external-oracle-for-tagged-and-subprocess-targets.md — derived
-      2026-09-29: the trigger the 2026-09-07 deferral named, a
-      consumer's request to measure the bounded leg, is wisp's own
-      report of 2026-09-05; the interim bound 163 landed states the
-      cap, the measurement is `--oracle-cmd` per tag set or package
-      with the mutated tree materialized and a pass/fail read; the
-      materialized-mutation half for subprocess oracles rides it).
-      Last of gomutant's tail; doc deletes at close.
+      external-oracle-for-tagged-and-subprocess-targets.md).
+      Active destination: tooling-redesign **5.4**. Settle the actual external
+      capability model before implementation: mutated artifact identity,
+      complete contributors, baseline symmetry, terminal/support authority
+      and attributable outcomes. Browser and nested-compiler shapes must
+      demonstrably read the mutant; whole host oracles and parent-profile
+      absence do not establish that. Preserve the existing unreached bound.
 - [ ] 295. gofresh: a declared surface for the ephemeral
-      process-identity input class (gomutant
-      docs/issues/process-identity-reads-have-no-discharge-channel.md's
-      declaration half —
-      derived 2026-09-29: a liveness read of `/proc/<pid>/stat` is
-      verdict-bearing, so no classification carve-out is sound; the
-      sound shape is the caller's assertion carried for exactly that
-      path class, REQ-inputs-volatile-os-roots gaining the declaration
-      as bracket-path carries tree paths, gomutant passing it at its
-      next bump — the alternative, a whole-symbol purity directive,
-      over-asserts, which the refusal-channel doctrine forbids). After
-      243; a release.
-      Audit 285 (2026-09-29): UNPINNED from 243 — an additive
-      declaration on REQ-inputs-volatile-os-roots depends on no
-      dead-surface sweep; slotted after 191 in the release cluster
-      (gomutant's process-identity reads stay unverifiable until it
-      lands).
-      Audit 6 (2026-10-07): a caller assertion for process-identity
-      reads is the assertion lane REQ-inputs-outcome-method and REQ-
-      fresh-evidence-support now govern: holds behind the evidence-model
-      plan's outcome capability (its chunk 5) and is re-derived under
-      that model — its bracket-path-like declaration shape reported to
-      the owner before implementing.
+      process-identity input class. Active destination: tooling-redesign
+      **7.3**. Derive exact assertion scope, authority home, provenance and
+      revocation under native evidence support before adding a form. A lock
+      holder's start time can change behavior; keep volatile-input refusal
+      outside the explicit permission, and never substitute static purity,
+      process-wide trust or an automatic liveness carve-out. Release shared
+      changes before consumers; reuse refusal is separately not flip evidence.
 - [ ] 296. gomutant: an unstable test quarantined per test (gomutant
-      docs/issues/unstable-test-quarantine.md — derived 2026-09-29: a
-      per-test exclusion with a stated cap on the run surface and in
-      the document is the narrowing class the 2026-08-31 ruling
-      accepted for the survivor oracle (option b, chunk 137), and the
-      alternative degrades every verdict in the group for one test's
-      defect; the test is named with its flip evidence on every face,
-      the exclusion is a counted coverage cap, the consumer's
-      obligation to fix the test stays). After 254; doc deletes at
-      close.
+      docs/issues/unstable-test-quarantine.md) cannot silently weaken the
+      claimed oracle. Active destination: tooling-redesign **6.3**. Name
+      actual flipping tests and affected scope, preserving confirmation,
+      complete-oracle fallback and partial/unknown advisory distinctions.
+      Any explicit quarantine changes oracle identity and requires separate
+      whole remeasurement; a stated cap or test-name match grants no carry.
 - [x] 297. gofresh: the dst-selection walk for the toolchain-audit key
-      (gofresh docs/issues/walk-dst-selection-for-audit-key.md, whose
+      (Gofresh recovery: `git log --all -- docs/issues/walk-dst-selection-for-audit-key.md`, whose
       trigger fired 2026-09-29 — the field report
       dst-selection-walk-trigger-fired-tugboat, with the admission
       rationale maintained in closure/toolchainaudit.go (recover with
@@ -3091,8 +2485,8 @@ in their repos.
       seeding-walk-unreached-routes folds here (its trigger fired at
       272.F's staticCallees).
       Rider (2026-10-04): testing/quick.Check recognized as a direct
-      property driver (stipulator docs/issues/
-      testing-quick-property-driver.md — Weaver's field report; the
+      property driver (Stipulator recovery:
+      `git log --all -- docs/issues/testing-quick-property-driver.md` — Weaver's field report; the
       derivation at open: Check and CheckEqual, the callback's
       quantification, Config.Rand against the time seed — the
       runtime-seeded freshness class every other driver carries; an
@@ -3122,8 +2516,9 @@ in their repos.
       parenthetical says 266 owns the document half, and 266 landed
       without them): the default-spelling rules — a knob's derived
       default spelled in prose, the zero-default lint over the
-      document (guidance-lint-zero-default-spelling,
-      coverage-lint-default-on-zero-default-flag), the prints-default
+      document (Gofresh recovery:
+      `git log --all -- docs/issues/guidance-lint-zero-default-spelling.md`;
+      `git log --all -- docs/issues/coverage-lint-default-on-zero-default-flag.md`), the prints-default
       rule as a NAME-KEYED table gofresh can host (the pflag-typed
       switch refused on the dependency boundary: gofresh carries no
       pflag; Knob.Usage already implements pflag's grammar as a string
@@ -3150,22 +2545,18 @@ in their repos.
       tree after the suite). Directly after 283, before any chunk
       whose probes read the shared tree.
 - [ ] 302. gomutant: a findings record keyed by (symbol, selection)
-      (gomutant docs/issues/findings-records-keyed-by-symbol-alone.md,
-      with serve-path-posture-keying judged at open). Derive the resolved
-      selection identity before choosing its encoding; ambient inputs are
-      not equivalent to an empty explicit declaration. Preserve distinct
-      measurements across both store layers, selection-scoped serving,
-      extension and splice, filters, reconciliation, prune, retarget and
-      disposition ownership. A survivor under one selection may name a
-      killer from another without replacing either measurement. Amend
-      REQ-result-record and the table grammar; choose a version after the
-      live document version. Reconcile 209's legacy-floor obligation with
-      actual persisted documents and preserve duplicate-key refusal. The
-      already-adopted runner/version/roots forms are not work to repeat;
-      baseline durability is 356. Preserve complete native bindings and
-      applicability evidence through the format move. Measure the scoped
-      self-campaign only after sound coverage admission and the new format
-      are installed; before 366's multi-selection campaign reconciliation.
+      (gomutant docs/issues/findings-records-keyed-by-symbol-alone.md).
+      Active destination: tooling-redesign **6.6**; constituents 6.5, 9.2
+      and 9.3. Derive complete resolved selection identity, preserving
+      omitted/explicit-empty differences. Keep measurements and dispositions
+      across both layers, filters, reconciliation, serve/extension, prune and
+      retarget; a cross-selection killer reference replaces neither record.
+      Current document version is 16, not a reserved 14-to-15 transition.
+      Decide actual historical readability, duplicate-key controls and native
+      compatibility from live formats; policies 1/2 and changed oracle evidence
+      cannot grant spliced reuse. Baseline durability remains 356's and the
+      original self-campaign population requires explicit authorization after
+      selection coexistence and recovery, never cheaper substitute oracles.
 - [x] 303. gofresh: a build selection whose tags constrain no
       standard-library file is admitted with the base selection's
       audit (gofresh selection-with-no-standard-library-delta-unwalked,
@@ -3400,37 +2791,22 @@ in their repos.
       temp directory leaves it untouched; the log under the state home
       carries the exit line; the instructions name the path.
 - [ ] 313. gomutant: the repo declares its own facts — `.gomutant/policy.json`
-      beside the findings document, tracked, carrying the knobs that are
-      repo facts and re-passed identically on every run today: bracket
-      paths, scratch namespaces, build tags and toolchain. Flags extend
-      the file and never narrow it (the vouch file's rule); vouches stay
-      in the tree root's `vouches` file (gofresh's contract); host and
-      operator facts (jobs, budgets, timeouts, memory) stay knobs with
-      derived defaults. Both faces read the file at preparation (its
-      shape joins REQ-exec-preparation's declaration stage; a malformed
-      file refuses before the load); the served inventory names the
-      declared set; the guidance states each knob's class. A design
-      chunk: the knob classification is its design, finished at its
-      open (scratchpad design-gomutant-ux.md). Directly after 312.
-      Grown (2026-10-06, audit 317): the design settles two gaps — bracket paths outside the tree are host facts, not repo facts; 'flags extend, never narrow' is undefined for a selection (tags, toolchain). Slotted after 324 (soundness first: 302 turns integration kills into survivors, 187 is a live MUST breach; the user's 2026-10-05 slot named priority, not a binding position).
-      Audit 6 (2026-10-07): loses campaign-silent-past-its-deadline (→
-      267, whose mechanism it is; policy.json touches no reporting).
+      is a rejected omnibus proposal, not a required file. Active destination:
+      tooling-redesign **7.3**. Classify each standing declaration by owner,
+      root/subject scope, precedence, default and consequence. Selection
+      overrides are not union; external bracket coordinates and operator
+      budgets are not repository facts. Retain one justified trust home,
+      explicit revocation, preparation-time refusal and truthful inventory
+      on both faces without silently spreading server defaults across roots.
 - [ ] 314. gofresh: the analysis pass's program retention bounded
-      (docs/issues/cold-analysis-pass-program-retention.md — measured at
-      gomutant 308's open: one target of gomutant's derived campaign,
-      796 subjects over 5 oracle packages, 0.54 GB warm and 3.47 GB cold
-      at the parent's high-water mark, the cold pass holding every
-      program it loaded for its life inside the proof pass; the 311
-      campaign's 8.4 GB is the same shape at scale). The pass's live set
-      bounded by its current subject's need — programs released per
-      package group as 305's discharge does, or the pass partitioned per
-      package — the cost model stated in the clause with the measured
-      anchor; a release, after 313 in the lane; consumers read it at
-      their bumps.
-      Narrowed (2026-10-06, audit 316): program retention alone — the ceiling's own-set derivation and the children's budget are 326's (a release before stipulator 290.2b/322 and gomutant 214).
-      Audit 6 (2026-10-07): loses children-budget-bounded-by-available
-      (→ 240: the own-set derivation and the budget are 326's, landed);
-      stands as program retention, held by the evidence-model owner.
+      only after causal ownership attribution. Active destination:
+      tooling-redesign **7.7**. Compare current cold/warm phase-local peaks
+      and retained RSS over the same completed subjects/verdicts; completed
+      observability groups, empty roots and discharge programs already release.
+      Do not rebuild that mechanism from historical HWM figures. Attribute
+      vfork/persistent shared-page sums against actual kernel ownership before
+      changing resident arithmetic; equal counters or a minimum sample are
+      not proof. Resource-control contracts remain distinct at 7.4/9.2.
 - [x] 315. gofresh: the toolchain-source audit's second half — the walk
       the machine can do (310's charter, deferred at 310's open to its
       own measurement; a release). The content key names the keys that
@@ -3539,30 +2915,16 @@ in their repos.
       go/types fix. Directly after 327.
 
 - [ ] 330. cross-repo (godst + gofresh): the test log carries the
-      operation's caller frame — protodb's campaign classifies `external
-      directory input: /` in every package with an empty input list
-      (gofresh docs/issues/root-directory-input-with-empty-manifest.md):
-      an open of a directory is an observed input under the log's
-      vocabulary (open, stat, chdir — no read), so a directory opened
-      for a sync and one listed are indistinguishable and the
-      classification stands fail-closed; the one fact that separates
-      them is the CALL, which only the toolchain can log. godst's test
-      log gains the operation's caller frame (the first frame outside
-      the runtime and the os/syscall packages: package path, function,
-      file:line) on every open/stat/chdir line as a stated extension of
-      the log's grammar; gofresh's parser reads it, the refusal's
-      attribution names it (`open "/" from <pkg>.<func> at <file:line>`
-      — the attribution limb, never the clause; the attribution
-      checker's grammar gains the frame form with its split pins), and a
-      godst build without the frame parses as today. The grammar is a
-      godst release consumed by a gofresh release (the listing + the
-      walk), measured over protodb's campaign at close. After 314.
-
-
-      Audit 6 (2026-10-07): unpinned from 314 (the log-frame grammar
-      does not depend on program retention); the test log is the
-      completed observation stream — reported to the evidence-model
-      owner before implementing (after their plan's chunk 5.2).
+      operation's caller frame as diagnostic provenance. Active destination:
+      tooling-redesign **8.3**; constituent 5.5. Specify an optional log
+      extension with package/function/file/line and its attribution grammar,
+      preserving unextended harnesses and owning cancellation/completion
+      boundaries. Release godst, then Gofresh's parser/audit, then consumers.
+      Caller frames never authorize ignoring an observed directory input;
+      open-for-sync and open-for-listing remain indistinguishable by operation
+      alone. Separate native input attribution from record-wide copied reasons;
+      never infer caller order from sorted manifest neighbours. This work does
+      not wait for 314 and authorizes no Protodb campaign.
 - [x] 331. stipulator: the memory term's estimate attributed and
       bounded to a package's run (the bldc field report
       cold-package-estimate-invocation-timeout — `git log --all --
@@ -3638,8 +3000,9 @@ in their repos.
       owner before implementing' (191, 295 — holds behind their chunk 5,
       102, 175, 260, 330, 240's item (d)); the register: children-budget
       → 240, gotool-carries-no-env-drop deleted (landed at 327),
-      coverage-lint-default-on-zero-default-flag merged into guidance-
-      lint-zero-default-spelling, the five 300 docs KEPT (a filed
+      the merged default-spelling filing is recoverable in Gofresh via
+      `git log --all -- docs/issues/guidance-lint-zero-default-spelling.md`;
+      the five 300 docs were kept at that audit (a filed
       deferral lives until its Lands fires — the consumer bumps carry
       them as riders; D6 refused in part), harness-admission-families →
       204, prints-default-one-home's pflag-rendering rider; D1–D5
@@ -3837,28 +3200,20 @@ in their repos.
 - [x] 319. pew: the fifth re-audit band's pew audit (as 316); closes the
       band with the cross-repo lane re-sequenced.
       Dispositioned 2026-10-06 — BAND R5 CLOSED: twelve coherence findings, seven consolidation candidates, the queue walked — 291, 174, 127, 15 and 177 dissolved into pew's performance-evidence plan (the handoff doc carries their riders), 252, 232 and 276 narrowed to residues after that plan closes, 320 chartered (the residual bump), A3's circular remedy (the train's 230 anchor) handed to that plan's chunk 3, A5's gomutant half filed. The cross-repo lane is in the order sentence; the audit count restarts at zero.
-- [ ] 320. pew: the residual bump (audit 319): the gofresh release
-      pew's performance-evidence chunk 2 predates — 292's clause re-key,
-      297's dst walk, 300's guidance lint with its pew half (the five
-      derived defaults 275 spelled in prose, which the lint must see)
-      — taken after that plan closes, before 252r/232r/276r.
-
-
-      Audit 6 (2026-10-07): narrows (audit 335): the evidence-model
-      plan's 6.2/6.3 bump pew past v0.111 (their adapter needs 5.4's
-      release), absorbing 292's re-key and @41; what remains — the bump
-      past the gofresh releases that plan does not take (315; the post-
-      plan 191/295/102), 300's lint pew half (the five prose-spelled
-      defaults; served-knob-strings-judged-by-consumer-grammars' pew arm
-      — handed to the plan's 12.2 through the handoff doc, else here),
-      and a resident ceiling: pew installs none (resident.InstallCeiling
-      at every other tool's preamble; pew's typed loads are the same
-      cold-analysis working set — the measured child's environment
-      unchanged). After the plan closes, first.
+- [ ] 320. pew: adopt only shared capabilities and projections
+      actually unconsumed by the live caller. Active destination:
+      tooling-redesign **5.6**; constituents 7.4 and 8.3. Current Pew already
+      pins v0.117.2 and has Session/native-binary, retained-artifact, query,
+      profile and A/B adoption plus shared Coverage lint. Remove remaining
+      zeroDefault/cliUsage/firstClause copies with independent pflag/literal
+      controls; adopt LongHelp's missing pointer. Reconcile remaining parent
+      resident/resource controls without changing the measured environment.
+      Future released capabilities require explicit adoption and compatibility
+      judgment, not a blanket repetition of completed migrations.
 - [x] 311. gomutant: the observation-proof pass per group — the vertical
       (the user's ruling 2026-10-04: the unit loop's deviations are the
       source of most of the fleet's problems and take priority; gomutant
-      docs/issues/observed-union-memory-slicing.md, its measured trigger
+      recovery: `git log --all -- docs/issues/observed-union-memory-slicing.md`, its measured trigger
       retired for the principle). Today the derived oracle's proof pass
       (`subjectViewSet.observed` → gofresh's CaptureObservedBatch, the
       "prove" phase) runs over the WHOLE union under one Hasher per
@@ -3923,9 +3278,10 @@ in their repos.
       provenance probe spawns outside the owned boundary
       (REQ-policy-cancellation's "every child process"). Code, with the
       identity table's claim made true or the omission stated.
-- [x] 223. stipulator: one witness pipeline (stipulator docs/issues/
-      two-completion-mechanisms.md, publish-refusal-ladders.md,
-      executor-diagnostics-trio.md) — the selective runner's 592-line
+- [x] 223. stipulator: one witness pipeline (Stipulator recovery:
+      `git log --all -- docs/issues/two-completion-mechanisms.md`,
+      `git log --all -- docs/issues/publish-refusal-ladders.md`,
+      `git log --all -- docs/issues/executor-diagnostics-trio.md`) — the selective runner's 592-line
       runWitnesses and the health-judged recorder (Derive, covered,
       invocationCompleted, publishRemaining, publishGroup) are two
       implementations of one spec object, which REQ-evidence-freshness-
@@ -3953,90 +3309,29 @@ in their repos.
       canonical projection); the 2,329-line MCP server split per verb to
       mirror internal/cmd.
 - [ ] 225. stipulator: the small folds — one reason tally behind two
-      caps (ReasonHistogram, blockerRows) and one diagnostic heading;
-      refKey once (compile, bundle).
-      (236: DISSOLVES INTO 227 — the folds and the sweep touch the same
-      files; refKey is THREE (a local closure in compile.resolve shadows
-      the package one with a different case rule); the cap-and-count
-      block duplicated across views.)
-      (263: does NOT dissolve — its refKey trio and reason tallies never
-      landed; grows to "one vocabulary, one composer": bucket words in five
-      tables over two types, the keyword's three spellings (MUST_NOT / MUST
-      NOT / must not — two on wire surfaces), enumWord + eleven hand-rolls,
-      four truncate helpers, per-face prose pairs as surface-parameterized
-      composers; 227's six deferred test-only production entries and two
-      true vestiges (resolverClient.stdin write-only, gitfs.absPath an
-      injection seam with no site); 172 merges in.)
-      Audit 287 (2026-09-29): grows — refKey three ways with
-      compile.go:487 a local closure shadowing the package function
-      and dropping the case folding (two term references differing
-      only in case are one identity at :540 and two at :487 — under
-      the comment citing REQ-model-layout-independence);
-      truncate-with-ellipsis four ways, three wrong (completions.go:36
-      cuts by bytes — invalid UTF-8; server.go:231; progress.go:45 off
-      by one; envreport.go:70 correct); bucket words two tables
-      (coverage.go:55 vs :805, one contradicting views.go:35's
-      comment; views.go:38 hand-lists what proto.go:126 derives);
-      vestiges verified: progress.WithInterval + progress.Option zero
-      production callers (227's 'seam' verdict re-derived),
-      resolutioncache.StoreDir, gitfs.absPath (a seam nothing
-      substitutes), resolverClient.stdin written never read,
-      profile.Dump ×4 zero references, over-exports
-      (verify.Registration.TopLevel, coverage.Policy.Active,
-      views.Scope.Empty, prune.ResolutionCounts,
-      proptest.Corpus.Partition, profile.LineIndex/NewLineIndex);
-      per-stream-color re-slotted here (172 merged into 225).
-      Grown (2026-10-06, audit 318): the post-307 vestiges — test-only exported production entries (ExecuteSelection, ExecuteInvocation, ExecutePolicy, RunWitnesses' dir form, ConservationReport, ServedCount, newResolverClient, telemetryOffEnvFor); packageleg.go's comment naming a field that no longer exists.
+      reader-specific caps and one semantic vocabulary. Active destination:
+      tooling-redesign **5.6**; constituent 8.3. Re-census reference-key case
+      rules, keyword/enum/bucket renderings, Unicode truncation and prose
+      composers before folding; preserve each reader's cap and omitted count.
+      Retire verified write-only/test-only exports, unused seams and stale
+      comments with binding checks, not the old inventory wholesale. Per-stream
+      styling judges each destination's TTY/NO_COLOR/TERM independently and
+      never colors structured output. Existing executor UTF-8 repair stays
+      closed; roster allocation and operation accounts remain distinct.
 - [ ] 226. stipulator: golang.go split by its three subsystems
-      (resolution and shape hashing, witness classification and the
-      seeding walk, generated detection) with the classifier's three
-      body inspections one per-view pass (stipulator docs/issues/
-      witness-verdict-one-body-classifier.md); doc deletes at close.
-      (236: grown — opens with the clause split A4 (REQ-go-owned-processes
-      carries five mechanisms and REQ-go-build-selections two behind one
-      gap each; split so a gap excuses only its own); the module-mode
-      view triple lands here (A5: derive keys module mode, the resolution
-      view does not); C8 the classifier's one pass; C9 the split.)
-      (263: loses its clause-split opening to 270; grows — workspaceMembers /
-      policyMembers one go.work rule (identical refusal text) with
-      depattribution's third ParseWork reader; path containment hand-rolled
-      six times; the subject key joined inline at 45 sites beside
-      witnesscache.Record.Key; the twin semver comparators; folds
-      go-backend-load-path-pairs and reviewed-row-sets-one-pattern.)
-      Audit 287 (2026-09-29): LEADS with the go.work divergence —
-      policyMembers (policy.go:447) refuses a non-host-portable member
-      before the escape test while workspaceMembers (workspace.go:22,
-      the load/witness reader) has no such check, so one go.work is
-      refused at derivation and admitted at verification, and
-      depattribution.go:111 re-parses go.work swallowing both errors
-      (REQ-go-workspace: 'never silently bent'); the third band's
-      'identical refusal text' note was wrong. Grows: path containment
-      EIGHT ways, two wrong (the two strings.Contains(clean, '..')
-      forms at mcpserver/export.go:53 and author/author.go:125 refuse
-      a legitimate ..foo component; golang.go:542's separator-less
-      HasPrefix judges a file under a ..cache directory out of tree;
-      recordapply.go:380's within resolves no symlink); test-variant
-      folding two rules (slice.go:156 by build identity vs seven sites
-      by spelling). Preserve the lexical-then-resolved two-step
-      workspace.go:41+:81 states.
-      The symbol-to-package derivation follows declared package identity;
-      scoped loading does not widen an unparseable symbol to the whole tree.
-      `check.scopeSubjects` splits test names and `records.SymbolMember`
-      names the final member, so neither is a package-boundary parser.
-      Recover the source report in Stipulator with
-      `git log --all -- docs/issues/dotted-package-element-unresolvable.md`.
-      Audit 6 (2026-10-07): golang.go is 1,745 lines (298 added the
-      walk's memory and path); witness-verdict-one-body-classifier and
-      go-backend-load-path-pairs re-derived at open (bodyDrivesRunner is
-      gone — bodyFactsOf is the one body memo; the classifier's passes
-      are two now); the fourth go.work reader (toolchainRequirement's
-      line read) joins the census. Before the evidence-model plan's 6.1
-      opens or after its stipulator migration, never concurrently (D3).
-      337.A surfaced one per-operation query holder: the capture's
-      toolchain sampler lives in its held discovery, its roots memo on
-      the Capture, the probe runners as package vars — one holder minted
-      at CapturePolicy (sampler, roots, runner) puts the operation's
-      queries on one life and one site.
+      (resolution/shape, classification/seeding and generated detection).
+      Active destination: tooling-redesign **7.8**; constituents 5.2d and
+      5.2e. Complete selections, module mode, physical declaration positions,
+      dotted package ownership and cross-view certificates are already closed
+      controls. Consolidate remaining workspace membership/error/path facts,
+      including portable syntax, escaping links and legitimate `..foo` paths;
+      retain distinct go-command requirement parsing and test-variant identity.
+      Share the two per-view body scans while keeping resolved class and
+      cross-view seeding union distinct. Dependency/interface and generic-
+      constraint precision needs separate seeded/deterministic/unresolved
+      proof. Reconcile subject-key and per-operation sampler/roots/runner
+      lifetimes. Reviewed-row lifecycle folds ride package adoption, retaining
+      distinct exclusion/vouch/namespace authority and endpoint observations.
 - [x] 227. stipulator: the vestigial sweep — three build-tagged
       atomicReplace declarations with no call site (the Windows arm
       dragging kernel32), the legacy .stipulator/cache removal on every
@@ -4060,60 +3355,19 @@ in their repos.
       shared machinery out of verb files (writes.go/export.go/schema.go);
       internal/dossier into facts; author.go and verify.go split by job.)
 - [ ] 228. stipulator: the test surface (stipulator docs/issues/
-      cli-test-binary-builds.md) — one built CLI binary per package run
-      behind sync.Once; the byte-identical firstClause helpers one; the
-      temp-module builders across the Go backend's tests one; the
-      comment-stripped freshfixture copies of fixturemod folded onto it;
-      the policyderive workspace fixture made real (its go.work names two
-      members that do not exist, so the derive path never meets a real
-      workspace); doc deletes at close.
-      (236: re-aimed — firstClause folds onto a test-support package,
-      never onto KnobClause (169's review removed that vacuous oracle);
-      the temp-module builders item has dissolved (one survivor);
-      FIRST: neutralAmbient has four copies and one diverges (GOWORK=off,
-      GOCACHE="" in golang's, whose rationale applies to check's
-      fixtures) — a fault, not tidiness; seven go-build sites behind
-      one sync.Once; repoWith, untouchable, compileFiles duplicated.)
-      Audit 287 (2026-09-29): grows — eight go build …/cmd/stipulator
-      sites in seven test files, none referencing newRootCmd
-      (bind/pin/prune/gap/check/interrupt exercised only out of
-      process — the recorded lesson, unlanded); neutralAmbient four
-      copies, two diverging (GOWORK=off, GOCACHE='');
-      firstClause/repoWith/untouchable/compileFiles duplicated;
-      freshfixture duplicates six fixturemod packages; the
-      policyderive/workspace fixture's go.work names members that do
-      not exist and its golden pins them; vacuous oracles
-      (hygiene_test.go:49's len floor over the surface 271 made the
-      MCP's correctness gate; vocabulary_test.go ranging the
-      production tables; the guidance tests taking want from the
-      rendered document; keysoundness_test.go:205/:255); untested arms
-      (progress.Word zero test references;
-      coverage.satisfied/requiredEvidence never see ANALYZER_PROOF or
-      PROPERTY; gapRowCap, ledgerVersion).
-      Grown (2026-10-06, audit 318): freshness_test.go's process-global runtime.GOMAXPROCS(4) where siblings set SpawnBound explicitly; the 287 census unchanged (eight go build sites with no sync.Once, four neutralAmbient copies, firstClause/repoWith/untouchable/compileFiles duplicated).
-      (270: grows — witnesscache's TestLoadUnreadableIsEmpty carries a
-      rule-per-arm tamper table that witnesses three sub-contracts at
-      once (REQ-evidence-witness-cache-format-validation,
-      -proof-and-outcomes, -version's refusals); split it into
-      per-sub-id subtests so each witness is separable, and bind the
-      version chain's literal and bump rule — the one gap 270 left —
-      from the split.)
+      cli-test-binary-builds.md). Active destination: tooling-redesign
+      **5.6**; constituent 9.3. Share the eight same-identity CLI builds
+      and reconcile four ambient helpers, preserving isolated fixtures,
+      real process/version tests and mutation-sensitive in-process pins.
+      Re-census workspace fixtures, helper copies, process-global settings,
+      enumeration/self-oracles and coverage/progress/format arms. Separate
+      witness-cache tamper cases by sub-contract and preserve strict history
+      controls. Add exact-field/value-pointer-method structural evidence and
+      a generated driver × spelling × reach body grammar, with independent
+      expected classes/never-serve facts across selected views. Completed
+      guidance grammar removal and source certificates are not repeated work.
 
 ## Band J — pew under the emergent shape (chartered by audit 197)
-      (263: grows — enumeration pins blind to a new member: progress.Word's
-      fallthrough (three of six phases untested), coverage.satisfied /
-      requiredEvidence's fallthrough sampled one cell per kind, the
-      witness-cache key list and the MCP tool names mirrored by hand;
-      premises re-verified: eight go build sites, neutralAmbient four copies
-      diverging on GOWORK=off.)
-
-      Audit 6 (2026-10-07): a generated witness-body grammar: driver set
-      × spelling (selector, dot import, value, method value) × reach
-      (direct, helper, elsewhere) — the fixture module holds 43 hand-
-      enumerated tests and two served flakes (testing/quick, the dot
-      import) were found from the field, not by a test; asserting
-      NeverServe only refuses more as drivers are added and a reachable
-      driver never serves.
 - [x] 229. pew: the gofresh bump v0.95.0 → v0.101.0 (recover in Pew with
       `git log --all -- docs/issues/gofresh-corpus-pin-lag.md` and
       `git log --all -- docs/issues/serve-proven-blocked-by-benchmark-loop.md`)
@@ -4155,58 +3409,19 @@ in their repos.
       context threading REQ-pew-interruption requires at the eleven
       Background/exec.Command sites (229 threaded ctx into gofresh's
       forms with a locally minted Background); the sweep is 252.)
-- [ ] 232. pew: the spec chunk — §11's "never by shelling to a git
-      binary" and "the only subprocesses are the Go toolchain" against
-      ab's seven git invocations (go-git cannot create linked worktrees:
-      ab requires a git binary, stated, with the install story); the
-      contradicting format-1 sentence deleted; --explain's stream stated
-      (stderr) and unified; the reader-injected pew-format-invalid key
-      stated or renamed out of the pew- namespace; REQ-pew-derived-state
-      given a two-item payload list so its shortfall is a clause gap
-      (pew docs/issues/derived-state-recompute-invariance-witness.md's
-      rationale predates stipulator's clause claims) — the first case for
-      spec-wide-requirement-forming; re-consented.
-      (237: grown — A6 §5's mandatory field set is a twelve-key literal
-      the table states only by prose: a mandatory/omittable column
-      (251 derives the code from one registry); A9 the strategy-class
-      admission is co-owned with gofresh's verdict ladder — name the
-      engine as the class's origin, pew's rung the pre-comparison
-      projection.)
-      Audit 288 (2026-09-29): grows — three format sentences under one
-      rule (spec.md:630 'Format-2 recordings are checked through the
-      ordinary fingerprint path' false since 230; :183 format-1's
-      canonical incomplete disposition describes a shape no reader
-      interprets; :110 correct); a validity? column in §5's table (the
-      one registry projection not derived — 'validity key' is prose at
-      :98/:102 and the rung a hand-written compare) that 174's
-      admission reads; a format bump announces its re-class (§10.1
-      already separates 'everything stale (format)' from 'nothing
-      recorded'; the same duty across a version bump); §11's
-      subprocess list gains go list -m -json; the declared-benchmarks
-      rule stated once (gc's two enumerations); 264's A4 as one
-      sentence naming ab's disagreement-only rule beside §10.1's
-      non-empty-equal rule (not one predicate); the recorded items
-      stand (§11's git-binary sentence, --explain's stream, the
-      reader-injected pew-format-invalid key, REQ-pew-derived-state's
-      payload list, §§1–12 ids, the purpose column).
-      Delegated: the format sentences → performance-evidence 3, the validity column and strategy class's origin → 8, §11's git sentence and subprocess list → 11, the purpose-column doc → 12.2; the residue — `--explain`'s stream, the `pew-format-invalid` key, REQ-pew-derived-state's payload list, the REQ home rule — stands after that plan closes.
+- [ ] 232. pew: reconcile current requirement homes, reader contracts
+      and their documentation. Active destination:
+      tooling-redesign **8.3**; constituent 9.2. Reconcile live README/spec
+      format and native-executor descriptions, subprocess requirements,
+      --explain stream, effective comparison policies and source inventory.
+      Preserve active A/B versus inactive-tag GC semantics. Census genuinely
+      unformed or duplicate requirement homes, including recovery/status
+      pairs, rather than re-forming every paragraph; IDs and a derived-state
+      gap already exist. Reconcile §12's purpose column under the spec's
+      authority and shared help/default projections, preserving distinct
+      validity/diagnostic/format dispositions and normative strength.
 
 ## Band E — design chunks (open with the user)
-      (264: grows — states which files a package's benchmarks are (§4's B,
-      §12's gc "gone from the source") so 252's collapse has its rule; pew's
-      requirements warrant no decomposition chunk — the largest is 393 words,
-      every id bound or gapped; what is missing is ids for §§1–12, filed here.)
-
-      Audit 6 (2026-10-07): grows and narrows (audit 335): loses the
-      pew-format-invalid key (→ the plan's 7); gains the REQ home rule's
-      two new pairs (REQ-pew-recording-recovery restating §5:133–139,
-      REQ-pew-status-completeness restating §12:1107–1110 — one
-      statement, two homes), and §5's three stale format sentences (:657
-      format-2 through the ordinary path vs :139/:1201's exclusion;
-      :189's uninterpreted format-1 disposition; REQ-pew-artifact-
-      format's refused-on-read anchor vs the stale(format) inventory) if
-      the plan's 7.1 declines them; keeps --explain's stream and REQ-
-      pew-derived-state's payload list.
 - [x] 215. gomutant: Tree.Run decomposed (design, with the user) — a
       2,713-line function holding the campaign's state in 52 locals and
       19 closures, three of 380–480 lines; a campaign struct with methods
@@ -4218,43 +3433,19 @@ in their repos.
       (262: MERGED into 245 — dissolved as its own chunk.)
 
 - [ ] 202. gofresh: the dynamic-state tier's home and walk context
-      (design — released to the autonomous order by the user
-      2026-09-29; the design derives under the standing authority and
-      is recorded in the change set's commit) — purity.go and dynamicstate.go implement
-      REQ-closure-shared-dynamic-state in the root package while the
-      spec home and every peer tier live under closure/; four functions
-      of 675–1,760 lines with `audited` hand-threaded through 34
-      signatures and `singleSubject` beside it; the collapse is a walk
-      context carrying the selection's audit, the subject scope, the
-      package, and the explain hooks, and the tier moved under closure/;
-      invariants: the per-package-graph judgment and the fail-closed
-      zero value; unblocks 193's fixpoint, 191's poisoning rule, and the
-      four filed walk unifications.
-      Audit 285 (2026-09-29): grows — the engine verdict discriminates
-      the shared-dynamic-state downgrade by a reason-string prefix
-      (gofresh.go:1279 over purity.go:47's sharedDynamicStatePrefix)
-      while 279 published runtimeinput.RefusalClause as the channel
-      mechanism for the other reason family; the walk context's design
-      names the typed class the ENGINE VERDICT reads, not only the
-      composers 199 folded in.
-      Grown (2026-10-06, audit 316): the analysis-unavailable class is discriminated by a reason-string prefix spelled in two packages (view.go's analysisUnavailablePrefix, closure/observability.go) — 305 widened its use — the typed verdict class covers it with the shared-dynamic-state family, one spelling on closure's side; generated-proto-discharge-single-subject-only (named here: the descriptor's content-invariance binds no execution model); 305's cut fact (observationFacts.cut, the held unavailability) and 5a7f309's per-attestation channel are tier-boundary inputs to the design.
-
-      Triage 281.1 (2026-09-30): two tugboat field reports ride here
-      as design inputs —
-      entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable
-      (828 of 1,098 subjects refused for a handshake nonce no witness
-      observes: an admission for entropy consumed but never observed,
-      judged by what the subject can observe of the reach) and
-      in-module-generated-descriptor-writes-have-no-discharge
-      (protoc-gen-go's init-once descriptor writes in an in-module
-      generated package: the vouch is dependency-only and a directive
-      cannot live in generated code — a generated-package admission
-      keyed on the generator's marker, or the vouch extended in-module
-      under an attestation).
-      Audit 6 (2026-10-07): the typed verdict class planned here widens
-      to every reason family a consumer discriminates (stipulator's
-      reasons.go: post-run validation, observation sealed, observation
-      proof refused). Held by the evidence-model owner.
+      need one semantic owner. Active destination: tooling-redesign **7.1**;
+      constituents 5.2c, 7.8 and 8.3. Carry source-audit, subject/model,
+      package-graph, cut/unavailability and explanation facts coherently,
+      retaining fail-closed defaults and independent transaction state.
+      Typed semantic causes are still absent from gofresh.Verdict: release
+      the minimal authority/cause/culprit boundary at package adoption rather
+      than grow consumer-local prose parsers or claim completed 4.1 supplied
+      every structured ground. Consolidate discharge channels, attestation
+      records and carrier/call/use walks only where their policies agree.
+      TLS entropy irrelevance is unproven; generated own/dependency descriptors
+      already have a single-subject channel. Package-process refinement,
+      carrier memos and immutable objects require separate alias/runtime
+      proofs before widening, never blanket TLS or local-vouch admission.
 - [x] 15. pew: profile capture and attribution as recording
       companions (`../pew/docs/specs/spec.md` §§6.2/10.2; noise floors:
       pew docs/issues/per-arm-noise-floors.md) — explicit CPU/allocation
@@ -4265,19 +3456,15 @@ in their repos.
       floors remain delegated to performance-evidence 12.1, sound on
       package closures; gofresh 102 only refines lineage precision.
 - [ ] 102. gofresh: per-subject sliced closures — Fingerprint gains
-      SlicedClosure (declaration-level hash over the subject's
-      attributed-reachable set; widens to the maximal hash where
-      attribution cannot bound, so slice-equal is never claimable
-      without proven reachability; closure-equal implies
-      slice-equal). Consumer: pew records pew-slice per arm; the
-      noise-floor lineage classifies unreached-declaration commits as
-      layout-only neighbors. Sequenced inside 15.
-      (234: after 175 — both derive a subject-scoped hash over the
-      attributed-reachable set; 175 decides whether that identity is
-      semantic and how it composes into IdentityStrategy.)
-      Audit 6 (2026-10-07): Fingerprint gaining SlicedClosure is
-      fingerprint serialization — reported to the evidence-model owner
-      before implementing, after their plan's chunk 5.3.
+      no field merely because the checkpoint proposed one. Active destination:
+      tooling-redesign **7.8**; constituent 8.2. Reconcile chunk-102-wip
+      08be384's attributed declaration identity with current canonical source,
+      compartments, complete dependencies and maximal fallback. Prove relevant
+      constants/initializers/imports/embeds move the identity and unreached
+      edits do not where bounded; unchanged-tree examples prove no universal.
+      Coordinate with 175 before any native format/application change. No
+      slice implies layout-only harmlessness or authorizes a noise floor;
+      preserve the checkpoint until its obligations are decided.
 - [x] 127. pew: observed-fingerprint recording path — governed by
       `../pew/docs/specs/spec.md` §7.8: each measurement invocation
       owns its observation, and current-tree judgments explicitly
@@ -4290,25 +3477,16 @@ in their repos.
       the original producing fields and support.
       Delegated: → performance-evidence chunk 8, after the shared completion capability/adapters at 5/6 and the canonical fingerprint boundary at 7. Process health alone supplies no outcome support, and old observation assertions are not upgraded by the format cutover.
 
-- [ ] 175. gofresh: subject-scoped closure identity (design — derived
-      2026-09-29: the identity is the canonical member form over the
-      subject's attributed-reachable set, widening to the package's
-      maximal closure wherever attribution cannot bound it, so equality
-      entails that no member the subject can reach changed semantically
-      — the maximal closure's own soundness argument over a proven
-      subset; it composes into IdentityStrategy as one more derivation
-      version; gomutant docs/issues/semantic-closure-in-the-carry-gate.md;
-      chartered by the user's ruling 2026-09-07) — a closure identity that is both semantic
-      (the canonical member form) and scoped to the subject's own
-      reachable closure, so gomutant's carry gate can shed on a semantic
-      move of the subject's closure and carry across sibling edits; the
-      carry gate stays body hash + operator set until it lands; doc
-      deletes at close.
-      Audit 285 (2026-09-29): stands (autonomous since ede9ab0).
-
-      Audit 6 (2026-10-07): a strategy composed into the identity is
-      fingerprint serialization — reported to the evidence-model owner
-      before implementing.
+- [ ] 175. gofresh: derive subject-scoped closure identity under the
+      canonical evidence contract. Active destination:
+      tooling-redesign **7.8**. Establish complete reachable-member identity
+      and maximal fallback, including source/configuration/derivation inputs,
+      before licensing finer applicability. Package-maximal canonical hashes
+      do not certify subject semantics. Keep Gomutant's current unshaped
+      domain and shaped pin distinctions until the new license exists;
+      neither dropping incomparable hashes nor carrying a strategy move may
+      hide a simultaneous real edit. Coordinate 102's checkpoint and native
+      format/binding consequences without automatic historical upgrade.
 - [x] 328. gofresh: admit the source-audited go1.27.1 nodwarf5 selection and its standard selection variants without weakening content-key admission.
   - [x] 328.1 Reproduce the unlisted internal/goexperiment key, compare the dwarf5 selection against the existing audited chain, and inspect the selected constants and their consumers.
   - [x] 328.2 Record the audited source deltas and retain rejection of unlisted content, including selection-specific chains.
@@ -4317,8 +3495,10 @@ in their repos.
 ## Ecosystem-blocked
 
 - [ ] 95. gomutant: MCP Tasks adoption — protocol-level operation
-      identity, polling, result retrieval after a client deadline,
-      explicit cancellation. Opens by re-auditing the prerequisites
-      that blocked it at chunk-41 time (SEP-2663 stable in go-sdk AND
-      a consuming agent client that speaks it); history: `git log
-      --all -- docs/issues/mcp-long-running-runs.md` (gomutant).
+      identity, polling, result retrieval and explicit cancellation remain
+      conditional. Active destination: tooling-redesign **6.7**; trigger
+      census 9.4. Provide bounded recovery independently of Tasks. Adopt the
+      protocol only when the SDK and a consuming agent client actually
+      support it; preserve that observable trigger at final census, not an
+      implementation grant. History in Gomutant: `git log --all --
+      docs/issues/mcp-long-running-runs.md`.

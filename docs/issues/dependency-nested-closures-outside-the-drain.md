@@ -1,23 +1,16 @@
-# A dependency package's nested closure is outside the object drain's scan
+# Dependency nested-function values need a precise reachability account
 
-The subject tier's object drain scans a referenced initializer's
-content — a first-party function reached by value, its nested closures
-now included (the value scan walks an anonymous function's body when
-it meets it). A dependency package's function reached the same way is
-refused by the drain's package-class filter before that arm: its
-nested closure's effects are never scanned by the drain, exactly the
-first-party shape the narrowed-dispatch chunk fixed, one package class
-over. Nothing is unsound today — a dependency's content is judged by
-its own persisted facts and the resolution-by-operand route excludes
-the class — but a dependency's closure reached only by reference keeps
-its effects unseen by the subject tier.
+The earlier diagnosis that `addObject` filters dependency functions before
+scanning them is false for the current implementation. In
+`closure/analyzer.go`, it scans a function's SSA value before the standard/
+test-main filter; the cached-dependency arm also scans declaration references
+and function bodies. Dependencies are not wholesale outside this scan.
 
-The fix shape is a design question, not a one-line arm: whether the
-drain should scan dependency bodies at all (the pinned-package facts
-are the dependency tier's judgment, and walking standard bodies is
-deliberately refused), or whether the dependency facts should carry a
-per-function effect summary the drain consults for a referenced
-function. Hoisting the scan above the class filter would walk standard
-bodies the design leaves unwalked.
+The remaining precision question is a nested function value reached only by
+reference through a dependency: identify the exact SSA value, parent/body
+scan and conservative refusal before changing the drain or adding summaries.
+Compare it with the already-covered first-party form and a direct dependency
+call. No current wrong-valid result is established by this filing, and no
+general dependency-body scan should be built on the refuted diagnosis.
 
-Lands: cross-tool train chunk 192
+Lands: docs/plans/tooling-redesign.md 7.8.

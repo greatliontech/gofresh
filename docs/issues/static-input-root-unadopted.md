@@ -3,10 +3,10 @@
 `runtimeinput.WithStaticInputRoot` (runtime-inputs.md: the testlog ingest
 "MUST accept caller-declared static-input roots") is the one acceptance of
 its clause, and across gofresh and its three consumers nothing calls it —
-the static-root guard pairing runs only under the option's own tests. Like
-the dirty inspector, it is a capability awaiting its adopter or a clause to
-retire; deleting the option deletes the clause's acceptance, so it does not
-move without the spec.
+the static-root guard pairing runs only under the option's own tests. Retire
+this unused option and the corresponding clause obligation together in the
+owning implementation slot, with bindings and references reconciled. Repeat
+the four-repository caller inventory before removal. Deleting the option alone
+would contradict the clause; adding a speculative adopter is not the remedy.
 
-Lands: cross-tool train chunk 243 — retire the option and amend the clause
-(derived 2026-09-29: pre-v1, no caller across the four repos).
+Lands: docs/plans/tooling-redesign.md 5.6.

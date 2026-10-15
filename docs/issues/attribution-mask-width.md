@@ -3,8 +3,8 @@
 Every reachability fact of an attributed walk carries one bit per
 subject of the slice (closure/attribution.go's subjectMask, a uint64),
 so a slice holds at most 64 subjects and a package with more is proven
-in several walks over the shared program. The width's cost curve,
-measured over gofresh's own closure package (237 subjects, cold memo):
+in several walks over the shared program. The historical cost curve
+recorded over gofresh's own closure package (237 subjects, cold memo):
 16 subjects per slice 81s, 32 76s, 64 73s, peak RSS flat within five
 percent — each slice re-walks the program, so fewer slices are faster.
 Widening the mask (a two-word or bitset mask) would let a package of
@@ -18,4 +18,8 @@ closure/attribution.go, and the reachability result and seed maps in
 closure/internal/rta — which the compiler names when the mask type
 moves, and the width guard the alias absorbs.
 
-Lands: a measured campaign or check names a package above 64 subjects whose slice count dominates its wall time (no measured hotspot names it today)
+The historical curve does not establish a current bottleneck. Measure the
+same completed workload before widening; preserve attribution and cancellation
+granularity, and do not treat omitted proof work as an improvement.
+
+Lands: docs/plans/tooling-redesign.md 7.7.

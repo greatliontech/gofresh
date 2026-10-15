@@ -1,6 +1,10 @@
 # Adopt native dependency evidence
 
-Lands: docs/plans/tooling-redesign.md 5.2 for Stipulator and 5.4 for Gomutant.
+Lands: docs/plans/tooling-redesign.md 5.2d.
+
+Secondary constituent: 5.4 owns Gomutant's producing/checking adoption.
+Stipulator's completed 5.2b source-certificate work is a retained control,
+not an unimplemented part of this producer migration.
 
 Native fingerprints carry optional `toolchainContent` and `admissionPolicy`
 keys after `buildConfig`. Their omission preserves historical encoding, not
@@ -33,12 +37,12 @@ At each adoption:
   member and key-set guard require its document-version decision at the bump;
   Stipulator's native aliases still need record-name and store-admission
   checks.
-- Stipulator's source-derived resolution certificates have a separate
-  projection and comparison: `resolutioncache.SourceTiers`, `Admits`, and
-  `backends/golang.closureMoved`. Adopt the dependencies of that static claim
-  at all three sites; updating the witness alias alone leaves this path
-  unchanged. Test same-version selected-content changes and historical
-  certificates with missing dependencies independently of witness execution.
+- Stipulator's source-derived resolution certificates now retain their complete
+  selected-view and derivation dependencies. Preserve that separate static
+  claim through `resolutioncache.SourceTiers`, admission and current-source
+  comparison; a witness alias is not its certificate. Same-version selected
+  content and missing historical dependencies remain independently judged,
+  without inventing a witness execution obligation.
 - Account for the public `closure.Closure` fields and `SetAnalysisScope`'s
   returned enriched scope where used. No current call site in these remaining
   consumers uses either API. An ordinary call may discard the new return;
@@ -53,6 +57,7 @@ At each adoption:
   consumer still require that consumer's own cleanup; the library's collected
   form does not silently change those lifetimes or other platforms' limits.
 
-The remaining consumer pins stay unchanged until these scoped adoptions. Their
-current binaries do not acquire new native-field support merely because the
-library has a newer release.
+A linked library version alone does not establish end-to-end producing
+adoption. Account for the complete descriptions, actual retained artifact,
+finalization, native checking and publication path together at each consumer;
+do not mark the vertical complete while a degraded legacy adapter remains.

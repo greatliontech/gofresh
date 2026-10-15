@@ -17,5 +17,7 @@ that increasing concurrency will reduce the current critical path. There is
 no obligation to add parallelism in the absence of a measured benefit and an
 established ownership model.
 
-Lands: docs/plans/tooling-redesign.md 7.7 and 9.3 for broader performance and
-final assurance, before any concurrent-fixture scheduling change.
+Lands: docs/plans/tooling-redesign.md 7.7.
+
+Secondary constituent: 9.3 owns final assurance after any justified scheduling
+change; it does not authorize parallelism without the ownership evidence above.

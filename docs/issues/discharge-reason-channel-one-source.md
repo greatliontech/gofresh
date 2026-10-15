@@ -16,4 +16,9 @@ the channel clause spelled once, and a reason naming an unhonored
 channel unrepresentable. (The culprit walk itself is one function,
 `dischargeCulprits`, since the discharge-walk fold.)
 
-Lands: cross-tool train chunk 202 (199 folded into it at audit 234; the reason composers are 202's)
+Lands: docs/plans/tooling-redesign.md 7.1.
+
+REQ-fresh-verdict requires structured causes independently of prose. Carry
+the deciding channel as a semantic fact and render it once; do not establish
+authority by parsing the resulting remedy string. Shared producing adoption
+at 5.2c is a secondary constituent of this boundary.

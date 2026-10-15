@@ -26,6 +26,8 @@ tiers and the reference scan both read. Invariants preserved: the
 pool's attestation-gated leg, the memo's unconditional leg, the
 fail-closed default on every unlisted use.
 
-Lands: with the next audited sync set, or with
-docs/issues/flag-surface-one-table.md's collapse (the same one-table
-shape).
+Lands: docs/plans/tooling-redesign.md 7.8.
+
+Share the traversal without equating the pool's execution-model conditions
+with the carrier-free memo's proof. A common receiver ladder is not a new
+discharge for previously unlisted uses.
