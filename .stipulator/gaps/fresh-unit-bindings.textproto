@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-unit-bindings"
-reason: "The independently closing singleton unit and Pew adoption now enforce roster, binding, sealing and final evidence selection for that form. The package-producing form, remaining consumer adoption and complete invariant evidence across those models remain outstanding; this gap does not reopen the completed singleton vertical."
+reason: "The independently closing singleton and package-process forms share roster, binding, sealing and final evidence selection. Remaining consumer adoption and complete invariant evidence across those models remain outstanding; a native process unit does not own the consumer's package publication group or merge retry evidence."
 content_hash: "b741077139817432356ab421ca292940dea5aa761440c5730007991cffb79774"
 source_hash: "8942ec2cab4cbee7088d7f88cf5deb03a7e5dcbad3299fe05d705eba183ee074"
 lands { manual { condition: "The shared unit boundary and affected consumer verticals pass positive and negative roster/binding, missing/late/conflicting contribution, failed/cancelled close, sibling independence, cut/drift precedence, post-success finalization, publication-failure and historical non-upgrade regressions, with property or analyzer evidence for invariants." } }

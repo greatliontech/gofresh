@@ -109,6 +109,14 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	}
 	t.Run("maximal and nested", func(t *testing.T) {
 		first := sibling(t, parent, cut)
+		fp, err := first.Capture(t.Context(), cut)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := first.Check(t.Context(), fp, cut)
+		if err != nil || verdict.Status != Unverifiable || verdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
+			t.Fatalf("cut was reported as established dependence: %+v %v", verdict, err)
+		}
 		assertCut(t, first)
 		assertCut(t, sibling(t, first, cut))
 	})

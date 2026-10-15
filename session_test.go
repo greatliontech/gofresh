@@ -502,7 +502,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	resumePreparation := sync.OnceFunc(func() { close(resume) })
 	defer resumePreparation()
 	defer pending.Abort()
-	pending.view.beforeOutcomeIssue = func() { close(prepared); <-resume }
+	pending.producing.view.beforeOutcomeIssue = func() { close(prepared); <-resume }
 	registered := make(chan error, 1)
 	go func() {
 		_, err := pending.Register(ctx, bound, ProcessDescription{Identity: "unfinished-preparation"})

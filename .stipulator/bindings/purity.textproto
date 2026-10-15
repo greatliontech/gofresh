@@ -150,3 +150,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "356d8c3788c824857144c19cb385f254d644fd50ba15207a5406967086082107"
 }
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestJudgmentAuthorityAndScope"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "36fc38ce1d99d516dc19b2c5701b597e03d33865338aeebfdacb0148a4d0af73"
+}
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPackageUnitOwnsTheWholeExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6dd878126a538353f78df15491de11bc1cfaef6a36e67d44db3dcdc54aa499ee"
+}

@@ -8,7 +8,7 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | issue | summary | Lands |
 |---|---|---|
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | complete producing adoption and historical non-upgrade; source-certificate dependencies already landed | tooling-redesign 5.2d |
-| [audit-boundary-residue](audit-boundary-residue.md) | remaining package-producing and structured-cause boundary, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2c |
+| [audit-boundary-residue](audit-boundary-residue.md) | adopt shared package-producing and typed-judgment boundaries, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2d |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
 | [resident-walk-counts-a-vfork-child-twice](resident-walk-counts-a-vfork-child-twice.md) | attribute duplicate held-page accounting for vfork and persistent shared mappings; equal counters and double sampling prove no ownership | tooling-redesign 7.7 |
 | [cold-analysis-pass-program-retention](cold-analysis-pass-program-retention.md) | measure the remaining cold working set; completed and rootless proof-group release already exists | tooling-redesign 7.7 |
@@ -30,7 +30,6 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [fixture-tier-parallelism](fixture-tier-parallelism.md) | require measured benefit and explicit shared-state ownership before broader fixture scheduling | tooling-redesign 7.7 |
 | [memo-scope-axes](memo-scope-axes.md) | remaining memo/read/result folds and the unfulfilled per-run standard-digest cost question, without cross-generation sharing | tooling-redesign 7.8 |
 | [attribution-mask-width](attribution-mask-width.md) | measure current slice cost before changing mask width, memory or cancellation granularity | tooling-redesign 7.7 |
-| [first-offender-refusals](first-offender-refusals.md) | exhaustive deterministic unknown-subject refusals are already a canonical obligation | tooling-redesign 5.2c |
 | [net-url-parse-godebug-channel](net-url-parse-godebug-channel.md) | parsing stays conservative until runtime configuration and in-process mutation have sound authority | tooling-redesign 7.8 |
 | [harness-admission-families-one-table](harness-admission-families-one-table.md) | share harness-family classification while preserving observation versus outcome authority | tooling-redesign 7.1 |
 | [dispatch-admissions-one-predicate](dispatch-admissions-one-predicate.md) | consolidate computed/invoke admission routes without assuming an unsafe current verdict | tooling-redesign 7.8 |

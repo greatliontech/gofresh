@@ -431,14 +431,8 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	// preparation — the fold below cannot change the answer. The
 	// refusal names every unknown subject of the batch at once, so a
 	// caller narrows its batch in one step (REQ-fresh-preparation).
-	var unknown []Subject
-	for _, subject := range subjects {
-		if !known[subject] {
-			unknown = append(unknown, subject)
-		}
-	}
-	if len(unknown) > 0 {
-		return observationFacts{}, &UnknownSubjectsError{Subjects: unknown}
+	if err := requireSubjects(subjects, func(s Subject) bool { return known[s] }, SelectedSource); err != nil {
+		return observationFacts{}, err
 	}
 	if viewTestHooks.maximalBatch != nil {
 		viewTestHooks.maximalBatch()
@@ -499,6 +493,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		// degraded judgment and carry none (REQ-closure-refusal-channels).
 		if term := openWorld[subject]; term != "" {
 			maximal.Unverifiable = true
+			maximal.Refusal = closure.OpenWorldRefusal
 			maximal.Reason = closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())
 		}
 		if reason := scan.downgradeReason[subject]; reason != "" {
@@ -510,6 +505,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 				reason += " (reachability unjudged: " + budgetExhausted(e.analysisBudget) + ")"
 			}
 			maximal.Unverifiable = true
+			maximal.Refusal = closure.SharedDynamicStateRefusal
 			maximal.Reason = closure.AttributeSelection(reason, hasher.SelectionAttribution())
 		}
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
@@ -528,6 +524,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			// variant), but no evidence can say WHICH declaration it
 			// vouches for (REQ-purity-directive).
 			maximal.Unverifiable = true
+			maximal.Refusal = closure.AmbiguousSubjectRefusal
 			maximal.Reason = "ambiguous subject identity: " + detail + "; rename one declaration to address either"
 		}
 		if external[subject] {
@@ -576,11 +573,10 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if v.sealed {
 		return Fingerprint{}, ErrViewSealed
 	}
-	cl, ok := v.facts.maximal[subject]
-	if !ok {
-		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return Fingerprint{}, err
 	}
-	return v.fingerprintLocked(subject, cl), nil
+	return v.fingerprintLocked(subject, v.facts.maximal[subject]), nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -596,11 +592,10 @@ func (v *View) SourceFiles() []string {
 func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	files, ok := v.facts.sourceFilesBySubject[subject]
-	if !ok {
-		return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return nil, err
 	}
-	return slices.Clone(files), nil
+	return slices.Clone(v.facts.sourceFilesBySubject[subject]), nil
 }
 
 // TestVariantLedger returns the declaration ledger over subject's package
@@ -614,8 +609,8 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	if _, ok := v.facts.maximal[subject]; !ok {
-		return TestVariantLedger{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return TestVariantLedger{}, err
 	}
 	// Clone, not a shallow struct copy: declarations carry reference-list
 	// slices, and a shallow copy would alias them into the view's internal
@@ -662,8 +657,8 @@ func (v *View) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprin
 func (v *View) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
-	if _, ok := v.facts.maximal[subject]; !ok {
-		return Fingerprint{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return Fingerprint{}, err
 	}
 	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
 		return Fingerprint{}, err
@@ -737,11 +732,10 @@ func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, obser
 	if v.sealed {
 		return Fingerprint{}, ErrViewSealed
 	}
-	cl, exists := v.facts.maximal[subject]
-	if !exists {
-		return Fingerprint{}, errors.New("gofresh: attachment subject is outside the view")
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return Fingerprint{}, err
 	}
-	want := v.fingerprintLocked(subject, cl)
+	want := v.fingerprintLocked(subject, v.facts.maximal[subject])
 	if observed {
 		want = v.observedFingerprintLocked(subject)
 	}
@@ -761,9 +755,6 @@ func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, obser
 // result kind and the caller's context. Under a deferred-close engine the
 // verdict is provisional until the view validates (WithDeferredCheckClose).
 func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	if _, ok := v.facts.maximal[subject]; !ok {
-		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-	}
 	verdicts, err := v.checkBatch(ctx, map[Subject]Fingerprint{subject: recorded}, v.engine != nil && v.engine.deferredCheckClose)
 	if err != nil {
 		return Verdict{}, err
@@ -791,9 +782,6 @@ func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (verdict Verdict, opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
-	if _, ok := v.facts.maximal[subject]; !ok {
-		return Verdict{}, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-	}
 	verdicts, err := v.CheckObservedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
 	if err != nil {
 		return Verdict{}, err
@@ -835,7 +823,7 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	// before the observation window opens: their verdicts never consult runtime
 	// state, so observing for them would only add cost and failure modes.
 	pending := make(map[Subject]Fingerprint, len(recorded))
-	positives := make(map[Subject]bool, len(recorded))
+	positives := make(map[Subject]ObservationAuthority, len(recorded))
 	for subject, rec := range recorded {
 		cl := closures[subject]
 		// The shared evidence ladder (core, compartment, fail-closed
@@ -846,7 +834,7 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 			continue
 		}
 		pending[subject] = rec
-		positives[subject] = compatibleObservationProof(rec, subject) && rec.AdmissionPolicy == cl.AdmissionPolicy && rec.ObservationProof.Observable && runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject))
+		positives[subject] = admittedObservation(rec, subject, cl)
 	}
 	hasRuntimeInputs := false
 	for _, fingerprint := range pending {
@@ -883,11 +871,11 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 		cl := v.facts.maximal[subject]
 		pure := v.purityMatches(rec, subject)
 		ordinary := decideAfterClosure(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure)
-		positive := positives[subject] && rec.RuntimeInputs != ""
+		positive := positives[subject].accepted()
 		if ordinary.Status == Unverifiable && positive && rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) {
 			// A proof cannot cure a manifest refusal, an external directive or
 			// shared dynamic state. Analyze only records it could actually lift.
-			if decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, true).Status == Valid {
+			if decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, positives[subject]).Status == Valid {
 				currentProofs = append(currentProofs, subject)
 			}
 		}
@@ -897,9 +885,15 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	}
 	lifted := make(map[Subject]bool, len(currentProofs))
 	for _, subject := range currentProofs {
-		positives[subject] = v.currentApplicabilityObservable(subject)
-		lifted[subject] = positives[subject]
-		if unavailable != nil && !positives[subject] {
+		lifted[subject] = v.currentApplicabilityObservable(subject)
+		if lifted[subject] {
+			accepted := positives[subject]
+			accepted.CurrentApplicability = true
+			positives[subject] = accepted
+		} else {
+			positives[subject] = ObservationAuthority{}
+		}
+		if unavailable != nil && !lifted[subject] {
 			v.mu.RLock()
 			proof := v.observable[subject]
 			v.mu.RUnlock()
@@ -911,8 +905,7 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 	for subject, rec := range pending {
 		cl := v.facts.maximal[subject]
 		pure := v.purityMatches(rec, subject)
-		positive := positives[subject] && rec.RuntimeInputs != ""
-		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, positive), rec)
+		verdicts[subject] = v.withMovedInputs(ctx, decideAfterClosureObserved(rec, cl, v.facts.guards, runtimeBefore[subject], v.kind, pure, positives[subject]), rec)
 	}
 	finished, err := finish()
 	if err != nil {
@@ -936,19 +929,16 @@ func (v *View) checkObservedBatch(ctx context.Context, recorded map[Subject]Fing
 // It returns each record's closure, so the deciding loops read a
 // validated membership rather than re-indexing the facts.
 func (v *View) prepareRecorded(recorded map[Subject]Fingerprint) (map[Subject]closure.Closure, error) {
+	ordered := orderedRecordedSubjects(recorded)
+	if err := v.validateRecordedBatch(recorded, ordered); err != nil {
+		return nil, err
+	}
+	if err := v.requireMembers(ordered); err != nil {
+		return nil, err
+	}
 	closures := make(map[Subject]closure.Closure, len(recorded))
-	for subject, rec := range recorded {
-		if err := rec.Validate(); err != nil {
-			return nil, err
-		}
-		if rec.ResultKind != v.kind {
-			return nil, fmt.Errorf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", rec.ResultKind, subject.Package, subject.Symbol, v.kind)
-		}
-		maximal, ok := v.facts.maximal[subject]
-		if !ok {
-			return nil, fmt.Errorf("gofresh: subject %s.%s is not in this analysis view", subject.Package, subject.Symbol)
-		}
-		closures[subject] = maximal
+	for _, subject := range ordered {
+		closures[subject] = v.facts.maximal[subject]
 	}
 	return closures, nil
 }
@@ -1018,18 +1008,12 @@ func (v *View) checkBatch(ctx context.Context, recorded map[Subject]Fingerprint,
 	return finish()
 }
 
-func (v *View) purityMatches(recorded Fingerprint, subject Subject) bool {
-	assertion := v.facts.purity[subject]
-	return validPurityAssertion(assertion) && validPurityAssertion(recorded.PurityAssertion)
+func (v *View) purityMatches(recorded Fingerprint, subject Subject) PurityAuthority {
+	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(v.facts.purity[subject])}
 }
 
 func validPurityAssertion(assertion string) bool {
-	switch assertion {
-	case "caller assertion", "source directive", "caller assertion and source directive":
-		return true
-	default:
-		return false
-	}
+	return purityAttribution(assertion) != NoPurity
 }
 
 func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
@@ -1069,9 +1053,16 @@ func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subjec
 	for subject, fingerprint := range recorded {
 		if fingerprint.RuntimeInputs != "" && before[subject] != after[subject] {
 			if verdicts[subject].Status != Stale {
-				verdicts[subject] = v.withMovedInputs(ctx, Verdict{Stale, "runtimeinputs"}, fingerprint)
+				moved, failed := runtimeInputVerdict(fingerprint, after[subject])
+				if !failed {
+					moved = refusal(Stale, RuntimeInputsCause, Changed, "runtimeinputs")
+				}
+				verdicts[subject] = v.withMovedInputs(ctx, moved, fingerprint)
 			}
 		}
+	}
+	for subject, verdict := range verdicts {
+		verdicts[subject] = v.judgmentFor(subject, verdict)
 	}
 	return verdicts, nil
 }
@@ -1248,10 +1239,8 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	for _, subject := range v.subjects {
 		parent[subject] = true
 	}
-	for _, subject := range subjects {
-		if !parent[subject] {
-			return nil, fmt.Errorf("gofresh: sibling subject %s.%s is not in the parent view", subject.Package, subject.Symbol)
-		}
+	if err := requireSubjects(subjects, func(s Subject) bool { return parent[s] }, ParentView); err != nil {
+		return nil, err
 	}
 	unique, requests, packages, err := scopeSubjects(subjects)
 	if err != nil {
@@ -1663,7 +1652,7 @@ func (v *View) evidenceRoot() string {
 // undecodable or moverless manifests — an older recording regenerates either
 // way — and gains "(moved: …)" whenever attribution is derivable.
 func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
-	if verdict.Status != Stale || verdict.Reason != "runtimeinputs" || recorded.RuntimeInputs == "" || v.engine == nil {
+	if verdict.Status != Stale || verdict.Ground.Cause.Kind != RuntimeInputsCause || recorded.RuntimeInputs == "" || v.engine == nil {
 		return verdict
 	}
 	movers, err := movedInputsForView(ctx, v, recorded.RuntimeInputs)
@@ -1760,7 +1749,7 @@ func (v *View) compareObservationContext(ctx context.Context, observation observ
 // subject a budget cut left unjudged in either compared observation.
 func dischargeNeutral(c closure.Closure, cut bool) closure.Closure {
 	if cut {
-		c.Unverifiable, c.Reason = false, ""
+		c.Unverifiable, c.Reason, c.Refusal = false, "", closure.DependenceRefusal
 	}
 	return c
 }

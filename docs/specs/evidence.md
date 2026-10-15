@@ -288,7 +288,7 @@ and declares its successful construction through a snapshot/package-bound
 identity. This is an attributable executor assertion, not binary authentication
 or a proof that an arbitrary compiler followed the description. The execution
 uses that artifact under the runtime description; a compiling go command under
-the latter is not that execution. The form admits one subject and exactly one
+the latter is not that execution. The singleton form admits one subject and exactly one
 contributing process per unit; a second registration refuses. Registration fixes
 the process identity, capture path and observation declarations before execution,
 with an exclusively assigned capture protected through finalization. Malformed
@@ -322,3 +322,54 @@ separately requested, retains producing evidence and returns its checked native
 endpoint and companion ledger only after its own closing validation.
 The result owner retains sample acceptance, actual execution truth, hold-still
 protection through publication and the separate durable-write disposition.
+
+## Package-process production
+
+The freshness unit and the consumer's publication group need not have the same
+membership. A package can have an original execution and several isolation
+attempts, while each stored witness selects just one producing execution. An
+attempt's actual failures remain in the consumer's operation account even when
+another attempt supplies an independently eligible witness. Grouping publication
+does not license unioning their evidence or replacing the original history.
+
+**REQ-fresh-package-unit** (behavior): The built-artifact producing boundary MUST
+also admit one package-test process over a nonempty, explicitly selected subject
+set from one package. The set is fixed before preparation, deduplicated in first
+request order and owned by the unit. Every subject the process executes belongs
+to that set, including subjects for which the consumer does not want a reusable
+record; a result or observation arriving later cannot define the executed set.
+Unknown members refuse as a complete batch before producing work. A declared
+single-subject execution model refuses a larger set; selecting the package form
+does not silently change the session's accepted assertion policy.
+
+One process has one retained-artifact binding, frame, actual environment,
+exclusively assigned capture and explicit terminal disposition. A second
+registration refuses. Its outcome support is prepared over the whole selected
+set and requires every member's admitted inventory, not just members whose
+records the consumer intends to publish. Unsupported inventory preserves
+identity-only evidence rather than treating package isolation or normal
+completion as operation-outcome support. The observation stream has no
+per-subject attribution: each subject's fingerprint retains all identities and
+refusals from that process, alongside its own source/proof and assertion facts.
+A subject's purity override changes neither the process observation's authority
+nor a sibling subject's judgment.
+
+Closing finalizes the capture once and exposes subject-indexed native evidence
+and judgments only after the whole execution's closing validation succeeds.
+The final account retains the declared process and artifact identity, actual
+terminal assertion, and separate observation-completeness and outcome-support
+dispositions. These are neither per-test outcome verdicts nor durable-write
+receipts. Missing registration or terminal disposition, a never-started process,
+failed validation, cancellation or a winning abort exposes no executed subject
+evidence. An ordinarily completed failing test remains compatible with normal
+harness completion; an abnormal process cannot gain supported evidence from an
+earlier passing row or a complete-looking log.
+
+The singleton and package forms share these lifecycle rules. Each retry owns
+another transaction, frame, selected obligations, attachments and closing seal;
+it neither repairs nor absorbs a prior attempt's evidence. Immutable snapshot
+facts may be shared, but completion or failure of one unit does not seal another.
+A source-drift retry requires a newly observed snapshot. Consumer-wide retry
+selection, package publication gates and outcome aggregation remain the result
+owner's responsibilities. No new runtime-manifest or fingerprint encoding is
+implied by the package form.

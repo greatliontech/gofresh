@@ -1792,7 +1792,7 @@ in their repos.
       readability. Coordinate shared vocabulary/cap mechanics with 225.
 - [ ] 249. stipulator: witness, check, coverage and compilation
       orchestration need explicit evaluation ownership.
-      Active destination: tooling-redesign **7.5**; constituents 5.2c,
+      Active destination: tooling-redesign **7.5**; constituents 5.2d,
       5.2e, 5.3, 7.8 and 8.3. Resolve the check/verifyrun dependency cycle
       around one explicit evaluator and non-measuring readers, preserving
       suite health, scoped policy and unknown/deletion limits. Fold live
@@ -1802,7 +1802,7 @@ in their repos.
       quiescence through later errors. Mint executed/resolution cause classes
       at composition and preserve Gofresh-owned causes. Add bounded diagnostic
       timelines and roster/residue allocation while retaining existing UTF-8
-      scrubbing. Package-producing support belongs to 5.2c/d, not automatic
+      scrubbing. Package-producing adoption belongs to 5.2d, not automatic
       isolate-each-once proofs. Bounded export refresh and scoped discovery
       measurements remain separate from valid-current evidence grants.
 - [x] 250. stipulator: the gofresh bump — v0.101.0 → current (three
@@ -3434,13 +3434,12 @@ in their repos.
 
 - [ ] 202. gofresh: the dynamic-state tier's home and walk context
       need one semantic owner. Active destination: tooling-redesign **7.1**;
-      constituents 5.2c, 7.8 and 8.3. Carry source-audit, subject/model,
+      constituents 7.8 and 8.3. Carry source-audit, subject/model,
       package-graph, cut/unavailability and explanation facts coherently,
       retaining fail-closed defaults and independent transaction state.
-      Typed semantic causes are still absent from gofresh.Verdict: release
-      the minimal authority/cause/culprit boundary at package adoption rather
-      than grow consumer-local prose parsers or claim completed 4.1 supplied
-      every structured ground. Consolidate discharge channels, attestation
+      Preserve gofresh.Verdict's typed deciding causes and authority during
+      consumer adoption rather than growing consumer-local prose parsers.
+      Consolidate discharge channels, attestation
       records and carrier/call/use walks only where their policies agree.
       TLS entropy irrelevance is unproven; generated own/dependency descriptors
       already have a single-subject channel. Package-process refinement,

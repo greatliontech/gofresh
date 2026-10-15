@@ -390,3 +390,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "532d3c99abfd6a31c01b915285a37920b00affb3a1b9334ed188541a1dde2c07"
 }
+
+bindings {
+  requirement_id: "REQ-guard-completeness"
+  content_hash: "24dffdef598935c994705e9fa18a173362996b86a195241a3f0dad1fde1eea03"
+  source_hash: "53dd02a0bda4d71f58ea5dde0f0c6282f1d6fe459392f49460b07d30385e50d2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guard.TestCompareFactsRetainsAxisAndMissingEvidence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3bc5f206a21bd109c6122edf31af85582bc8560ec4c37f0fee04293db1aa8dda"
+}

@@ -2,8 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-verdict"
-reason: "The current public verdict mainly carries status and diagnostic prose. The final judgment boundary must also expose semantic causes, scope and accepted authority independently of rendering while preserving the existing test-variant compatibility projection and integrity-bound historic bytes."
-content_hash: "281741b43dee9590bb04c4881496ad8f58408c0ef1fc9ce3f006fe7886c6015d"
-source_hash: "caae99b7897fe55938436aea11b9942d4b7a2796d93aab5f2aee8ef21c2c73d1"
-lands { manual { condition: "The shared final judgment and consuming projections expose typed semantic causes, scope and accepted authority; rendering changes cannot change evidence eligibility, and historical integrity and test-variant compatibility regressions pass." contradicted: true } }
+reason: "The shared judgment now exposes typed deciding causes, subject/result scope and accepted authority independently of diagnostics; targeted probes and diagnostic-independence fuzzing exercise that boundary. Remaining consumer projections and clause-appropriate fleet evidence must adopt that account while preserving the test-variant compatibility projection and integrity-bound historical bytes."
+content_hash: "e151446727da53b1e4491367a9ac47ed015c23a93b1d2ed6d8ba8ba2644832f5"
+source_hash: "c82be28ec42abfe72fc6e0bb4ea57e5b6c06d140ea48fed79fb59973a3d96fc1"
+lands { manual { condition: "The shared final judgment and consuming projections expose typed semantic causes, scope and accepted authority; rendering changes cannot change evidence eligibility, and historical integrity and test-variant compatibility regressions pass." } }
 excuses: GAP_EXCUSE_UNCOVERED

@@ -46,7 +46,7 @@ func TestUnitRefusesScratchDeclarationsBeforePreparation(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "scratch namespace") {
 				t.Fatalf("declaration admitted: %v", err)
 			}
-			if u.execution != nil || u.phase != unitOpen {
+			if u.producing.execution != nil || u.producing.phase != unitOpen {
 				t.Fatal("invalid declaration reached producing preparation")
 			}
 			if _, err := u.Register(t.Context(), bound, ProcessDescription{Identity: "worker", ScratchNamespaces: []runtimeinput.ScratchNamespace{{Dir: ".", Pattern: "valid-*"}}}); err != nil {

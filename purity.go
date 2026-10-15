@@ -41,10 +41,8 @@ func ScanPureDirectives(dir string, env, buildFlags []string, pkgPaths ...string
 }
 
 // sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
-// reason. It is the one discriminator between the downgrade family and
-// ordinary unverifiable dependence on the verdict path: observation
-// evidence may substitute for the latter, never the former, and the
-// prefix is set here alone so the two sites cannot drift.
+// diagnostic. The verdict uses the closure's typed refusal origin, never this
+// spelling, to keep shared state outside the observation lift.
 const sharedDynamicStatePrefix = "package graph shares mutated dynamic state: "
 
 func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {

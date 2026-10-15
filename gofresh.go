@@ -528,29 +528,6 @@ const (
 	Unverifiable Status = "unverifiable"
 )
 
-// UnknownSubjectsError is a view's refusal for subjects the selected
-// source does not declare: every such subject of the batch at once,
-// each once, in request order. At construction it is the preparation
-// refusal (REQ-fresh-preparation); from any post-construction
-// re-observation — Validate, an observed capture, a check window's
-// close — it means a subject of a built view vanished since
-// construction. A caller that recorded subjects narrows its batch by
-// exactly this set.
-type UnknownSubjectsError struct {
-	Subjects []Subject
-}
-
-func (e *UnknownSubjectsError) Error() string {
-	if len(e.Subjects) == 1 {
-		return fmt.Sprintf("gofresh: subject %s.%s not found in selected source", e.Subjects[0].Package, e.Subjects[0].Symbol)
-	}
-	names := make([]string, 0, len(e.Subjects))
-	for _, s := range e.Subjects {
-		names = append(names, s.Package+"."+s.Symbol)
-	}
-	return fmt.Sprintf("gofresh: subjects %s not found in selected source", strings.Join(names, ", "))
-}
-
 // ReasonTestVariants is the stale reason of a compartment-only move:
 // the subject's own closure unchanged, its package's test variants
 // moved. A consumer keying a rule on it reads the constant, never the
@@ -560,10 +537,12 @@ const ReasonTestVariants = "test variants"
 // Verdict is the freshness answer for one subject's fingerprint. Reason names the
 // first failing guard for Stale, or the unverifiable dependence for Unverifiable;
 // its spellings are diagnostics, except ReasonTestVariants, the one a consumer
-// keys a rule on.
+// keys a rule on. Ground carries the semantic cause, scope and accepted authority
+// independently of that diagnostic projection. Verdict remains value-comparable.
 type Verdict struct {
 	Status Status
 	Reason string
+	Ground JudgmentGround
 }
 
 // Engine is immutable analysis configuration. Source, guards, purity directives,
@@ -1223,7 +1202,7 @@ func (e *Engine) guardInputs() []string {
 // observation or assertion; any validity rests on independent applicable
 // evidence or purity (REQ-inputs-absent-asserted). commit/dirty are never consulted
 // (REQ-fresh-commit-independent).
-func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
+func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure PurityAuthority) Verdict {
 	if verdict, failed := recordedEvidenceVerdict(rec, cl); failed {
 		return verdict
 	}
@@ -1242,26 +1221,41 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 // proceed to the surface's own guard tiers.
 func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict, bool) {
 	if rec.MaximalClosure == "" {
-		return Verdict{Stale, "closure"}, true
+		return refusal(Stale, ClosureCause, Missing, "closure"), true
 	}
 	if rec.MaximalClosure == current.Hash && (!rec.recognizedApplicability() || compartmentStale(rec.EffectiveTestVariantClosure(), current.TestVariants)) {
-		return Verdict{Stale, ReasonTestVariants}, true
+		condition := Changed
+		if !rec.recognizedApplicability() {
+			condition = Unsupported
+		} else if rec.EffectiveTestVariantClosure() == "" {
+			condition = Missing
+		} else if current.TestVariants == "" {
+			condition = Unavailable
+		}
+		return refusal(Stale, TestVariantsCause, condition, ReasonTestVariants), true
 	}
 	if rec.MaximalClosure != current.Hash {
-		return Verdict{Stale, "closure"}, true
+		if current.Hash == "" {
+			return refusal(Stale, ClosureCause, Unavailable, "closure"), true
+		}
+		return refusal(Stale, ClosureCause, Changed, "closure"), true
 	}
 	if rec.ToolchainContent != "" && current.ToolchainContent != "" && rec.ToolchainContent != current.ToolchainContent {
-		return Verdict{Stale, "toolchain content"}, true
+		return refusal(Stale, ToolchainContentCause, Changed, "toolchain content"), true
 	}
 	if rec.DynamicStateStrategy != DynamicStateStrategy {
 		// The dynamic-state derivation the record was computed under
 		// moved (or predates the field): its verdict semantics are not
 		// this engine's — re-measure, never serve. The structural twin
 		// of the observation-strategy refusal.
-		return Verdict{Stale, "dynamic-state strategy"}, true
+		condition := Unsupported
+		if rec.DynamicStateStrategy == "" {
+			condition = Missing
+		}
+		return refusal(Stale, DynamicStateStrategyCause, condition, "dynamic-state strategy"), true
 	}
 	if rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) && rec.ClosureStrategy != ClosureStrategy {
-		return Verdict{Stale, "closure strategy"}, true
+		return closureStrategyVerdict(rec), true
 	}
 	return Verdict{}, false
 }
@@ -1275,16 +1269,20 @@ func compartmentStale(recorded, current string) bool {
 	return recorded == "" || recorded != current
 }
 
-func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure bool) Verdict {
-	return decideAfterClosureObserved(rec, cl, cur, rt, kind, pure, false)
+func decideAfterClosure(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure PurityAuthority) Verdict {
+	return decideAfterClosureObserved(rec, cl, cur, rt, kind, pure, ObservationAuthority{})
 }
 
-func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure, observed bool) Verdict {
+func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinput.State, kind Kind, pure PurityAuthority, observed ObservationAuthority) Verdict {
 	if verdict, failed := decideKnownGuards(rec, cur, rt, kind); failed {
 		return verdict
 	}
 	if rec.ToolchainContent == "" || cl.ToolchainContent == "" {
-		return Verdict{Unverifiable, "toolchain content evidence unavailable"}
+		condition := Unavailable
+		if rec.ToolchainContent == "" {
+			condition = Missing
+		}
+		return refusal(Unverifiable, ToolchainContentCause, condition, "toolchain content evidence unavailable")
 	}
 	// An external-state declaration withholds reuse whenever the guards hold:
 	// unverifiability by the author's word, immune to purity overrides and
@@ -1292,13 +1290,21 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 	// REQ-external-precedence). A failing guard above still reported stale —
 	// externality never masks guard information.
 	if cl.External {
-		return Verdict{Unverifiable, "external directive"}
+		return refusal(Unverifiable, ExternalDirectiveCause, Refused, "external directive")
+	}
+	accepted := AcceptedAuthority{GuardAgreement: true, RuntimeInputs: rec.RuntimeInputs != ""}
+	answer := func(verdict Verdict) Verdict {
+		if verdict.Status == Valid {
+			accepted.Applicability = rec.InertTestVariantApplicability
+		}
+		verdict.Ground.Accepted = accepted
+		return verdict
 	}
 	// Guards hold. Absent a purity override, an unhashable observed input or an
 	// unverifiable closure dependence makes validity unprovable (REQ-fresh-sound).
-	if !pure {
+	if !pure.accepted() {
 		if rec.RuntimeInputs != "" && rt.Unverifiable {
-			return Verdict{Unverifiable, reasonOr(rt.Reason, "runtime inputs")}
+			return answer(refusal(Unverifiable, RuntimeInputsCause, Refused, reasonOr(rt.Reason, "runtime inputs")))
 		}
 		if cl.Unverifiable {
 			// Completed observation evidence substitutes for
@@ -1308,31 +1314,56 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 			// subject's in-process write is not an input the bracket
 			// can see (REQ-purity-observation-separation,
 			// REQ-closure-shared-dynamic-state).
-			if observed && rec.RuntimeInputs != "" && !strings.HasPrefix(cl.Reason, sharedDynamicStatePrefix) {
-				return Verdict{Valid, ""}
+			if observed.accepted() && rec.RuntimeInputs != "" && cl.Refusal != closure.SharedDynamicStateRefusal {
+				accepted.Observation = observed
+				return answer(Verdict{Status: Valid})
 			}
-			return Verdict{Unverifiable, reasonOr(cl.Reason, "external dependence")}
+			cause := ClosureDependenceCause
+			switch cl.Refusal {
+			case closure.OpenWorldRefusal:
+				cause = OpenWorldCause
+			case closure.SharedDynamicStateRefusal:
+				cause = SharedDynamicStateCause
+			case closure.AmbiguousSubjectRefusal:
+				cause = AmbiguousSubjectCause
+			}
+			return answer(refusal(Unverifiable, cause, Refused, reasonOr(cl.Reason, "external dependence")))
 		}
+	} else if cl.Unverifiable || (rec.RuntimeInputs != "" && rt.Unverifiable) {
+		accepted.Purity = pure
 	}
-	return Verdict{Valid, ""}
+	return answer(Verdict{Status: Valid})
 }
 
 func decideKnownGuards(rec Fingerprint, cur guard.Guards, rt runtimeinput.State, kind Kind) (Verdict, bool) {
+	if verdict, failed := runtimeInputVerdict(rec, rt); failed {
+		return verdict, true
+	}
+	// Environment guards under the kind policy.
+	if mismatch := guard.CompareFacts(rec.Guards, cur, kind); mismatch.Axis != guard.NoAxis {
+		return guardVerdict(mismatch), true
+	}
+	return Verdict{}, false
+}
+
+func runtimeInputVerdict(rec Fingerprint, rt runtimeinput.State) (Verdict, bool) {
 	// A recorded runtime digest without its manifest is a corrupted recording, not
 	// an absence assertion: the digest proves the guard applied, and the missing
 	// manifest makes it unevaluable — Stale, never valid (REQ-guard-completeness).
 	if rec.RuntimeInputs == "" && rec.RuntimeDigest != "" {
-		return Verdict{Stale, "runtimeinputs"}, true
+		return refusal(Stale, RuntimeInputsCause, Missing, "runtimeinputs"), true
 	}
 	// Runtime-input guard, when the recording carries a manifest.
 	if rec.RuntimeInputs != "" {
-		if !rt.OK || rec.RuntimeDigest == "" || rec.RuntimeDigest != rt.Digest {
-			return Verdict{Stale, "runtimeinputs"}, true
+		if !rt.OK {
+			return refusal(Stale, RuntimeInputsCause, Unavailable, "runtimeinputs"), true
 		}
-	}
-	// Environment guards under the kind policy.
-	if mismatch := guard.Compare(rec.Guards, cur, kind); mismatch != "" {
-		return Verdict{Stale, mismatch}, true
+		if rec.RuntimeDigest == "" {
+			return refusal(Stale, RuntimeInputsCause, Missing, "runtimeinputs"), true
+		}
+		if rec.RuntimeDigest != rt.Digest {
+			return refusal(Stale, RuntimeInputsCause, Changed, "runtimeinputs"), true
+		}
 	}
 	return Verdict{}, false
 }

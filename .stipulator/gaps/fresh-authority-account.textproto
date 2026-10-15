@@ -2,8 +2,8 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-authority-account"
-reason: "The singleton boundary and Pew adoption now enforce declared-model applicability and authority preservation for that form. Complete package/fleet adoption, the structured semantic authority account and clause-appropriate invariant evidence remain outstanding; the former first-arm implementation-absence diagnosis is retired."
+reason: "The shared singleton and package-producing boundaries now preserve distinct execution models and typed accepted authority. Remaining consumer adoption and clause-appropriate invariant evidence across the fleet remain outstanding; native package support does not migrate a consumer's execution or publication paths."
 content_hash: "da53bc5e0d1a3139a36a54387d44baee62a1d95ba59767ba21d382613a45610f"
 source_hash: "853a44eb0b2877a8ec6c35f5ba1149145041b3644db340f9b5892ed5824e3a17"
-lands { manual { condition: "tooling-redesign 5.2c establishes the remaining shared package/model boundary and its structured authority account; affected consumer adoption and clause-appropriate positive, negative and historical non-upgrade evidence complete the requirement" } }
+lands { manual { condition: "tooling-redesign 5.2d/5.2e and 5.4 adopt the shared package/model boundary and structured authority account; affected consumer adoption and clause-appropriate positive, negative and historical non-upgrade evidence complete the requirement" } }
 excuses: GAP_EXCUSE_UNCOVERED

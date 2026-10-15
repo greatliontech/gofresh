@@ -58,6 +58,9 @@ func (v *View) CheckObservedInertTestVariantExtension(ctx context.Context, recor
 
 func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
 	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
+		if err == nil {
+			verdict = v.judgmentFor(subject, verdict)
+		}
 		return Fingerprint{}, TestVariantLedger{}, verdict, err
 	}
 	if ctx == nil {
@@ -72,10 +75,14 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 	}
 	cl := closures[subject]
 	if !recorded.recognizedApplicability() || recorded.EffectiveTestVariantClosure() == "" {
-		return refuse(Verdict{Stale, ReasonTestVariants}, nil)
+		condition := Missing
+		if !recorded.recognizedApplicability() {
+			condition = Unsupported
+		}
+		return refuse(refusal(Stale, TestVariantsCause, condition, ReasonTestVariants), nil)
 	}
 	if recorded.ClosureStrategy != ClosureStrategy {
-		return refuse(Verdict{Stale, "closure strategy"}, nil)
+		return refuse(closureStrategyVerdict(recorded), nil)
 	}
 	// The only waived comparison is the effective compartment. Core and
 	// derivations still use the shared ladder, before any ledger judgment.
@@ -84,15 +91,15 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 	if verdict, failed := recordedEvidenceVerdict(candidate, cl); failed {
 		return refuse(verdict, nil)
 	}
-	if mismatch := guard.Compare(recorded.Guards, v.facts.guards, v.kind); mismatch != "" {
-		return refuse(Verdict{Stale, mismatch}, nil)
+	if mismatch := guard.CompareFacts(recorded.Guards, v.facts.guards, v.kind); mismatch.Axis != guard.NoAxis {
+		return refuse(guardVerdict(mismatch), nil)
 	}
 	ledger, err := v.TestVariantLedger(subject)
 	if err != nil {
 		return refuse(Verdict{}, err)
 	}
 	if !DiffTestVariantLedgers(prior, ledger).Inert() {
-		return refuse(Verdict{Stale, ReasonTestVariants}, nil)
+		return refuse(refusal(Stale, TestVariantsCause, Refused, ReasonTestVariants), nil)
 	}
 	var verdict Verdict
 	if observed {

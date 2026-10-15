@@ -20,5 +20,6 @@ Lands: docs/plans/tooling-redesign.md 7.1.
 
 REQ-fresh-verdict requires structured causes independently of prose. Carry
 the deciding channel as a semantic fact and render it once; do not establish
-authority by parsing the resulting remedy string. Shared producing adoption
-at 5.2c is a secondary constituent of this boundary.
+authority by parsing the resulting remedy string. Preserve the native typed
+deciding cause during the remaining channel-level consolidation; consumer
+producing adoption at 5.2d is a secondary constituent of this boundary.

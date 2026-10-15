@@ -202,7 +202,7 @@
       views, earlier-declaration absence, seeding/classifier rules and native
       source/content/admission identities. Refuse malformed whole envelopes and
       re-derive historical incomplete certificates without fabricated execution.
-    - [ ] 5.2c Specify and release the minimal shared package-producing form
+    - [x] 5.2c Specify and release the minimal shared package-producing form
       for the actual contributing subjects and processes. Preserve the existing
       singleton form, independent package closing and separate retry executions;
       reuse immutable preparation facts without merging mutable transactions.
@@ -216,6 +216,10 @@
       publication paths without carrying a degraded legacy adapter as completion.
       Carry reviewed declarations and their withdrawal/narrowing rules through
       those paths without merging assertion, exclusion and namespace authority.
+      Amend the sole-runnable proof rule together with complete executed-subject
+      registration, including non-cacheable runnables and examples. Preserve
+      process-wide observation and separate retry candidates; package publication
+      grouping does not merge producing evidence from distinct executions.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Attribute scoped discovery and certificate cold/warm costs before changing

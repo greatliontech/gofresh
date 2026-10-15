@@ -1,19 +1,22 @@
 # Unclosed mutation and operation boundaries
 
-Lands: docs/plans/tooling-redesign.md 5.2c.
+Lands: docs/plans/tooling-redesign.md 5.2d.
 
 These are distinct obligations, not permission to broaden a repair into a
 second implementation trajectory. Except where explicitly measured below,
 the mechanisms are source-traced and their deciding regressions remain to be
 run. Existing execution-model, assertion and sampling limits remain governing.
 
-The shared `Session`/built-artifact singleton form already exists. Stipulator's
+The shared `Session`/built-artifact singleton and package-process forms exist,
+with typed deciding causes, scope and accepted authority. Stipulator's
 engine constructor uses `gofresh.NewContext`; its physical declaration
 positions, full selection and dotted package identities, and source-resolution
 certificate dependencies have also landed. Those are controls for the remaining
-work, not repairs to repeat. The primary residual is the shared package-producing
-form and structured cause/authority account; secondary constituents below retain
-their own destinations and do not enlarge that form implicitly.
+work, not repairs to repeat. The primary residual is adopting the shared
+package-producing form and complete build/runtime descriptions; secondary
+constituents below retain their own destinations. Each native unit closes one
+execution over its complete subject set; consumer publication groups and retry
+selection remain distinct and cannot union separate attempts' evidence.
 
 ## Shaped mutation materialization and dependencies — 5.4, before shaped assurance
 
@@ -146,9 +149,8 @@ overwrite, applicability refresh and profile attachment semantics.
   same PASS/optional-CR completion marker. Use one recognizer when consolidating
   the producer readers; keep executor success, sample admission and profile
   validity separate. No current disagreement between those grammars is claimed.
-- **5.2c / 7.1:** The shared final judgment still exposes status and prose where
-  the contract requires an authority/cause account. Preserve that obligation at
-  migration rather than growing another consumer-local reason parser. Separately,
+- **5.2d / 5.4 / 7.1:** Adopt the shared typed authority/cause account rather than
+  growing another consumer-local reason parser. Separately,
   `EnvSnapshot.JSON` is mutable beside its parsed values; make the common
   representation immutable before extending its consumer exposure.
 - **9.2:** Pew's older producer prose still describes a compiling go-test driver

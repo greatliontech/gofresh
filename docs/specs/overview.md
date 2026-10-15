@@ -181,6 +181,17 @@ core, or a recording that predates the compartment and fails closed
 record's integrity evidence remain integrity-bound; structured causes do not
 authorize rewriting them inside an existing seal.
 
+The cause identifies the deciding evidence or guard and distinguishes missing
+support, incompatible support and demonstrated drift where the deciding surface
+can establish that distinction. Its scope names the subject and result model.
+The accepted-authority account records only facts that the judgment actually
+admits, with assertion attribution and used discharges retained; a recorded
+assertion is not automatically a currently accepted one. Short-circuit refusal
+does not claim an inventory of unexamined evidence. When closing discovers a
+stronger refusal, its deciding cause replaces the provisional answer; it cannot
+retain positive reuse authority from an answer that no longer stands. Changes
+to diagnostic wording alone do not change these semantics.
+
 **REQ-fresh-sound** (invariant): A subject MUST be reported valid only when every
 applicable guard provably holds over a source closure that is a superset of the
 source able to affect the subject — every gap in the static picture resolved to a
@@ -748,6 +759,16 @@ refusal is one typed value carrying exactly that set, and the same typed value
 names, from any re-observation of a built view — a validation, an observed
 capture, a check window's close — a subject the view held that the source no
 longer declares.
+
+A subject outside a selected view is distinct from a declaration absent in the
+selected source. Both membership refusals carry the complete deduplicated set
+and its truthful scope. Ordered requests preserve first-request order;
+map-backed requests use lexical package and symbol order. Recorded batches
+report every shape failure before considering result-kind mismatches, then
+every kind mismatch before membership. Thus the first refusing preparation
+tier has a complete, deterministic account, with shape-before-kind precedence
+within each record as well. No membership refusal opens a runtime window or
+starts producing proof work.
 
 **REQ-fresh-progress** (behavior): An operation MUST report, through the
 caller's progress sink, each unit of work at the moment it begins — an

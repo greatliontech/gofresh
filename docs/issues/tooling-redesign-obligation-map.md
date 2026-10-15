@@ -22,7 +22,7 @@ Each issue row names its current source file, whose body supplies the source-tra
 basis and remaining deciding obligation. The bold first destination is its exact
 open primary slot; separately named constituents are additional obligations,
 not alternative primaries. Completed slots record preservation controls only.
-The 149 source issues comprise 48 Gofresh, 52 Gomutant, 40 Stipulator and nine
+The 148 source issues comprise 47 Gofresh, 52 Gomutant, 40 Stipulator and nine
 Pew files, excluding each README and this map. Conditional capabilities retain
 their explicit activation conditions through 9.4; a mapping grants no capability
 implementation or measurement by itself.
@@ -47,7 +47,7 @@ fold at implementation carries every constituent obligation forward.
 | gofresh | 191 | A | **7.8** | The runtime-relevance contract is settled; net/url parsing remains refused until process and in-process GODEBUG effects are accounted for. |
 | gofresh | 192 | A | **7.8** | addObject already scans dependency values before filtering; reduce reference-only nested closure reach before choosing summaries. |
 | gofresh | 193 | A | **7.8**; constituent 9.2 | Prove whole reachable-object immutability, external aliases and writes; keep carrier memos, channelz and clause decomposition distinct. |
-| gofresh | 202 | A | **7.1**; constituents 5.2c, 7.8, 8.3 | Carry model/audit/cut and typed cause facts once. Verdict's semantic cause boundary remains absent despite completed singleton work; precision requires separate proof. |
+| gofresh | 202 | A | **7.1**; constituents 7.8, 8.3 | Carry model/audit/cut and typed cause facts once. Preserve the native semantic judgment boundary during wider consolidation; precision requires separate proof. |
 | gofresh | 203 | A | **7.8**; prerequisite 7.7 for cost changes | Preserve completed dependency identities while folding memo mechanics; condition the unfulfilled standard-source digest memo limb of closed 315 on measured cost and immutable-generation ownership. |
 | gofresh | 204 | A | **7.1** | Existing ReceiverMethod ladder stays; consolidate receiver/flag/class-B/harness inventories without merging observable effects and outcome authority. |
 | gofresh | 206 | A | **9.3**; constituents 5.6, 7.7 | Re-census independent fixture/property oracles, API roots, hook ownership and real platform/CI premises; no old count is a fresh inventory. |
@@ -97,7 +97,7 @@ fold at implementation carries every constituent obligation forward.
 | stipulator | 228 | A | **5.6**; constituent 9.3 | Eight CLI build sites, ambient controls, independent body/record generators and exact-method shape evidence. |
 | stipulator | 238 | A | **5.5**; constituents 7.1, 7.8 | Actual loader descendants and policy-scoped explain costs require an owned boundary, not a hook the loader lacks. |
 | stipulator | 248 | R | **8.3**; constituent 9.2 | Reconcile live cap/account/format and decomposition contracts without stale literals or fictitious enforcement. |
-| stipulator | 249 | A | **7.5**; constituents 5.2c, 5.2e, 5.3, 7.8, 8.3 | One explicit evaluation; independent package prefixes, tiers, NoOutcome and typed publication accounts remain visible on errors. |
+| stipulator | 249 | A | **7.5**; constituents 5.2d, 5.2e, 5.3, 7.8, 8.3 | One explicit evaluation; independent package prefixes, tiers, NoOutcome and typed publication accounts remain visible on errors. |
 | stipulator | 345 | R | **5.3**; constituent 7.4 | Ambiguous timeout-looking values/positionals and repetition remain identity-bearing unless their actual role permits discharge. |
 | stipulator | 346 | R | **5.3** | Label/ordinal/multi-successor carry preserves scope or refuses; ordinary retarget's fixed key does not fix supersede. |
 | stipulator | 357 | R | **5.3** | A completed retry package persists before later retry cancellation. |
@@ -121,7 +121,7 @@ README and this reconciliation document itself.
 
 | Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
 |---|---|---|
-| audit-boundary-residue | A; **5.2c**; constituents 5.2d, 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 9.2 | Verdict still lacks semantic cause/authority data. Retain shaped symlink/quoted-replace/probe-name isolation, physical snapshot/cancelled waiter/selection-slice cases, GOFLAGS aliases, resource-index publication, GC cancellation, count identity, mutable snapshot bytes and buffer-cost cases; completed 5.2a/b controls stay closed. |
+| audit-boundary-residue | A; **5.2d**; constituents 5.3, 5.4, 5.5a, 5.6, 7.1, 7.4, 7.7, 9.2 | Adopt native package production and typed judgment. Retain shaped symlink/quoted-replace/probe-name isolation, physical snapshot/cancelled waiter/selection-slice cases, GOFLAGS aliases, resource-index publication, GC cancellation, count identity, mutable snapshot bytes and buffer-cost cases; completed native and 5.2a/b controls stay closed. |
 | assembly-fixtures-amd64-only | C; **9.3**; trigger census 9.4 | Three assembly fixtures have only amd64 bodies. A selected non-amd64 gate or supported workload triggers equivalent bodies or explicit scoping; cross-vet is not execution. |
 | attestation-keyed-record | A; **7.1** | Two positive model assertions duplicate fields/scopes/copies; a sibling omission was repaired. Consolidate without inventing a third assertion or changing discharge authority. |
 | attribution-mask-width | A; **7.7**; constituent 7.8 | subjectMask is uint64; the 16/32/64 timing curve is historical. Widen only after a current hotspot measurement, preserving attribution and cancellation granularity. |
@@ -136,11 +136,10 @@ README and this reconciliation document itself.
 | containment-windows-job-object | C; **5.6**; trigger census 9.4 | Shared taskkill and Gomutant's stronger job object are different boundaries. Common capability requires an actual supported Windows consumer need; retain assignment, priority and kill attribution. |
 | dependency-nested-closures-outside-the-drain | A; **7.8** | addObject scans SSA before the dependency filter. Reduce the exact reference-only nested-value refusal against direct and first-party controls; no general missing dependency scan is established. |
 | direct-call-site-index-one-source | A; **7.8** | The shared field/memo index unwraps generic and parenthesized callees; init-only helpers still require direct identifiers. Share facts without silently widening init-region/escape policy; pin deliberate precision changes separately. |
-| discharge-reason-channel-one-source | A; **7.1**; constituents 5.2c, 8.3 | composeDynamicState repeats verb/channel composition. Carry the deciding channel semantically into Verdict, not through another remedy-string parser. |
+| discharge-reason-channel-one-source | A; **7.1**; constituents 5.2d, 8.3 | composeDynamicState repeats verb/channel composition. Preserve the native typed deciding cause during consolidation rather than adding remedy-string authority. |
 | dispatch-admissions-one-predicate | A; **7.8** | Resolved, invoke and held-target routes encode one admission differently; no wrong-valid witness is established. Preserve indexed-target/operand conditions in the common predicate. |
 | entropy-reach-through-tls-handshakes-marks-networked-witnesses-uncacheable | A; **7.8** | Tugboat's historical 828/1098 histogram does not prove nonce irrelevance. Reduce exact versus enumerated reach; preserve network/liveness refusals and no TLS-wide grant. |
 | explain-no-chain-for-a-dependency-culprit | A; **8.3**; constituent 7.1 | Explain already visits module-owned dependencies. Reproduce the named descriptor under matching selection/assertions/generation and inspect composition hooks; do not repeat the refuted omission diagnosis. |
-| first-offender-refusals | R; **5.2c** | Sibling/prepareRecorded still stop at one offender, with map-order nondeterminism. Collect the full unknown set deterministically while preserving kind/shape precedence. |
 | fixture-tier-parallelism | A; **7.7**; constituent 9.3 | Setenv/memo/hook/explain owners constrain concurrency. Current equal-population measurements and ownership, not sequential fixture reuse, decide any scheduling expansion. |
 | flag-surface-one-table | R; **7.1** | Four flag-name policies and fold/walk ladders overlap. Consolidate lookup while retaining storage-judged registration and parsed-input refusal. |
 | fleet-sweep-tugboat-vouch-list-retires | R; **7.3** | Both Tugboat files contain the six mirrored identities. Confirm the effective set non-measuring with flags omitted before deleting the script mirror; file presence is not that confirmation. |
@@ -249,15 +248,15 @@ Each slug names the current sibling `stipulator/docs/issues/` file. There are
 | deadline-roster-head-unbounded | R; **5.3**; constituent 8.3 | streamState.roster can consume runResidue's budget. Bound head/residue with omitted counts; byte scrubbing/rune cuts already exist and are not reopened. |
 | decomposition-editorial-pass | R; **8.3**; constituents 9.2, 9.4 | Source list identifies dangling antecedents, exceptions, bundled obligations and misplaced bindings. Reconcile each against current clauses, including evidence-tier effects, without restoring superseded producer prose. |
 | discovery-exit137-memory-target | A; **7.7**; constituent 5.2e | Discovery precedes executor admission; soft ceiling is not a hard cap. Attribute current parent/resolver/children cold/warm phases; exit137 alone supplies no OOM diagnosis. |
-| executed-and-resolution-reason-faces-unclassed | A; **5.3**; constituents 5.2c, 8.3 | Uncacheable is typed but executed/resolution reasons are strings. Mint classes at composition and preserve Gofresh-owned causes rather than parse passed-through prose. |
+| executed-and-resolution-reason-faces-unclassed | A; **5.3**; constituents 5.2d, 8.3 | Uncacheable is typed but executed/resolution reasons are strings. Mint classes at composition and preserve Gofresh-owned causes rather than parse passed-through prose. |
 | execution-timing-diagnostics | R; **5.3**; constituent 7.7 | Decoder/admission/start/reap paths retain no package/test timeline. Pin fast/blocked/waiting cases and partial cancellation account separately from reusable evidence. |
 | go-backend-load-path-pairs | A; **7.8**; constituent 5.2e | Workspace and attribution readers differ; HasPrefix(rel,"..") rejects ..foo. Preserve portable/escaping-path controls; complete selection/physical/dotted certificates already landed. |
 | cerebro-scoped-discovery-cost | A; **5.2e**; constituents 7.7, 7.8 | Identified c9ea6cd scoped check timed out in discovery; current complete-certificate paths need subphase attribution, not renewed selection repairs or assumed current reproduction. |
 | generic-constraint-seeding-reuse | A; **7.8**; measurement 7.7 | Deliberate unresolved constraint-method refusal differs from concrete Origin and abstract interface handling. Prove deterministic/seeded/unresolved targets and measure traversal separately. |
 | implemented-capability-acceptance | C/A; **7.5**; conditional census 9.4 | Current report/execution/acceptance scopes differ. Derive the unmet eleven-requirement workflow preserving global reds and suite health; filing leaves implementation uncommissioned. |
-| gofresh-corpus-pin-lag | R; **5.2d**; prerequisite 5.2c; constituent 5.2e | Source now pins v0.116.3 but observe.go retains legacy production and omitted auto-PGO is uncovered. Adopt full package/build/runtime/artifact/closing path; dependency bump alone is not closure. |
+| gofresh-corpus-pin-lag | R; **5.2d**; constituent 5.2e | Source now pins v0.116.3 but observe.go retains legacy production and omitted auto-PGO is uncovered. Adopt the released package/build/runtime/artifact/closing path; dependency bump alone is not closure. |
 | findings-store-historical-fleet-sweep | R; **9.3**; constituents 9.1, 9.2 | Three reported local records/two attestations remain historical despite an empty repo document. Inventory merged layers and disposition only an explicitly authorized complete-oracle scope. |
-| impure-siblings-never-earn-a-proof | A; **5.2c**; constituents 5.2d, 5.2e, 5.3 | Singleton proof selection does not support two observing siblings. Specify actual package contributors/processes; reject the old isolate-each-once substitute. |
+| impure-siblings-never-earn-a-proof | A; **5.2d**; constituents 5.2e, 5.3 | Adopt native complete-subject package production with its consumer contract amendment; singleton proof selection still refuses observing siblings. Preserve separate process candidates and reject the old isolate-each-once substitute. |
 | invocation-folds-two-shapes | A; **5.3** | assembleInvocation and SelectionResult.absorb duplicate common appends. Preserve distinct process/tier/health facts and retry durable prefixes, not already-implemented registration. |
 | ledger-store-as-a-record-kind | A; **5.6**; constituent 9.2 | Full ledger coordinates, WriteAtomic, exclusion and encoder errors already work. Fold remaining scan/admission/collection with lazy reads and refused-record/concurrent-install protection. |
 | mcp-go-export-compatibility-authoring | R; **5.5a**; constituent 9.3 | Source has patched loader but live MCP provenance is unknown. Closure requires compatible resolution and the blocked claim on the same identified server; no Weaver retry authorized here. |
@@ -309,7 +308,7 @@ historical reports (`gofresh.md`, `gomutant.md`, `stipulator.md`, `pew.md`) agai
 the retained obligations, promote any still-load-bearing rationale and retarget
 citations before retiring the tracking directory. This is neither an immediate
 whole-directory deletion nor permission to revive the reports' obsolete defects.
-It is additional to Pew's five inline obligations, not a 150th source issue.
+It is additional to Pew's five inline obligations, not another source issue.
 
 Pew's campaign issue retains the complete scope ledger: the blocked chunk-11
 delta; runs `1e11674dc9cefba4` and `e8423761e551fb96`; twelve hand probes
@@ -419,11 +418,11 @@ wording in their records does not merge their claims or promote example pins.
 | REQ-fresh-static-certificate | **9.3** | N | Native enforcement and Stipulator's complete selected-view certificate landed. Reconcile full invariant evidence for membership, precedence, classifiers and composition; no additional consumer certificate violation is established. |
 | REQ-fresh-progress | **9.3** | N | Implementation excludes diagnostic payload from memo/hash inputs; supply a witness that changes payload while discriminating memo stability. This behavior obligation is not automatically a new invariant class. |
 | REQ-fresh-producing-evidence | **8.1** | N | Preserve established producing identity through remaining unit adoption and independently verify record-only support with no current runtime read, identity substitution, trust promotion or authenticity inference. |
-| REQ-fresh-unit-roster, REQ-fresh-unit-bindings, REQ-fresh-unit-close | **5.2c** | N | Singleton/Pew roster, binding and sealing controls landed. Complete package/fleet coverage of missing/late/conflicting contributions, failed/cancelled close, independent siblings, cut/drift precedence and publication/history, with invariant evidence. |
-| REQ-fresh-result-model, REQ-fresh-authority-account | **5.2c** | N | Singleton declared-model applicability and authority preservation landed; package/fleet adoption, structured semantic authority and complete invariant evidence remain. Do not reopen the first arm. |
-| REQ-fresh-verdict | **5.2c** | C | Public verdict still mainly exposes status/prose. Release semantic causes, scope and accepted authority independent of rendering, preserving test-variant projection and integrity-bound history; 7.1 is the broader owner constituent. |
-| REQ-fresh-final-evidence-selection | **5.2c** | C | Singleton automatic final selection landed, but legacy consumers still select ordinary/observed checking. Migrate package/fleet paths without missed producing support, unlicensed transformations or loss of explicit analysis policy/full inventories. |
-| REQ-fresh-observation-lifecycle | **5.2c** | C | Producing-time preparation and closing exist for the singleton. Package/fleet lifecycle and full property/analyzer evidence remain; preserve both actual lifecycle contradictions rather than inferring completion from one consumer. |
+| REQ-fresh-unit-roster, REQ-fresh-unit-bindings, REQ-fresh-unit-close | **5.2d** | N | Native singleton/package roster, binding and sealing controls landed. Complete fleet coverage of missing/late/conflicting contributions, failed/cancelled close, independent siblings, cut/drift precedence and publication/history, with invariant evidence. |
+| REQ-fresh-result-model, REQ-fresh-authority-account | **5.2d** | N | Native declared-model applicability and typed authority preservation landed; remaining consumer adoption and complete invariant evidence remain. Native process closing does not own consumer publication grouping. |
+| REQ-fresh-verdict | **5.2d** | N | Native verdicts expose typed causes, scope and accepted authority independently of diagnostics. Complete consumer projection adoption and clause-appropriate evidence while preserving test-variant projection and integrity-bound history; 7.1 retains wider consolidation. |
+| REQ-fresh-final-evidence-selection | **5.2d** | C | Native singleton/package final selection landed, but legacy consumers still select ordinary/observed checking. Migrate fleet paths without missed producing support, unlicensed transformations or loss of explicit analysis policy/full inventories. |
+| REQ-fresh-observation-lifecycle | **5.2d** | C | Native singleton/package preparation and closing exist. Remaining fleet lifecycle and full property/analyzer evidence remain; preserve actual consumer contradictions rather than inferring completion from the shared form. |
 | REQ-fresh-unit-exclusion, REQ-fresh-producer-view | **5.5** | N | Existing singleton and sibling checks are controls. Complete owning-unit exclusion through preparation, execution, close and publication/consumption, inherited provenance and independent sibling/cut/drift evidence. |
 | REQ-inputs-context | **5.5** | C | Finalization/check pins cover only part of the family. Remove context-free/background adoption/conversion/merge work under explicit owning and bounded closing phases, without partial-result or hidden-continuation grants. |
 | REQ-control-authority, REQ-control-execution-description | **7.4** | C | Admit each control once under its operation owner; preserve overflow, typed/raw arguments, omitted/empty selection, real producer environment, default-consuming build inputs and observer-does-not-execute regressions across affected faces. |
@@ -465,9 +464,9 @@ table does not replace them with manual plan triggers or judge them covered.
 | REQ-pew-derived-state | **7.8** | N | Shared content/admission repair is adopted. Independent completed cold/warm/discarded-cache, same-version content and source-coordinate controls remain, separate from budget availability and historical backfill; no missing-enforcement contradiction is asserted. |
 
 The reconciliation is 72 + 3 + 15 + 6 = 96. Within Gofresh the primary-slot
-totals are 40 at 9.3, 13 at 7.8, eight at 5.2c, three at 5.5, two each at
-7.4 and 5.5a, and one each at 8.1, 7.3, 5.2d and 9.4. Raw contradiction
-flags remain on eleven Gofresh, five Stipulator and five Pew records; none of
+totals are 40 at 9.3, 13 at 7.8, nine at 5.2d, three at 5.5, two each at
+7.4 and 5.5a, and one each at 8.1, 7.3 and 9.4. Raw contradiction
+flags remain on ten Gofresh, five Stipulator and five Pew records; none of
 Gomutant's three records uses that manual flag. These counts describe stored
 declarations only, not evaluated coverage, firing or resolution.
 
@@ -541,7 +540,7 @@ vertical is not permitted by completing this verification step.
 | Typed count versus raw arguments | Stipulator validateConfig admits raw -test.count; testCommandArgs appends it after typed count/BYPASS. | **5.3**: actual repetitions for conflicting, duplicate, two-token and invalid count forms; one admitted meaning, no silently defeated cache intent. |
 | Runtime-only argument partition | Stipulator identityArgs strips a timeout-looking token independently of whether it is a custom flag's value or follows --. | **5.3**: behavior-bearing custom string/positional values retain different identities; actual timeout discharge needs an unambiguous active option. |
 | Explicit-empty selection | Gomutant MCP tags:[] and omission both inherit ambient tags; explicit target/oracle emptiness already has different semantics. | **5.4**; constituent 7.2: omitted/clear/nonempty across CLI/MCP and ambient tags; retain explicit-empty target and oracle inventories. |
-| Internal empty test selection | Stipulator ExecuteSelection accepts an empty package row; testCommandArgs emits no -run for it. No public producer of that row established. | **5.2c**: trace reachable package-producing callers first; nil versus empty must not accidentally request a whole package. |
+| Internal empty test selection | Stipulator ExecuteSelection accepts an empty package row; testCommandArgs emits no -run for it. No public producer of that row established. | **5.2d**: trace reachable package-producing callers while adopting explicit subject sets; nil versus empty must not accidentally request a whole package. |
 | Diagnostic A/B trust | Pew prepareABProfiles reaches invocationVouches fallback and each side's own benchmarks/vouches without an A/B source control. | **7.3**: preserve completed producer controls while settling the justified source; divergent/missing/malformed/revoked declarations and no output-path trust transfer. |
 | Auto-PGO | Go reads default.pgo when PGO is omitted, while Stipulator contributes no profile input; two valid profile contents produced identical native fingerprints and a later native check answered valid. Explicit auto/path controls answered stale on buildconfig. | **5.2d**: adopt complete build inputs and lasting producer/publication/record-serving regressions, including missing/unreadable profiles and workspace scope; completed 5.2a/b certificates are not reopened. |
 | Callback selects work | Gomutant emitOracleGuidance starts per-test execution only with a Guidance callback and derived oracle. | **6.3**; constituent 7.2: subscription and oracle derivation do not choose diagnostic workload. |
@@ -618,13 +617,14 @@ their own evidence and memo identities, while consumer certificate adoption and
 the separately tracked memo-version refinements remain. Supplied-observation
 merge still does not establish the complete contributor roster or unit ownership.
 
-The completed singleton boundary is not the minimal package-producing form at
-5.2c. Typed semantic causes are still absent from `gofresh.Verdict`; that
-5.2c/7.1 boundary remains required so consumer migration does not introduce
-another parser over reason prose. Stipulator's completed 5.2a/b selection,
-physical-source, module ownership and certificate work remains a preservation
-control; package production, full descriptions and historical admission remain
-at their open 5.2c/d/e destinations.
+The shared singleton and package forms close one process over its complete
+subject set. Separate attempts retain separate evidence; consumer publication
+groups do not become observation unions. `gofresh.Verdict` carries typed deciding
+causes, scope and accepted authority; consumers must adopt these facts rather
+than introduce another parser over reason prose. Stipulator's completed 5.2a/b
+selection, physical-source, module ownership and certificate work remains a
+preservation control; producing adoption, full descriptions and historical
+admission remain at their open 5.2d/e destinations.
 
 Keep producing evidence and a licensed applicability endpoint distinct. Static
 certificates have source/configuration/classifier dependencies without a fake

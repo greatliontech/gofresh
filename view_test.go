@@ -1122,6 +1122,9 @@ func TestViewMarksCallerSuppliedCallbackUnverifiable(t *testing.T) {
 	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "caller-supplied") {
 		t.Fatalf("callback subject verdict = %+v, want caller-supplied unverifiable", verdict)
 	}
+	if verdict.Ground.Cause.Kind != OpenWorldCause {
+		t.Fatalf("callback origin was not retained: %+v", verdict.Ground)
+	}
 }
 
 func TestViewMarksGenericCallbackUnverifiable(t *testing.T) {
@@ -1177,6 +1180,9 @@ func TestMutableCallbackGlobalIsCallerSuppliedUnverifiable(t *testing.T) {
 	}
 	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "shares mutated dynamic state") {
 		t.Fatalf("mutable callback global verdict = %+v fingerprint=%+v, want the shared-dynamic-state downgrade", verdict, fingerprint)
+	}
+	if verdict.Ground.Cause.Kind != SharedDynamicStateCause {
+		t.Fatalf("shared-state origin was not retained: %+v", verdict.Ground)
 	}
 }
 
@@ -3192,13 +3198,15 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			want := Verdict{Stale, "runtimeinputs"}
+			want := Verdict{Status: Stale, Reason: "runtimeinputs", Ground: JudgmentGround{Cause: Cause{Kind: RuntimeInputsCause, Condition: Unavailable}, Scope: JudgmentScope{Subject: subject, ResultKind: CodeResult}}}
 			if drift {
-				want = Verdict{Stale, "closure"}
+				want.Reason = "closure"
+				want.Ground.Cause = Cause{Kind: ClosureCause, Condition: Changed}
 			}
 			if scenario == "guard drift" {
 				fingerprint.Guards.BuildConfig = "different"
-				want = Verdict{Stale, "buildconfig"}
+				want.Reason = "buildconfig"
+				want.Ground.Cause = Cause{Kind: BuildConfigCause, Condition: Changed}
 			}
 			movingRuntime := func(v *View) {
 				calls := 0

@@ -77,6 +77,19 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	if v.Status != Stale || !strings.Contains(v.Reason, "moved: path data/fixture.txt") {
 		t.Fatalf("moved-input verdict = {%s %q}, want stale naming the mover", v.Status, v.Reason)
 	}
+	if v.Ground.Cause != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) {
+		t.Fatalf("mover lost its semantic cause: %+v", v.Ground)
+	}
+	view := &View{engine: e, moduleDir: tmp}
+	v.Reason = "different diagnostic wording"
+	decorated := view.withMovedInputs(t.Context(), v, fp)
+	if decorated.Ground != v.Ground || !strings.Contains(decorated.Reason, "moved: path data/fixture.txt") {
+		t.Fatalf("wording selected decoration or changed authority: %+v", decorated)
+	}
+	spoof := Verdict{Status: Stale, Reason: "runtimeinputs", Ground: JudgmentGround{Cause: Cause{Kind: ClosureCause, Condition: Changed}}}
+	if got := view.withMovedInputs(t.Context(), spoof, fp); got != spoof {
+		t.Fatalf("runtime diagnostic spoof selected attribution: %+v", got)
+	}
 }
 
 // TestDriftRefusalComponents pins the refusal vocabulary: guard drift names

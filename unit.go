@@ -61,8 +61,17 @@ type Terminal struct {
 // Contribution is a unit-owned execution binding. Its zero value and a handle
 // from another unit cannot settle this unit's obligation.
 type Contribution struct {
-	unit      *Unit
+	unit      *producingUnit
 	execution *unitExecution
+}
+
+// Subjects returns the complete declared subject set of the execution, in
+// first-request order. The executor runs this set, not only its cacheable subset.
+func (c Contribution) Subjects() []Subject {
+	if c.unit == nil || c.execution == nil {
+		return nil
+	}
+	return slices.Clone(c.unit.view.subjects)
 }
 
 // Environment returns the exact owned process environment as an independent copy.
@@ -101,10 +110,11 @@ const (
 
 type unitExecution struct {
 	process       ProcessDescription
+	artifact      string
 	env           []string
 	frame         runtimeinput.ProducerFrame
 	support       runtimeinput.OutcomeSupport
-	fingerprint   Fingerprint
+	fingerprints  map[Subject]Fingerprint
 	outcomeReason string
 	terminal      Terminal
 	ready         bool
@@ -115,10 +125,23 @@ type unitExecution struct {
 // producing/closing obligations. A second contributor is refused, not silently
 // dropped. Independent units share only their snapshot's immutable source facts.
 type Unit struct {
+	producing *producingUnit
+}
+
+// PackageUnit owns one package-test process over its complete selected subject
+// set. Its subjects share that process's observation, not another attempt's
+// evidence. Isolation retries use separate units; publication grouping remains
+// the result owner's responsibility.
+type PackageUnit struct {
+	producing *producingUnit
+}
+
+// producingUnit is the single lifecycle for singleton and package executions.
+// The immutable subject set is also the process's complete proof obligation.
+type producingUnit struct {
 	mu            sync.Mutex
 	phase         unitPhase
 	snapshot      *Snapshot
-	subject       Subject
 	view          *View
 	execution     *unitExecution
 	closingCancel context.CancelFunc
@@ -127,31 +150,82 @@ type Unit struct {
 
 // Begin creates an independently closing unit for a subject in the snapshot.
 func (s *Snapshot) Begin(subject Subject) (*Unit, error) {
-	return s.begin(subject, false)
+	u, err := s.begin([]Subject{subject}, false)
+	if err != nil {
+		return nil, err
+	}
+	return &Unit{producing: u}, nil
 }
 
 // BeginIdentity selects identity-only input evidence for a diagnostic execution,
 // such as an instrumented profile. It deliberately prepares no outcome support;
 // ordinary completion cannot promote the resulting evidence to supported form.
 func (s *Snapshot) BeginIdentity(subject Subject) (*Unit, error) {
-	return s.begin(subject, true)
-}
-
-func (s *Snapshot) begin(subject Subject, identityOnly bool) (*Unit, error) {
-	if s == nil || s.view == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	v, err := s.view.Sibling([]Subject{subject})
+	u, err := s.begin([]Subject{subject}, true)
 	if err != nil {
 		return nil, err
 	}
-	return &Unit{snapshot: s, subject: subject, view: v, identityOnly: identityOnly}, nil
+	return &Unit{producing: u}, nil
+}
+
+// BeginPackage creates an independently closing execution for a nonempty set
+// of subjects from one package. Duplicates collapse in first-request order.
+// Every executed subject, including subjects without a cacheable result, belongs
+// in this set. A single-subject execution assertion refuses a larger set.
+func (s *Snapshot) BeginPackage(subjects []Subject) (*PackageUnit, error) {
+	u, err := s.begin(subjects, false)
+	if err != nil {
+		return nil, err
+	}
+	return &PackageUnit{producing: u}, nil
+}
+
+func (s *Snapshot) begin(subjects []Subject, identityOnly bool) (*producingUnit, error) {
+	if s == nil || s.view == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
+	v, err := s.view.Sibling(subjects)
+	if err != nil {
+		return nil, err
+	}
+	if len(v.packages) != 1 {
+		return nil, errors.New("gofresh: a producing execution must belong to one package")
+	}
+	if len(v.subjects) > 1 && s.session.engine.singleSubjectExecution {
+		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
+	}
+	return &producingUnit{snapshot: s, view: v, identityOnly: identityOnly}, nil
 }
 
 // Register prepares the complete producing obligation before execution. Build
 // must belong to the same snapshot and package. Expensive preparation holds no
 // unit mutex: concurrent close freezes the roster and cancels that preparation.
 func (u *Unit) Register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
+	return u.transaction().register(ctx, build, process)
+}
+
+// Register prepares all subject obligations before the package process starts.
+// One process has one frame and one exclusive capture; a second registration is
+// refused. The returned subject set is owned and cannot change preparation.
+func (u *PackageUnit) Register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
+	return u.transaction().register(ctx, build, process)
+}
+
+func (u *Unit) transaction() *producingUnit {
+	if u == nil {
+		return nil
+	}
+	return u.producing
+}
+
+func (u *PackageUnit) transaction() *producingUnit {
+	if u == nil {
+		return nil
+	}
+	return u.producing
+}
+
+func (u *producingUnit) register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
 	if ctx == nil {
 		return Contribution{}, errors.New("gofresh: nil registration context")
 	}
@@ -161,7 +235,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	if u == nil || u.snapshot == nil {
 		return Contribution{}, errors.New("gofresh: uninitialized unit")
 	}
-	if build.snapshot != u.snapshot || build.pkg != u.subject.Package || build.identity == "" {
+	if build.snapshot != u.snapshot || build.pkg != u.view.subjects[0].Package || build.identity == "" {
 		return Contribution{}, errors.New("gofresh: built artifact belongs to another snapshot or package")
 	}
 	dir := u.snapshot.session.runtimeDir
@@ -191,7 +265,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	}
 	preparing, cancel := context.WithCancel(ctx)
 	defer cancel()
-	x := &unitExecution{process: process, env: env, cancel: cancel}
+	x := &unitExecution{process: process, artifact: build.identity, env: env, cancel: cancel}
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
@@ -205,13 +279,13 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	u.mu.Unlock()
 	frame := runtimeinput.CaptureProducerFrame(preparing, e.evidenceRootFor(e.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
 	var support runtimeinput.OutcomeSupport
-	var fp Fingerprint
+	var fingerprints map[Subject]Fingerprint
 	if u.identityOnly {
-		fp, err = u.view.Capture(preparing, u.subject)
+		fingerprints, err = u.view.CaptureBatch(preparing)
 	} else {
 		support, err = u.view.PrepareOutcomeSupport(preparing, frame, process.Identity)
 		if err == nil {
-			fp, err = u.view.CaptureObserved(preparing, u.subject)
+			fingerprints, err = u.view.CaptureObservedBatch(preparing)
 		}
 	}
 	if preparing.Err() != nil {
@@ -219,6 +293,14 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	// Closing cancels the derived preparation context itself. Only cancellation
+	// of the original caller context outranks the unit's terminal transition.
+	if cause := ctx.Err(); cause != nil {
+		if u.phase == unitOpen {
+			u.phase = unitFailed
+		}
+		return Contribution{}, cause
+	}
 	if u.phase != unitOpen {
 		return Contribution{}, ErrUnitClosed
 	}
@@ -231,7 +313,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 		u.phase = unitFailed
 		return Contribution{}, err
 	}
-	x.frame, x.support, x.fingerprint, x.outcomeReason = frame, support, fp, support.Reason(binding)
+	x.frame, x.support, x.fingerprints, x.outcomeReason = frame, support, fingerprints, support.Reason(binding)
 	if u.identityOnly {
 		x.outcomeReason = "identity-only execution selected"
 	}
@@ -242,6 +324,17 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 // Submit supplies the registered execution's one terminal disposition. No log,
 // frame, environment or support can be substituted at this boundary.
 func (u *Unit) Submit(c Contribution, terminal Terminal) error {
+	return u.transaction().submit(c, terminal)
+}
+
+// Submit settles this package process with its actual harness disposition.
+// An ordinary failing test can complete normally; result success remains the
+// consumer's judgment. A handle from another attempt is always refused.
+func (u *PackageUnit) Submit(c Contribution, terminal Terminal) error {
+	return u.transaction().submit(c, terminal)
+}
+
+func (u *producingUnit) submit(c Contribution, terminal Terminal) error {
 	if u == nil || u.snapshot == nil {
 		return errors.New("gofresh: uninitialized unit")
 	}
@@ -268,6 +361,16 @@ func (u *Unit) Submit(c Contribution, terminal Terminal) error {
 // final evidence. The executor still owns stopping/reaping its process and
 // disposing of its capture. Already closed evidence and other units are untouched.
 func (u *Unit) Abort() {
+	u.transaction().abort()
+}
+
+// Abort ends this unpublished package execution and cancels library-owned work.
+// It does not stop the executor's process or alter an independently closed unit.
+func (u *PackageUnit) Abort() {
+	u.transaction().abort()
+}
+
+func (u *producingUnit) abort() {
 	if u == nil {
 		return
 	}
@@ -298,6 +401,31 @@ type Finalized struct {
 	Attribution       string
 }
 
+// FinalizedSubject is one subject's native evidence and closed judgment. It
+// retains the process-wide observation because the test log does not attribute
+// individual reads to subjects.
+type FinalizedSubject struct {
+	Subject     Subject
+	Fingerprint Fingerprint
+	Verdict     Verdict
+}
+
+// FinalizedProcess is a closed package execution, not a suite-health result or
+// a durable publication. Process and Artifact retain executor-declared identity;
+// Terminal is the executor's harness assertion. Subjects is in first-request
+// order and owned by the caller. Observation describes the shared capture's
+// authority, independently of each subject's verdict or purity assertion.
+type FinalizedProcess struct {
+	Process           string
+	Artifact          string
+	Subjects          []FinalizedSubject
+	Terminal          Terminal
+	Observation       ObservationDisposition
+	ObservationReason string
+	OutcomeReason     string
+	Attribution       string
+}
+
 // ObservationDisposition states the native observation's support class without
 // asking a consumer to interpret diagnostic text as authority.
 type ObservationDisposition uint8
@@ -315,14 +443,34 @@ const (
 // finalization and closing validation succeed. Cancellation or any failure ends
 // the unit; retrying requires another unit. Publication belongs to the consumer,
 // which keeps the source/runtime exclusion until that separate boundary ends.
-func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
+func (u *Unit) Close(ctx context.Context) (Finalized, error) {
+	result, err := u.transaction().close(ctx)
+	if err != nil {
+		return Finalized{}, err
+	}
+	subject := result.Subjects[0]
+	return Finalized{Fingerprint: subject.Fingerprint, Verdict: subject.Verdict,
+		Terminal: result.Terminal, Observation: result.Observation,
+		ObservationReason: result.ObservationReason, OutcomeReason: result.OutcomeReason,
+		Attribution: result.Attribution}, nil
+}
+
+// Close fixes this execution's roster and finalizes its one capture for all
+// declared subjects. It exposes no subject result until the whole execution's
+// closing validation succeeds. A failed or cancelled close is terminal; a
+// separately prepared retry cannot repair this process's producing evidence.
+func (u *PackageUnit) Close(ctx context.Context) (FinalizedProcess, error) {
+	return u.transaction().close(ctx)
+}
+
+func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err error) {
 	if u == nil || u.snapshot == nil {
-		return Finalized{}, errors.New("gofresh: uninitialized unit")
+		return FinalizedProcess{}, errors.New("gofresh: uninitialized unit")
 	}
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
-		return Finalized{}, ErrUnitClosed
+		return FinalizedProcess{}, ErrUnitClosed
 	}
 	u.phase = unitClosing
 	parent := ctx
@@ -347,7 +495,7 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 			err = ErrUnitAborted
 		}
 		if err != nil {
-			result = Finalized{}
+			result = FinalizedProcess{}
 			if u.phase != unitAborted {
 				u.phase = unitFailed
 			}
@@ -356,20 +504,20 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 		}
 	}()
 	if ctx == nil {
-		return Finalized{}, errors.New("gofresh: nil closing context")
+		return FinalizedProcess{}, errors.New("gofresh: nil closing context")
 	}
 	if err := ctx.Err(); err != nil {
-		return Finalized{}, err
+		return FinalizedProcess{}, err
 	}
 	if x == nil || !x.ready || x.terminal.Kind == 0 {
-		return Finalized{}, ErrUnitIncomplete
+		return FinalizedProcess{}, ErrUnitIncomplete
 	}
 	if x.terminal.Kind == NeverStarted {
-		return Finalized{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
+		return FinalizedProcess{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
 	}
 	receipt, err := x.frame.Completion(x.process.Identity, x.env, x.terminal.Reason)
 	if err != nil {
-		return Finalized{}, err
+		return FinalizedProcess{}, err
 	}
 	s := u.snapshot.session
 	in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.engine.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
@@ -381,24 +529,36 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 		observation, observationReason, err = x.frame.ObserveInputs(ctx, x.process.Capture, in)
 	}
 	if err != nil {
-		return Finalized{}, err
+		return FinalizedProcess{}, err
 	}
-	fp, err := u.view.attachObservation(u.subject, x.fingerprint, observation, !u.identityOnly)
-	if err != nil {
-		return Finalized{}, err
+	fingerprints := make(map[Subject]Fingerprint, len(u.view.subjects))
+	supported := true
+	for _, subject := range u.view.subjects {
+		fp, err := u.view.attachObservation(subject, x.fingerprints[subject], observation, !u.identityOnly)
+		if err != nil {
+			return FinalizedProcess{}, err
+		}
+		fingerprints[subject] = fp
+		supported = supported && runtimeinput.HasOutcomeSupport(fp.RuntimeInputs, outcomeSubject(fp, subject))
 	}
-	verdict, err := u.view.CheckObserved(ctx, fp, u.subject)
+	verdicts, err := u.view.CheckObservedBatch(ctx, fingerprints)
 	if err != nil {
-		return Finalized{}, err
+		return FinalizedProcess{}, err
 	}
 	if err := u.view.Validate(ctx); err != nil {
-		return Finalized{}, err
+		return FinalizedProcess{}, err
 	}
 	disposition := IdentityObservation
 	if observationReason != "" {
 		disposition = IncompleteObservation
-	} else if runtimeinput.HasOutcomeSupport(fp.RuntimeInputs, outcomeSubject(fp, u.subject)) {
+	} else if supported {
 		disposition = SupportedObservation
 	}
-	return Finalized{Fingerprint: fp, Verdict: verdict, Terminal: x.terminal, Observation: disposition, ObservationReason: observationReason, OutcomeReason: x.outcomeReason, Attribution: observation.Attribution}, nil
+	result = FinalizedProcess{Process: x.process.Identity, Artifact: x.artifact,
+		Terminal: x.terminal, Observation: disposition, ObservationReason: observationReason,
+		OutcomeReason: x.outcomeReason, Attribution: observation.Attribution}
+	for _, subject := range u.view.subjects {
+		result.Subjects = append(result.Subjects, FinalizedSubject{Subject: subject, Fingerprint: fingerprints[subject], Verdict: verdicts[subject]})
+	}
+	return result, nil
 }

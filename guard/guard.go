@@ -143,25 +143,72 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 // mismatch, since validity requires proof and an unevaluable guard is not proof
 // (REQ-guard-completeness). Comparison is exact equality (REQ-guard-equality).
 func Compare(recorded, current Guards, kind Kind) string {
-	if kind != CodeResult && kind != Measurement {
+	return CompareFacts(recorded, current, kind).Axis.String()
+}
+
+// Axis names an applicable guard independently of its diagnostic spelling.
+type Axis uint8
+
+const (
+	NoAxis Axis = iota
+	KindAxis
+	ToolchainAxis
+	BuildConfigAxis
+	MachineAxis
+	RuntimeConfigAxis
+)
+
+// String is the compatibility diagnostic for a guard axis.
+func (a Axis) String() string {
+	switch a {
+	case KindAxis:
 		return "kind"
+	case ToolchainAxis:
+		return "toolchain"
+	case BuildConfigAxis:
+		return "buildconfig"
+	case MachineAxis:
+		return "machine"
+	case RuntimeConfigAxis:
+		return "runtimeconfig"
+	default:
+		return ""
 	}
-	pairs := []struct{ name, rec, cur string }{
-		{"toolchain", recorded.Toolchain, current.Toolchain},
-		{"buildconfig", recorded.BuildConfig, current.BuildConfig},
+}
+
+// Mismatch is the first failing applicable guard. Missing distinguishes an
+// absent value on either side from differing values. NoAxis means agreement.
+type Mismatch struct {
+	Axis    Axis
+	Missing bool
+}
+
+// CompareFacts compares the same ordered guards as Compare, preserving the
+// deciding facts rather than requiring consumers to classify its diagnostic.
+func CompareFacts(recorded, current Guards, kind Kind) Mismatch {
+	if kind != CodeResult && kind != Measurement {
+		return Mismatch{Axis: KindAxis}
+	}
+	type pair struct {
+		axis     Axis
+		rec, cur string
+	}
+	pairs := []pair{
+		{ToolchainAxis, recorded.Toolchain, current.Toolchain},
+		{BuildConfigAxis, recorded.BuildConfig, current.BuildConfig},
 	}
 	if kind == Measurement {
 		pairs = append(pairs,
-			struct{ name, rec, cur string }{"machine", recorded.Machine, current.Machine},
-			struct{ name, rec, cur string }{"runtimeconfig", recorded.RuntimeConfig, current.RuntimeConfig},
+			pair{MachineAxis, recorded.Machine, current.Machine},
+			pair{RuntimeConfigAxis, recorded.RuntimeConfig, current.RuntimeConfig},
 		)
 	}
 	for _, p := range pairs {
 		if p.rec == "" || p.rec != p.cur {
-			return p.name
+			return Mismatch{Axis: p.axis, Missing: p.rec == "" || p.cur == ""}
 		}
 	}
-	return ""
+	return Mismatch{}
 }
 
 // toolchainOf is the `go version` identity minus the redundant leading

@@ -135,6 +135,9 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 		!strings.Contains(verdict.Reason, "internal_test.go") || !strings.Contains(verdict.Reason, "external_test.go") {
 		t.Fatalf("verdict does not name both declarations: %+v", verdict)
 	}
+	if verdict.Ground.Cause.Kind != AmbiguousSubjectCause {
+		t.Fatalf("ambiguous identity origin was lost: %+v", verdict.Ground)
+	}
 	if fingerprint.PurityAssertion != "" {
 		t.Fatalf("collapsed identity carries a purity attribution: %q", fingerprint.PurityAssertion)
 	}

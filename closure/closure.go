@@ -54,11 +54,25 @@ type Closure struct {
 	TestVariants string
 	Unverifiable bool
 	Reason       string // why unverifiable (e.g. "reaches os.Open (file I/O)")
+	// Refusal identifies a consumer-tier downgrade at its deciding arm. The
+	// zero value leaves the closure's ordinary dependence classification intact.
+	Refusal RefusalKind
 	// External marks a subject the author declared external-state via
 	// //gofresh:external: unverifiability by declaration, never suppressible
 	// by a purity assertion or observation evidence (REQ-external-precedence).
 	External bool
 }
+
+// RefusalKind distinguishes consumer-tier closure refusals whose authority does
+// not follow from their human-readable Reason. It is not a persisted proof.
+type RefusalKind uint8
+
+const (
+	DependenceRefusal RefusalKind = iota
+	OpenWorldRefusal
+	SharedDynamicStateRefusal
+	AmbiguousSubjectRefusal
+)
 
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
 // cache-vs-mutable classification; loaded whole-program SSA is cached per package

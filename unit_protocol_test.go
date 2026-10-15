@@ -15,11 +15,24 @@ func FuzzUnitTerminalProtocol(f *testing.F) {
 		f.Add(input)
 	}
 	f.Fuzz(func(t *testing.T, input []byte) {
-		u := &Unit{snapshot: &Snapshot{}}
+		u := &Unit{producing: &producingUnit{snapshot: &Snapshot{}}}
+		pkg := &PackageUnit{producing: u.producing}
+		submit, abort := u.Submit, u.Abort
+		closeUnit := func(ctx context.Context) (bool, error) {
+			result, err := u.Close(ctx)
+			return reflect.DeepEqual(result, Finalized{}), err
+		}
+		if len(input) > 0 && input[0]%2 == 1 {
+			submit, abort = pkg.Submit, pkg.Abort
+			closeUnit = func(ctx context.Context) (bool, error) {
+				result, err := pkg.Close(ctx)
+				return reflect.DeepEqual(result, FinalizedProcess{}), err
+			}
+		}
 		x := &unitExecution{ready: true, cancel: func() {}}
-		u.execution = x
-		own := Contribution{unit: u, execution: x}
-		other := Contribution{unit: &Unit{}, execution: x}
+		u.producing.execution = x
+		own := Contribution{unit: u.producing, execution: x}
+		other := Contribution{unit: &producingUnit{}, execution: x}
 		cases := []struct {
 			terminal Terminal
 			valid    bool
@@ -41,7 +54,7 @@ func FuzzUnitTerminalProtocol(f *testing.F) {
 				if op%4 == 1 {
 					handle = other
 				}
-				err := u.Submit(handle, candidate.terminal)
+				err := submit(handle, candidate.terminal)
 				want := !ended && !settled && op%4 == 0 && candidate.valid
 				if (err == nil) != want {
 					t.Fatalf("step %d: submission accepted=%t want=%t ended=%t settled=%t", i, err == nil, want, ended, settled)
@@ -50,17 +63,17 @@ func FuzzUnitTerminalProtocol(f *testing.F) {
 					settled = true
 				}
 			case 2:
-				u.Abort()
+				abort()
 				ended = true
 			case 3:
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				result, err := u.Close(ctx)
+				empty, err := closeUnit(ctx)
 				want := error(context.Canceled)
 				if ended {
 					want = ErrUnitClosed
 				}
-				if !errors.Is(err, want) || !reflect.DeepEqual(result, Finalized{}) {
+				if !errors.Is(err, want) || !empty {
 					t.Fatalf("step %d: cancelled close returned evidence or wrong cause: %v (want %v)", i, err, want)
 				}
 				ended = true

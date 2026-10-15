@@ -108,8 +108,8 @@ func TestDecide(t *testing.T) {
 		{"runtime unverifiable, pure overrides", func(_ *Fingerprint, _ *closure.Closure, _ *guard.Guards, r *runtimeinput.State) {
 			r.Unverifiable = true
 		}, Measurement, true, Valid, ""},
-		// An absent manifest is the caller's assertion that the run observed no
-		// runtime inputs (REQ-inputs-absent-asserted) — the guard holds vacuously.
+		// An absent manifest supplies no observation or caller assertion. Here
+		// independent source evidence needs no runtime-input guard.
 		{"no manifest, clean", func(f *Fingerprint, _ *closure.Closure, _ *guard.Guards, _ *runtimeinput.State) {
 			f.RuntimeInputs = ""
 			f.RuntimeDigest = ""
@@ -127,7 +127,7 @@ func TestDecide(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&rec, &cl, &cur, &rt)
 			}
-			got := decide(rec, cl, cur, rt, tc.kind, tc.pure)
+			got := decide(rec, cl, cur, rt, tc.kind, testPurityAuthority(tc.pure))
 			if got.Status != tc.want || got.Reason != tc.wantReas {
 				t.Errorf("decide = {%s %q}, want {%s %q}", got.Status, got.Reason, tc.want, tc.wantReas)
 			}
@@ -151,7 +151,7 @@ func FuzzDecideSound(f *testing.F) {
 		rec := Fingerprint{MaximalClosure: recCl, TestVariantClosure: recTv, ToolchainContent: recStd, DynamicStateStrategy: DynamicStateStrategy, Guards: g, RuntimeInputs: manifest, RuntimeDigest: "D"}
 		cl := closure.Closure{Hash: curCl, TestVariants: curTv, ToolchainContent: curStd, Unverifiable: clUnver}
 		rt := runtimeinput.State{Digest: "D", Unverifiable: rtUnver, OK: true}
-		v := decide(rec, cl, g, rt, CodeResult, pure)
+		v := decide(rec, cl, g, rt, CodeResult, testPurityAuthority(pure))
 		if v.Status == Valid && (recStd == "" || recStd != curStd) {
 			t.Fatal("valid with missing or changed toolchain content")
 		}
@@ -752,14 +752,15 @@ func TestExternalDirectiveImmuneToObservationEvidence(t *testing.T) {
 	}
 	rt := runtimeinput.State{Manifest: "manifest", Digest: "d", OK: true}
 	inferred := closure.Closure{Hash: "h", ToolchainContent: "stdlib", Unverifiable: true, Reason: "reaches os.Open"}
-	if v := decideAfterClosureObserved(rec, inferred, rec.Guards, rt, CodeResult, false, true); v.Status != Valid {
+	observed := ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: "gofresh/immutable-environment@1"}
+	if v := decideAfterClosureObserved(rec, inferred, rec.Guards, rt, CodeResult, PurityAuthority{}, observed); v.Status != Valid {
 		t.Fatalf("observed inferred unverifiability = {%s %q}, want valid (the upgrade this test contrasts)", v.Status, v.Reason)
 	}
 	declared := closure.Closure{Hash: "h", ToolchainContent: "stdlib", Unverifiable: true, External: true, Reason: "external directive"}
-	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, false, true); v.Status != Unverifiable || v.Reason != "external directive" {
+	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, PurityAuthority{}, observed); v.Status != Unverifiable || v.Reason != "external directive" {
 		t.Fatalf("observed external subject = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
 	}
-	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, true, true); v.Status != Unverifiable || v.Reason != "external directive" {
+	if v := decideAfterClosureObserved(rec, declared, rec.Guards, rt, CodeResult, testPurityAuthority(true), observed); v.Status != Unverifiable || v.Reason != "external directive" {
 		t.Fatalf("pure external subject = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
 	}
 }
