@@ -2310,3 +2310,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "dc4572d383d3bec413327332002cf75c478228a525bbed92bdf1a1ebffd3ef9b"
 }
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-ledger"
+  content_hash: "856aef3fd555fb7706f6f2810ee50a19dfde00e6ef1b9ee93231b1c9de5a702c"
+  source_hash: "dc480054aa162b788c977016df0d05c27356a93802269c6b1f9e8073122ec350"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestPGOBuildCopiesRetainImportBindings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a6e0249f1afbae3db569ed7e901e1ff1964271c3733cdd41cd2d980bd35685c2"
+}
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-ledger"
+  content_hash: "856aef3fd555fb7706f6f2810ee50a19dfde00e6ef1b9ee93231b1c9de5a702c"
+  source_hash: "dc480054aa162b788c977016df0d05c27356a93802269c6b1f9e8073122ec350"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSyntheticTestPackageCannotReplaceAnImportBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3f3f7f8e93353f0e323a35de8c51c055366ed08c7965f89334614792bafb73b6"
+}

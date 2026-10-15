@@ -220,6 +220,17 @@
       registration, including non-cacheable runnables and examples. Preserve
       process-wide observation and separate retry candidates; package publication
       grouping does not merge producing evidence from distinct executions.
+      - [ ] 5.2d.1 Guard omitted and explicit auto-PGO using the actual selected
+        main-package directories, not a recursive module scan. Preserve explicit
+        profile coordinates, off, absent/present/error states, module/workspace
+        selection and build-input coherence through capture and closing.
+      - [ ] 5.2d.2 Adopt complete compilation/runtime descriptions, retained test
+        artifacts and per-attempt native preparation/finalization/checking.
+        Amend the sole-runnable rule with the complete actual runnable roster;
+        preserve vet/build/health, examples, fuzz seeds, runtime arguments,
+        declaration authority, independent retries and package publication.
+        Retain the binary's own exit and completion facts through event
+        conversion; a converter's exit cannot replace the producer's outcome.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Attribute scoped discovery and certificate cold/warm costs before changing

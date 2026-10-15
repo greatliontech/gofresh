@@ -438,7 +438,16 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	importNames := map[string]string{}
 	compartmentDir := ""
 	for _, p := range pkgs {
-		importNames[p.ImportPath] = p.Name
+		// Source imports name the undecorated path even when go list exposes
+		// only a test or PGO build copy of that dependency. A synthetic test
+		// package can collide with a real source path; disagreement leaves
+		// the binding unresolved rather than selecting by listing order.
+		path := p.SourcePath()
+		if previous, exists := importNames[path]; exists && previous != p.Name {
+			importNames[path] = ""
+		} else {
+			importNames[path] = p.Name
+		}
 		if p.ImportPath == pkgPath && p.ForTest == "" {
 			baseGo = append(baseGo, p.GoFiles...)
 			baseGo = append(baseGo, p.CgoFiles...)
