@@ -351,6 +351,16 @@
     reject decisive source/guard mismatches before unnecessary refinement.
     Preserve full-inventory requests and explicit applicability transformations;
     keep declaration-level precision a separately justified refinement.
+  - [ ] 7.9a Bound gofresh's persistent memo disk retention and expose shared
+    usage/cleanup; docs/issues/persistent-memo-disk-retention.md. Preserve
+    cache-miss recomputation and concurrent publication; precedes 7.9b/7.9c.
+  - [ ] 7.9b Provide gomutant safe cache reclamation after 7.9a, preserving
+    human attestations and legacy records while bounding disposable data;
+    gomutant docs/issues/cache-cleanup-preserves-local-attestations.md.
+  - [ ] 7.9c Bound Stipulator cache growth across corpora/worktrees after
+    7.9b; stipulator docs/issues/global-cache-disk-retention.md. Reconcile
+    explicit-only cross-identity GC before automatic eviction; preserve
+    lock inodes, publication, ledger integrity, and missing-evidence execution.
 - [ ] 8. Complete the approved historical and reader-facing workflow.
   - [ ] 8.1 Reconcile checkpoint 5bf9023's record-only support validation
     independently; preserve original producing identity and trust class, with

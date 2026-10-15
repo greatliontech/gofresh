@@ -7,6 +7,7 @@ verification. The doc is deleted when its obligation resolves (git holds history
 
 | issue | summary | Lands |
 |---|---|---|
+| [persistent-memo-disk-retention](persistent-memo-disk-retention.md) | 16 GiB shared memo store without global retention; bound disk growth and expose safe reclamation | tooling-redesign 7.9a |
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | complete producing adoption and historical non-upgrade; source-certificate dependencies already landed | tooling-redesign 5.2d |
 | [audit-boundary-residue](audit-boundary-residue.md) | adopt shared package-producing and typed-judgment boundaries, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2d |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
