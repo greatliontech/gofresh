@@ -2020,3 +2020,63 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "38d9cc37ecf1a2bc48b5f8c071f9a44861983f2e75f41435dd2ffb11a965881d"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestScratchNamespaceMatchesPath"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "31b1a60cd1acf30885f2844ffc12d820f507ba3c1ad08e86de821573baa7f608"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestScratchNamespaceMatchesPathAgreement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5ce10e2668d687125f870be3233b7fa420696eed3fa75cd34e7a67dca158e2e5"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestScratchNamespaceMatchesPathMkdirTemp"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "86e78eec4d1ed52355d1b3498ab94846446809f9093b711eb57de4b6c303f558"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestScratchNamespaceMatchesPathRejectsMalformed"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "83d0a40d015e6db8154d7731607adfb15d47e100ed81d7b6d91ccab652e9d5ba"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestScratchNamespaceMatchesPathDoesNotResolve"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "edf84b8eff580a922cbf758f9593739b5fab16757eaf1c9d884a16f79e4f5f95"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-scratch-namespace"
+  content_hash: "2736958e5ad17211247b0a80297bb024c8418cdefa1893c74333b477f91e5f20"
+  source_hash: "3847dee3be8dfdc6b22b383786c75580f7726876328efe515a2db5e5fa9fdf0a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzScratchNamespaceMatchesPath"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dc017b196bbf69bd30d6d4501813fea48a8b4f4249619a74732a8033cf560a6f"
+}

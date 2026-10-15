@@ -680,17 +680,60 @@ func WithStaticInputRoot(root string) TestLogOption {
 // observed.
 func WithScratchNamespace(dir, pattern string) TestLogOption {
 	return func(c *testLogConfig) {
-		if err := ValidateScratchNamespace(dir, pattern); err != nil {
+		n, err := compileScratchNamespace(dir, pattern)
+		if err != nil {
 			c.err = err
 			return
 		}
-		clean := path.Clean(filepath.ToSlash(dir))
-		prefix, suffix := pattern, ""
-		if i := strings.LastIndex(pattern, "*"); i >= 0 {
-			prefix, suffix = pattern[:i], pattern[i+1:]
-		}
-		c.scratchNamespaces = append(c.scratchNamespaces, scratchNamespace{dir: pathID{Kind: pathRel, Path: clean}, prefix: prefix, suffix: suffix})
+		c.scratchNamespaces = append(c.scratchNamespaces, n)
 	}
+}
+
+// MatchesPath reports syntactic coverage by the namespace using the same
+// matcher as WithScratchNamespace. It performs no filesystem or environment
+// reads and grants no observation admission: bracket coverage, matching-child
+// absence at capture, and path absence at ingest remain separate obligations.
+//
+// Dir is normalized exactly as WithScratchNamespace normalizes it: host
+// separators become slashes and lexical cleaning removes dot components.
+// Pattern replaces its last "*" with any string (including empty), or accepts
+// any suffix when it has no "*". Earlier stars are literal, prefix and suffix
+// cannot overlap, and descendants of a matching child also match. The native
+// matcher's conservative root behavior is retained: Dir "." with Pattern "*"
+// also matches the module-root identity "."; this proves no root absence.
+//
+// identityPath must already be canonical identity form: a slash-separated
+// module-relative path ("." for the module root), or a clean absolute host
+// path. Absolute paths retain their absolute kind and never match; callers
+// must express in-module paths relatively. No module root is inferred and
+// identityPath is neither cleaned nor resolved. Invalid declarations or path
+// identities return false and an error under the ingest declaration grammar
+// and manifest path grammar, respectively.
+func (n ScratchNamespace) MatchesPath(identityPath string) (bool, error) {
+	compiled, err := compileScratchNamespace(n.Dir, n.Pattern)
+	if err != nil {
+		return false, err
+	}
+	id := pathID{Kind: pathRel, Path: identityPath}
+	if filepath.IsAbs(identityPath) {
+		id.Kind = pathAbs
+	}
+	if err := validatePathID(id); err != nil {
+		return false, err
+	}
+	return compiled.matches(id), nil
+}
+
+func compileScratchNamespace(dir, pattern string) (scratchNamespace, error) {
+	if err := ValidateScratchNamespace(dir, pattern); err != nil {
+		return scratchNamespace{}, err
+	}
+	clean := path.Clean(filepath.ToSlash(dir))
+	prefix, suffix := pattern, ""
+	if i := strings.LastIndex(pattern, "*"); i >= 0 {
+		prefix, suffix = pattern[:i], pattern[i+1:]
+	}
+	return scratchNamespace{dir: pathID{Kind: pathRel, Path: clean}, prefix: prefix, suffix: suffix}, nil
 }
 
 // ValidateScratchNamespace is the scratch-namespace grammar
@@ -2847,37 +2890,45 @@ func validateManifest(m manifest) error {
 		}
 	}
 	for _, entry := range m.Paths {
-		id := entry.pathID
-		if id.Path == "" || !utf8.ValidString(id.Path) || strings.ContainsAny(id.Path, "\x00\r\n") {
-			return fmt.Errorf("runtimeinputs: invalid path %q", id.Path)
-		}
-		switch id.Kind {
-		case pathRel:
-			if filepath.IsAbs(id.Path) {
-				return fmt.Errorf("runtimeinputs: relative path input is absolute: %q", id.Path)
-			}
-			clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(id.Path)))
-			if clean == ".." || strings.HasPrefix(clean, "../") {
-				return fmt.Errorf("runtimeinputs: relative path escapes module: %q", id.Path)
-			}
-			if clean != id.Path {
-				return fmt.Errorf("runtimeinputs: relative path input is not canonical: %q", id.Path)
-			}
-		case pathAbs:
-			if !filepath.IsAbs(id.Path) {
-				return fmt.Errorf("runtimeinputs: absolute path input is relative: %q", id.Path)
-			}
-			if filepath.Clean(id.Path) != id.Path {
-				return fmt.Errorf("runtimeinputs: absolute path input is not canonical: %q", id.Path)
-			}
-		default:
-			return fmt.Errorf("runtimeinputs: unknown path kind %q", id.Kind)
+		if err := validatePathID(entry.pathID); err != nil {
+			return err
 		}
 	}
 	for _, reason := range m.Unverifiable {
 		if reason == "" || !utf8.ValidString(reason) || strings.ContainsAny(reason, "\x00\r\n") {
 			return fmt.Errorf("runtimeinputs: invalid unverifiable reason %q", reason)
 		}
+	}
+	return nil
+}
+
+// validatePathID is the canonical manifest path grammar, independent of any
+// module location or filesystem state.
+func validatePathID(id pathID) error {
+	if id.Path == "" || !utf8.ValidString(id.Path) || strings.ContainsAny(id.Path, "\x00\r\n") {
+		return fmt.Errorf("runtimeinputs: invalid path %q", id.Path)
+	}
+	switch id.Kind {
+	case pathRel:
+		if filepath.IsAbs(id.Path) {
+			return fmt.Errorf("runtimeinputs: relative path input is absolute: %q", id.Path)
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(id.Path)))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("runtimeinputs: relative path escapes module: %q", id.Path)
+		}
+		if clean != id.Path {
+			return fmt.Errorf("runtimeinputs: relative path input is not canonical: %q", id.Path)
+		}
+	case pathAbs:
+		if !filepath.IsAbs(id.Path) {
+			return fmt.Errorf("runtimeinputs: absolute path input is relative: %q", id.Path)
+		}
+		if filepath.Clean(id.Path) != id.Path {
+			return fmt.Errorf("runtimeinputs: absolute path input is not canonical: %q", id.Path)
+		}
+	default:
+		return fmt.Errorf("runtimeinputs: unknown path kind %q", id.Kind)
 	}
 	return nil
 }
