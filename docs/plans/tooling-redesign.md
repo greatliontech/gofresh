@@ -244,7 +244,7 @@
         declaration authority, independent retries and package publication.
         Retain the binary's own exit and completion facts through event
         conversion; a converter's exit cannot replace the producer's outcome.
-        - [ ] 5.2d.2a Establish native and consumer preparation baselines; amend
+        - [x] 5.2d.2a Establish native and consumer preparation baselines; amend
           runtime ownership and checking contracts, then release shared-generation
           runtime bindings and independently closing native batch checks.
           Frame runtime-configuration guard values unambiguously and coordinate
