@@ -561,8 +561,8 @@ type Engine struct {
 	envSet          bool
 	// producerEnv, when declared, is the producer processes' environment:
 	// runtime-input revalidation computes environment values from it
-	// instead of env. Sessions bind it to their separate prebuilt-runtime
-	// description; the legacy option can only repeat the analysis environment.
+	// instead of env. The legacy option can only repeat the analysis
+	// environment; explicit sessions keep runtime state in RuntimeBinding.
 	producerEnv    []string
 	producerEnvSet bool
 	// completeBuild selects the explicit session build-description guard.
@@ -603,6 +603,9 @@ var viewTestHooks struct {
 	// observe observes every source/guard/purity observation pass — tests
 	// pin how many observations an operation performs.
 	observe func()
+	// runtimeGuards observes or perturbs an execution-side guard sample in
+	// binding/closing tests, independently of source/build observation passes.
+	runtimeGuards func(*guard.RuntimeGuards)
 	// snapshot observes the env snapshot each precise-analysis bracket
 	// derives its configuration from — tests pin that the bracket reuses
 	// the view's construction snapshot instead of re-reading go env.

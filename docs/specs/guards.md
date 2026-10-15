@@ -137,6 +137,15 @@ the Go runtime-configuration environment the measured process inherits — `GOGC
 before execution and able to move allocation and scheduling behavior with no other
 guard moving; it bears only on a timing result, an unset `GOMAXPROCS` deferring to
 the core count the machine guard already covers.
+The runtime guard's encoding uses the domain `gofresh/runtime-config@1` followed
+by a newline, then the decimal key count and a colon. In the order `GOGC`,
+`GODEBUG`, `GOMEMLIMIT`, `GOMAXPROCS`, each key and value is prefixed with its
+decimal byte length and a colon. An absent value contributes the empty value.
+The guard is the first 16 bytes of SHA-256, encoded as lowercase hexadecimal.
+Newlines and key-shaped text inside values cannot change field boundaries.
+Historical delimiter-only guards remain readable but do not acquire the new
+encoding's identity; comparison requires a new measurement rather than rewriting
+the recording.
 
 **REQ-guard-runtime-relevance** (invariant): A behavior-affecting runtime or
 machine dependency of a code result MUST be guarded by evidence applicable to
@@ -168,16 +177,22 @@ as the source of truth, so recomputing or discarding it never changes source
 equivalence, and evidence that disagrees with recomputation from source can never
 make an unsound result look valid.
 
-**REQ-guard-view-lifetime** (invariant): Environment guards MUST be re-observed for
-every new analysis view generation, with capture shared only by subjects inside
-that generation — a derived sibling view shares its parent's guard capture
-exactly as it shares the rest of the parent's one observation
-(REQ-fresh-producer-view's sibling clause) — and never memoized by module
-directory across views. Each view re-observes facts under its
-engine's immutable complete process environment; constructing a new engine captures
-later ambient process-environment drift. A producer view therefore freezes the guards
-inherited by its producing process, while a current view under newly constructed
-engine configuration sees toolchain, build, machine, or runtime-configuration drift.
+**REQ-guard-view-lifetime** (invariant): Guard observations MUST remain scoped
+to the source/build generation and, in the explicit split form, the runtime
+binding whose configuration they describe, never memoized by module directory
+across generations or bindings. A derived sibling view shares its parent's
+source/build observation and the same runtime binding's guards
+(REQ-fresh-producer-view's sibling clause). Each view re-observes compilation facts under its
+engine's immutable complete compilation environment; constructing a new engine captures
+later ambient compilation-environment drift. An explicit runtime binding owns
+its complete runtime environment separately: applicable runtime guards are
+derived and checked under that binding without replacing compilation facts or
+another binding's guards. A producer view therefore freezes the guards
+inherited by its producing process. A newly observed source/build generation
+captures toolchain and build drift; a newly admitted runtime binding captures
+its applicable machine and runtime-configuration guards, independently of other
+bindings. Closing re-observes the complete applicable guard set under those same
+compilation and runtime configurations.
 
 **REQ-guard-completeness** (invariant): A recorded fingerprint missing a value
 required to evaluate a guard that applies to its result MUST be treated as stale, not
@@ -188,8 +203,14 @@ recording written before a guard existed re-measures rather than being trusted.
 guards applicable to its caller-declared result kind. A code-result view captures the
 code guards and leaves machine and runtime-configuration values absent without
 probing machine support; a measurement view additionally captures both measurement
-guards. The view's result kind is fixed at construction and a check under another
-kind is refused. Every fingerprint records that nonzero kind and a check derives its
+guards. In the explicit split form, the source/build generation captures the
+source/build guards and its runtime binding captures the applicable measurement
+guards; neither another binding nor a later generation overwrites either set.
+Observed runtime-input evidence belongs to its producing unit and retained
+record, and is checked under the selected runtime binding for both result kinds;
+it is never shared source/build state. The view's
+result kind is fixed at construction and a check under another kind is refused.
+Every fingerprint records that nonzero kind and a check derives its
 view policy from the recording rather than accepting a replacement kind from the
 caller; missing or mismatched kind evidence is refused. Unavailable measurement
 support therefore cannot block a code result, and a measurement recording cannot be

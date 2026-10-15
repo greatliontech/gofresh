@@ -86,7 +86,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}}
 	configuration := BuildDescription{Directory: dir, Environment: buildEnv, Inputs: []string{}}
 	policy := SessionPolicy{Execution: SingleSubjectExecution, Runner: runner}
-	session, err := NewSession(ctx, configuration, RuntimeDescription{Environment: runtimeEnv}, policy)
+	session, err := NewSession(ctx, configuration, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +96,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
+	execution := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: runtimeEnv})
 	ledger, err := snapshot.TestVariantLedger(subject)
 	if err != nil || ledger.BindingStrategy == "" || len(ledger.Declarations) == 0 {
 		t.Fatalf("snapshot ledger: %+v %v", ledger, err)
@@ -109,7 +110,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if snapshot.SourceFiles()[0] != originalFile {
 		t.Fatal("source projection aliases snapshot")
 	}
-	currentFacts, err := snapshot.CurrentFacts(ctx, subject)
+	currentFacts, err := execution.CurrentFacts(ctx, subject)
 	if err != nil || currentFacts.RuntimeInputs != "" || currentFacts.ObservationAssertion != "" || currentFacts.ObservationProof.Strategy != "" {
 		t.Fatalf("analysis facts gained producing evidence: %v", err)
 	}
@@ -130,7 +131,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	missing, err := snapshot.Begin(subject)
+	missing, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if out, err := control.CombinedOutput(); err != nil || !strings.Contains(string(out), "selected=1") {
 		t.Fatalf("actual artifact: %v\n%s", err, out)
 	}
-	unit, err := snapshot.Begin(subject)
+	unit, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if _, err := unit.Register(ctx, bound, ProcessDescription{Identity: "unaccounted-process"}); err == nil {
 		t.Fatal("second contributor admitted by a single-process unit")
 	}
-	sibling, err := snapshot.Begin(subject)
+	sibling, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +291,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if result, err := sibling.Close(ctx); err != nil || result.Verdict.Status != Valid {
 		t.Fatalf("sibling closing: %+v %v", result.Verdict, err)
 	}
-	aborted, err := snapshot.Begin(subject)
+	aborted, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if _, err := os.Stat(abortGate.spawnMarker); !os.IsNotExist(err) {
 		t.Fatalf("aborted closing started another query: %v", err)
 	}
-	diagnostic, err := snapshot.BeginIdentity(subject)
+	diagnostic, err := execution.BeginIdentity(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +359,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		t.Fatalf("diagnostic gained observation authority: disposition=%d error=%v", result.Observation, err)
 	}
 	write("input", "before")
-	fileUnit, err := snapshot.BeginIdentity(fileSubject)
+	fileUnit, err := execution.BeginIdentity(fileSubject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +385,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if !errors.Is(fileErr, ErrViewChanged) || fileResult.Fingerprint.MaximalClosure != "" {
 		t.Fatalf("identity-only closing missed runtime motion during source validation: %+v %v", fileResult.Verdict, fileErr)
 	}
-	unstarted, err := snapshot.Begin(subject)
+	unstarted, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +399,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if result, err := unstarted.Close(ctx); err == nil || result.Fingerprint.MaximalClosure != "" {
 		t.Fatalf("unstarted process became evidence: %+v %v", result.Verdict, err)
 	}
-	abnormal, err := snapshot.Begin(subject)
+	abnormal, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +413,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if result, err := abnormal.Close(ctx); err != nil || result.Observation != IncompleteObservation || result.Terminal.Kind != AbnormalCompletion || result.Verdict.Status != Unverifiable {
 		t.Fatalf("abnormal disposition lost: terminal=%+v observation=%d verdict=%+v error=%v", result.Terminal, result.Observation, result.Verdict, err)
 	}
-	current, err := NewSession(ctx, configuration, RuntimeDescription{Environment: runtimeEnv}, policy)
+	current, err := NewSession(ctx, configuration, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,13 +421,13 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := checking.Check(ctx, subject, final.Fingerprint)
+	verdict, err := bindTestRuntime(t, checking, RuntimeDescription{Environment: runtimeEnv}).Check(ctx, subject, final.Fingerprint)
 	if err != nil || verdict.Status != Valid {
 		t.Fatalf("later check: %+v %v", verdict, err)
 	}
 	compilerChange := configuration
 	compilerChange.Environment = gotool.SetEnv(buildEnv, "FRESH_COMPILER_SETTING", "changed")
-	compilerSession, err := NewSession(ctx, compilerChange, RuntimeDescription{Environment: runtimeEnv}, policy)
+	compilerSession, err := NewSession(ctx, compilerChange, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,26 +435,18 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = compilerSnapshot.Check(ctx, subject, final.Fingerprint)
+	verdict, err = bindTestRuntime(t, compilerSnapshot, RuntimeDescription{Environment: runtimeEnv}).Check(ctx, subject, final.Fingerprint)
 	if err != nil || verdict.Status != Stale || verdict.Reason != "buildconfig" {
 		t.Fatalf("unprojected compiler environment ignored: %+v %v", verdict, err)
 	}
 	changedRuntime := gotool.SetEnv(runtimeEnv, "FRESH_SESSION_VALUE", "changed")
-	changed, err := NewSession(ctx, configuration, RuntimeDescription{Environment: changedRuntime}, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changedSnapshot, err := changed.Snapshot(ctx, []Subject{subject}, Measurement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err = changedSnapshot.Check(ctx, subject, final.Fingerprint)
+	verdict, err = bindTestRuntime(t, snapshot, RuntimeDescription{Environment: changedRuntime}).Check(ctx, subject, final.Fingerprint)
 	if err != nil || verdict.Status != Stale {
 		t.Fatalf("changed runtime served: %+v %v", verdict, err)
 	}
 	configuration.Environment = gotool.SetEnv(buildEnv, "GOAMD64", "v2")
 	write("feature.go", "//go:build amd64.v2\n\npackage session\nfunc Value() int { return 3 }\n")
-	changedBuild, err := NewSession(ctx, configuration, RuntimeDescription{Environment: runtimeEnv}, policy)
+	changedBuild, err := NewSession(ctx, configuration, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +471,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if out, err := changedControl.CombinedOutput(); err != nil || !strings.Contains(string(out), "selected=3") {
 		t.Fatalf("changed actual artifact: %v\n%s", err, out)
 	}
-	wrongBuild, err := snapshot.Begin(subject)
+	wrongBuild, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,11 +483,11 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		t.Fatal("borrowed an artifact from another snapshot")
 	}
 	wrongBuild.Abort()
-	verdict, err = changedBuildSnapshot.Check(ctx, subject, final.Fingerprint)
+	verdict, err = bindTestRuntime(t, changedBuildSnapshot, RuntimeDescription{Environment: runtimeEnv}).Check(ctx, subject, final.Fingerprint)
 	if err != nil || verdict.Status != Stale {
 		t.Fatalf("changed producing build served: %+v %v", verdict, err)
 	}
-	pending, err := snapshot.Begin(subject)
+	pending, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +520,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	case <-time.After(10 * time.Second):
 		t.Fatal("closed preparation did not return")
 	}
-	drifting, err := snapshot.Begin(subject)
+	drifting, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,12 +544,12 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}
 	write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 1 }\n")
 	write("unused_test.go", "package session\nimport \"testing\"\nfunc TestUnused(t *testing.T) {}\n")
-	extensionSession, err := NewSession(ctx, build, RuntimeDescription{Environment: runtimeEnv}, policy)
+	extensionSession, err := NewSession(ctx, build, policy)
 	if err == nil {
 		t.Fatal("package-filled execution description accepted as a session configuration")
 	}
 	configuration.Environment = buildEnv
-	extensionSession, err = NewSession(ctx, configuration, RuntimeDescription{Environment: runtimeEnv}, policy)
+	extensionSession, err = NewSession(ctx, configuration, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,10 +557,11 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict, err := extensionSnapshot.Check(ctx, subject, final.Fingerprint); err != nil || verdict.Status != Stale {
+	extension := bindTestRuntime(t, extensionSnapshot, RuntimeDescription{Environment: runtimeEnv})
+	if verdict, err := extension.Check(ctx, subject, final.Fingerprint); err != nil || verdict.Status != Stale {
 		t.Fatalf("ordinary checking silently extended applicability: %+v %v", verdict, err)
 	}
-	extended, paired, verdict, err := extensionSnapshot.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
+	extended, paired, verdict, err := extension.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
 	if err != nil || verdict.Status != Valid {
 		t.Fatalf("licensed extension: %+v %v", verdict, err)
 	}
@@ -576,7 +570,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}
 	// Price only the native provisional operation, independently of the public
 	// wrapper's closing call. The next observation belongs to that closing call.
-	preview, err := extensionSnapshot.view.Sibling([]Subject{subject})
+	preview, err := extension.newView([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +588,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 			write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 77 }\n")
 		}
 	}
-	rejected, rejectedLedger, _, closingErr := extensionSnapshot.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
+	rejected, rejectedLedger, _, closingErr := extension.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
 	viewTestHooks.observe = priorObserve
 	if !errors.Is(closingErr, ErrViewChanged) || rejected.MaximalClosure != "" || len(rejectedLedger.Declarations) != 0 {
 		t.Fatalf("extension returned provisional evidence without closing: passes=%d preview=%d error=%v", passes, previewPasses, closingErr)
@@ -625,7 +619,7 @@ func TestSessionCheckerProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	session, err := NewSession(ctx, record.Build, record.Runtime, SessionPolicy{Execution: SingleSubjectExecution})
+	session, err := NewSession(ctx, record.Build, SessionPolicy{Execution: SingleSubjectExecution})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +627,7 @@ func TestSessionCheckerProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := snapshot.Check(ctx, record.Subject, record.Fingerprint)
+	verdict, err := bindTestRuntime(t, snapshot, record.Runtime).Check(ctx, record.Subject, record.Fingerprint)
 	want := record.Want
 	if want == "" {
 		want = Valid
@@ -642,4 +636,13 @@ func TestSessionCheckerProcess(t *testing.T) {
 		t.Fatalf("record check: %+v %v", verdict, err)
 	}
 	t.Logf("record %s in fresh process", want)
+}
+
+func bindTestRuntime(t *testing.T, snapshot *Snapshot, description RuntimeDescription) *RuntimeBinding {
+	t.Helper()
+	binding, err := snapshot.BindRuntime(t.Context(), description)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binding
 }

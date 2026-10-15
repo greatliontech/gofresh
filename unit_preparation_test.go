@@ -22,7 +22,7 @@ func TestUnitRefusesScratchDeclarationsBeforePreparation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{}, SessionPolicy{})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,13 +31,14 @@ func TestUnitRefusesScratchDeclarationsBeforePreparation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	execution := bindTestRuntime(t, snapshot, RuntimeDescription{})
 	bound, err := snapshot.BindBuilt(subject.Package, "executor-declared-artifact")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, ns := range []runtimeinput.ScratchNamespace{{Dir: ".", Pattern: "bad/name"}, {Dir: "..", Pattern: "scratch-*"}, {Dir: "", Pattern: "scratch-*"}, {Dir: ".", Pattern: ""}} {
 		t.Run(ns.Dir+":"+ns.Pattern, func(t *testing.T) {
-			u, err := snapshot.Begin(subject)
+			u, err := execution.Begin(subject)
 			if err != nil {
 				t.Fatal(err)
 			}

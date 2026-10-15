@@ -14,7 +14,7 @@ import (
 
 // PrepareOutcomeSupport derives support for exactly this view's contributing
 // subject set, before execution. Use a sibling view for a narrower process set.
-// The caller runs that exact set under the engine's complete producer environment
+// The caller runs that exact set under the view's complete runtime environment
 // and excludes environment mutation. Unsupported inventories return a capability
 // carrying their refusal; they never turn process health into outcome evidence.
 // Preparation selects each subject's observation proof for producer validation.
@@ -22,7 +22,7 @@ func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.Pro
 	if len(v.subjects) == 0 {
 		return runtimeinput.OutcomeSupport{}, fmt.Errorf("gofresh: outcome support needs contributing subjects")
 	}
-	env, err := gotool.EnvForCommand(v.engine.evidenceEnv(), frame.PkgDir)
+	env, err := gotool.EnvForCommand(v.evidenceEnv(), frame.PkgDir)
 	if err != nil {
 		return runtimeinput.OutcomeSupport{}, err
 	}

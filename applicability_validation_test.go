@@ -20,32 +20,21 @@ func TestApplicabilityBatchesPreserveRecordsAndPolicies(t *testing.T) {
 	for draw := 0; draw < 300; draw++ {
 		var checks []applicabilityCheck
 		want := map[applicabilityCheck]int{}
-		counts := map[bool]map[Subject]int{false: {}, true: {}}
 		for n := r.Intn(30); n > 0; n-- {
 			check := applicabilityCheck{Fingerprint{RuntimeInputs: fmt.Sprint(r.Intn(5)), RuntimeDigest: fmt.Sprint(r.Intn(5))}, Subject{"p", fmt.Sprint(r.Intn(5))}, r.Intn(2) == 0}
 			checks = append(checks, check)
 			want[check]++
-			counts[check.observed][check.subject]++
 		}
 		got := map[applicabilityCheck]int{}
-		batchCounts := map[bool]int{}
-		for _, batch := range batchApplicabilityChecks(checks) {
-			batchCounts[batch.observed]++
-			for subject, recorded := range batch.recorded {
-				got[applicabilityCheck{recorded, subject, batch.observed}]++
+		for i, record := range applicabilityRecords(checks) {
+			check := applicabilityCheck{record.Recorded, record.Subject, record.observed}
+			got[check]++
+			if check != checks[i] {
+				t.Fatalf("draw %d changed candidate order at %d", draw, i)
 			}
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("draw %d lost or changed historical evidence/policy: got %v want %v", draw, got, want)
-		}
-		for policy, subjects := range counts {
-			minimum := 0
-			for _, count := range subjects {
-				minimum = max(minimum, count)
-			}
-			if batchCounts[policy] != minimum {
-				t.Fatalf("draw %d policy %v used %d batches, need %d", draw, policy, batchCounts[policy], minimum)
-			}
 		}
 	}
 }
@@ -234,7 +223,7 @@ func TestApplicabilityValidationClosesSourceAfterUnavailableProof(t *testing.T) 
 			return
 		}
 		phases++
-		if phases != 4 {
+		if phases != 2 {
 			return
 		}
 		path := filepath.Join(f.dir, "observed_test.go")
@@ -248,7 +237,7 @@ func TestApplicabilityValidationClosesSourceAfterUnavailableProof(t *testing.T) 
 		}
 	}
 	err := v.Validate(context.Background())
-	if phases != 4 || !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
+	if phases != 2 || !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
 		t.Fatalf("final source close lost to proof cut (%d runtime phases): %v", phases, err)
 	}
 }
@@ -274,11 +263,11 @@ func TestApplicabilityValidationSharesCompatibleBatches(t *testing.T) {
 	if err := v.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if analyses != 1 || windows != 2 || runtimePhases != 4 {
-		t.Fatalf("validation sharing: analyses=%d windows=%d runtime phases=%d; want 1,2,4", analyses, windows, runtimePhases)
+	if analyses != 1 || windows != 1 || runtimePhases != 2 {
+		t.Fatalf("validation sharing: analyses=%d windows=%d runtime phases=%d; want 1,1,2", analyses, windows, runtimePhases)
 	}
 	// Count evaluations themselves, not just phase announcements. Each pair
-	// carries the identical manifest, which is read once per batch endpoint.
+	// carries the identical manifest, which is read once per endpoint across policies.
 	current := f.view(t)
 	read := current.runtimeCheck()
 	reads := 0
@@ -289,8 +278,8 @@ func TestApplicabilityValidationSharesCompatibleBatches(t *testing.T) {
 	if err := v.validateApplicabilityBatches(context.Background(), current, v.applicabilityChecks); err != nil {
 		t.Fatal(err)
 	}
-	if reads != 4 {
-		t.Fatalf("four historical records caused %d runtime reads; want one per policy-batch endpoint (4)", reads)
+	if reads != 2 {
+		t.Fatalf("four historical records caused %d runtime reads; want one per endpoint (2)", reads)
 	}
 }
 

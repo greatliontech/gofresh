@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -30,6 +31,8 @@ type BuildDescription struct {
 // Environment inherits the session's build environment; a nonnil empty slice
 // describes an otherwise empty environment. Directory supplies PWD; omission
 // uses the build directory, and a relative directory is based at that directory.
+// The executor runs the retained artifact under this description; a compiling Go
+// command under this environment does not execute the admitted build description.
 type RuntimeDescription struct {
 	Directory   string
 	Environment []string
@@ -64,21 +67,19 @@ type SessionPolicy struct {
 	Progress       func(Progress)
 }
 
-// Session owns one judged operation's immutable build/runtime configuration and
+// Session owns one judged operation's immutable build configuration and
 // policy. It executes no subject and stores no result. Source generations belong
 // to its snapshots, and producing obligations belong to their independent units.
 type Session struct {
-	engine     *Engine
-	build      BuildDescription
-	runtimeDir string
-	roots      runtimeinput.Roots
+	engine *Engine
+	build  BuildDescription
+	roots  runtimeinput.Roots
 }
 
-// NewSession admits explicitly separate compilation and runtime descriptions.
-// The executor builds under the former and runs that retained artifact under the
-// latter; running a compiling go command under the runtime description violates
-// the binding. Construction and its queries honor ctx.
-func NewSession(ctx context.Context, build BuildDescription, execution RuntimeDescription, policy SessionPolicy) (session *Session, err error) {
+// NewSession admits a complete compilation description and analysis policy.
+// Snapshots observe source/build generations; BindRuntime separately admits the
+// environment of executions using a retained artifact. Construction honors ctx.
+func NewSession(ctx context.Context, build BuildDescription, policy SessionPolicy) (session *Session, err error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil session context")
 	}
@@ -106,36 +107,11 @@ func NewSession(ctx context.Context, build BuildDescription, execution RuntimeDe
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	runtimeDir := execution.Directory
-	if runtimeDir == "" {
-		runtimeDir = buildDir
-	} else {
-		runtimeDir, err = rebaseProcessPath(buildDir, runtimeDir)
-		if err != nil {
-			return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
-		}
-	}
-	runtimeDir, err = gotool.CanonicalDir(runtimeDir)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
-	}
 	buildEnv, err := gotool.EnvForPackages(build.Environment)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: build environment: %w", err)
 	}
 	buildEnv, err = gotool.EnvForCommand(buildEnv, buildDir)
-	if err != nil {
-		return nil, err
-	}
-	runtimeEnv := execution.Environment
-	if runtimeEnv == nil {
-		runtimeEnv = buildEnv
-	}
-	runtimeEnv, err = gotool.NormalizeEnv(runtimeEnv)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: runtime environment: %w", err)
-	}
-	runtimeEnv, err = gotool.EnvForCommand(runtimeEnv, runtimeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -172,13 +148,10 @@ func NewSession(ctx context.Context, build BuildDescription, execution RuntimeDe
 	if err != nil {
 		return nil, err
 	}
-	// This is the explicit prebuilt-execution form, never the legacy option
-	// that ambiguously described a process which might also compile.
-	e.producerEnv, e.producerEnvSet = slices.Clone(runtimeEnv), true
 	e.completeBuild = true
 	e.deferredCheckClose = true
 	owned := BuildDescription{Directory: e.dir, Environment: slices.Clone(e.env), Flags: slices.Clone(e.buildFlags), Inputs: append([]string{}, e.buildInputs...)}
-	return &Session{engine: e, build: owned, runtimeDir: runtimeDir}, nil
+	return &Session{engine: e, build: owned}, nil
 }
 
 // canonicalSessionVouches validates the already-resolved identity form through
@@ -225,7 +198,110 @@ type Snapshot struct {
 	view    *View
 }
 
+// RuntimeBinding owns an immutable process directory, complete environment and
+// applicable runtime guards over one snapshot. It owns no execution or closing
+// state; independent units may use the same retained package artifact.
+type RuntimeBinding struct {
+	snapshot *Snapshot
+	runtime  boundRuntime
+}
+
+// boundRuntime is shared read-only by every view derived from a binding. Source
+// observations stay on the engine's compilation environment.
+type boundRuntime struct {
+	dir    string
+	env    []string
+	guards guard.RuntimeGuards
+}
+
+// Snapshot returns the immutable source/build generation underlying this binding.
+func (b *RuntimeBinding) Snapshot() *Snapshot {
+	if b == nil {
+		return nil
+	}
+	return b.snapshot
+}
+
+// BindRuntime admits the actual process configuration without re-observing source
+// or compilation facts. Nil Environment inherits the build environment; a present
+// empty environment contains only derived PWD. Measurement guards require a fresh
+// agreement pair. The caller protects both dependency sets through their spans.
+func (s *Snapshot) BindRuntime(ctx context.Context, execution RuntimeDescription) (binding *RuntimeBinding, err error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil runtime binding context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			binding, err = nil, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s == nil || s.view == nil || s.session == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
+	dir, err := rebaseProcessPath(s.session.build.Directory, execution.Directory)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
+	}
+	dir, err = gotool.CanonicalDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
+	}
+	env := execution.Environment
+	if env == nil {
+		env = s.session.build.Environment
+	}
+	env, err = gotool.EnvForCommand(env, dir)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: runtime environment: %w", err)
+	}
+	r := boundRuntime{dir: dir, env: env}
+	r.guards, err = r.observe(ctx, s.view.kind)
+	if err != nil {
+		return nil, err
+	}
+	second, err := r.observe(ctx, s.view.kind)
+	if err != nil {
+		return nil, err
+	}
+	if r.guards != second {
+		return nil, fmt.Errorf("%w: runtime guards during binding", ErrViewChanged)
+	}
+	return &RuntimeBinding{snapshot: s, runtime: r}, nil
+}
+
+func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGuards, error) {
+	guards, err := guard.CaptureRuntime(ctx, r.env, kind)
+	if err != nil {
+		return guard.RuntimeGuards{}, err
+	}
+	if viewTestHooks.runtimeGuards != nil {
+		viewTestHooks.runtimeGuards(&guards)
+	}
+	if err := ctx.Err(); err != nil {
+		return guard.RuntimeGuards{}, err
+	}
+	return guards, nil
+}
+
+// newView selects immutable source facts and the binding while giving the caller
+// a fresh transaction. No attachment, obligation or seal crosses this boundary.
+func (b *RuntimeBinding) newView(subjects []Subject) (*View, error) {
+	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+		return nil, errors.New("gofresh: uninitialized runtime binding")
+	}
+	v, err := b.snapshot.view.Sibling(subjects)
+	if err != nil {
+		return nil, err
+	}
+	v.runtime = &b.runtime
+	return v, nil
+}
+
 // Snapshot observes the requested subjects under the session's admitted build.
+// It captures no measurement-side guards; BindRuntime admits those separately.
 func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (*Snapshot, error) {
 	if s == nil || s.engine == nil {
 		return nil, errors.New("gofresh: uninitialized session")
@@ -275,22 +351,20 @@ func (s *Snapshot) BindBuilt(pkg, identity string) (BuildBinding, error) {
 // Check automatically selects admissible established native evidence and closes
 // its own checking interval before returning a judgment. It never fills missing
 // historical producing support or seals another unit.
-func (s *Snapshot) Check(ctx context.Context, subject Subject, recorded Fingerprint) (Verdict, error) {
-	if s == nil || s.view == nil {
-		return Verdict{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	v, err := s.view.Sibling([]Subject{subject})
+func (b *RuntimeBinding) Check(ctx context.Context, subject Subject, recorded Fingerprint) (Verdict, error) {
+	u, err := b.BeginCheck([]Subject{subject})
 	if err != nil {
 		return Verdict{}, err
 	}
-	judgment, err := v.CheckObserved(ctx, recorded, subject)
+	defer u.Abort()
+	if _, err := u.CheckBatch(ctx, []Candidate{{subject, recorded}}); err != nil {
+		return Verdict{}, err
+	}
+	checked, err := u.Close(ctx)
 	if err != nil {
 		return Verdict{}, err
 	}
-	if err := v.Validate(ctx); err != nil {
-		return Verdict{}, err
-	}
-	return judgment, nil
+	return checked[0].Verdict, nil
 }
 
 // SourceFiles returns the snapshot's caller-owned mutable source inventory for
@@ -319,39 +393,53 @@ func (s *Snapshot) TestVariantLedger(subject Subject) (TestVariantLedger, error)
 	return s.view.TestVariantLedger(subject)
 }
 
-// CurrentFacts returns this snapshot's analysis-only fingerprint projection for
+// CurrentFacts returns this binding's analysis-only fingerprint projection for
 // explanations. It carries neither an execution receipt nor runtime observation
 // or selected producing proof. It is not a newly produced result.
-func (s *Snapshot) CurrentFacts(ctx context.Context, subject Subject) (Fingerprint, error) {
+func (b *RuntimeBinding) CurrentFacts(ctx context.Context, subject Subject) (Fingerprint, error) {
 	if ctx == nil {
 		return Fingerprint{}, errors.New("gofresh: nil facts context")
 	}
 	if err := ctx.Err(); err != nil {
 		return Fingerprint{}, err
 	}
-	if s == nil || s.view == nil {
-		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized runtime binding")
 	}
-	return s.view.Capture(ctx, subject)
+	if err := requireSubjects([]Subject{subject}, func(s Subject) bool {
+		return slices.Contains(b.snapshot.view.subjects, s)
+	}, SelectedView); err != nil {
+		return Fingerprint{}, err
+	}
+	v, err := b.newView([]Subject{subject})
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return v.Capture(ctx, subject)
 }
 
 // CheckInertExtension explicitly requests the native inert-test-variant license.
 // It preserves producing evidence and returns the checked endpoint/ledger pair
 // only after closing validation. Ordinary Check never requests this transform.
-func (s *Snapshot) CheckInertExtension(ctx context.Context, subject Subject, recorded Fingerprint, prior TestVariantLedger) (Fingerprint, TestVariantLedger, Verdict, error) {
-	if s == nil || s.view == nil {
-		return Fingerprint{}, TestVariantLedger{}, Verdict{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	v, err := s.view.Sibling([]Subject{subject})
+func (b *RuntimeBinding) CheckInertExtension(ctx context.Context, subject Subject, recorded Fingerprint, prior TestVariantLedger) (Fingerprint, TestVariantLedger, Verdict, error) {
+	u, err := b.BeginCheck([]Subject{subject})
 	if err != nil {
 		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
 	}
-	fp, ledger, verdict, err := v.CheckObservedInertTestVariantExtension(ctx, recorded, prior, subject)
+	defer u.Abort()
+	if _, err := u.CheckBatch(ctx, []Candidate{{subject, recorded}}); err != nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
+	}
+	if _, err := u.ExtendInertBatch(ctx, []InertRequest{{0, prior}}); err != nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
+	}
+	checked, err := u.Close(ctx)
 	if err != nil {
 		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
 	}
-	if err := v.Validate(ctx); err != nil {
-		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
+	result := checked[1]
+	if result.Extension == nil {
+		return Fingerprint{}, TestVariantLedger{}, result.Verdict, nil
 	}
-	return fp, ledger, verdict, nil
+	return result.Extension.Fingerprint, result.Extension.Ledger, result.Verdict, nil
 }

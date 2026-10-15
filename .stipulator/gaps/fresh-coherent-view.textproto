@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-fresh-coherent-view"
 reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "8a7efba710de570b9b5d6db30a60bbbae17b2811d6338ccbb481a3b2bf749849"
-source_hash: "b110caf7c0669f3fb2d71764434e42d0b74ee2f26054eaf06f572ea3d0d77cec"
+content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

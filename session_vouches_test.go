@@ -11,7 +11,7 @@ func TestSessionAcceptsTheResolvedVouchSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewSession(t.Context(), BuildDescription{Directory: t.TempDir(), Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{}, SessionPolicy{Vouches: entries})
+	s, err := NewSession(t.Context(), BuildDescription{Directory: t.TempDir(), Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{Vouches: entries})
 	if err != nil {
 		t.Fatal(err)
 	}

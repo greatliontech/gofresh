@@ -3,7 +3,7 @@
 
 requirement_id: "REQ-fresh-producer-view"
 reason: "Existing producer/sibling checks enforce post-execution agreement and independent attachments, but the amended unit-wide exclusion through publication/consumption and complete inherited provenance require the replacement boundary and consumer enforcement. Existing examples do not establish those added obligations."
-content_hash: "6599c15e12df186c76a94cc09a7e67f6e9d8efbe5d6449476e56cf2e493bb56a"
-source_hash: "0d1f5128efa181a70744452307246362b8ac1b5b199aabb6a7c8757fe9b0183a"
+content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
+source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
 lands { manual { condition: "The unit boundary and its consumer publication paths enforce source/build exclusion through preparation, execution and close, preserve the validated state through publication/consumption, and pass independent-sibling, budget-cut provenance and actual-drift regressions." } }
 excuses: GAP_EXCUSE_UNCOVERED

@@ -14,7 +14,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 		t.Skip("prepares a real observation proof at a deterministic closing boundary")
 	}
 	dir := writeSupportedViewModule(t)
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{}, SessionPolicy{Execution: PackageExecution})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{Execution: PackageExecution})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,6 +23,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	execution := bindTestRuntime(t, snapshot, RuntimeDescription{})
 	bound, err := snapshot.BindBuilt(subject.Package, "declared-artifact")
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +36,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 					var register func(context.Context, BuildBinding, ProcessDescription) (Contribution, error)
 					var end func()
 					if form == "singleton" {
-						u, err := snapshot.Begin(subject)
+						u, err := execution.Begin(subject)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -51,7 +52,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 							}
 						}
 					} else {
-						u, err := snapshot.BeginPackage([]Subject{subject})
+						u, err := execution.BeginPackage([]Subject{subject})
 						if err != nil {
 							t.Fatal(err)
 						}

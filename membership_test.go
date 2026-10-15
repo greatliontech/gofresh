@@ -114,8 +114,8 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 		}
 	}
 	// Empty maps retain the successful empty-batch behavior.
-	prepared, err := v.prepareRecorded(nil)
-	if err != nil || !reflect.DeepEqual(prepared, map[Subject]closure.Closure{}) {
+	prepared, err := v.CheckBatch(t.Context(), nil)
+	if err != nil || !reflect.DeepEqual(prepared, map[Subject]Verdict{}) {
 		t.Fatalf("empty preparation = %+v %v", prepared, err)
 	}
 }

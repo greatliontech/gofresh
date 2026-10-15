@@ -224,17 +224,40 @@
         main-package directories, not a recursive module scan. Preserve explicit
         profile coordinates, off, absent/present/error states, module/workspace
         selection and build-input coherence through capture and closing.
+        Accept the dependency adoption together with 5.2d.2's runtime binding:
+        native v3 PWD observations must publish and serve under the actual
+        package environment rather than the legacy analysis environment.
       - [ ] 5.2d.2 Adopt complete compilation/runtime descriptions, retained test
         artifacts and per-attempt native preparation/finalization/checking.
+        First derive the shared ownership and preparation design with 5.2e:
+        analysis generations, package runtime coordinates, retained artifacts,
+        independent attempts and closing must have one target architecture.
+        Establish scoped cold/warm cost and sharing baselines before choosing
+        sharing changes; migrate consumers against that design and remove the
+        superseded producing/checking mechanisms in the same coherent units.
+        Settle native runtime binding over shared source/build generations and
+        independently closing batch checking before the port. Keep reusable
+        proof inventories separate from attempt-bound support, and preserve a
+        non-authorizing process account when reusable finalization refuses.
         Amend the sole-runnable rule with the complete actual runnable roster;
         preserve vet/build/health, examples, fuzz seeds, runtime arguments,
         declaration authority, independent retries and package publication.
         Retain the binary's own exit and completion facts through event
         conversion; a converter's exit cannot replace the producer's outcome.
+        - [ ] 5.2d.2a Establish native and consumer preparation baselines; amend
+          runtime ownership and checking contracts, then release shared-generation
+          runtime bindings and independently closing native batch checks.
+          Frame runtime-configuration guard values unambiguously and coordinate
+          the existing native Pew caller migration before the dependency release.
+        - [ ] 5.2d.2b Amend the consumer proof contract and adopt retained builds,
+          complete runnable rosters and independent native attempts, preserving
+          execution flags, output/accounting and publication semantics; remove
+          replaced producer/checker orchestration and close the PGO adoption gate.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
-      Attribute scoped discovery and certificate cold/warm costs before changing
-      sharing; fold Stipulator's selection-certificate-preparation-repeated
+      Complete and verify the preparation sharing designed before 5.2d.2's
+      consumer migration, using its scoped discovery and certificate cold/warm
+      baseline; fold Stipulator's selection-certificate-preparation-repeated
       issue through endpoint-local selected-view preparation. Keep retry
       durability/tier/account obligations at 5.3 explicit,
       and prevent another consumer-local reason parser during migration.

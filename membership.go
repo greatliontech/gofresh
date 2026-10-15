@@ -103,7 +103,7 @@ type RecordedFailure struct {
 }
 
 // RecordedBatchError reports every failure in the first refusing preparation
-// tier, in package/symbol order. All shape failures precede every view-kind
+// tier, in request order (package/symbol order for map-backed APIs). All shape failures precede every view-kind
 // mismatch; every kind mismatch precedes membership. No partial verdict exists.
 type RecordedBatchError struct {
 	Tier     RecordedRefusalKind
@@ -133,24 +133,4 @@ func (e *RecordedBatchError) Unwrap() []error {
 		}
 	}
 	return errors
-}
-
-func (v *View) validateRecordedBatch(recorded map[Subject]Fingerprint, ordered []Subject) error {
-	shape := &RecordedBatchError{Tier: RecordShapeRefusal, ViewKind: v.kind}
-	kinds := &RecordedBatchError{Tier: RecordKindRefusal, ViewKind: v.kind}
-	for _, subject := range ordered {
-		rec := recorded[subject]
-		if err := rec.Validate(); err != nil {
-			shape.Failures = append(shape.Failures, RecordedFailure{Subject: subject, Shape: err})
-		} else if rec.ResultKind != v.kind {
-			kinds.Failures = append(kinds.Failures, RecordedFailure{Subject: subject, Kind: rec.ResultKind})
-		}
-	}
-	if len(shape.Failures) != 0 {
-		return shape
-	}
-	if len(kinds.Failures) != 0 {
-		return kinds
-	}
-	return nil
 }

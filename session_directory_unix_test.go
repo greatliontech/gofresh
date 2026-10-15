@@ -26,14 +26,16 @@ func TestSessionRuntimeDirectoryPreservesSymlinkParents(t *testing.T) {
 	if err := os.Symlink(child, filepath.Join(build, "via")); err != nil {
 		t.Fatal(err)
 	}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: build, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{Directory: "via/.."}, SessionPolicy{})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: build, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.runtimeDir != destination {
-		t.Fatalf("runtime directory = %q, want filesystem parent %q", session.runtimeDir, destination)
+	snapshot := &Snapshot{session: session, view: &View{kind: CodeResult}}
+	binding := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "via/.."})
+	if binding.runtime.dir != destination {
+		t.Fatalf("runtime directory = %q, want filesystem parent %q", binding.runtime.dir, destination)
 	}
-	if pwd, _ := gotool.LookupEnv(session.engine.evidenceEnv(), "PWD"); pwd != destination {
+	if pwd, _ := gotool.LookupEnv(binding.runtime.env, "PWD"); pwd != destination {
 		t.Fatalf("runtime PWD = %q, want %q", pwd, destination)
 	}
 }

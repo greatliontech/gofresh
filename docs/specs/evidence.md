@@ -175,6 +175,11 @@ types or a particular public signature:
   declarations and derived facts. Lazy computation and memo serving do not
   change which generation those facts describe. Selecting a subset preserves
   the selected facts and their provenance rather than observing a new tree.
+- A **runtime binding** selects an immutable actual process directory and
+  complete environment over that source/build generation. Runtime-dependent
+  guards and checking use that binding; its creation supplies no execution,
+  attachment or closing authority. Different bindings can share the same
+  compilation facts and retained package artifact.
 - A **unit transaction** owns the selected producing or checking obligations,
   its contributing execution bindings and evidence, and its closing interval.
   Sharing a snapshot does not share another unit's attachments or closing seal.
@@ -277,12 +282,19 @@ answer from that unit; an earlier independently committed unit remains kept.
 **REQ-fresh-built-unit** (behavior): The explicit built-artifact producing form
 MUST bind its snapshot, declared successful build and contributing execution
 without exposing mutable analysis or transaction state. The session owns copied
-build/runtime descriptions and accepted assertion sets; its complete vouch set
+build description and accepted assertion sets; its complete vouch set
 is caller-resolved in canonical `import-path.Variable` identity form, with no
-additional implicit repository-file read or re-interpretation as CLI flag syntax. Its fixed
-runtime directory defaults to the build directory, a relative value resolving
-against that directory; it supplies the actual process PWD. A different runtime
-description requires a different session. The executor builds the selected
+additional implicit repository-file read or re-interpretation as CLI flag syntax.
+Each immutable runtime binding owns a copied runtime description over the
+snapshot. Its directory defaults to the build directory, a relative value
+resolving against that directory, and supplies the actual process PWD. An omitted
+runtime environment inherits the complete build environment; an explicitly empty
+environment remains empty apart from that derived PWD. Different runtime
+descriptions do not require another source/build observation or change compilation
+identity. Production, runtime observation and checking use the selected binding's
+same normalized environment. Measurement results retain their applicable runtime
+guards under that environment; code results gain no measurement-only guards.
+The executor builds the selected
 package artifact under the snapshot's build description, retains it unchanged
 and declares its successful construction through a snapshot/package-bound
 identity. This is an attributable executor assertion, not binary authentication
@@ -322,6 +334,21 @@ separately requested, retains producing evidence and returns its checked native
 endpoint and companion ledger only after its own closing validation.
 The result owner retains sample acceptance, actual execution truth, hold-still
 protection through publication and the separate durable-write disposition.
+
+**REQ-fresh-checking-unit** (behavior): Checking a batch of existing native
+records MUST admit an independently closing transaction over a declared subject
+set and runtime binding. Different candidate variants for a subject can be
+judged within that transaction without lending evidence between candidates.
+Evidence selection is automatic under REQ-fresh-final-evidence-selection; an
+inert-compartment extension remains an explicit request. Answers before closing
+are provisional, including transformed endpoints and ledgers. Only successful
+closing grants final judgments or checked transformed evidence; failure,
+cancellation or abort grants none and ends the transaction. Closing validates
+all selected obligations, not just the last candidate. A checking transaction
+owns no producing contribution, cannot synthesize historical execution support
+and cannot seal its snapshot, runtime binding or another transaction. A singleton
+check uses this same lifecycle. The caller retains protection of the checked
+dependencies through consumption of the final judgment.
 
 ## Package-process production
 
@@ -364,6 +391,15 @@ failed validation, cancellation or a winning abort exposes no executed subject
 evidence. An ordinarily completed failing test remains compatible with normal
 harness completion; an abnormal process cannot gain supported evidence from an
 earlier passing row or a complete-looking log.
+
+A separate, non-authorizing process account remains available when reusable
+closing refuses. It preserves the registered process and artifact, the supplied
+terminal disposition when present, and observation facts already established by
+finalization, with an explicit unknown or incomplete disposition for work not
+completed. It supplies no reusable subject fingerprint, final applicability
+judgment or transferable producing support. Reading this account performs no
+additional observation and does not continue cancelled work; an account of a
+completed process is not a successful closing or durable-publication receipt.
 
 The singleton and package forms share these lifecycle rules. Each retry owns
 another transaction, frame, selected obligations, attachments and closing seal;

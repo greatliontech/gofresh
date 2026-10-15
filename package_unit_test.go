@@ -50,7 +50,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 	fail, crash := Subject{Package: pkg, Symbol: "TestFail"}, Subject{Package: pkg, Symbol: "TestCrash"}
 	env := gotool.SetEnv(gotool.SetEnv(os.Environ(), "PACKAGE_A", "a"), "PACKAGE_B", "b")
 	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, RuntimeDescription{}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{pureFile}, Runner: runner})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{pureFile}, Runner: runner})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +58,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 	if err != nil {
 		t.Fatal(err)
 	}
+	execution := bindTestRuntime(t, snapshot, RuntimeDescription{})
 	build, err := snapshot.BuildDescription(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 		t.Helper()
 		requested := append([]Subject(nil), selected...)
 		requested = append(requested, selected[0])
-		u, err := snapshot.BeginPackage(requested)
+		u, err := execution.BeginPackage(requested)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +124,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 	var completed FinalizedProcess
 	for _, missing := range []string{"contributor", "terminal", "never started"} {
 		t.Run(missing, func(t *testing.T) {
-			u, err := snapshot.BeginPackage([]Subject{a, b})
+			u, err := execution.BeginPackage([]Subject{a, b})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,21 +255,22 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	engine := &Engine{singleSubjectExecution: true}
 	view := &View{engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
 	snapshot := &Snapshot{session: &Session{engine: engine}, view: view}
+	execution := &RuntimeBinding{snapshot: snapshot}
 	for _, selected := range [][]Subject{nil, {a, b}, {a, c}, {a, {Package: a.Package, Symbol: "unknown"}}} {
-		if u, err := snapshot.BeginPackage(selected); err == nil || u != nil {
+		if u, err := execution.BeginPackage(selected); err == nil || u != nil {
 			t.Fatalf("invalid executed scope admitted: %v", selected)
 		}
 	}
-	u, err := snapshot.BeginPackage([]Subject{a, a})
+	u, err := execution.BeginPackage([]Subject{a, a})
 	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{a}) {
 		t.Fatalf("singleton package scope refused: %v", err)
 	}
 	engine.singleSubjectExecution = false
-	u, err = snapshot.BeginPackage([]Subject{b, a, b})
+	u, err = execution.BeginPackage([]Subject{b, a, b})
 	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{b, a}) {
 		t.Fatalf("package scope or order lost: %v", err)
 	}
-	if _, err := snapshot.BeginPackage([]Subject{a, c}); err == nil {
+	if _, err := execution.BeginPackage([]Subject{a, c}); err == nil {
 		t.Fatal("cross-package process admitted without the singleton assertion")
 	}
 	u.Abort()

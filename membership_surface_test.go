@@ -23,7 +23,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{}, SessionPolicy{})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if declared, err := all.CurrentFacts(t.Context(), g); err != nil || declared.MaximalClosure == "" {
+	if declared, err := bindTestRuntime(t, all, RuntimeDescription{}).CurrentFacts(t.Context(), g); err != nil || declared.MaximalClosure == "" {
 		t.Fatalf("the excluded subject is not a real declaration: %v", err)
 	}
 	view, err := all.view.Sibling([]Subject{f})
@@ -40,6 +40,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	selected := &Snapshot{session: session, view: view}
+	bound := bindTestRuntime(t, selected, RuntimeDescription{})
 	view.beforePreciseAnalysis = func() { t.Fatal("membership refusal started proof work") }
 	observation, err := runtimeinput.Incomplete(dir, "unrelated-process", "no completion", os.Environ())
 	if err != nil {
@@ -51,7 +52,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 		"source files":     func() error { _, err := view.SourceFilesFor(g); return err },
 		"ledger":           func() error { _, err := view.TestVariantLedger(g); return err },
 		"attachment":       func() error { _, err := view.AttachObservation(g, Fingerprint{}, observation); return err },
-		"snapshot facts":   func() error { _, err := selected.CurrentFacts(t.Context(), g); return err },
+		"binding facts":    func() error { _, err := bound.CurrentFacts(t.Context(), g); return err },
 		"snapshot sources": func() error { _, err := selected.SourceFilesFor(g); return err },
 		"snapshot ledger":  func() error { _, err := selected.TestVariantLedger(g); return err },
 	} {
@@ -63,7 +64,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 			}
 		})
 	}
-	if _, err := selected.CurrentFacts(t.Context(), f); err != nil {
+	if _, err := bound.CurrentFacts(t.Context(), f); err != nil {
 		t.Fatalf("refused projection sealed a valid sibling: %v", err)
 	}
 }

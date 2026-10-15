@@ -34,6 +34,55 @@ type Guards struct {
 	RuntimeConfig string // Go runtime-config env digest (measurement guard)
 }
 
+// RuntimeGuards contains only measurement-side facts. Code results leave both
+// fields absent and never probe machine support.
+type RuntimeGuards struct {
+	Machine       string
+	RuntimeConfig string
+}
+
+// CaptureRuntime observes the guards applicable to a bound execution without
+// loading source or querying compilation settings. The environment is complete;
+// it is never supplemented from the calling process.
+func CaptureRuntime(ctx context.Context, env []string, kind Kind) (guards RuntimeGuards, err error) {
+	if ctx == nil {
+		return RuntimeGuards{}, errors.New("guard: nil runtime context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			guards, err = RuntimeGuards{}, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return RuntimeGuards{}, err
+	}
+	if kind != CodeResult && kind != Measurement {
+		return RuntimeGuards{}, fmt.Errorf("guard: invalid result kind %d", kind)
+	}
+	env, err = gotool.NormalizeEnv(env)
+	if err != nil {
+		return RuntimeGuards{}, fmt.Errorf("guard: runtime env: %w", err)
+	}
+	return captureRuntimeFor(ctx, env, kind, gatherFacts, runtimeConfig)
+}
+
+func captureRuntimeFor(ctx context.Context, env []string, kind Kind, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (RuntimeGuards, error) {
+	if err := ctx.Err(); err != nil {
+		return RuntimeGuards{}, err
+	}
+	if kind == CodeResult {
+		return RuntimeGuards{}, nil
+	}
+	facts, err := machine()
+	if cause := ctx.Err(); cause != nil {
+		return RuntimeGuards{}, cause
+	}
+	if err != nil {
+		return RuntimeGuards{}, err
+	}
+	return RuntimeGuards{Machine: facts.Fingerprint(), RuntimeConfig: runtimeGuard(env)}, nil
+}
+
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set).
 type Kind int
 
@@ -125,15 +174,11 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 		return Guards{}, err
 	}
 	guards := Guards{Toolchain: tc, BuildConfig: bc}
-	if kind == CodeResult {
-		return guards, nil
-	}
-	facts, err := machine()
+	runtime, err := captureRuntimeFor(ctx, env, kind, machine, runtimeGuard)
 	if err != nil {
 		return Guards{}, err
 	}
-	guards.Machine = facts.Fingerprint()
-	guards.RuntimeConfig = runtimeGuard(env)
+	guards.Machine, guards.RuntimeConfig = runtime.Machine, runtime.RuntimeConfig
 	return guards, nil
 }
 
@@ -289,13 +334,16 @@ func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string
 // an unset GOMAXPROCS defers to the core count the machine guard already covers.
 var runtimeConfigEnvKeys = []string{"GOGC", "GODEBUG", "GOMEMLIMIT", "GOMAXPROCS"}
 
-// runtimeConfig digests the runtime-config environment (fixed key order; values not
-// stored in clear text).
+// runtimeConfig digests the runtime-config environment in fixed key order.
+// Byte lengths separate arbitrary values, including newlines and key spellings;
+// the domain separates this encoding from historical delimiter-only guards.
 func runtimeConfig(env []string) string {
 	var b strings.Builder
+	b.WriteString("gofresh/runtime-config@1\n")
+	fmt.Fprintf(&b, "%d:", len(runtimeConfigEnvKeys))
 	for _, k := range runtimeConfigEnvKeys {
 		value, _ := gotool.LookupEnv(env, k)
-		fmt.Fprintf(&b, "%s=%s\n", k, value)
+		fmt.Fprintf(&b, "%d:%s%d:%s", len(k), k, len(value), value)
 	}
 	return digest(b.String())
 }

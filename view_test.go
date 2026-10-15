@@ -1925,11 +1925,13 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	}
 	current := func(runtimeEnv []string) runtimeinput.State {
 		t.Helper()
-		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{Environment: runtimeEnv}, SessionPolicy{})
+		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		view := &View{moduleDir: dir, engine: session.engine}
+		snapshot := &Snapshot{session: session, view: &View{kind: CodeResult}}
+		binding := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: runtimeEnv})
+		view := &View{moduleDir: dir, engine: session.engine, runtime: &binding.runtime}
 		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
 		if err != nil {
 			t.Fatal(err)
@@ -1952,11 +1954,15 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 	obsProducerEnv := append(append([]string(nil), os.Environ()...), "GOFRESH_TEST_WIDTH=2")
 	validate := func(runtimeEnv []string) error {
 		t.Helper()
-		session, err := NewSession(context.Background(), BuildDescription{Directory: obsDir, Environment: os.Environ(), Inputs: []string{}}, RuntimeDescription{Environment: runtimeEnv}, SessionPolicy{})
+		session, err := NewSession(context.Background(), BuildDescription{Directory: obsDir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := session.engine.NewView(context.Background(), []Subject{sub}, obsDir)
+		snapshot, err := session.Snapshot(context.Background(), []Subject{sub}, CodeResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: runtimeEnv}).newView([]Subject{sub})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2001,11 +2007,15 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 	}
 	view := func(width string) *View {
 		t.Helper()
-		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: base, Inputs: []string{}}, RuntimeDescription{Environment: append(append([]string(nil), base...), "GOMAXPROCS="+width)}, SessionPolicy{})
+		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: base, Inputs: []string{}}, SessionPolicy{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := session.engine.NewViewFor(context.Background(), []Subject{subject}, dir, Measurement)
+		snapshot, err := session.Snapshot(context.Background(), []Subject{subject}, Measurement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: append(append([]string(nil), base...), "GOMAXPROCS="+width)}).newView([]Subject{subject})
 		if err != nil {
 			t.Fatal(err)
 		}

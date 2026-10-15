@@ -69,11 +69,37 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 	if err := ctx.Err(); err != nil {
 		return refuse(Verdict{}, err)
 	}
-	closures, err := v.prepareRecorded(map[Subject]Fingerprint{subject: recorded})
-	if err != nil {
+	if err := v.prepareCandidates([]Candidate{{subject, recorded}}); err != nil {
 		return refuse(Verdict{}, err)
 	}
-	cl := closures[subject]
+	candidate, ledger, rejected, err := v.prepareInertExtension(recorded, prior, subject)
+	if err != nil || rejected.Status != "" {
+		return refuse(rejected, err)
+	}
+	var verdict Verdict
+	if observed {
+		verdict, err = v.CheckObserved(ctx, candidate, subject)
+	} else {
+		verdict, err = v.Check(ctx, candidate, subject)
+	}
+	if err != nil || verdict.Status != Valid {
+		return refuse(verdict, err)
+	}
+	if err := v.retainApplicabilityCheck(ctx, candidate, subject, observed); err != nil {
+		return refuse(Verdict{}, err)
+	}
+	return candidate, ledger, verdict, nil
+}
+
+// prepareInertExtension licenses only the compartment substitution. It observes
+// no runtime inputs or proof and preserves every original producing constituent.
+// The caller has admitted shape, kind and membership for the entire batch first.
+// An empty verdict means the resulting endpoint still needs the checking kernel.
+func (v *View) prepareInertExtension(recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
+		return Fingerprint{}, TestVariantLedger{}, verdict, err
+	}
+	cl := v.facts.maximal[subject]
 	if !recorded.recognizedApplicability() || recorded.EffectiveTestVariantClosure() == "" {
 		condition := Missing
 		if !recorded.recognizedApplicability() {
@@ -91,7 +117,7 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 	if verdict, failed := recordedEvidenceVerdict(candidate, cl); failed {
 		return refuse(verdict, nil)
 	}
-	if mismatch := guard.CompareFacts(recorded.Guards, v.facts.guards, v.kind); mismatch.Axis != guard.NoAxis {
+	if mismatch := guard.CompareFacts(recorded.Guards, v.guards(), v.kind); mismatch.Axis != guard.NoAxis {
 		return refuse(guardVerdict(mismatch), nil)
 	}
 	ledger, err := v.TestVariantLedger(subject)
@@ -101,19 +127,7 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 	if !DiffTestVariantLedgers(prior, ledger).Inert() {
 		return refuse(refusal(Stale, TestVariantsCause, Refused, ReasonTestVariants), nil)
 	}
-	var verdict Verdict
-	if observed {
-		verdict, err = v.CheckObserved(ctx, candidate, subject)
-	} else {
-		verdict, err = v.Check(ctx, candidate, subject)
-	}
-	if err != nil || verdict.Status != Valid {
-		return refuse(verdict, err)
-	}
-	if err := v.retainApplicabilityCheck(ctx, candidate, subject, observed); err != nil {
-		return refuse(Verdict{}, err)
-	}
-	return candidate, ledger, verdict, nil
+	return candidate, ledger, Verdict{}, nil
 }
 
 // Applicability obligations are checks of historical evidence, never producer
@@ -163,63 +177,35 @@ func (v *View) validateApplicabilityChecks(ctx context.Context) error {
 	return v.validateApplicabilityBatches(ctx, current, checks)
 }
 
-// Each batch has one policy and at most one historical record per subject.
-// Distinct records of the same subject occupy separate batches: a map overwrite
-// would silently discard an obligation. Proof derivation remains view-shared;
-// runtime evidence is shared only by identical manifests within a batch phase.
-type applicabilityBatch struct {
-	recorded map[Subject]Fingerprint
-	observed bool
-}
-
-func batchApplicabilityChecks(checks []applicabilityCheck) []applicabilityBatch {
-	var batches []applicabilityBatch
-	for _, check := range checks {
-		index := -1
-		for i, batch := range batches {
-			if _, exists := batch.recorded[check.subject]; batch.observed == check.observed && !exists {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
-			index = len(batches)
-			batches = append(batches, applicabilityBatch{make(map[Subject]Fingerprint), check.observed})
-		}
-		batches[index].recorded[check.subject] = check.recorded
+// applicabilityRecords preserves every historical variant and its policy in one
+// ordered batch, sharing endpoint observations across subjects and policies.
+func applicabilityRecords(checks []applicabilityCheck) []recordCheck {
+	records := make([]recordCheck, len(checks))
+	for i, check := range checks {
+		records[i] = recordCheck{Candidate: Candidate{check.subject, check.recorded}, observed: check.observed}
 	}
-	return batches
+	return records
 }
 
 func (v *View) validateApplicabilityBatches(ctx context.Context, current *View, checks []applicabilityCheck) error {
 	var unavailable error
-	for _, batch := range batchApplicabilityChecks(checks) {
-		var verdicts map[Subject]Verdict
-		var err error
-		proofUnavailable := make(map[Subject]error)
-		// Runtime comparisons close within every batch. The base observation
-		// closes all batches together, after every historical obligation, so a
-		// cut base comparison cannot hide a later batch's concrete failure.
-		if batch.observed {
-			verdicts, err = current.checkObservedBatch(ctx, batch.recorded, true, proofUnavailable)
-		} else {
-			verdicts, err = current.checkBatch(ctx, batch.recorded, true)
+	records := applicabilityRecords(checks)
+	results, err := current.checkRecords(ctx, records, true, false)
+	if err := deferValidationUnavailability(err, &unavailable); err != nil {
+		return err
+	}
+	for i, result := range results {
+		if result.verdict.Status == Valid {
+			continue
 		}
-		if err := deferValidationUnavailability(err, &unavailable); err != nil {
-			return err
-		}
-		for subject, verdict := range verdicts {
-			if verdict.Status == Valid {
-				continue
+		if result.verdict.Status == Unverifiable && result.unavailable != nil {
+			if unavailable == nil {
+				unavailable = result.unavailable
 			}
-			if verdict.Status == Unverifiable && proofUnavailable[subject] != nil {
-				if unavailable == nil {
-					unavailable = proofUnavailable[subject]
-				}
-				continue
-			}
-			return fmt.Errorf("%w: applicability for %s.%s: %s", ErrViewChanged, subject.Package, subject.Symbol, verdict.Reason)
+			continue
 		}
+		subject := checks[i].subject
+		return fmt.Errorf("%w: applicability for %s.%s: %s", ErrViewChanged, subject.Package, subject.Symbol, result.verdict.Reason)
 	}
 	if err := deferValidationUnavailability(current.reobserveBase(ctx), &unavailable); err != nil {
 		return err

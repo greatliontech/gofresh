@@ -51,7 +51,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 	runner := gotool.Runner{Containment: &gotool.Containment{}}
 	policy := SessionPolicy{Runner: runner, Execution: SingleSubjectExecution}
 	subject := Subject{Package: "example.com/pwd", Symbol: "BenchmarkPWD"}
-	session, err := NewSession(ctx, build, RuntimeDescription{Directory: a, Environment: env}, policy)
+	session, err := NewSession(ctx, build, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +59,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 	if err != nil {
 		t.Fatal(err)
 	}
+	execution := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: a, Environment: env})
 	description, err := snapshot.BuildDescription(subject.Package)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +83,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := snapshot.Begin(subject)
+	u, err := execution.Begin(subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,14 +136,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 			if tc.unrelated {
 				runtimeEnv = gotool.SetEnv(env, "UNREAD_RUNTIME_VALUE", "changed")
 			}
-			current, err := NewSession(ctx, build, RuntimeDescription{Directory: tc.cwd, Environment: runtimeEnv}, policy)
-			if err != nil {
-				t.Fatal(err)
-			}
-			view, err := current.Snapshot(ctx, []Subject{subject}, Measurement)
-			if err != nil {
-				t.Fatal(err)
-			}
+			view := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: tc.cwd, Environment: runtimeEnv})
 			facts, err := view.CurrentFacts(ctx, subject)
 			if err != nil || facts.Guards.BuildConfig != recorded.Guards.BuildConfig {
 				t.Fatalf("runtime-only change moved build guard: %v", err)
@@ -214,7 +208,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 		t.Fatalf("historical native record lost readability: %v", err)
 	}
 	for _, observed := range []bool{false, true} {
-		view, err := session.engine.NewViewFor(ctx, []Subject{subject}, dir, Measurement)
+		view, err := execution.newView([]Subject{subject})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -228,7 +222,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 			t.Fatalf("legacy check observed=%t: %+v, %v", observed, verdict, err)
 		}
 	}
-	got, err := snapshot.Check(ctx, subject, restored)
+	got, err := execution.Check(ctx, subject, restored)
 	if err != nil || got.Status == Valid {
 		t.Fatalf("legacy snapshot check: %+v, %v", got, err)
 	}

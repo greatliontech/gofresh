@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -26,7 +25,7 @@ var ErrUnitAborted = errors.New("gofresh: unit aborted before closing completed"
 // ProcessDescription names the execution before it starts. Capture is the
 // executor-owned test-log path; the executor keeps it exclusively assigned to
 // this contribution through finalization. A relative path resolves against the
-// session's runtime directory at registration, and the same absolute coordinate
+// binding's runtime directory at registration, and the same absolute coordinate
 // is returned to the executor and read by closing. It is not supplied at Submit.
 type ProcessDescription struct {
 	Identity          string
@@ -87,7 +86,7 @@ func (c Contribution) Directory() string {
 	if c.execution == nil {
 		return ""
 	}
-	return c.unit.snapshot.session.runtimeDir
+	return c.unit.view.runtime.dir
 }
 
 // Capture returns the test-log path registered before execution.
@@ -116,6 +115,7 @@ type unitExecution struct {
 	support       runtimeinput.OutcomeSupport
 	fingerprints  map[Subject]Fingerprint
 	outcomeReason string
+	observation   finalizedProcessObservation
 	terminal      Terminal
 	ready         bool
 	cancel        context.CancelFunc
@@ -148,8 +148,8 @@ type producingUnit struct {
 	identityOnly  bool
 }
 
-// Begin creates an independently closing unit for a subject in the snapshot.
-func (s *Snapshot) Begin(subject Subject) (*Unit, error) {
+// Begin creates an independently closing unit under this runtime binding.
+func (s *RuntimeBinding) Begin(subject Subject) (*Unit, error) {
 	u, err := s.begin([]Subject{subject}, false)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (s *Snapshot) Begin(subject Subject) (*Unit, error) {
 // BeginIdentity selects identity-only input evidence for a diagnostic execution,
 // such as an instrumented profile. It deliberately prepares no outcome support;
 // ordinary completion cannot promote the resulting evidence to supported form.
-func (s *Snapshot) BeginIdentity(subject Subject) (*Unit, error) {
+func (s *RuntimeBinding) BeginIdentity(subject Subject) (*Unit, error) {
 	u, err := s.begin([]Subject{subject}, true)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (s *Snapshot) BeginIdentity(subject Subject) (*Unit, error) {
 // of subjects from one package. Duplicates collapse in first-request order.
 // Every executed subject, including subjects without a cacheable result, belongs
 // in this set. A single-subject execution assertion refuses a larger set.
-func (s *Snapshot) BeginPackage(subjects []Subject) (*PackageUnit, error) {
+func (s *RuntimeBinding) BeginPackage(subjects []Subject) (*PackageUnit, error) {
 	u, err := s.begin(subjects, false)
 	if err != nil {
 		return nil, err
@@ -180,21 +180,18 @@ func (s *Snapshot) BeginPackage(subjects []Subject) (*PackageUnit, error) {
 	return &PackageUnit{producing: u}, nil
 }
 
-func (s *Snapshot) begin(subjects []Subject, identityOnly bool) (*producingUnit, error) {
-	if s == nil || s.view == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	v, err := s.view.Sibling(subjects)
+func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*producingUnit, error) {
+	v, err := s.newView(subjects)
 	if err != nil {
 		return nil, err
 	}
 	if len(v.packages) != 1 {
 		return nil, errors.New("gofresh: a producing execution must belong to one package")
 	}
-	if len(v.subjects) > 1 && s.session.engine.singleSubjectExecution {
+	if len(v.subjects) > 1 && v.engine.singleSubjectExecution {
 		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
 	}
-	return &producingUnit{snapshot: s, view: v, identityOnly: identityOnly}, nil
+	return &producingUnit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil
 }
 
 // Register prepares the complete producing obligation before execution. Build
@@ -238,7 +235,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 	if build.snapshot != u.snapshot || build.pkg != u.view.subjects[0].Package || build.identity == "" {
 		return Contribution{}, errors.New("gofresh: built artifact belongs to another snapshot or package")
 	}
-	dir := u.snapshot.session.runtimeDir
+	dir := u.view.runtime.dir
 	if process.Capture != "" {
 		var err error
 		process.Capture, err = rebaseProcessPath(dir, process.Capture)
@@ -254,10 +251,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		}
 	}
 	e := u.snapshot.session.engine
-	env, err := gotool.EnvForCommand(e.evidenceEnv(), dir)
-	if err != nil {
-		return Contribution{}, err
-	}
+	env := u.view.evidenceEnv()
 	// The frame owns the process/environment grammar. A zero frame performs
 	// that input validation without capturing anything or issuing support.
 	if _, err := (runtimeinput.ProducerFrame{}).OutcomeBinding(process.Identity, env); err != nil {
@@ -278,6 +272,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 	u.execution = x
 	u.mu.Unlock()
 	frame := runtimeinput.CaptureProducerFrame(preparing, e.evidenceRootFor(e.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
+	var err error
 	var support runtimeinput.OutcomeSupport
 	var fingerprints map[Subject]Fingerprint
 	if u.identityOnly {
@@ -431,8 +426,11 @@ type FinalizedProcess struct {
 type ObservationDisposition uint8
 
 const (
+	// UnknownObservation means finalization has not established observation facts.
+	// It includes work not attempted or interrupted before finalization completed.
+	UnknownObservation ObservationDisposition = iota
 	// SupportedObservation carries the subject's admitted outcome support.
-	SupportedObservation ObservationDisposition = iota + 1
+	SupportedObservation
 	// IdentityObservation carries finalized input guards, not outcome support.
 	IdentityObservation
 	// IncompleteObservation names missing or incomplete capture/completion.
@@ -531,15 +529,16 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	if err != nil {
 		return FinalizedProcess{}, err
 	}
+	if err := u.recordObservation(observation, observationReason); err != nil {
+		return FinalizedProcess{}, err
+	}
 	fingerprints := make(map[Subject]Fingerprint, len(u.view.subjects))
-	supported := true
 	for _, subject := range u.view.subjects {
 		fp, err := u.view.attachObservation(subject, x.fingerprints[subject], observation, !u.identityOnly)
 		if err != nil {
 			return FinalizedProcess{}, err
 		}
 		fingerprints[subject] = fp
-		supported = supported && runtimeinput.HasOutcomeSupport(fp.RuntimeInputs, outcomeSubject(fp, subject))
 	}
 	verdicts, err := u.view.CheckObservedBatch(ctx, fingerprints)
 	if err != nil {
@@ -548,15 +547,10 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	if err := u.view.Validate(ctx); err != nil {
 		return FinalizedProcess{}, err
 	}
-	disposition := IdentityObservation
-	if observationReason != "" {
-		disposition = IncompleteObservation
-	} else if supported {
-		disposition = SupportedObservation
-	}
-	result = FinalizedProcess{Process: x.process.Identity, Artifact: x.artifact,
-		Terminal: x.terminal, Observation: disposition, ObservationReason: observationReason,
-		OutcomeReason: x.outcomeReason, Attribution: observation.Attribution}
+	account, _ := u.account()
+	result = FinalizedProcess{Process: account.Process, Artifact: account.Artifact,
+		Terminal: account.Terminal, Observation: account.Observation, ObservationReason: account.ObservationReason,
+		OutcomeReason: account.OutcomeReason, Attribution: account.Attribution}
 	for _, subject := range u.view.subjects {
 		result.Subjects = append(result.Subjects, FinalizedSubject{Subject: subject, Fingerprint: fingerprints[subject], Verdict: verdicts[subject]})
 	}

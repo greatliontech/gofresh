@@ -136,9 +136,9 @@ bindings {
   content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
   source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.View.finishRuntimeObservation"
+  symbol: "github.com/greatliontech/gofresh.View.runtimeMotion"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "18d957df92d71080bc84efa36d6253763b3f885999e0ee332f097d41f6e7e8e9"
+  shape_hash: "0eb3cc105533b951975efa379abfa778c7366d63a74e28081d352a503c60af73"
 }
 
 bindings {

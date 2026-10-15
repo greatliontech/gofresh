@@ -633,7 +633,7 @@ view's construction-time reading only for module-cache resolution, must
 revalidate build-flag values live before any load whose derivations persist,
 and relies on its closing observation's fresh reading to refuse any
 guard-covered drift. Every source load, Go invocation, purity scan,
-and guard observation in the view uses that same environment, so workspace mode,
+and compilation-guard observation in the view uses that same environment, so workspace mode,
 persistent Go configuration, toolchain selection, and source selection cannot differ
 between the closure and the binary the guards describe. The host process selects the
 `go` launcher before that complete environment is inherited, matching Go's command
@@ -645,7 +645,14 @@ path that could select a different automatic workspace. External
 and absent driver configuration is pinned off only in the internal package-loader
 environment, without changing the caller environment observed by commands, guards,
 or runtime inputs, because the ordinary Go loader is the source model the closure and
-guards represent. Checking re-observes the view's inputs around its
+guards represent. In the explicit built-artifact form, a runtime binding
+composes those shared source/build facts with its own immutable runtime
+environment and applicable runtime-side guards. Recording-time runtime guard
+observations require agreement independently of the source/build generation;
+binding another runtime environment neither re-observes that generation nor
+changes any existing binding's guards. The caller protects both dependency sets
+through their required spans; rebinding cannot make an old source generation
+current. Checking re-observes the view's inputs around its
 runtime-input and precise-analysis windows to detect ordinary drift — any change
 persisting to an observation makes the check fail with the view-changed error —
 but, like producer validation, it cannot prove the absence of a
@@ -709,6 +716,11 @@ parent still free to derive). Comparison-side observation is unchanged:
 a sibling's validation re-observes the tree exactly as any view's, an
 observed capture over a subject whose proof the parent never captured
 computes it fresh, and a subject outside the parent refuses.
+For a runtime-bound view, the inherited observation includes the same runtime
+binding and applicable guards. Creating a different runtime binding is not a
+sibling derivation: it retains the source/build generation but establishes its
+own applicable runtime-side guard observation. Neither operation transfers
+attachments, selected execution support or a closing seal between transactions.
 
 **REQ-fresh-context** (behavior): Context-bound engine preparation,
 analysis-view construction, checking —
