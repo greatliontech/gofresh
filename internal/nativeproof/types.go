@@ -36,7 +36,7 @@ const MachineModel = "x86-64/baseline-long-mode/ordinary-near-return@1"
 
 // RuleModel identifies the decoder and abstract proof rules together. A semantic
 // change requires a new identity; this is not an implementation approval list.
-const RuleModel = "gofresh/native-leaf@1;x86asm@v0.32.0"
+const RuleModel = "gofresh/native-leaf@2;x86asm@v0.32.0"
 
 // Conditions are explicit caller-supplied premises, not facts this checker proves.
 type Conditions struct {

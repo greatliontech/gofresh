@@ -340,7 +340,12 @@ func (c *selectedSourceBinder) selectedPackage(fn *ssa.Function, p *packages.Pac
 		if err := c.chargeBytes(fn, fn.Pos(), len(m.Dir)); err != nil {
 			return zero, err
 		}
-		files[filepath.Clean(filepath.Join(m.Dir, name))] = true
+		// Generated test-main files may already be absolute cache paths.
+		// Only relative listing entries are interpreted under the package directory.
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(m.Dir, name)
+		}
+		files[filepath.Clean(name)] = true
 	}
 	if len(files) == 0 || len(files) != len(p.Syntax) || len(files) != len(p.CompiledGoFiles) {
 		return zero, computationRefusal(fn, fn.Pos(), "incomplete local selected source")

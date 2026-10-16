@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-callback-transfer"
+reason: "Clause-scoped readonly-image descriptor and decoded single-call transfer examples, a fixed-image descriptor-address property and a bounded register-transport grammar support conditional callback transfer. Complete invariant evidence across all four clauses remains outstanding: these populations do not establish the complete accepted mapping, alias, target, argument/context, frame, return, ownership and refusal conjunction. No checked language-transport relation binds selected typed lowering to actual fragments or accounts for permitted Go suspension/resumption. Unproved descriptor provenance and isolation/stack conditions remain antecedents. This is an uncovered evidence obligation, not a demonstrated implementation contradiction; local positives supply no ordinary invocation or runtime-reuse grant."
+content_hash: "c50bc8c264756909a1747e151aeda2da6c21a46eb800b46c7a04ca9d30b6a3c0"
+source_hash: "02ac359c6dd38019e01ef1d0a4419ad8e0b352b57bc70e348f10d8b61e41604e"
+lands { manual { condition: "tooling-redesign 5.1w.2b.3b.1: complete conditional callback-transfer invariant evidence for the supported descriptor/call model, with independent checks of mapping/alias bounds, actual target and continuation, exact argument/context/frame transport, retained premises, immutable dependencies and bounded/cancelled refusal; establish the separately required typed-operation/lowering and suspension/resumption relation before composing an ordinary Go callback. Actual selected-main-to-native-use and whole-use/harness coverage remain at 5.1w.2b.3b.3, and producing/current/historical applicability at 5.1w.2b.4." } }
+excuses: GAP_EXCUSE_UNCOVERED

@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -78,6 +79,35 @@ func TestSelectedSourceBindingHasNoScalarInterfacePolicy(t *testing.T) {
 	}
 	// This supplies no interpretation of the pointer or proof of non-use; that
 	// requires the consuming grammar's actual instruction walk.
+}
+
+func TestSelectedSourceAbsoluteListingPaths(t *testing.T) {
+	s := relationFixture(t, "func F(x int32)int32{return x}", 64)
+	root, pkg := s.prog.Roots["F"], s.prog.Pkgs[0]
+	if !filepath.IsAbs(pkg.CompiledGoFiles[0]) {
+		t.Fatal("fixture must supply a platform-absolute source path")
+	}
+	want, err := selectedSourceFixtureBinder(t, s).bindDeclaration(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range s.metas {
+		if s.metas[i].ImportPath == pkg.ID {
+			s.metas[i].GoFiles = slices.Clone(pkg.CompiledGoFiles)
+		}
+	}
+	got, err := selectedSourceFixtureBinder(t, s).bindDeclaration(root)
+	if err != nil || got.identity != want.identity || got.decl != want.decl {
+		t.Fatalf("absolute and relative listing identities disagree: %v", err)
+	}
+	for i := range s.metas {
+		if s.metas[i].ImportPath == pkg.ID {
+			s.metas[i].GoFiles[0] = filepath.Join(filepath.Dir(pkg.CompiledGoFiles[0]), "other.go")
+		}
+	}
+	if _, err := selectedSourceFixtureBinder(t, s).bindDeclaration(root); err == nil {
+		t.Fatal("a different absolute listing path acquired the original declaration")
+	}
 }
 
 func TestSelectedSourceDirectiveInventoryCoversSyntaxAndComments(t *testing.T) {

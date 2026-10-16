@@ -194,23 +194,38 @@ func decodeGraphLimited(ctx context.Context, im *Image, entry uint64, limit int)
 }
 
 func decode(im *Image, pc uint64) (decodedInstruction, error) {
-	b, err := im.instructionBytes(pc)
+	i, b, err := decodeEncoding(im, pc)
 	if err != nil {
 		return decodedInstruction{}, err
 	}
+	return decodeLeaf(pc, i, b)
+}
+
+// decodeEncoding validates shared encoding constraints before either the scalar
+// grammar or the call-fragment grammar interprets operands. A decoded boundary
+// alone does not assert that the instruction's effects have been checked.
+func decodeEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
+	b, err := im.instructionBytes(pc)
+	if err != nil {
+		return x86asm.Inst{}, nil, err
+	}
 	i, err := x86asm.Decode(b, 64)
 	if err != nil || i.Op == 0 || i.Len <= 0 || i.Len > len(b) {
-		return decodedInstruction{}, refuse(pc, "instruction-decode", "invalid or truncated instruction")
+		return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid or truncated instruction")
 	}
 	b = b[:i.Len]
 	if err := legalPrefixes(pc, b, i); err != nil {
-		return decodedInstruction{}, err
+		return x86asm.Inst{}, nil, err
 	}
 	for _, arg := range i.Args[2:] {
 		if arg != nil {
-			return decodedInstruction{}, refuse(pc, "instruction-shape", "extra operands")
+			return x86asm.Inst{}, nil, refuse(pc, "instruction-shape", "extra operands")
 		}
 	}
+	return i, b, nil
+}
+
+func decodeLeaf(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, error) {
 	for _, arg := range i.Args {
 		if _, memory := arg.(x86asm.Mem); memory && i.Op != x86asm.LEA && i.Op != x86asm.NOP {
 			return decodedInstruction{}, refuse(pc, "data-memory", "decoded data-memory operand is outside the leaf bound")

@@ -391,7 +391,7 @@ func relationInputs(t testing.TB, s computationSource) (bitrelation.Scope, []bit
 	root := s.prog.Roots["F"]
 	var inputs []bitrelation.Term
 	for i, param := range root.Params {
-		sort, _ := computationRelationSort(param.Type(), s.prog.Pkgs[0].TypesSizes)
+		sort := computationRelationTypeOf(param.Type(), s.prog.Pkgs[0].TypesSizes).inputSort()
 		input, err := b.Input(sort, scope, uint64(i))
 		if err != nil {
 			t.Fatal(err)

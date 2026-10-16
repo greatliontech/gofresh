@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +23,11 @@ import (
 func computationFixture(t testing.TB, text string) computationSource {
 	t.Helper()
 	const path = "example.com/computation"
-	const filename = "/computation/p.go"
+	dir, err := filepath.Abs("/computation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := filepath.Join(dir, "p.go")
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, "package p\n"+text, parser.ParseComments)
 	if err != nil {
@@ -36,7 +41,7 @@ func computationFixture(t testing.TB, text string) computationSource {
 	p := &packages.Package{ID: path, PkgPath: path, Name: "p", Types: pkg, TypesInfo: info, Fset: fset, Syntax: []*ast.File{file}, CompiledGoFiles: []string{filename}}
 	return computationSource{
 		prog:  &program{PkgPath: path, Prog: ssaPkg.Prog, Pkgs: []*packages.Package{p}, Roots: map[string]*ssa.Function{"F": ssaPkg.Func("F")}},
-		metas: []listPkg{{ImportPath: path, Name: "p", Dir: "/computation", GoFiles: []string{"p.go"}}},
+		metas: []listPkg{{ImportPath: path, Name: "p", Dir: dir, GoFiles: []string{"p.go"}}},
 	}
 }
 

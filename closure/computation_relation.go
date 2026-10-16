@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"errors"
 	"go/constant"
 	"go/token"
 	"go/types"
@@ -12,7 +13,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/bitrelation"
 )
 
-const computationRelationRules = "gofresh/local-source-scalar@1"
+const computationRelationRules = "gofresh/local-source-scalar@2;" + bitrelation.RuleModel
 
 // computationRelation is an immutable, pass-local interpretation of selected
 // source, NOT a source/native correspondence certificate. No public authority or
@@ -31,6 +32,7 @@ type computationRelation struct {
 	dependencies []computationRelationDependency
 	inputs       []bitrelation.Term
 	outputs      []bitrelation.Term
+	exclusions   []computationRelationExclusion
 	open         computationRelationObligations
 }
 
@@ -56,6 +58,25 @@ type computationRelationType struct {
 	name   string
 	sort   bitrelation.Sort
 	signed bool
+	// A pointer has storage bits for the conditional machine interface, but no
+	// scalar sort or integer interpretation in the source language model.
+	pointerBits int
+}
+
+func (t computationRelationType) inputSort() bitrelation.Sort {
+	if t.pointerBits != 0 {
+		return bitrelation.Bits(t.pointerBits)
+	}
+	return t.sort
+}
+
+// An exclusion retains its exact source call context and CFG coordinates.
+// predecessor == -1 denotes a whole block; otherwise it denotes a phi edge.
+// The witness must bind path to false, never merely certify some other equality.
+type computationRelationExclusion struct {
+	dependency, block, predecessor int
+	path                           bitrelation.Term
+	witness                        bitrelation.Witness
 }
 
 type computationRelationLimits struct{ nodes, contexts, work, depth, bytes int }
@@ -66,11 +87,17 @@ func defaultComputationRelationLimits() computationRelationLimits {
 
 type computationRelationChecker struct {
 	*selectedSourceBinder
-	builder   *bitrelation.Builder
-	contexts  int
-	active    map[*ssa.Function]bool
-	relations map[*ssa.Function]computationRelationDependency
-	deps      []computationRelationDependency
+	builder          *bitrelation.Builder
+	contexts         int
+	contextsUsed     int
+	active           map[*ssa.Function]bool
+	relations        map[*ssa.Function]computationRelationDependency
+	deps             []computationRelationDependency
+	provePaths       bool
+	pathProofs       map[bitrelation.Term]bitrelation.Witness
+	exclusions       []computationRelationExclusion
+	expressionFailed bool
+	retryable        bool
 }
 
 // deriveComputationRelation checks the actual source graph, not a proposed pure
@@ -112,7 +139,7 @@ func deriveComputationRelation(ctx context.Context, source computationSource, ro
 	if len(root.Params) > limits.nodes || len(root.Params) > limits.work {
 		return fail(computationRefusal(root, root.Pos(), "local relation parameter budget exhausted"))
 	}
-	if len(inputs) != len(root.Params) || root.Signature.Results().Len() == 0 {
+	if len(inputs) != len(root.Params) {
 		return fail(computationRefusal(root, root.Pos(), "local relation needs exact scalar input and result arity"))
 	}
 	entry.bindings = make([]*ssa.Function, len(root.Params))
@@ -125,6 +152,16 @@ func deriveComputationRelation(ctx context.Context, source computationSource, ro
 		used[p.Immediate] = true
 	}
 	outputs, err := c.function(entry, inputs, 0)
+	if err != nil && c.retryable && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && c.work < c.limits.work && !c.expressionFailed {
+		// Ordinary scalar programs pay no path-proof search. Only a failed strict
+		// interpretation of an unsupported operation retries with checked
+		// exclusions. Resource/binding failures do not select a retry. Input
+		// caches and spent work/bytes/contexts/expression capacity never reset.
+		c.deps = nil
+		c.provePaths = true
+		c.pathProofs = map[bitrelation.Term]bitrelation.Witness{}
+		outputs, err = c.function(entry, inputs, 0)
+	}
 	if err != nil {
 		return fail(err)
 	}
@@ -132,7 +169,7 @@ func deriveComputationRelation(ctx context.Context, source computationSource, ro
 		return nil, err
 	}
 	return &computationRelation{owner: source.prog, rules: computationRelationRules, root: c.deps[0], dependencies: c.deps,
-		inputs: inputs, outputs: slices.Clone(outputs), open: computationRelationObligations{true, true, true, true, true}}, nil
+		inputs: inputs, outputs: slices.Clone(outputs), exclusions: c.exclusions, open: computationRelationObligations{true, true, true, true, true}}, nil
 }
 
 // bind is deliberately claim-local: it binds only packages actually used by the
@@ -154,16 +191,16 @@ func (c *computationRelationChecker) bind(fn *ssa.Function) (computationRelation
 	m := c.metas[p.ID]
 	m.ForTest = ""
 	if err := computationPackageInputs(m, ""); err != nil {
-		return zero, p, computationRefusal(fn, fn.Pos(), err.Error())
+		return zero, p, c.unsupported(fn, fn.Pos(), err.Error())
 	}
 	if len(c.packages[p].directives) != 0 {
-		return zero, p, computationRefusal(fn, fn.Pos(), "unsupported local implementation directive")
+		return zero, p, c.unsupported(fn, fn.Pos(), "unsupported local implementation directive")
 	}
 	if bound.decl.Body == nil {
-		return zero, p, computationRefusal(fn, fn.Pos(), "selected function body binding disagrees")
+		return zero, p, c.unsupported(fn, fn.Pos(), "selected function body binding disagrees")
 	}
 	if len(fn.Blocks) == 0 || fn.Synthetic != "" || len(fn.FreeVars) != 0 || parameterizedBody(fn) {
-		return zero, p, computationRefusal(fn, fn.Pos(), "selected local body is absent or unsupported")
+		return zero, p, c.unsupported(fn, fn.Pos(), "selected local body is absent or unsupported")
 	}
 	word := int(p.TypesSizes.Sizeof(types.Typ[types.Int]) * 8)
 	if word != 32 && word != 64 {
@@ -196,7 +233,69 @@ func (c *computationRelationChecker) bind(fn *ssa.Function) (computationRelation
 
 func computationRelationTypeOf(t types.Type, sizes types.Sizes) computationRelationType {
 	sort, signed := computationRelationSort(t, sizes)
-	return computationRelationType{name: types.TypeString(t, func(p *types.Package) string { return p.Path() }), sort: sort, signed: signed}
+	r := computationRelationType{name: types.TypeString(t, func(p *types.Package) string { return p.Path() }), sort: sort, signed: signed}
+	if _, pointer := t.Underlying().(*types.Pointer); pointer && sizes != nil {
+		r.pointerBits = int(sizes.Sizeof(t) * 8)
+	}
+	return r
+}
+
+// unsupported marks only a semantic refusal that a checked path exclusion may
+// discharge. A resource or source-binding failure cannot acquire a retry merely
+// because it uses the same diagnostic representation.
+func (c *computationRelationChecker) unsupported(fn *ssa.Function, at token.Pos, premise string) error {
+	c.retryable = true
+	return computationRefusal(fn, at, premise)
+}
+
+// Err meters both proof proposal and independent checking against the same
+// derivation-wide counter, including unsuccessful searches and retry work.
+type computationRelationProofContext struct {
+	context.Context
+	checker *computationRelationChecker
+	fn      *ssa.Function
+	at      token.Pos
+}
+
+func (p computationRelationProofContext) Err() error { return p.checker.tick(p.fn, p.at) }
+
+func computationExclusionBinds(w bitrelation.Witness, path, falsity bitrelation.Term) bool {
+	left, right := w.Roots()
+	return w.Valid() && left == path && right == falsity && falsity.Sort().IsBool() && falsity.View().Op == bitrelation.Constant && falsity.View().Immediate == 0
+}
+
+func (c *computationRelationChecker) exclude(fn *ssa.Function, at token.Pos, dependency, block, predecessor int, path, falsity bitrelation.Term) (bool, error) {
+	if !c.provePaths {
+		return false, nil
+	}
+	if err := c.tick(fn, at); err != nil {
+		return false, err
+	}
+	w, seen := c.pathProofs[path]
+	if !seen {
+		var err error
+		w, err = bitrelation.Prove(computationRelationProofContext{Context: c.ctx, checker: c, fn: fn, at: at}, path, falsity, bitrelation.Limits{})
+		if err != nil {
+			var refusal *bitrelation.Refusal
+			if errors.As(err, &refusal) && refusal.Code == bitrelation.Cancelled && refusal.Cause != nil {
+				// The proof meter's context also carries our shared work refusal;
+				// preserve that cause rather than relabeling it user cancellation.
+				return false, refusal.Cause
+			}
+			if !errors.As(err, &refusal) || refusal.Code != bitrelation.Unsupported {
+				return false, err
+			}
+		}
+		c.pathProofs[path] = w
+	}
+	if !w.Valid() {
+		return false, nil
+	}
+	if !computationExclusionBinds(w, path, falsity) {
+		return false, computationRefusal(fn, at, "path exclusion witness endpoints disagree")
+	}
+	c.exclusions = append(c.exclusions, computationRelationExclusion{dependency, block, predecessor, path, w})
+	return true, nil
 }
 
 func computationRelationSort(t types.Type, sizes types.Sizes) (bitrelation.Sort, bool) {
@@ -223,11 +322,11 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 	if err := c.tick(fn, fn.Pos()); err != nil {
 		return nil, err
 	}
-	if depth >= c.limits.depth || len(c.deps) >= c.contexts {
+	if depth >= c.limits.depth || c.contextsUsed >= c.contexts {
 		return fail("local relation context/depth budget exhausted")
 	}
 	if c.active[fn] {
-		return fail("recursive local relation has no induction")
+		return nil, c.unsupported(fn, fn.Pos(), "recursive local relation has no induction")
 	}
 	dep, pkg, err := c.bind(fn)
 	if err != nil {
@@ -238,7 +337,8 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 	}
 	values := map[ssa.Value][]bitrelation.Term{}
 	for i, param := range fn.Params {
-		sort, _ := computationRelationSort(param.Type(), pkg.TypesSizes)
+		typ := dep.parameters[i]
+		sort := typ.inputSort()
 		if binding := current.bindings[i]; binding != nil {
 			if args[i].Valid() || !types.Identical(param.Type().Underlying(), binding.Signature) {
 				return fail("callback context type or argument disagrees")
@@ -247,7 +347,12 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 		} else if !args[i].Valid() || args[i].Sort() != sort {
 			return fail("scalar input sort disagrees with selected parameter")
 		}
-		values[param] = []bitrelation.Term{args[i]}
+		// Opaque inputs are retained in the typed interface, never installed as
+		// usable scalar values. Actual instruction interpretation must establish
+		// non-use; Referrers and caller-supplied unused flags are not evidence.
+		if typ.pointerBits == 0 {
+			values[param] = []bitrelation.Term{args[i]}
+		}
 	}
 	resultSorts := make([]bitrelation.Sort, fn.Signature.Results().Len())
 	for i := range resultSorts {
@@ -257,6 +362,8 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 		}
 	}
 	dep.arguments = slices.Clone(args)
+	dependency := len(c.deps)
+	c.contextsUsed++
 	c.deps = append(c.deps, dep)
 	c.active[fn] = true
 	defer delete(c.active, fn)
@@ -293,6 +400,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 		t, err := c.builder.Make(op, sort, imm, args...)
 		if err != nil {
 			buildErr = computationRefusal(fn, at, "local scalar expression: "+err.Error())
+			c.expressionFailed = true
 		}
 		return t
 	}
@@ -303,7 +411,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 		if constantValue, ok := v.(*ssa.Const); ok {
 			sort, signed := computationRelationSort(v.Type(), pkg.TypesSizes)
 			if constantValue.Value == nil || sort == (bitrelation.Sort{}) {
-				return bitrelation.Term{}, computationRefusal(fn, at, "unsupported scalar constant")
+				return bitrelation.Term{}, c.unsupported(fn, at, "unsupported scalar constant")
 			}
 			var bits uint64
 			if sort.IsBool() {
@@ -350,7 +458,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 		if ts, ok := values[v]; ok && len(ts) == 1 && ts[0].Valid() {
 			return ts[0], nil
 		}
-		return bitrelation.Term{}, computationRefusal(fn, at, "scalar operand is not an available local value")
+		return bitrelation.Term{}, c.unsupported(fn, at, "scalar operand is not an available local value")
 	}
 	type edge struct{ from, to *ssa.BasicBlock }
 	edges := map[edge]bitrelation.Term{}
@@ -367,31 +475,42 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 			}
 			paths[block] = path
 		}
-		ordinarySeen := false
-		for index, instruction := range block.Instrs {
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		if block != fn.Blocks[0] {
+			excluded, err := c.exclude(fn, fn.Pos(), dependency, block.Index, -1, path, falsity)
+			if err != nil {
+				return nil, err
+			}
+			if excluded {
+				// The original graph was validated in full. Propagate the proven
+				// false path, rather than inventing values for unexecuted operations.
+				for _, successor := range block.Succs {
+					edges[edge{block, successor}] = path
+				}
+				continue
+			}
+		}
+		for _, instruction := range block.Instrs {
 			at = instruction.Pos()
 			if err := c.tick(fn, at); err != nil {
 				return nil, err
 			}
-			if instruction.Block() != block {
-				return nil, computationRefusal(fn, at, "instruction belongs to another block")
-			}
-			if _, phi := instruction.(*ssa.Phi); !phi {
-				ordinarySeen = true
-			}
 			var terms []bitrelation.Term
 			switch ins := instruction.(type) {
 			case *ssa.Phi:
-				if len(ins.Edges) != len(block.Preds) || len(ins.Edges) == 0 {
-					return nil, computationRefusal(fn, at, "phi predecessor arity disagrees")
-				}
-				if ordinarySeen {
-					return nil, computationRefusal(fn, at, "phi follows ordinary instruction")
-				}
 				sort, _ := computationRelationSort(ins.Type(), pkg.TypesSizes)
 				var merged bitrelation.Term
 				for i, operand := range ins.Edges {
 					useBlock = block.Preds[i]
+					excluded, err := c.exclude(fn, at, dependency, block.Index, useBlock.Index, edges[edge{useBlock, block}], falsity)
+					if err != nil {
+						return nil, err
+					}
+					if excluded {
+						continue
+					}
 					t, err := value(operand)
 					if err != nil {
 						return nil, err
@@ -399,11 +518,14 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 					if t.Sort() != sort {
 						return nil, computationRefusal(fn, at, "phi scalar sort disagrees")
 					}
-					if i == 0 {
+					if !merged.Valid() {
 						merged = t
 					} else {
 						merged = makeTerm(bitrelation.ITE, sort, 0, edges[edge{block.Preds[i], block}], t, merged)
 					}
+				}
+				if !merged.Valid() {
+					return fail("phi has no unexcluded predecessor value")
 				}
 				useBlock = block
 				terms = []bitrelation.Term{merged}
@@ -416,7 +538,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				if ins.Op == token.SHL || ins.Op == token.SHR {
 					count, ok := ins.Y.(*ssa.Const)
 					if !ok || count.Value == nil || count.Value.Kind() != constant.Int || constant.Sign(count.Value) < 0 {
-						return nil, computationRefusal(fn, at, "shift count is not a nonnegative fixed integer")
+						return nil, c.unsupported(fn, at, "shift count is not a nonnegative fixed integer")
 					}
 					n, exact := constant.Uint64Val(count.Value)
 					if !exact {
@@ -496,7 +618,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 					}
 					terms = []bitrelation.Term{acc}
 				default:
-					return nil, computationRefusal(fn, at, "unsupported or exceptional scalar binary operation")
+					return nil, c.unsupported(fn, at, "unsupported or exceptional scalar binary operation")
 				}
 				if terms == nil {
 					t := makeTerm(op, outSort, 0, x, y)
@@ -519,7 +641,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				case token.SUB:
 					t = makeTerm(bitrelation.Sub, x.Sort(), 0, makeTerm(bitrelation.Constant, x.Sort(), 0), x)
 				default:
-					return nil, computationRefusal(fn, at, "unsupported scalar unary operation or memory read")
+					return nil, c.unsupported(fn, at, "unsupported scalar unary operation or memory read")
 				}
 				terms = []bitrelation.Term{t}
 			case *ssa.Convert:
@@ -530,7 +652,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				sort, _ := computationRelationSort(ins.Type(), pkg.TypesSizes)
 				_, signed := computationRelationSort(ins.X.Type(), pkg.TypesSizes)
 				if sort.Width() == 0 || x.Sort().Width() == 0 {
-					return nil, computationRefusal(fn, at, "unsupported scalar conversion")
+					return nil, c.unsupported(fn, at, "unsupported scalar conversion")
 				}
 				if sort.Width() < x.Sort().Width() {
 					x = makeTerm(bitrelation.Trunc, sort, 0, x)
@@ -555,7 +677,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 			case *ssa.Call:
 				child := computationCallContext(ins.Common(), current)
 				if child == nil {
-					return nil, computationRefusal(fn, at, "call has no exact selected source context")
+					return nil, c.unsupported(fn, at, "call has no exact selected source context")
 				}
 				childArgs := make([]bitrelation.Term, len(ins.Call.Args))
 				for i, arg := range ins.Call.Args {
@@ -580,9 +702,6 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				}
 				terms = []bitrelation.Term{tuple[ins.Index]}
 			case *ssa.If:
-				if index != len(block.Instrs)-1 || len(block.Succs) != 2 {
-					return nil, computationRefusal(fn, at, "invalid local branch successors")
-				}
 				cond, err := value(ins.Cond)
 				if err != nil {
 					return nil, err
@@ -590,14 +709,8 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				edges[edge{block, block.Succs[0]}] = makeTerm(bitrelation.And, bitrelation.Bool(), 0, path, cond)
 				edges[edge{block, block.Succs[1]}] = makeTerm(bitrelation.And, bitrelation.Bool(), 0, path, makeTerm(bitrelation.Not, bitrelation.Bool(), 0, cond))
 			case *ssa.Jump:
-				if index != len(block.Instrs)-1 || len(block.Succs) != 1 {
-					return nil, computationRefusal(fn, at, "invalid local jump successor")
-				}
 				edges[edge{block, block.Succs[0]}] = path
 			case *ssa.Return:
-				if index != len(block.Instrs)-1 || len(block.Succs) != 0 || len(ins.Results) != len(resultSorts) {
-					return nil, computationRefusal(fn, at, "invalid local return interface")
-				}
 				returned := make([]bitrelation.Term, len(ins.Results))
 				for i, result := range ins.Results {
 					returned[i], err = value(result)
@@ -617,7 +730,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 				}
 				returns++
 			default:
-				return nil, computationRefusal(fn, at, "instruction outside pure local scalar relation")
+				return nil, c.unsupported(fn, at, "instruction outside pure local scalar relation")
 			}
 			if buildErr != nil {
 				return nil, buildErr
@@ -638,11 +751,11 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 // branch or a discarded call. Acyclicity makes predecessor conditions complete.
 func (c *computationRelationChecker) topology(fn *ssa.Function) ([]*ssa.BasicBlock, error) {
 	set := map[*ssa.BasicBlock]bool{}
-	for _, b := range fn.Blocks {
+	for i, b := range fn.Blocks {
 		if err := c.tick(fn, fn.Pos()); err != nil {
 			return nil, err
 		}
-		if b == nil || set[b] || b.Parent() != fn {
+		if b == nil || set[b] || b.Parent() != fn || b.Index != i {
 			return nil, computationRefusal(fn, fn.Pos(), "invalid local block ownership")
 		}
 		set[b] = true
@@ -659,9 +772,46 @@ func (c *computationRelationChecker) topology(fn *ssa.Function) ([]*ssa.BasicBlo
 			return nil, computationRefusal(fn, fn.Pos(), "empty local block")
 		}
 		switch b.Instrs[len(b.Instrs)-1].(type) {
-		case *ssa.If, *ssa.Jump, *ssa.Return:
+		case *ssa.If, *ssa.Jump, *ssa.Return, *ssa.Panic:
 		default:
 			return nil, computationRefusal(fn, fn.Pos(), "local block has no supported terminal")
+		}
+		ordinarySeen := false
+		for i, instruction := range b.Instrs {
+			if err := c.tick(fn, fn.Pos()); err != nil {
+				return nil, err
+			}
+			if instruction.Block() != b {
+				return nil, computationRefusal(fn, fn.Pos(), "instruction belongs to another block")
+			}
+			if _, phi := instruction.(*ssa.Phi); !phi {
+				ordinarySeen = true
+			}
+			switch ins := instruction.(type) {
+			case *ssa.Phi:
+				if ordinarySeen {
+					return nil, computationRefusal(fn, fn.Pos(), "phi follows ordinary instruction")
+				}
+				if len(ins.Edges) == 0 || len(ins.Edges) != len(b.Preds) {
+					return nil, computationRefusal(fn, fn.Pos(), "phi predecessor arity disagrees")
+				}
+			case *ssa.If:
+				if i != len(b.Instrs)-1 || len(b.Succs) != 2 {
+					return nil, computationRefusal(fn, fn.Pos(), "invalid local branch successors")
+				}
+			case *ssa.Jump:
+				if i != len(b.Instrs)-1 || len(b.Succs) != 1 {
+					return nil, computationRefusal(fn, fn.Pos(), "invalid local jump successor")
+				}
+			case *ssa.Return:
+				if i != len(b.Instrs)-1 || len(b.Succs) != 0 || len(ins.Results) != fn.Signature.Results().Len() {
+					return nil, computationRefusal(fn, fn.Pos(), "invalid local return interface")
+				}
+			case *ssa.Panic:
+				if i != len(b.Instrs)-1 || len(b.Succs) != 0 {
+					return nil, computationRefusal(fn, fn.Pos(), "invalid local panic terminal")
+				}
+			}
 		}
 		for _, pair := range []struct {
 			edges     []*ssa.BasicBlock

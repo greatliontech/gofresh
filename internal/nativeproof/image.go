@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 )
 
 type mapping struct {
 	va, end, off, filesz uint64
 	executable           bool
+	readable, writable   bool
 }
 
 // Image owns an immutable copy of a fully bound ELF64 little-endian ET_EXEC
@@ -93,6 +95,11 @@ func NewImage(ctx context.Context, input []byte) (*Image, error) {
 		if p.Vaddr%4096 != p.Off%4096 {
 			return nil, refuse(p.Vaddr, "image-mapping", "load is not congruent under the 4KiB page model")
 		}
+		// Even a zero-length logical load can map its leading partial page.
+		// Do not discard such a mapping and thereby hide a file-page alias.
+		if p.Memsz == 0 && p.Vaddr%4096 != 0 {
+			return nil, refuse(p.Vaddr, "image-mapping", "empty partial-page load is unsupported")
+		}
 		for _, old := range im.loads {
 			if p.Vaddr&^uint64(4095) < (old.end+4095)&^uint64(4095) && old.va&^uint64(4095) < (end+4095)&^uint64(4095) && p.Memsz != 0 {
 				return nil, refuse(p.Vaddr, "image-mapping", "ambiguous overlapping PT_LOAD ranges")
@@ -103,7 +110,7 @@ func NewImage(ctx context.Context, input []byte) (*Image, error) {
 			return nil, refuse(p.Vaddr, "image-mapping", "executable load must be readable and nonwritable")
 		}
 		if p.Memsz != 0 {
-			im.loads = append(im.loads, mapping{p.Vaddr, end, p.Off, p.Filesz, x})
+			im.loads = append(im.loads, mapping{va: p.Vaddr, end: end, off: p.Off, filesz: p.Filesz, executable: x, readable: p.Flags&elf.PF_R != 0, writable: p.Flags&elf.PF_W != 0})
 		}
 	}
 	if len(im.loads) == 0 {
@@ -142,4 +149,40 @@ func (im *Image) instructionBytes(pc uint64) ([]byte, error) {
 		return im.data[start : start+n], nil
 	}
 	return nil, refuse(pc, "instruction-mapping", fmt.Sprintf("%#x is not executable file-backed code", pc))
+}
+
+// readonlyWord uses load permissions and file bounds, never section labels. A
+// second mapping of any backing page is refused, even when it is readonly: this
+// finite loader model does not establish a shared-page alias relation.
+func (im *Image) readonlyWord(address uint64) (uint64, Span, error) {
+	end, ok := plus(address, 8)
+	if im == nil || !ok || end > 1<<47 {
+		return 0, Span{}, refuse(address, "descriptor-mapping", "missing image or descriptor extent overflow")
+	}
+	for index, m := range im.loads {
+		if address < m.va || end > m.end {
+			continue
+		}
+		delta := address - m.va
+		if !m.readable || m.writable || delta > m.filesz || m.filesz-delta < 8 {
+			return 0, Span{}, refuse(address, "descriptor-mapping", "descriptor must be readable, nonwritable and entirely file-backed")
+		}
+		start := m.off + delta
+		lo, hi := start&^uint64(4095), (start+8+4095)&^uint64(4095)
+		for j, alias := range im.loads {
+			// A BSS load with an unaligned start can still map the preceding
+			// file-page prefix. Its logical Filesz==0 does not remove that alias.
+			if j != index && (alias.filesz != 0 || alias.off%4096 != 0) && lo < (alias.off+alias.filesz+4095)&^uint64(4095) && alias.off&^uint64(4095) < hi {
+				return 0, Span{}, refuse(address, "descriptor-alias", "descriptor backing page has another PT_LOAD alias")
+			}
+		}
+		return binary.LittleEndian.Uint64(im.data[start : start+8]), Span{m.va, m.end}, nil
+	}
+	return 0, Span{}, refuse(address, "descriptor-mapping", "descriptor crosses or misses a load boundary")
+}
+
+// Identity is ownership, not a digest comparison. Snapshots retain the same
+// privately owned byte allocation; an independent reconstruction is another input.
+func sameImage(a, b *Image) bool {
+	return a != nil && b != nil && len(a.data) != 0 && len(a.data) == len(b.data) && &a.data[0] == &b.data[0]
 }

@@ -1,11 +1,11 @@
-// Package nativeproof checks conditional value, effect and input bounds for one native
-// entry in an immutable ELF image. It is an internal proof prerequisite, not a
+// Package nativeproof checks conditional value, effect, input and callback-transfer
+// bounds in an immutable ELF image. It is an internal proof prerequisite, not a
 // source-equivalence, whole-program, execution, termination, or freshness API.
 //
 // The caller supplies the invocation interface and machine conditions explicitly;
 // no Go ABI table, symbol name, symbol size, compiler label, or hash establishes
-// them. Under those conditions, the checked acyclic instruction graph has no data
-// memory operations or calls except the specified near-return slot read. Branch
+// them. Under those conditions, Check's acyclic leaf graph has no data memory
+// operations or calls except the specified near-return slot read. Branch
 // decisions and declared result bits depend only on declared input bits and
 // instruction constants; selected preserved bits are never written. Undeclared
 // scratch bits and incoming arithmetic flags are arbitrary. Instruction fetch,
@@ -24,6 +24,16 @@
 // expressions, retaining exact register projections and path-conditioned merges.
 // A separate equality checker must relate those expressions to selected source;
 // neither input dependence nor symbolic evaluation alone establishes that relation.
+// A zero-result interface retains the complete effect and return obligations.
+//
+// CheckDescriptor binds a readonly loaded entry word to a checked same-image
+// target. CheckCall verifies a local decoded transfer through that target,
+// including descriptor and declared stack-argument reads, the protected eight-byte
+// CALL write, argument/context identity and the return transition. Its incoming
+// descriptor provenance, loaded-memory integrity and invocation/frame conditions
+// remain explicit premises. It does not establish which registration row selected
+// the descriptor, or lift isolated invocation to ordinary Go suspension/resumption.
+// CallbackRules identifies this composition separately from the leaf RuleModel.
 //
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span

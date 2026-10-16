@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-region-transport"
+reason: "Clause-scoped independent invariant checking, concrete-oracle examples, a bounded two-row registration fuzz grammar and actual selected generated-main construction-to-operand examples support conditional source-region transport. Complete invariant evidence across all five clauses remains outstanding: these finite shapes and input populations do not establish every admitted entry state, edge/backedge/phi, alias or summary allocation, captured environment, correlated aggregate, call/effect boundary and certificate dependency together. The current relation refuses unsupported calls/effects and retains imported initialization, intervening live-heap equality, concurrency, native and harness premises. This is an uncovered evidence obligation, not a demonstrated implementation contradiction; construction-to-operand provenance alone grants no whole-use or runtime authority."
+content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+lands { manual { condition: "tooling-redesign 5.1w.2b.3b.2: complete conditional region-transport invariant evidence for the supported typed region and registration model, including selected ownership and actual consuming operands, all represented initial states and edge/backedge/phi inclusion, conservative alias/summary updates, closure environments and row correlation, exceptional/call boundaries, retained frame premises, immutable dependencies and bounded/cancelled refusal. Actual main-to-native-use linkage, initialization/frame-premise discharge and whole-use/harness coverage remain separately at 5.1w.2b.3b.3; producing/current/historical applicability remains at 5.1w.2b.4." } }
+excuses: GAP_EXCUSE_UNCOVERED

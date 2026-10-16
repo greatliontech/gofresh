@@ -13,6 +13,8 @@ import (
 // computationScalarLocation maps one complete source scalar, in declaration
 // order, to exactly one native interval. Boolean storage is canonical one-byte
 // 0/1; integers retain their exact-width bit pattern, including signed values.
+// An opaque pointer input maps its selected word-width storage only, conditional
+// on the typed entry interface; it has no source integer semantics.
 type computationScalarLocation struct {
 	register      nativeproof.Register
 	offset, width int
@@ -22,6 +24,8 @@ type computationScalarLocation struct {
 // grant. The source owner is an identity token; interpretation uses the frozen
 // source relation. The native relation owns its inspected image and mandatory
 // effect/frame certificate. No caller-authored expected output is accepted.
+// A void body has no result equalities, but still requires complete source
+// interpretation and the native effect/return/frame certificate.
 //
 // Source/build-to-artifact provenance and closing are still executor obligations:
 // composing these local facts does not authenticate their common production.
@@ -52,7 +56,7 @@ func (r *computationCorrespondenceEqualityRefusal) Error() string {
 
 func (r *computationCorrespondenceEqualityRefusal) Unwrap() error { return r.cause }
 
-// deriveComputationCorrespondence owns the scalar namespace and independently
+// deriveComputationCorrespondence owns the formal-input namespace and independently
 // derives both endpoints. Maps and the opaque image container are captured before
 // context callbacks. Source is the owner's selected loader graph, not a public
 // editable proposal; it must remain under that owner's control during derivation.
@@ -66,7 +70,7 @@ func deriveComputationCorrespondence(ctx context.Context, source computationSour
 	if source.prog == nil || root == nil || root.Prog != source.prog.Prog || root.Pkg == nil {
 		return nil, fmt.Errorf("correspondence: root is not owned by selected source")
 	}
-	if len(arguments) != len(root.Params) || len(results) != root.Signature.Results().Len() || len(results) == 0 {
+	if len(arguments) != len(root.Params) || len(results) != root.Signature.Results().Len() {
 		return nil, fmt.Errorf("correspondence: exact scalar arity required")
 	}
 	var parameterTypes []computationRelationType
@@ -90,7 +94,7 @@ func deriveComputationCorrespondence(ctx context.Context, source computationSour
 		if err := correspondenceLocation(parameterTypes[i], location, &inputMask); err != nil {
 			return nil, fmt.Errorf("correspondence argument %d: %w", i, err)
 		}
-		input, err := builder.Input(parameterTypes[i].sort, scope, uint64(i))
+		input, err := builder.Input(parameterTypes[i].inputSort(), scope, uint64(i))
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +163,7 @@ func deriveComputationCorrespondence(ctx context.Context, source computationSour
 }
 
 func correspondenceLocation(typ computationRelationType, location computationScalarLocation, covered *nativeproof.Masks) error {
-	width := typ.sort.Width()
+	width := typ.inputSort().Width()
 	if typ.sort.IsBool() {
 		width = 8
 	}
@@ -175,13 +179,13 @@ func correspondenceLocation(typ computationRelationType, location computationSca
 }
 
 func correspondenceStorage(builder *bitrelation.Builder, typ computationRelationType, value bitrelation.Term) (bitrelation.Term, error) {
-	if !value.Valid() || value.Sort() != typ.sort {
+	if !value.Valid() || value.Sort() != typ.inputSort() {
 		return bitrelation.Term{}, fmt.Errorf("correspondence: source value disagrees with selected type")
 	}
 	if typ.sort.IsBool() {
 		return builder.Make(bitrelation.BoolToBits, bitrelation.Bits(8), 0, value)
 	}
-	if typ.sort.Width() == 0 {
+	if typ.inputSort().Width() == 0 {
 		return bitrelation.Term{}, fmt.Errorf("correspondence: unsupported scalar storage")
 	}
 	return value, nil

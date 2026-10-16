@@ -192,7 +192,9 @@ establish its stated value, dependence or effect bound under these obligations:
   flags and scratch state remain arbitrary. An ABI name or document interprets
   an interface; it does not establish that an actual caller obeys it. Applying
   the conditional claim later requires establishing that interface and its
-  preconditions at the relevant use.
+  preconditions at the relevant use. An effect-only interface may have no result
+  locations or result bits; it does not invent a scalar output to represent
+  completion, and retains its return and context-preservation obligations.
 - **machine-applicability** — Instruction-set mode, feature requirements,
   applicable address and memory semantics, valid code mappings and code-integrity
   premises are explicit. Faults, undefined results and nondeterminism remain in
@@ -265,6 +267,10 @@ establish its stated value, dependence or effect bound under these obligations:
 Numeric correspondence relates a selected source computation to a bound native
 entry. It is a subordinate all-input fact, not a result about a sampled execution
 or a replacement for the existing test and benchmark result models.
+An effect-only correspondence may have no scalar results and may admit a pointer
+argument proved unused on both sides: no access through it or escape of it is
+assumed harmless. The argument retains its typed interface and transfer relation;
+absence of result bits does not remove effect or exceptional-outcome obligations.
 
 **REQ-impl-numeric-correspondence** (invariant): An accepted conditional numeric
 source/native relation MUST satisfy these obligations:
@@ -331,6 +337,128 @@ source/native relation MUST satisfy these obligations:
   Ordinary runtime reuse still requires the complete coverage of
   REQ-impl-build-selection and separately established producing, current and
   historical applicability evidence under the existing result model.
+
+## Conditional descriptor and callback transfer
+
+**REQ-impl-callback-transfer** (invariant): A conditional readonly-descriptor or
+callback-transfer claim MUST satisfy the following obligations in addition to
+REQ-impl-native-entry. It composes the existing instruction and correspondence
+rules, not a separate set of approved native callees.
+
+- **descriptor-binding** — A readonly descriptor claim identifies its region,
+  bounds, representation and context in the bound artifact's actual loaded-image
+  mapping. Readability, non-writability and integrity for the claimed span are
+  established under explicit loading and memory premises, including relevant
+  aliases; section labels alone establish none of them. Address arithmetic,
+  width, endianness, mapping ambiguity, file-backed and zero-fill bounds, and
+  relevant relocations are accounted for or refused. The decoded target is bound
+  to an admitted executable mapping and checked entry/interface; a wrapper at
+  that entry retains its own obligations. Readonly descriptor bytes do not make
+  a selecting registration header, row, backing array or other carrier readonly.
+  Writable registration state requires its own mutation and use provenance.
+- **decoded-transfer** — The claim retains the antecedent that the incoming
+  value designates that descriptor with the stated region and context provenance.
+  A supplied address or a matching descriptor word does not establish it.
+  Independently checked actual load and call instructions establish the target,
+  argument locations and interpretations, closure context, preserved frame and
+  return/continuation relation. Coverage follows REQ-impl-native-entry through
+  every successor and applicable nil or fault outcome within the stated scope;
+  target and continuation instruction boundaries are established, not inferred
+  from symbol extents. The callee's checked claim applies at the actual target
+  with all its preconditions, and its returned state satisfies the continuation
+  interface. Direct or devirtualized calls require the corresponding checked
+  transfer. Unproved incoming provenance may remain an explicit condition of the
+  local lemma, never a derived fact about a caller or registration use.
+- **language-transport** — Under REQ-impl-premise-boundary, a checked transport
+  relation may use faithful lowering of an identified source-language operation,
+  such as function-value copying, aggregate selection, concrete interface
+  dispatch, closure or goroutine argument capture, or defer/return. It binds the
+  exact selected typed operation and context to the actual fragment, with its
+  complete boundaries, continuations and logical-state/frame relation. Transport
+  establishes which value is carried or invoked, not the selected target's
+  semantics. Explicit calls and their selected replacements retain
+  REQ-impl-build-selection and their own effect/frame obligations. Helper names,
+  ABI labels and table/compiler metadata may locate candidate implementations;
+  none establishes this association, provenance, coverage or a callee summary.
+- **conditional-composition** — Isolation, stack-space, memory and frame
+  restrictions remain explicit conditions. Applying a native lemma to an ordinary
+  Go callback requires a checked relation showing that permitted implicit
+  lowering and suspension/resumption preserve its logical state and account for
+  relevant intervening effects; it cannot silently assume an isolated invocation
+  or an ample stack. An unavailable transport or frame relation leaves that
+  composition unsupported. A local descriptor/transfer fact alone establishes
+  neither the selected generated main's actual registration-to-use chain nor
+  harness scope preservation, noninterference or runtime applicability. Those
+  obligations, producing/current evidence and existing test/benchmark result
+  models remain governed by the existing contracts; this fact grants no public
+  discharge and requires no new tracing or invocation protocol.
+
+## Conditional source-region transport
+
+**REQ-impl-region-transport** (invariant): An accepted source-region transport
+claim MUST establish its stated construction-to-use relation under these
+obligations, using the existing selection, independent-checking and composition
+contracts:
+
+- **bound-scope** — The claim binds the source owner's exact selected typed
+  syntax and control-flow representation, source/build snapshot, specialization,
+  roots and bounded call contexts. A registration claim identifies the actual
+  selected main and initialization construction and the actual consuming call
+  operand reached from it. Names, generated-file labels and metadata locate
+  candidates only; a regenerated template or unused lookalike table supplies no
+  use provenance. Entry-state premises, covered paths and terminal uses are
+  explicit. Source selection establishes identity, not an effect bound, and a
+  local transport scope cannot weaken a whole-startup claim's obligations.
+- **inductive-transfer** — Proposed block-entry states and invariants are checked
+  against the actual control-flow graph and typed operations. Every admitted
+  initial state is included in the entry invariant; on every edge, the checked
+  transfer of the predecessor invariant is included in the successor invariant.
+  Inclusion means coverage of all represented concrete states, not agreement of
+  proposal labels. This includes every backedge and the actual predecessor/value
+  association of each phi, with path conditions and exceptional outcomes retained.
+  Excluding an edge requires a checked argument. Loops and recursive contexts
+  require inductive justification at their boundaries, not finite unrolling or
+  mutually assumed summaries. The invariant at each claimed use entails the
+  claimed operand relation. Unsupported transfers, unclosed invariants, exhausted
+  bounds or cancellation yield no partial positive certificate.
+- **memory-and-callables** — The finite typed region model distinguishes selected
+  globals, allocation sites with bounded context, closure environments, formal
+  inputs and unknown memory; locations retain field/index paths and their possible
+  overlaps. It distinguishes a singleton object from a summary of possibly many
+  objects. Replacing an old location fact with a store's value requires a proven
+  exact singleton target; possible aliases, summary objects and unknown indices
+  require conservative updates retaining every possible old and new value at
+  overlapping locations. Unknown writes invalidate affected facts unless their
+  frame is justified. Repeated allocation at one site initializes the new object,
+  not earlier escaped instances represented by the same summary. A callable
+  retains its target together with its captured environment identity and value
+  relation; target identity alone is insufficient. Aggregate transport preserves
+  claim-relevant correlations, including each registration row's name/function
+  pairing. Separate name and target sets cannot establish that pairing; lost
+  correlation must widen the relation or refuse the dependent claim.
+- **context-and-effects** — Calls bind actual arguments, receivers, captured
+  environments and concrete interface values to the exact callee context.
+  Preservation across a call requires a checked read/write/escape/callback and
+  continuation relation, or an explicit retained premise. An unknown call cannot
+  be modeled solely by an arbitrary return while preserving memory and excluding
+  callbacks without justification. Language-defined copying and capture establish
+  the values captured at the specified evaluation point, not stability of their
+  reachable heap or completion of the invoked work. Goroutine and deferred calls
+  retain their own execution, continuation and exceptional effects; concurrency
+  or delayed mutation cannot disappear into a value-transport fact.
+- **conditional-composition** — A local positive may relate registration
+  construction to an actual consuming operand while retaining explicit imported
+  initialization, intervening-frame, concurrency, callee, native and harness
+  premises. It does not skip initialization side effects: an omitted phase's
+  influence on the entry state or transported relation remains a premise whose
+  applicability must be established before composition. Such a fact proves no
+  whole-program registration coverage, callee behavior, harness noninterference
+  or runtime applicability by itself. Native use still requires
+  REQ-impl-callback-transfer and REQ-impl-build-selection. Evidence retains the
+  checked relation, premises, source/context and subordinate dependencies under
+  REQ-impl-derivation-reuse; no special function name supplies semantic authority.
+  Existing result models and producing/current obligations remain in force, with
+  no public discharge or tracing protocol supplied by this local relation.
 
 ## Observation obligations
 

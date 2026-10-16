@@ -3,7 +3,7 @@
 
 requirement_id: "REQ-impl-native-entry"
 reason: "Clause-scoped mapped-image, machine-interface, control-flow, transfer, ownership and conditional-composition examples and bounded generated properties support the native checker. Complete invariant evidence across all eight clauses remains outstanding: the existing finite graph/instruction grammars and sampled bitvector populations do not establish the complete accepted mapping, interface, reachable-transfer, effect/return and immutable-evidence conjunction. Unsupported ISA forms deliberately refuse; this record alleges no implementation contradiction and grants no ordinary whole-operation or runtime-reuse authority."
-content_hash: "f38fc6aef851a766140b6be614fb4723869dbfbae9b1eefa850e8d210afb31cb"
-source_hash: "300cebef23cfecaac1af2739bc572f72846a8bbd8df82d77fa8f444c0b5fd36d"
+content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
 lands { manual { condition: "tooling-redesign 5.1w.2b.2: property witnesses or analyzer evidence establish the complete conditional native-entry invariant for the supported instruction and image model, including required premises, mapping bounds, every reachable successor, definedness and result projections, effects/return, ownership, cancellation and independent checking, alongside the ordinarily compiled useful-kernel positive and actual CPU-dispatch negative. Ordinary actual-use/harness coverage remains separately at 5.1w.2b.3b and native records/current/historical closing at 5.1w.2b.4; those are not authority supplied by this conditional theorem." } }
 excuses: GAP_EXCUSE_UNCOVERED

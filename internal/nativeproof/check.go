@@ -127,13 +127,6 @@ func validInterface(pc uint64, face Interface) error {
 	if face.Inputs[RSP]|face.Results[RSP]|face.Preserved[RSP] != 0 {
 		return refuse(pc, "return-interface", "RSP belongs to the return interface")
 	}
-	var result uint64
-	for _, m := range face.Results {
-		result |= m
-	}
-	if result == 0 {
-		return refuse(pc, "result-interface", "no result bits declared")
-	}
 	return nil
 }
 
