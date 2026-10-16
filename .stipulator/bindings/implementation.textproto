@@ -2255,3 +2255,157 @@ bindings {
   shape_hash: "23db54e5df7c8a54c1ecf44c909d0bad370c8fcee5170ad1fbc30e7d511475db"
   clause_label: "decoded-transfer"
 }
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionPointerChange"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "122bb98ab25b929b1574e8b20a73c7ee15b937add9c46c462099ff1f4f034614"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionViewValue"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "46836e1b0d8cae5ab9f5230bdd7a7d739f13d52c8b84faaaec49289f62383776"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.pointerEquality"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "a40b50c655dc8752a626dd62e871553364eb19a6e4b99898e313894a6298e8cf"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewsConcreteOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "48ef7cc11b2a2d2394a183b105697f9ca0bf599b8c10c08d6ef39b18c14ebe6d"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewsConcreteOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "48ef7cc11b2a2d2394a183b105697f9ca0bf599b8c10c08d6ef39b18c14ebe6d"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewsRefuseUnsupportedAccess"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7f78916717fbd24c985363960723eb3e56f51f5701cf43b0a210b08a63e6200b"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewForgedLocations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7b80e7409f08d61864dd2bba44defba37a634712d98b9db71b96b2a1cb1f12d3"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewWeakUpdatesAndAliases"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ca73be799ab87418b764f1320705e1a4111e29161deaeb2020f15f9cef08b718"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewActualOperandMutation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5a064fca9278a4e37271ba2db8d4ca7e7bf44fed83c9d4de57c22a2644acde3f"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewSummaryPointersRemainDistinct"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "eeb4cc1e0530462e2c6c46806b88cdffdb171a1cc04fee845279e59a23bfdfdb"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewOwnershipAndCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bbf4390d495142797057c4856faf2443c43955ee88487b96390dfdb3d0a102ab"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzRegionScalarViewOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2fdeef0cb6579533bc0c71fa312d0c66c7346913c4231e0a549409ff4c190bf3"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewActualFlagRegistration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bdedd45a567772509f7ff7f96fd813142f29f22ea4457f14a3db117a4aff3da9"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionScalarViewActualFlagRegistration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bdedd45a567772509f7ff7f96fd813142f29f22ea4457f14a3db117a4aff3da9"
+  clause_label: "memory-and-callables"
+}

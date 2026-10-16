@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@3"
+const regionRules = "gofresh/source-region-transport@4"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -66,6 +66,8 @@ type regionLocation struct {
 }
 
 type regionValue struct {
+	// For pointers, typ is the access view. The canonical storage type is
+	// derived from location's object/path, never a second mutable type field.
 	typ         types.Type
 	kind        regionKind
 	scalar      constant.Value
@@ -466,10 +468,10 @@ func readRegionLocation(state regionState, loc regionLocation, typ types.Type) r
 		}
 		v = v.elements[step.index]
 	}
-	if !types.Identical(v.typ, typ) {
-		return regionUnknownValue(typ)
+	if viewed, ok := regionViewValue(v, typ); ok {
+		return viewed
 	}
-	return v
+	return regionUnknownValue(typ)
 }
 
 func regionInstruction(point regionPoint) ssa.Instruction {

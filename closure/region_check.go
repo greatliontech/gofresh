@@ -396,7 +396,7 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		}
 	case regionPointer:
 		p, ok := v.typ.Underlying().(*types.Pointer)
-		valid = ok && types.Identical(k.locationType(v.location), p.Elem())
+		valid = ok && regionAccessType(k.locationType(v.location), p.Elem())
 	case regionSlice:
 		s, ok := v.typ.Underlying().(*types.Slice)
 		t := k.locationType(v.location)
@@ -961,8 +961,13 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		t := k.locationType(addr.location)
 		v := get(x.Val)
-		if !types.Identical(t, v.typ) {
+		pointer, ok := addr.typ.Underlying().(*types.Pointer)
+		if !ok || !types.Identical(pointer.Elem(), v.typ) || !regionAccessType(t, pointer.Elem()) {
 			return regionError("store type mismatch")
+		}
+		v, ok = regionViewValue(v, t)
+		if !ok {
+			return regionError("store has no supported storage view")
 		}
 		// Formal regions may alias any selected object. A write through one
 		// invalidates the whole heap; a concrete write invalidates every formal
@@ -983,8 +988,18 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if k.singleton(addr.location.object) {
 			s.memory[addr.location.object] = regionReplace(old, addr.location.path, v)
 		} else {
-			// Weak update widened to top: no old instance/value is discarded.
-			s.memory[addr.location.object] = regionUnknownValue(old.typ)
+			// A weak store joins the old and updated whole object. The exact
+			// equal-term case retains all old/new possibilities without granting
+			// singleton ownership. Other joins still widen to top.
+			if err := k.chargeValue(old); err != nil {
+				return err
+			}
+			updated := regionReplace(old, addr.location.path, v)
+			if regionSameValue(old, updated) {
+				s.memory[addr.location.object] = old
+			} else {
+				s.memory[addr.location.object] = regionUnknownValue(old.typ)
+			}
 		}
 		return nil
 	case *ssa.UnOp:
@@ -1076,7 +1091,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		return set(x, regionUnknownValue(x.Type()))
 	case *ssa.ChangeType:
-		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) {
+		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) && !regionPointerChange(x.X.Type(), x.Type()) {
 			return regionError("unsupported representation change")
 		}
 		v := get(x.X)
@@ -1089,6 +1104,9 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		a, b := get(x.X), get(x.Y)
 		if x.Op == token.EQL || x.Op == token.NEQ {
 			if equal, known := regionNilEquality(a, b); known {
+				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
+			}
+			if equal, known := k.pointerEquality(a, b); known {
 				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
 			}
 			if a.kind != regionNil && b.kind != regionNil {
