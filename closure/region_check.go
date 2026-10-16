@@ -11,10 +11,13 @@ import (
 )
 
 type regionKernel struct {
-	input regionInput
-	meter regionMeter
-	owned map[ssa.Value]bool
-	cycle map[*ssa.BasicBlock]bool
+	input       regionInput
+	meter       *regionMeter
+	session     *regionCallSession
+	invocation  regionInvocation
+	fullReturns bool
+	owned       map[ssa.Value]bool
+	cycle       map[*ssa.BasicBlock]bool
 	// A site already represented at entry may include an earlier invocation's
 	// object. Executing it now must not reset that object's surviving aliases.
 	preexisting map[regionObject]bool
@@ -24,19 +27,25 @@ type regionKernel struct {
 // newRegionKernel checks typed ownership and the actual graph, not proposal
 // labels. The source loader's SSA/type objects must remain immutable throughout.
 func newRegionKernel(ctx context.Context, in regionInput, limits regionLimits) (*regionKernel, error) {
-	k := &regionKernel{input: in, meter: regionMeter{ctx: ctx, limits: limits}, owned: map[ssa.Value]bool{}, cycle: map[*ssa.BasicBlock]bool{}, preexisting: map[regionObject]bool{}, constants: map[*ssa.Const]regionValue{}}
+	session := newRegionCallSession(ctx, in, limits)
+	return newRegionContextKernel(in, session, regionInvocation{}, false)
+}
+
+func newRegionContextKernel(in regionInput, session *regionCallSession, invocation regionInvocation, fullReturns bool) (*regionKernel, error) {
+	limits := session.meter.limits
+	k := &regionKernel{input: in, meter: session.meter, session: session, invocation: invocation, fullReturns: fullReturns, owned: map[ssa.Value]bool{}, cycle: map[*ssa.BasicBlock]bool{}, preexisting: session.preexisting, constants: map[*ssa.Const]regionValue{}}
 	if err := k.meter.tick(); err != nil {
 		return nil, err
 	}
 	fn := in.root
 	if in.owner == nil || fn == nil || fn.Prog != in.owner || len(fn.Blocks) == 0 || len(fn.Blocks) > limits.nodes ||
-		len(fn.Params) > limits.nodes || len(fn.FreeVars) > limits.nodes || fn.Signature == nil || fn.Signature.TypeParams().Len() != 0 || len(in.premises) == 0 {
+		len(fn.Params) > limits.nodes || len(fn.FreeVars) > limits.nodes || fn.Signature == nil || fn.Signature.TypeParams().Len() != 0 && fn.Origin() == nil || len(in.premises) == 0 {
 		return nil, regionError("missing typed owner, concrete root, or explicit entry/frame premises")
 	}
-	if regionInstruction(in.entry) == nil || regionInstruction(in.use.at) == nil || in.entry.block.Parent() != fn || in.use.at.block.Parent() != fn {
+	if regionInstruction(in.entry) == nil || in.entry.block.Parent() != fn || !fullReturns && (regionInstruction(in.use.at) == nil || in.use.at.block.Parent() != fn) {
 		return nil, regionError("invalid scope instruction boundary")
 	}
-	if in.use.operand == nil {
+	if !fullReturns && in.use.operand == nil {
 		ret, ok := regionInstruction(in.use.at).(*ssa.Return)
 		if !ok || len(ret.Results) != 0 {
 			return nil, regionError("missing actual consuming operand")
@@ -84,10 +93,10 @@ func newRegionKernel(ctx context.Context, in regionInput, limits regionLimits) (
 			}
 		}
 	}
-	if !blocks[in.entry.block] || !blocks[in.use.at.block] {
+	if !blocks[in.entry.block] || !fullReturns && !blocks[in.use.at.block] {
 		return nil, regionError("scope outside root")
 	}
-	if in.use.operand != nil {
+	if !fullReturns && in.use.operand != nil {
 		found := false
 		for _, operand := range regionInstruction(in.use.at).Operands(nil) {
 			found = found || operand != nil && *operand == in.use.operand
@@ -179,6 +188,10 @@ func newRegionKernel(ctx context.Context, in regionInput, limits regionLimits) (
 	if in.entry.index != 0 && k.cycle[in.entry.block] {
 		return nil, regionError("mid-block entry has a backedge")
 	}
+	info := session.contexts[invocation]
+	info.function = fn
+	info.cycle = k.cycle
+	session.contexts[invocation] = info
 	if err := k.validateState(in.initial); err != nil {
 		return nil, err
 	}
@@ -193,12 +206,14 @@ func newRegionKernel(ctx context.Context, in regionInput, limits regionLimits) (
 			}
 		}
 	}
-	for object, value := range in.initial.memory {
-		k.preexisting[object] = true
-		remember(value)
-	}
-	for _, value := range in.initial.values {
-		remember(value)
+	if !fullReturns {
+		for object, value := range in.initial.memory {
+			k.preexisting[object] = true
+			remember(value)
+		}
+		for _, value := range in.initial.values {
+			remember(value)
+		}
 	}
 	return k, nil
 }
@@ -256,7 +271,7 @@ func (k *regionKernel) objectType(o regionObject) types.Type {
 	switch o.kind {
 	case regionGlobal:
 		g, ok := o.site.(*ssa.Global)
-		if !ok || g == nil || !k.owns(g) || o.context != nil {
+		if !ok || g == nil || !k.owns(g) || o.context != nil || o.invocation != (regionInvocation{}) {
 			return nil
 		}
 	case regionAllocation:
@@ -277,8 +292,18 @@ func (k *regionKernel) objectType(o regionObject) types.Type {
 		default:
 			return nil
 		}
-		if !k.owns(o.site) || o.context != k.input.root {
+		if o.context == nil || o.context.Prog != k.input.owner || o.site.Parent() != o.context {
 			return nil
+		}
+		switch site := o.site.(type) {
+		case *ssa.Parameter:
+			if !slices.Contains(o.context.Params, site) {
+				return nil
+			}
+		case *ssa.FreeVar:
+			if !slices.Contains(o.context.FreeVars, site) {
+				return nil
+			}
 		}
 	default:
 		return nil
@@ -417,6 +442,15 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 					}
 				}
 			}
+		case *types.Tuple:
+			valid = len(v.elements) == t.Len()
+			if valid {
+				for i, item := range v.elements {
+					if !types.Identical(item.typ, t.At(i).Type()) {
+						valid = false
+					}
+				}
+			}
 		}
 	}
 	if !valid {
@@ -440,6 +474,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 	if err != nil {
 		return nil, err
 	}
+	k.session.proofs = p.calls
 	if err := k.validateState(p.input.initial); err != nil {
 		return nil, err
 	}
@@ -452,7 +487,19 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 			return nil, regionError("proposal initial premise differs from input")
 		}
 	}
-	for block, states := range p.entries {
+	observations, err := k.checkEntries(p.entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used}, nil
+}
+
+func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) ([]regionObservation, error) {
+	in := k.input
+	for block, states := range entries {
 		if block == nil || block.Parent() != in.root || !slices.Contains(in.root.Blocks, block) || len(states) == 0 {
 			return nil, regionError("invalid invariant block")
 		}
@@ -462,14 +509,14 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 			}
 		}
 	}
-	covered, err := k.covered(in.initial, p.entries[in.entry.block])
+	covered, err := k.covered(in.initial, entries[in.entry.block])
 	if err != nil {
 		return nil, err
 	}
 	if !covered {
 		return nil, regionError("entry invariant omits initial states")
 	}
-	checked := &checkedRegion{rules: regionRules, input: in}
+	var observations []regionObservation
 	seen := map[*ssa.BasicBlock]bool{}
 	queue := []*ssa.BasicBlock{in.entry.block}
 	for len(queue) != 0 {
@@ -479,20 +526,18 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 			continue
 		}
 		seen[block] = true
-		states := p.entries[block]
+		states := entries[block]
 		if len(states) == 0 {
 			return nil, regionError("reachable block invariant omitted")
 		}
 		for _, state := range states {
-			edges, observation, err := k.block(block, state)
+			edges, outcomes, err := k.block(block, state)
 			if err != nil {
 				return nil, err
 			}
-			if observation != nil {
-				checked.observations = append(checked.observations, *observation)
-			}
+			observations = append(observations, outcomes...)
 			for _, edge := range edges {
-				covered, err := k.covered(edge.state, p.entries[edge.block])
+				covered, err := k.covered(edge.state, entries[edge.block])
 				if err != nil {
 					return nil, err
 				}
@@ -503,13 +548,13 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 			}
 		}
 	}
-	if len(seen) != len(p.entries) || len(checked.observations) == 0 {
+	if len(seen) != len(entries) || len(observations) == 0 {
 		return nil, regionError("unused invariant or consuming use is unreachable")
 	}
-	if err := ctx.Err(); err != nil {
+	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return checked, nil
+	return observations, nil
 }
 
 type regionEdge struct {
@@ -639,7 +684,7 @@ func (k *regionKernel) clone(s regionState) (regionState, error) {
 	return r, nil
 }
 
-func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regionEdge, *regionObservation, error) {
+func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regionEdge, []regionObservation, error) {
 	s, err := k.clone(initial)
 	if err != nil {
 		return nil, nil, err
@@ -648,65 +693,102 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 	if block == k.input.entry.block {
 		start = k.input.entry.index
 	}
+	states := []regionState{s}
 	for index := start; index < len(block.Instrs); index++ {
 		if err := k.meter.tick(); err != nil {
 			return nil, nil, err
 		}
-		if block == k.input.use.at.block && index == k.input.use.at.index {
-			var value regionValue
-			if k.input.use.operand != nil {
-				value = k.value(s, k.input.use.operand)
-			}
-			return nil, &regionObservation{value: value, state: s}, nil
-		}
-		instruction := block.Instrs[index]
-		switch x := instruction.(type) {
-		case *ssa.Phi:
-			// Assigned simultaneously on the actual predecessor edge below.
-		case *ssa.Jump, *ssa.If:
-			var edges []regionEdge
-			for i, successor := range block.Succs {
-				if branch, ok := instruction.(*ssa.If); ok {
-					if b, known := regionBool(k.value(s, branch.Cond)); known && b != (i == 0) {
-						continue
-					}
+		var edges []regionEdge
+		var observations []regionObservation
+		var continuing []regionState
+		for _, s := range states {
+			if !k.fullReturns && block == k.input.use.at.block && index == k.input.use.at.index {
+				var value regionValue
+				if k.input.use.operand != nil {
+					value = k.value(s, k.input.use.operand)
 				}
-				next, err := k.clone(s)
+				observations = append(observations, regionObservation{value: value, state: s})
+				continue
+			}
+			instruction := block.Instrs[index]
+			switch x := instruction.(type) {
+			case *ssa.Phi:
+				// Assigned simultaneously on the actual predecessor edge below.
+				continuing = append(continuing, s)
+			case *ssa.Jump, *ssa.If:
+				for i, successor := range block.Succs {
+					if branch, ok := instruction.(*ssa.If); ok {
+						if b, known := regionBool(k.value(s, branch.Cond)); known && b != (i == 0) {
+							continue
+						}
+					}
+					next, err := k.clone(s)
+					if err != nil {
+						return nil, nil, err
+					}
+					if branch, ok := instruction.(*ssa.If); ok {
+						if _, known := regionBool(k.value(s, branch.Cond)); !known {
+							// The condition itself is an immutable SSA value. Retain the
+							// selected edge's Boolean fact, without inventing relations
+							// between an unmodeled comparison's operands.
+							next.values[branch.Cond] = regionValue{typ: branch.Cond.Type(), kind: regionConstant, scalar: constant.MakeBool(i == 0)}
+						}
+					}
+					pred := slices.Index(successor.Preds, block)
+					if pred < 0 {
+						return nil, nil, regionError("missing actual phi predecessor")
+					}
+					for _, ins := range successor.Instrs {
+						phi, ok := ins.(*ssa.Phi)
+						if !ok {
+							break
+						}
+						if pred >= len(phi.Edges) {
+							return nil, nil, regionError("missing actual phi edge")
+						}
+						next.values[phi] = k.value(s, phi.Edges[pred])
+					}
+					edges = append(edges, regionEdge{block: successor, state: next})
+				}
+			case *ssa.Return:
+				if !k.fullReturns {
+					return nil, nil, regionError("terminal path is outside the named use boundary")
+				}
+				value, err := k.returnValue(x, s)
 				if err != nil {
 					return nil, nil, err
 				}
-				if branch, ok := instruction.(*ssa.If); ok {
-					if _, known := regionBool(k.value(s, branch.Cond)); !known {
-						// The condition itself is an immutable SSA value. Retain the
-						// selected edge's Boolean fact, without inventing relations
-						// between an unmodeled comparison's operands.
-						next.values[branch.Cond] = regionValue{typ: branch.Cond.Type(), kind: regionConstant, scalar: constant.MakeBool(i == 0)}
+				observations = append(observations, regionObservation{value: value, state: s})
+			case *ssa.Call:
+				if _, builtin := x.Call.Value.(*ssa.Builtin); builtin {
+					if err := k.transfer(&s, x); err != nil {
+						return nil, nil, err
+					}
+					continuing = append(continuing, s)
+				} else {
+					returned, err := k.call(x, s)
+					if err != nil {
+						return nil, nil, err
+					}
+					for _, after := range returned {
+						var err error
+						continuing, _, err = k.join(continuing, after)
+						if err != nil {
+							return nil, nil, err
+						}
 					}
 				}
-				pred := slices.Index(successor.Preds, block)
-				if pred < 0 {
-					return nil, nil, regionError("missing actual phi predecessor")
+			default:
+				if err := k.transfer(&s, x); err != nil {
+					return nil, nil, err
 				}
-				for _, ins := range successor.Instrs {
-					phi, ok := ins.(*ssa.Phi)
-					if !ok {
-						break
-					}
-					if pred >= len(phi.Edges) {
-						return nil, nil, regionError("missing actual phi edge")
-					}
-					next.values[phi] = k.value(s, phi.Edges[pred])
-				}
-				edges = append(edges, regionEdge{block: successor, state: next})
-			}
-			return edges, nil, nil
-		case *ssa.Return:
-			return nil, nil, regionError("terminal path is outside the named use boundary")
-		default:
-			if err := k.transfer(&s, x); err != nil {
-				return nil, nil, err
+				continuing = append(continuing, s)
 			}
 		}
+		if len(edges) != 0 || len(observations) != 0 {
+			return edges, observations, nil
+		}
+		states = continuing
 	}
 	return nil, nil, regionError("scope has no terminal transfer")
 }
@@ -772,7 +854,8 @@ func (k *regionKernel) singleton(object regionObject) bool {
 		return true
 	}
 	a, ok := object.site.(*ssa.Alloc)
-	return object.kind == regionAllocation && ok && object.context == k.input.root && !k.cycle[a.Block()] && !k.preexisting[object]
+	info, derived := k.session.contexts[object.invocation]
+	return object.kind == regionAllocation && ok && derived && object.context == info.function && !info.repeated && !info.cycle[a.Block()] && !k.preexisting[object]
 }
 
 func regionReplace(v regionValue, path []regionStep, value regionValue) regionValue {
@@ -811,7 +894,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !ok {
 			return regionError("allocation is not typed storage")
 		}
-		object := regionObject{kind: regionAllocation, site: x, context: k.input.root}
+		object := regionObject{kind: regionAllocation, site: x, context: k.input.root, invocation: k.invocation}
 		v := regionUnknownValue(p.Elem())
 		if k.singleton(object) {
 			var err error
@@ -972,13 +1055,26 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !ok || !k.owns(target) || len(x.Bindings) != len(target.FreeVars) {
 			return regionError("unbound closure context")
 		}
-		v := regionValue{typ: x.Type(), kind: regionCallable, target: target, location: regionLocation{object: regionObject{kind: regionClosureEnvironment, site: x, context: k.input.root}}}
+		v := regionValue{typ: x.Type(), kind: regionCallable, target: target, location: regionLocation{object: regionObject{kind: regionClosureEnvironment, site: x, context: k.input.root, invocation: k.invocation}}}
 		for _, binding := range x.Bindings {
 			v.environment = append(v.environment, get(binding))
 		}
 		return set(x, v)
 	case *ssa.MakeInterface:
 		return set(x, regionValue{typ: x.Type(), kind: regionInterface, elements: []regionValue{get(x.X)}})
+	case *ssa.ChangeInterface:
+		v := get(x.X)
+		if v.kind != regionInterface && v.kind != regionNil {
+			return set(x, regionUnknownValue(x.Type()))
+		}
+		v.typ = x.Type()
+		return set(x, v)
+	case *ssa.Extract:
+		v := get(x.Tuple)
+		if v.kind == regionAggregate && x.Index >= 0 && x.Index < len(v.elements) {
+			return set(x, v.elements[x.Index])
+		}
+		return set(x, regionUnknownValue(x.Type()))
 	case *ssa.ChangeType:
 		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) {
 			return regionError("unsupported representation change")
@@ -991,6 +1087,20 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			return regionError("unsupported numeric transfer")
 		}
 		a, b := get(x.X), get(x.Y)
+		if x.Op == token.EQL || x.Op == token.NEQ {
+			if equal, known := regionNilEquality(a, b); known {
+				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
+			}
+			if a.kind != regionNil && b.kind != regionNil {
+				total, err := k.equalityTotal(x.X.Type(), true, 0, map[types.Type]bool{})
+				if err != nil {
+					return err
+				}
+				if !total {
+					return regionError("equality has no proof against dynamic-comparison panic")
+				}
+			}
+		}
 		if a.kind == regionConstant && b.kind == regionConstant {
 			return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(constant.Compare(a.scalar, x.Op, b.scalar))})
 		}
@@ -1023,5 +1133,52 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return regionError("deferred capture has open invocation and continuation effects")
 	default:
 		return regionError("unsupported instruction transfer")
+	}
+}
+
+// equalityTotal establishes that equality cannot panic before its result is
+// widened to an unknown Boolean. Static Go comparability is not enough: an
+// interface anywhere in a compared aggregate can hold an incomparable value.
+// Zero-length arrays and blank fields perform no dynamic comparisons, but their
+// types must still be statically comparable. Pointers/channels compare identity,
+// never their referents. The active set and shared limits bound by-value walks.
+func (k *regionKernel) equalityTotal(t types.Type, compared bool, depth int, active map[types.Type]bool) (bool, error) {
+	if err := k.meter.tick(); err != nil {
+		return false, err
+	}
+	if t == nil || depth > k.meter.limits.depth {
+		return false, regionError("equality type/depth budget exhausted")
+	}
+	if active[t] {
+		return false, regionError("recursive by-value equality type is unproved")
+	}
+	active[t] = true
+	defer delete(active, t)
+	if _, parameter := t.(*types.TypeParam); parameter {
+		return false, nil
+	}
+	switch typ := t.Underlying().(type) {
+	case *types.Basic:
+		return typ.Kind() != types.Invalid && typ.Kind() != types.UntypedNil, nil
+	case *types.Pointer, *types.Chan:
+		return true, nil
+	case *types.Interface:
+		return !compared, nil
+	case *types.Array:
+		return k.equalityTotal(typ.Elem(), compared && typ.Len() != 0, depth+1, active)
+	case *types.Struct:
+		if typ.NumFields() > k.meter.limits.nodes {
+			return false, regionError("equality field budget exhausted")
+		}
+		for i := 0; i < typ.NumFields(); i++ {
+			field := typ.Field(i)
+			total, err := k.equalityTotal(field.Type(), compared && field.Name() != "_", depth+1, active)
+			if err != nil || !total {
+				return total, err
+			}
+		}
+		return true, nil
+	default:
+		return false, nil
 	}
 }

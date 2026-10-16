@@ -32,6 +32,7 @@ type registration struct {
 	call         *ssa.Call
 	arguments    []registrationArgument
 	callbacks    []selectedSourceDeclaration
+	callBindings []sourceRegionCall
 	open         []string
 }
 
@@ -65,9 +66,10 @@ func defaultRegistrationLimits() registrationLimits {
 
 type registrationChecker struct {
 	*selectedSourceBinder
-	root   *ssa.Function
-	limits regionLimits
-	bound  []selectedSourceDeclaration
+	root         *ssa.Function
+	limits       regionLimits
+	bound        []selectedSourceDeclaration
+	callBindings []sourceRegionCall
 }
 
 type registrationTable struct {
@@ -158,6 +160,7 @@ func deriveRegistration(ctx context.Context, source computationSource, packageID
 		return nil, err
 	}
 	r.callbacks = c.bound
+	r.callBindings = c.callBindings
 	r.open = []string{
 		"source/build snapshot stability and faithful selected typed source-to-SSA lowering",
 		"implicit zero initialization, guard entry/skip branch, imported initialization effects, exceptions, termination and callbacks",
@@ -181,7 +184,16 @@ func (c *registrationChecker) check(in regionInput) (*checkedRegion, error) {
 	if err != nil {
 		return nil, err
 	}
-	return checkRegion(c.ctx, in, p, c.limits)
+	packet, err := checkRegion(c.ctx, in, p, c.limits)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := c.bindRegionCalls(packet)
+	if err != nil {
+		return nil, err
+	}
+	c.callBindings = append(c.callBindings, bindings...)
+	return packet, nil
 }
 
 func (c *registrationChecker) frame(state regionState, from, to regionPoint) (registrationFrame, error) {

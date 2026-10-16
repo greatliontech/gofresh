@@ -36,6 +36,7 @@ type selectedSourceBinder struct {
 	metas       map[string]listPkg
 	packages    map[*packages.Package]selectedSourcePackage
 	bound       map[*ssa.Function]selectedSourceDeclaration
+	callables   map[*ssa.Function]selectedSourceCallable
 }
 
 type selectedSourceInput struct{ kind, name string }
@@ -66,6 +67,346 @@ type selectedSourceDeclaration struct {
 	identity selectedSourceIdentity
 	pkg      *packages.Package
 	decl     *ast.FuncDecl
+}
+
+// Callable binding is input ownership, never a body/effect certificate. Type
+// handles, lexical syntax and function tokens belong to the immutable selected
+// owner; the identity is frozen and typeArguments owns its container. The exact
+// invocation and captured values are retained by the consuming checked region.
+type selectedSourceCallable struct {
+	identity                 selectedSourceIdentity
+	pkg                      *packages.Package
+	function, origin, parent *ssa.Function
+	syntax                   ast.Node
+	typeArguments            []types.Type
+	signature                *types.Signature
+}
+
+func (c *selectedSourceBinder) bindCallable(fn *ssa.Function) (selectedSourceCallable, error) {
+	return c.callable(fn, 0)
+}
+
+func (c *selectedSourceBinder) callable(fn *ssa.Function, depth int) (selectedSourceCallable, error) {
+	var zero selectedSourceCallable
+	if fn == nil || fn.Prog != c.source.prog.Prog || fn.Signature == nil {
+		return zero, computationRefusal(fn, token.NoPos, "callable has no selected owner or signature")
+	}
+	if err := c.tick(fn, fn.Pos()); err != nil {
+		return zero, err
+	}
+	if depth >= c.limits.depth {
+		return zero, computationRefusal(fn, fn.Pos(), "callable parent depth budget exhausted")
+	}
+	if prior, ok := c.callables[fn]; ok {
+		return prior, nil
+	}
+	bound := selectedSourceCallable{function: fn, signature: fn.Signature, syntax: fn.Syntax()}
+	if parent := fn.Parent(); parent != nil {
+		// Reject generic lexical ancestors before Origin can ask SSA to build a
+		// generic parent's package. This binder observes an already built owner.
+		if parent.Signature == nil || parent.Signature.RecvTypeParams().Len() != 0 || parent.TypeParams().Len() != 0 || fn.TypeParams().Len() != 0 {
+			return zero, computationRefusal(fn, fn.Pos(), "generic lexical callable is unsupported")
+		}
+		outer, err := c.callable(parent, depth+1)
+		if err != nil {
+			return zero, err
+		}
+		found := 0
+		for _, child := range parent.AnonFuncs {
+			if err := c.tick(fn, fn.Pos()); err != nil {
+				return zero, err
+			}
+			if child == fn {
+				found++
+			}
+		}
+		lit, ok := fn.Syntax().(*ast.FuncLit)
+		if !ok || lit.Body == nil || found != 1 || fn.Object() != nil || fn.Pkg != parent.Pkg || fn.Signature.Recv() != nil {
+			return zero, computationRefusal(fn, fn.Pos(), "lexical callable ownership disagrees")
+		}
+		// Parent membership alone cannot authenticate a copied FuncLit. Walk the
+		// already preflighted selected syntax, pruning nested lexical bodies.
+		occurrences, err := c.lexicalLiteral(fn, outer.syntax, lit)
+		if err != nil {
+			return zero, err
+		}
+		if occurrences != 1 || !types.Identical(outer.pkg.TypesInfo.TypeOf(lit), fn.Signature) {
+			return zero, computationRefusal(fn, fn.Pos(), "lexical callable syntax/type binding disagrees")
+		}
+		h := c.hasher(fn, fn.Pos())
+		if err := selectedSourcePrint(h, outer.pkg.Fset, lit); err != nil {
+			return zero, err
+		}
+		if err := c.chargeBytes(fn, fn.Pos(), len(fn.Name())); err != nil {
+			return zero, err
+		}
+		bound.pkg, bound.parent = outer.pkg, parent
+		bound.identity = selectedSourceIdentity{packageID: outer.identity.packageID, function: fn.Name(), position: outer.pkg.Fset.PositionFor(lit.Pos(), false).String(), source: outer.identity.source, body: h.sum()}
+	} else if origin := fn.Origin(); origin != nil && origin != fn {
+		if origin.Parent() != nil || origin.Signature == nil || origin.Signature.Recv() != nil || fn.Signature.Recv() != nil || len(fn.FreeVars) != 0 {
+			return zero, computationRefusal(fn, fn.Pos(), "receiver or lexical specialization is unsupported")
+		}
+		decl, err := c.bindDeclaration(origin)
+		if err != nil {
+			return zero, err
+		}
+		declaredSignature := origin.Object().Type().(*types.Signature)
+		// A declared SSA origin retains its selected types.Func signature. Use
+		// that exact typed declaration, not a replacement origin signature.
+		if origin.Signature != declaredSignature {
+			return zero, computationRefusal(fn, fn.Pos(), "specialization origin signature disagrees with selected declaration")
+		}
+		count := declaredSignature.TypeParams().Len()
+		if count == 0 || fn.TypeParams().Len() != count || count > c.limits.work-c.work || count > (c.limits.bytes-c.bytes)/8 {
+			return zero, computationRefusal(fn, fn.Pos(), "specialization arity or budget disagrees")
+		}
+		if err := c.chargeBytes(fn, fn.Pos(), count*8); err != nil {
+			return zero, err
+		}
+		args := fn.TypeArgs()
+		if len(args) != count || fn.Syntax() != decl.decl || fn.Object() != origin.Object() || fn.Pkg != nil && fn.Pkg != origin.Pkg {
+			return zero, computationRefusal(fn, fn.Pos(), "specialization origin/body binding disagrees")
+		}
+		before := c.work
+		if err := c.callableType(fn, declaredSignature, false, map[types.Type]bool{}, 0); err != nil {
+			return zero, err
+		}
+		originWork := c.work - before
+		before = c.work
+		for _, arg := range args {
+			if err := c.callableType(fn, arg, true, map[types.Type]bool{}, 0); err != nil {
+				return zero, err
+			}
+		}
+		// Instantiation/constraint checking is a library operation without a
+		// cancellation hook. Reserve the origin/argument graph product before
+		// invoking it, bounding substitution and method/constraint comparisons.
+		argumentWork := c.work - before
+		if argumentWork != 0 && originWork > (c.limits.work-c.work)/argumentWork {
+			return zero, computationRefusal(fn, fn.Pos(), "specialization work budget exhausted")
+		}
+		for range originWork * argumentWork {
+			if err := c.tick(fn, fn.Pos()); err != nil {
+				return zero, err
+			}
+		}
+		instantiated, err := types.Instantiate(nil, declaredSignature, args, true)
+		if err != nil || !types.Identical(instantiated, fn.Signature) {
+			return zero, computationRefusal(fn, fn.Pos(), "specialization type arguments/signature disagree")
+		}
+		bound.pkg, bound.origin, bound.typeArguments, bound.identity = decl.pkg, origin, args, decl.identity
+	} else {
+		decl, err := c.bindDeclaration(fn)
+		if err != nil {
+			return zero, err
+		}
+		declSig := fn.Object().Type().(*types.Signature)
+		if fn.TypeParams().Len() != 0 || len(fn.FreeVars) != 0 || !types.Identical(declSig, fn.Signature) || (declSig.Recv() == nil) != (fn.Signature.Recv() == nil) || declSig.Recv() != nil && !types.Identical(declSig.Recv().Type(), fn.Signature.Recv().Type()) {
+			return zero, computationRefusal(fn, fn.Pos(), "ordinary callable type/context binding disagrees")
+		}
+		bound.pkg, bound.identity = decl.pkg, decl.identity
+	}
+	// Block/parameter parents reject copied SSA functions, including instances
+	// whose origin/signature alone could otherwise be borrowed. A bodyless/native
+	// declaration remains inventory under bindDeclaration, not a callable body.
+	if decl, ok := bound.syntax.(*ast.FuncDecl); ok && decl.Body == nil {
+		return zero, computationRefusal(fn, fn.Pos(), "selected callable declaration has no source body")
+	}
+	if len(fn.Blocks) == 0 {
+		return zero, computationRefusal(fn, fn.Pos(), "selected callable has no source body")
+	}
+	for _, block := range fn.Blocks {
+		if err := c.tick(fn, fn.Pos()); err != nil {
+			return zero, err
+		}
+		if block == nil || block.Parent() != fn {
+			return zero, computationRefusal(fn, fn.Pos(), "callable block belongs to another function")
+		}
+		for _, instruction := range block.Instrs {
+			if err := c.tick(fn, fn.Pos()); err != nil {
+				return zero, err
+			}
+			if instruction == nil || instruction.Parent() != fn {
+				return zero, computationRefusal(fn, fn.Pos(), "callable instruction belongs to another function")
+			}
+			// SSA's non-monomorphizing mode emits a forwarding call to the
+			// uninstantiated origin. That is not a concrete source specialization.
+			if call, ok := instruction.(*ssa.Call); ok && bound.origin != nil && call.Call.StaticCallee() == bound.origin {
+				return zero, computationRefusal(fn, fn.Pos(), "uninstantiated-origin wrapper is unsupported")
+			}
+		}
+	}
+	for _, parameter := range fn.Params {
+		if err := c.tick(fn, fn.Pos()); err != nil {
+			return zero, err
+		}
+		if parameter == nil || parameter.Parent() != fn {
+			return zero, computationRefusal(fn, fn.Pos(), "callable parameter belongs to another function")
+		}
+	}
+	for _, free := range fn.FreeVars {
+		if err := c.tick(fn, fn.Pos()); err != nil {
+			return zero, err
+		}
+		if free == nil || free.Parent() != fn {
+			return zero, computationRefusal(fn, fn.Pos(), "callable capture belongs to another function")
+		}
+	}
+	if c.callables == nil {
+		c.callables = map[*ssa.Function]selectedSourceCallable{}
+	}
+	c.callables[fn] = bound
+	return bound, nil
+}
+
+func (c *selectedSourceBinder) lexicalLiteral(fn *ssa.Function, parent ast.Node, literal *ast.FuncLit) (occurrences int, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if stop, ok := p.(selectedSourceWalkStop); ok {
+				err = stop.err
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	ast.Inspect(parent, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		if err := c.tick(fn, fn.Pos()); err != nil {
+			panic(selectedSourceWalkStop{err})
+		}
+		if n == parent {
+			return true
+		}
+		if child, ok := n.(*ast.FuncLit); ok {
+			if child == literal {
+				occurrences++
+			}
+			return false
+		}
+		return true
+	})
+	return occurrences, nil
+}
+
+// Bound the type graph before constraint validation/instantiation. Recursive
+// named types are visited once; free parameters in actual arguments refuse.
+func (c *selectedSourceBinder) callableType(fn *ssa.Function, typ types.Type, concrete bool, seen map[types.Type]bool, depth int) error {
+	if err := c.tick(fn, fn.Pos()); err != nil {
+		return err
+	}
+	if typ == nil || depth >= c.limits.depth {
+		return computationRefusal(fn, fn.Pos(), "callable type depth/shape budget exhausted")
+	}
+	if seen[typ] {
+		return nil
+	}
+	seen[typ] = true
+	visit := func(t types.Type) error { return c.callableType(fn, t, concrete, seen, depth+1) }
+	name := func(obj types.Object) error { return c.chargeBytes(fn, fn.Pos(), len(obj.Name())) }
+	switch t := typ.(type) {
+	case *types.Basic:
+	case *types.Pointer:
+		return visit(t.Elem())
+	case *types.Slice:
+		return visit(t.Elem())
+	case *types.Array:
+		return visit(t.Elem())
+	case *types.Chan:
+		return visit(t.Elem())
+	case *types.Map:
+		if err := visit(t.Key()); err != nil {
+			return err
+		}
+		return visit(t.Elem())
+	case *types.Alias:
+		return visit(types.Unalias(t))
+	case *types.TypeParam:
+		if concrete {
+			return computationRefusal(fn, fn.Pos(), "specialization argument is not concrete")
+		}
+		return visit(t.Constraint())
+	case *types.Tuple:
+		for i := 0; i < t.Len(); i++ {
+			if err := visit(t.At(i).Type()); err != nil {
+				return err
+			}
+		}
+	case *types.Signature:
+		if concrete && t.TypeParams().Len() != 0 {
+			return computationRefusal(fn, fn.Pos(), "specialization argument is generic")
+		}
+		for i := 0; i < t.TypeParams().Len(); i++ {
+			if err := visit(t.TypeParams().At(i)); err != nil {
+				return err
+			}
+		}
+		if t.Recv() != nil {
+			if err := visit(t.Recv().Type()); err != nil {
+				return err
+			}
+		}
+		if err := visit(t.Params()); err != nil {
+			return err
+		}
+		return visit(t.Results())
+	case *types.Named:
+		if err := name(t.Obj()); err != nil {
+			return err
+		}
+		if concrete && t.TypeParams().Len() != t.TypeArgs().Len() {
+			return computationRefusal(fn, fn.Pos(), "specialization argument is an uninstantiated type")
+		}
+		for i := 0; i < t.TypeArgs().Len(); i++ {
+			if err := visit(t.TypeArgs().At(i)); err != nil {
+				return err
+			}
+		}
+		if err := visit(t.Underlying()); err != nil {
+			return err
+		}
+		for i := 0; i < t.NumMethods(); i++ {
+			if err := name(t.Method(i)); err != nil {
+				return err
+			}
+			if err := visit(t.Method(i).Type()); err != nil {
+				return err
+			}
+		}
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if err := name(t.Field(i)); err != nil {
+				return err
+			}
+			if err := visit(t.Field(i).Type()); err != nil {
+				return err
+			}
+		}
+	case *types.Interface:
+		for i := 0; i < t.NumExplicitMethods(); i++ {
+			if err := name(t.ExplicitMethod(i)); err != nil {
+				return err
+			}
+			if err := visit(t.ExplicitMethod(i).Type()); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < t.NumEmbeddeds(); i++ {
+			if err := visit(t.EmbeddedType(i)); err != nil {
+				return err
+			}
+		}
+	case *types.Union:
+		for i := 0; i < t.Len(); i++ {
+			if err := visit(t.Term(i).Type()); err != nil {
+				return err
+			}
+		}
+	default:
+		return computationRefusal(fn, fn.Pos(), "unsupported callable type")
+	}
+	return nil
 }
 
 func newSelectedSourceBinder(ctx context.Context, source computationSource, root *ssa.Function, limits selectedSourceLimits) (*selectedSourceBinder, error) {

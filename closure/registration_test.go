@@ -226,7 +226,8 @@ func TestRegistrationStructuralTransport(t *testing.T) {
 		{"zero-initialization-open", `var implicit int`, `receive(Context{}, collection)`, ""},
 		{"unused-lookalike", `var unused = []Row{{"unused", Beta}}`, `_ = unused; receive(Context{}, collection)`, ""},
 		{"actual-other-table", `var unused = []Row{{"unused", Beta}}`, `receive(Context{}, unused)`, ""},
-		{"unknown-call", "", `unknown(); receive(Context{}, collection)`, "call effects"},
+		{"checked-helper", `func helper(){}`, `helper(); receive(Context{}, collection)`, ""},
+		{"unknown-call", `func opaque()`, `opaque(); receive(Context{}, collection)`, "ordinary source body"},
 		{"alias-mutation", "", `alias := collection; alias[0].Invoke = Beta; receive(Context{}, collection)`, "correlation"},
 		{"header-replacement", `var unused = []Row{{"one", Alpha}, {"two", Beta}}`, `collection = unused; receive(Context{}, collection)`, "different provenance"},
 	} {
@@ -243,6 +244,9 @@ func TestRegistrationStructuralTransport(t *testing.T) {
 				t.Fatal(err)
 			}
 			arg := got.arguments[1]
+			if tc.name == "checked-helper" && len(got.callBindings) == 0 {
+				t.Fatal("checked helper lacks selected call binding")
+			}
 			if tc.name == "actual-other-table" {
 				if arg.object.Name() != "unused" || len(arg.rows) != 1 || constant.StringVal(arg.rows[0].elements[0].scalar) != "unused" {
 					t.Fatal("convenient unused table substituted for actual operand")
@@ -310,5 +314,30 @@ func TestRegistrationInitializerAllocationAndLiveFrame(t *testing.T) {
 	stores[1].Val = stores[0].Val
 	if got, err := deriveRegistration(t.Context(), source, source.prog.Pkgs[0].ID, registrationLimits{}); got != nil || err == nil || !strings.Contains(err.Error(), "selected initializer allocation") {
 		t.Fatal("identical unused backing replaced selected allocation", err)
+	}
+}
+
+func TestRegistrationCheckedHelpersKeepSourceBindings(t *testing.T) {
+	source := registrationFixture(t, `func helper(){f:=func(){};f()}`, `helper();receive(Context{},collection)`)
+	receipt, err := deriveRegistration(t.Context(), source, source.prog.Pkgs[0].ID, registrationLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lexical := false
+	for _, binding := range receipt.callBindings {
+		if binding.call.target != binding.bound.function {
+			t.Fatal("registration substituted a proposed target for a checked dependency")
+		}
+		lexical = lexical || binding.bound.parent != nil
+	}
+	if !lexical {
+		t.Fatal("registration lost its checked lexical helper")
+	}
+	helper := source.prog.Prog.Package(source.prog.Pkgs[0].Types).Func("helper")
+	foreign := relationFixture(t, `func F(){}`, 64)
+	decl := helper.Syntax().(*ast.FuncDecl)
+	source.prog.Pkgs[0].TypesInfo.Defs[decl.Name] = foreign.prog.Roots["F"].Object()
+	if r, err := deriveRegistration(t.Context(), source, source.prog.Pkgs[0].ID, registrationLimits{}); r != nil || err == nil || !strings.Contains(err.Error(), "selected function body binding disagrees") {
+		t.Fatal("checked helper escaped selected source binding", err)
 	}
 }

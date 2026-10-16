@@ -74,7 +74,11 @@ type regionConcreteFunction struct {
 	target      *ssa.Function
 	environment []any
 }
-type regionConcreteInterface struct{ value any }
+type regionConcreteInterface struct {
+	typ   types.Type
+	value any
+}
+type regionConcreteResults []any
 
 func regionConcreteCopy(value any) any {
 	if fields, ok := value.([]any); ok {
@@ -109,6 +113,48 @@ func regionConcreteWrite(destination *any, snapshot any) {
 	*destination = snapshot
 }
 
+// Concrete Go equality evaluates fields/elements in order. Interface values
+// first compare dynamic types and may then panic on incomparable dynamic data.
+// This executes actual values; it does not use the kernel's static totality
+// predicate or abstract joins.
+func regionConcreteEqual(typ types.Type, a, b any) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if !types.Comparable(typ) {
+		panic("oracle comparison of incomparable dynamic type")
+	}
+	switch t := typ.Underlying().(type) {
+	case *types.Interface:
+		x, y := a.(regionConcreteInterface), b.(regionConcreteInterface)
+		if !types.Identical(x.typ, y.typ) {
+			return false
+		}
+		if !types.Comparable(x.typ) {
+			panic("oracle comparison of incomparable dynamic type")
+		}
+		return regionConcreteEqual(x.typ, x.value, y.value)
+	case *types.Struct:
+		x, y := a.([]any), b.([]any)
+		for i := 0; i < t.NumFields(); i++ {
+			if t.Field(i).Name() != "_" && !regionConcreteEqual(t.Field(i).Type(), x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case *types.Array:
+		x, y := a.([]any), b.([]any)
+		for i := int64(0); i < t.Len(); i++ {
+			if !regionConcreteEqual(t.Elem(), x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return a == b
+	}
+}
+
 func regionConcreteZero(t types.Type) any {
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
@@ -139,11 +185,21 @@ func regionConcreteZero(t types.Type) any {
 }
 
 func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
+	steps := 0
+	return executeRegionConcreteFrame(t, in, map[*ssa.Global]*any{}, args, nil, false, 0, &steps)
+}
+
+func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.Global]*any, args, environment []any, whole bool, depth int, steps *int) any {
 	t.Helper()
+	if depth > 32 {
+		t.Fatal("concrete oracle call depth exhausted")
+	}
 	values := map[ssa.Value]any{}
-	globals := map[*ssa.Global]*any{}
 	for i, parameter := range in.root.Params {
 		values[parameter] = args[i]
+	}
+	for i, free := range in.root.FreeVars {
+		values[free] = environment[i]
 	}
 	get := func(value ssa.Value) any {
 		switch x := value.(type) {
@@ -196,7 +252,11 @@ func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 		}
 		var next *ssa.BasicBlock
 		for i := start; i < len(block.Instrs); i++ {
-			if block == in.use.at.block && i == in.use.at.index {
+			*steps++
+			if *steps > 10000 {
+				t.Fatal("concrete oracle execution bound exhausted")
+			}
+			if !whole && block == in.use.at.block && i == in.use.at.index {
 				if in.use.operand == nil {
 					return nil
 				}
@@ -261,7 +321,9 @@ func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 				}
 				values[x] = f
 			case *ssa.MakeInterface:
-				values[x] = regionConcreteInterface{regionConcreteCopy(get(x.X))}
+				values[x] = regionConcreteInterface{x.X.Type(), regionConcreteCopy(get(x.X))}
+			case *ssa.ChangeInterface:
+				values[x] = get(x.X)
 			case *ssa.ChangeType:
 				values[x] = get(x.X)
 			case *ssa.Field:
@@ -271,9 +333,9 @@ func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 			case *ssa.BinOp:
 				a, b := get(x.X), get(x.Y)
 				if x.Op == token.EQL {
-					values[x] = a == b
+					values[x] = regionConcreteEqual(x.X.Type(), a, b)
 				} else if x.Op == token.NEQ {
-					values[x] = a != b
+					values[x] = !regionConcreteEqual(x.X.Type(), a, b)
 				} else {
 					t.Fatalf("oracle comparison %s", x)
 				}
@@ -286,13 +348,54 @@ func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 			case *ssa.Jump:
 				next = block.Succs[0]
 			case *ssa.Call:
-				b := x.Call.Value.(*ssa.Builtin)
+				b, builtin := x.Call.Value.(*ssa.Builtin)
+				if !builtin {
+					var callee regionConcreteFunction
+					var actual []any
+					if x.Call.IsInvoke() {
+						box := get(x.Call.Value).(regionConcreteInterface)
+						object, index, _ := types.LookupFieldOrMethod(box.typ, false, x.Call.Method.Pkg(), x.Call.Method.Name())
+						method, ok := object.(*types.Func)
+						if !ok || len(index) != 1 {
+							t.Fatal("oracle unsupported interface receiver adjustment")
+						}
+						callee.target = in.root.Prog.FuncValue(method)
+						if callee.target == nil {
+							t.Fatal("oracle missing concrete method body")
+						}
+						actual = append(actual, regionConcreteCopy(box.value))
+					} else {
+						callee = get(x.Call.Value).(regionConcreteFunction)
+					}
+					for _, arg := range x.Call.Args {
+						actual = append(actual, regionConcreteCopy(get(arg)))
+					}
+					child := regionInput{root: callee.target, entry: regionPoint{callee.target.Blocks[0], 0}}
+					result := executeRegionConcreteFrame(t, child, globals, actual, callee.environment, true, depth+1, steps).(regionConcreteResults)
+					if len(result) == 1 {
+						values[x] = result[0]
+					} else {
+						values[x] = result
+					}
+					break
+				}
 				s := get(x.Call.Args[0]).(regionConcreteSlice)
 				n := s.length
 				if b.Name() == "cap" {
 					n = s.capacity
 				}
 				values[x] = int64(n)
+			case *ssa.Extract:
+				values[x] = get(x.Tuple).(regionConcreteResults)[x.Index]
+			case *ssa.Return:
+				if !whole {
+					t.Fatal("oracle returned outside requested use")
+				}
+				result := make(regionConcreteResults, len(x.Results))
+				for i, operand := range x.Results {
+					result[i] = regionConcreteCopy(get(operand))
+				}
+				return result
 			default:
 				t.Fatalf("oracle unsupported instruction %T: %s", ins, ins)
 			}
@@ -372,7 +475,7 @@ func regionMatchesConcrete(v regionValue, state regionState, concrete any, depth
 		return true
 	case regionInterface:
 		i, ok := concrete.(regionConcreteInterface)
-		return ok && len(v.elements) == 1 && regionMatchesConcrete(v.elements[0], state, i.value, depth+1)
+		return ok && len(v.elements) == 1 && types.Identical(v.elements[0].typ, i.typ) && regionMatchesConcrete(v.elements[0], state, i.value, depth+1)
 	}
 	return false
 }
@@ -504,7 +607,7 @@ func TestRegionConcreteAggregateAssignment(t *testing.T) {
 }
 
 func TestRegionActualCallOperandAndScope(t *testing.T) {
-	const text = `type Row struct{Name string; F func()};func a(){};func use([]Row){};func opaque();func F(){opaque();unused:=[]Row{{"decoy",a}};_ = unused;actual:=[]Row{{"actual",a}};use(actual)}`
+	const text = `type Row struct{Name string; F func()};func a(){};func use([]Row){opaque()};func opaque();func F(){opaque();unused:=[]Row{{"decoy",a}};_ = unused;actual:=[]Row{{"actual",a}};use(actual)}`
 	in := regionAtCall(t, regionFixture(t, text), "use", 0)
 	if _, err := proposeRegion(t.Context(), in, defaultRegionLimits()); err == nil {
 		t.Fatal("unknown preceding call skipped")

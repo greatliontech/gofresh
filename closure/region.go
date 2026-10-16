@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@1"
+const regionRules = "gofresh/source-region-transport@3"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -48,9 +48,10 @@ const (
 // control-flow cycle, formal objects and unknown objects are summaries. Closure
 // environments are retained with the callable, including captured cell aliases.
 type regionObject struct {
-	kind    regionObjectKind
-	site    ssa.Value
-	context *ssa.Function
+	kind       regionObjectKind
+	site       ssa.Value
+	context    *ssa.Function
+	invocation regionInvocation
 }
 
 type regionStep struct {
@@ -129,6 +130,7 @@ func (l regionLimits) valid() bool {
 type regionProposal struct {
 	input   regionInput
 	entries map[*ssa.BasicBlock][]regionState
+	calls   []*regionCallProof
 }
 
 type regionObservation struct {
@@ -146,6 +148,9 @@ type checkedRegion struct {
 	rules        string
 	input        regionInput
 	observations []regionObservation
+	// Only bodies actually checked under their actual input states appear here.
+	// Their selected-source and native bindings remain composition obligations.
+	calls []*regionCallProof
 }
 
 // openObligations is deliberately not a single "closed" bit. The assembly must
@@ -197,9 +202,10 @@ func regionCapture(input regionInput, proposal *regionProposal, limits regionLim
 	if err != nil || proposal == nil {
 		return in, nil, err
 	}
-	if len(proposal.entries) > limits.nodes {
+	if len(proposal.entries) > limits.nodes || len(proposal.calls) > limits.nodes-len(proposal.entries) {
 		return regionInput{}, nil, regionError("node budget exhausted")
 	}
+	m.nodes = len(proposal.entries) + len(proposal.calls)
 	p := &regionProposal{entries: make(map[*ssa.BasicBlock][]regionState, len(proposal.entries))}
 	p.input, err = copyInput(proposal.input)
 	if err != nil {
@@ -216,6 +222,43 @@ func regionCapture(input regionInput, proposal *regionProposal, limits regionLim
 			}
 			p.entries[block] = append(p.entries[block], owned)
 		}
+	}
+	if len(proposal.calls) > limits.nodes {
+		return regionInput{}, nil, regionError("call proof budget exhausted")
+	}
+	for _, call := range proposal.calls {
+		if err := m.tick(); err != nil {
+			return regionInput{}, nil, err
+		}
+		if call == nil {
+			return regionInput{}, nil, regionError("nil call proof")
+		}
+		copy := *call
+		if len(copy.invocation.path) > limits.depth*96 {
+			return regionInput{}, nil, regionError("call context budget exhausted")
+		}
+		copy.initial, err = m.copyState(call.initial)
+		if err != nil {
+			return regionInput{}, nil, err
+		}
+		if len(call.entries) > limits.nodes-m.nodes {
+			return regionInput{}, nil, regionError("callee node budget exhausted")
+		}
+		m.nodes += len(call.entries)
+		copy.entries = make(map[*ssa.BasicBlock][]regionState, len(call.entries))
+		for block, states := range call.entries {
+			if len(states) > limits.alternatives {
+				return regionInput{}, nil, regionError("callee alternative budget exhausted")
+			}
+			for _, state := range states {
+				owned, err := m.copyState(state)
+				if err != nil {
+					return regionInput{}, nil, err
+				}
+				copy.entries[block] = append(copy.entries[block], owned)
+			}
+		}
+		p.calls = append(p.calls, &copy)
 	}
 	return in, p, nil
 }
@@ -234,6 +277,9 @@ func (m *regionMeter) copyState(s regionState) (regionState, error) {
 		r.values[k] = v
 	}
 	for k, v := range s.memory {
+		if len(k.invocation.path) > m.limits.depth*96 {
+			return regionState{}, regionError("object call context budget exhausted")
+		}
 		v, err := m.copyValue(v, 0)
 		if err != nil {
 			return regionState{}, err
@@ -248,7 +294,7 @@ func (m *regionMeter) copyValue(v regionValue, depth int) (regionValue, error) {
 		return regionValue{}, err
 	}
 	m.locations++
-	if depth > m.limits.depth || m.locations > m.limits.locations || len(v.location.path) > m.limits.depth ||
+	if depth > m.limits.depth || m.locations > m.limits.locations || len(v.location.path) > m.limits.depth || len(v.location.object.invocation.path) > m.limits.depth*96 ||
 		len(v.environment) > m.limits.locations || len(v.elements) > m.limits.locations {
 		return regionValue{}, regionError("value/location/depth budget exhausted")
 	}
@@ -342,24 +388,37 @@ func proposeRegion(ctx context.Context, input regionInput, limits regionLimits) 
 	if err != nil {
 		return nil, err
 	}
-	p := &regionProposal{input: in, entries: map[*ssa.BasicBlock][]regionState{in.entry.block: {in.initial}}}
+	k.session.proposing = true
+	entries, err := k.proposeEntries()
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &regionProposal{input: in, entries: entries, calls: k.session.proofs}, nil
+}
+
+func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, error) {
+	in := k.input
+	entries := map[*ssa.BasicBlock][]regionState{in.entry.block: {in.initial}}
 	queue := []*ssa.BasicBlock{in.entry.block}
 	queued := map[*ssa.BasicBlock]bool{in.entry.block: true}
 	for len(queue) != 0 {
 		block := queue[0]
 		queue = queue[1:]
 		queued[block] = false
-		for _, state := range slices.Clone(p.entries[block]) {
+		for _, state := range slices.Clone(entries[block]) {
 			edges, _, err := k.block(block, state)
 			if err != nil {
 				return nil, err
 			}
 			for _, edge := range edges {
-				joined, changed, err := k.join(p.entries[edge.block], edge.state)
+				joined, changed, err := k.join(entries[edge.block], edge.state)
 				if err != nil {
 					return nil, err
 				}
-				p.entries[edge.block] = joined
+				entries[edge.block] = joined
 				if changed && !queued[edge.block] {
 					queue = append(queue, edge.block)
 					queued[edge.block] = true
@@ -367,10 +426,10 @@ func proposeRegion(ctx context.Context, input regionInput, limits regionLimits) 
 			}
 		}
 	}
-	if err := ctx.Err(); err != nil {
+	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return p, nil
+	return entries, nil
 }
 
 func regionConst(v *ssa.Const) regionValue {
