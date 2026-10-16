@@ -205,6 +205,24 @@
         Carry the structured failed premise, phase, entry and dependency edges
         into native/public refusal accounts, including proposal exhaustion;
         diagnostic text alone does not complete this vertical.
+        - [x] 5.1w.2b.1 Inspect immutable retained-artifact inputs on the existing
+          snapshot/build binding and enforce their producer-span agreement at
+          registration and closing. Preserve declaration-only bindings, actual
+          execution-coordinate semantics, cancellation and independent units;
+          bytes and digests confer no implementation or reuse authority.
+        - [ ] 5.1w.2b.2 Check the required native entry/control-flow claims against
+          actual artifact bytes and identified machine/interface semantics.
+          Exercise an ordinarily compiled useful kernel and the actual CPU
+          dispatch negative without changing build flags or trusting symbol sizes.
+        - [ ] 5.1w.2b.3 Establish independently checked correspondence and coverage
+          for the ordinary source-subject obligation, including inline instances,
+          relevant startup, dispatch, code motion and actual execution binding.
+          A narrower native-invocation result cannot substitute for this gate.
+        - [ ] 5.1w.2b.4 Carry the accepted implementation evidence through native
+          records, current applicability and independent producing/checking close.
+          Reject missing historical premises and unsupported current artifacts;
+          expose structured refusals before restoring runtime discharge and its
+          preserved useful-positive acceptance population.
     - [ ] 5.1w.3 Extend compositional proofs across the runtime/native boundaries
       required by the selected useful workload. Establish each primitive's exact
       semantic premises and interpret actual selected native instructions under

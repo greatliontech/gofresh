@@ -328,12 +328,14 @@ func (s *Snapshot) BuildDescription(pkg string) (BuildDescription, error) {
 
 // BuildBinding is the executor's declaration that a retained package test
 // artifact was successfully built from this snapshot's description. It prevents
-// accidental cross-snapshot borrowing; it does not authenticate the executor,
-// inspect arbitrary binaries, or certify that the executor followed the plan.
+// accidental cross-snapshot borrowing; it does not authenticate the executor
+// or certify that the executor followed the description. BindArtifact additionally
+// captures immutable file inputs; those observations confer no semantic authority.
 type BuildBinding struct {
-	snapshot *Snapshot
-	pkg      string
-	identity string
+	snapshot  *Snapshot
+	pkg       string
+	identity  string
+	inspected *inspectedArtifact
 }
 
 // BindBuilt binds the executor's nonempty artifact identity to this snapshot.

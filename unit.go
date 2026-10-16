@@ -110,6 +110,7 @@ const (
 type unitExecution struct {
 	process       ProcessDescription
 	artifact      string
+	inspected     *inspectedArtifact
 	env           []string
 	frame         runtimeinput.ProducerFrame
 	support       runtimeinput.OutcomeSupport
@@ -259,7 +260,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 	}
 	preparing, cancel := context.WithCancel(ctx)
 	defer cancel()
-	x := &unitExecution{process: process, artifact: build.identity, env: env, cancel: cancel}
+	x := &unitExecution{process: process, artifact: build.identity, inspected: build.inspected, env: env, cancel: cancel}
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
@@ -282,6 +283,9 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		if err == nil {
 			fingerprints, err = u.view.CaptureObservedBatch(preparing)
 		}
+	}
+	if err == nil {
+		err = x.inspected.validate(preparing)
 	}
 	if preparing.Err() != nil {
 		err = preparing.Err()
@@ -545,6 +549,9 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 		return FinalizedProcess{}, err
 	}
 	if err := u.view.Validate(ctx); err != nil {
+		return FinalizedProcess{}, err
+	}
+	if err := x.inspected.validate(ctx); err != nil {
 		return FinalizedProcess{}, err
 	}
 	account, _ := u.account()

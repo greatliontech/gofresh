@@ -181,6 +181,10 @@ types or a particular public signature:
   declarations and derived facts. Lazy computation and memo serving do not
   change which generation those facts describe. Selecting a subset preserves
   the selected facts and their provenance rather than observing a new tree.
+- A **build binding** associates an executor's successful-build declaration
+  with that snapshot and package. Its inspected form additionally owns observed
+  retained-artifact inputs under REQ-fresh-inspected-artifact; the declaration
+  alone supplies none of those observations or their authority.
 - A **runtime binding** selects an immutable actual process directory and
   complete environment over that source/build generation. Runtime-dependent
   guards and checking use that binding; its creation supplies no execution,
@@ -340,6 +344,93 @@ separately requested, retains producing evidence and returns its checked native
 endpoint and companion ledger only after its own closing validation.
 The result owner retains sample acceptance, actual execution truth, hold-still
 protection through publication and the separate durable-write disposition.
+
+**REQ-fresh-inspected-artifact** (behavior): The existing snapshot/package build
+binding MUST admit an explicitly selected inspected retained-artifact form for
+the producing units of REQ-fresh-built-unit and REQ-fresh-package-unit, with
+these obligations:
+
+- **execution-coordinate** — The input names the actual retained regular file
+  the executor will execute for the bound package build. A relative coordinate
+  resolves under the snapshot's build directory, independently of the runtime
+  directory. Resolution preserves the filesystem meaning of symlink and `..`
+  components rather than lexically cancelling them. A missing, unreadable or
+  non-regular target supplies no inspected binding. Detached bytes, an executor
+  label or a caller-supplied digest cannot substitute for observing this file.
+- **agreeing-capture** — Inspection completely reads and hashes the selected
+  file under the caller's context and establishes agreeing observations of the
+  execution coordinate, retained file and full content under the coherent-view
+  capture discipline. A partial read or disagreement refuses inspection. File
+  metadata alone is insufficient. The binding owns immutable observed bytes,
+  their digest, observed target-identity facts and the execution coordinate;
+  later filesystem changes cannot mutate that analysis input.
+- **snapshot-ownership** — The inspected input belongs to the snapshot's captured
+  source/build generation and the declared package. Caller input is copied;
+  changing it after inspection cannot change the binding. Registration checks
+  snapshot and package ownership, not merely equal labels or digests. Runtime
+  bindings may share these immutable inputs, but units retain independent
+  contributors, observations and closing seals. The declaration-only build
+  binding remains available and acquires no inspected facts implicitly.
+- **executor-responsibility** — Inspection does not authenticate the declaration
+  that the file was built under this snapshot's description or that a contributing
+  process executed it. The executor retains those truths, the existing package
+  build and subject scope, and protection of the retained artifact and its
+  execution-path resolution from inspection through execution, closing and
+  publication. A different executable or independent rebuild is not that
+  execution. Agreeing samples cannot exclude mutation-and-restore between them;
+  the existing caller-owned exclusion obligation remains explicit.
+- **registration-validation** — Before a producing contribution using an inspected
+  binding is successfully registered, registration re-observes the execution
+  coordinate and complete file content. It compares the target's observed
+  regular-file identity and complete content with the captured observations.
+  Observed target-identity or content disagreement, unreadability or loss of
+  regular-file status refuses registration. Namespace changes or identity reuse
+  leaving all compared observations equal are not proven absent; excluding
+  those changes remains the executor's responsibility.
+  A remembered digest, metadata agreement or reading only an old open file cannot
+  replace re-observation through the execution coordinate. No contributing
+  execution may begin on the strength of a pending validation.
+- **closing-validation** — Before committing successful closing or exposing final
+  subject evidence or judgment, producing close repeats the execution-coordinate
+  and full-content validation for every inspected binding used by the unit,
+  after ordinary process-observation finalization and the other selected closing
+  observations. Failure yields none, even if
+  source, build and runtime guards agree. The failure identifies the unavailable
+  observation or demonstrated artifact disagreement without asserting which binary
+  actually executed. A normally completed process retains its supplied terminal
+  disposition and observation facts established by the existing finalization path
+  in the non-authorizing process account; artifact refusal does not erase them or
+  convert them into reusable evidence. Artifact disagreement alone does not skip
+  normal-completion finalization. Facts not established remain unknown, including
+  when cancellation or a winning abort prevents completing that work. Protection
+  after the comparison remains caller-owned; validation does not establish an
+  atomic observation-to-publication interval.
+- **cancellation-and-isolation** — Potentially expensive inspection, registration
+  validation and closing re-observation honor their existing caller-owned phase
+  contexts. Cancellation or an abort that wins the unit's existing lifecycle
+  prevents successful registration or final evidence from escaping; partial reads
+  supply no inspected fact. Pending validation cannot register past the unit's
+  closing or abort boundary. Failure or cancellation of one unit does not mutate
+  the shared immutable artifact input or seal another unit. Existing cancellation,
+  abort, finalization and process-account rules retain their precedence.
+- **authority-boundary** — Observed bytes, path and digest are implementation
+  inputs, not a proof of native behavior, compiler correspondence, inline coverage,
+  actual execution, observation completeness or operation outcomes. Inspection
+  selects no new result model and discharges no maximal-tier blocker. Any use for
+  runtime reuse still requires independently checked implementation coverage and
+  semantic evidence under REQ-impl-build-selection and the existing authority
+  contracts. Ordinary source/build/runtime guards and explicit assertion rules
+  continue to apply.
+- **applicability-boundary** — Successful inspection and span validation establish
+  only the additional producing-span fact. They do not make artifact identity a
+  new persisted applicability guard of an ordinary fingerprint or assert that its
+  record represents native implementation evidence. Absence of artifact fields in
+  such a record is therefore not a missing required guard for its unchanged
+  ordinary evidence channel, and its inspection supplies no stronger reuse claim.
+  Current or historical native-artifact-dependent reuse requires separately
+  represented producing evidence and an explicitly governed current-artifact
+  selection and comparison. A present inspection cannot add that authority to an
+  old record, and artifact-free checking cannot implicitly select an artifact.
 
 **REQ-fresh-checking-unit** (behavior): Checking a batch of existing native
 records MUST admit an independently closing transaction over a declared subject
