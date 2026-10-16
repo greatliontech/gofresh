@@ -2,19 +2,10 @@ package closure
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
-	"go/ast"
-	"go/build/constraint"
 	"go/constant"
-	"go/printer"
 	"go/token"
 	"go/types"
-	"hash"
-	"path/filepath"
 	"slices"
-	"strings"
-	"unicode"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
@@ -74,23 +65,12 @@ func defaultComputationRelationLimits() computationRelationLimits {
 }
 
 type computationRelationChecker struct {
-	ctx      context.Context
-	source   computationSource
-	builder  *bitrelation.Builder
-	limits   computationRelationLimits
-	work     int
-	bytes    int
-	active   map[*ssa.Function]bool
-	bound    map[*ssa.Function]computationRelationDependency
-	pkgs     map[*types.Package]*packages.Package
-	metas    map[string]listPkg
-	deps     []computationRelationDependency
-	packages map[*packages.Package]computationRelationPackage
-}
-
-type computationRelationPackage struct {
-	digest       [32]byte
-	declarations map[*ssa.Function]*ast.FuncDecl
+	*selectedSourceBinder
+	builder   *bitrelation.Builder
+	contexts  int
+	active    map[*ssa.Function]bool
+	relations map[*ssa.Function]computationRelationDependency
+	deps      []computationRelationDependency
 }
 
 // deriveComputationRelation checks the actual source graph, not a proposed pure
@@ -119,38 +99,12 @@ func deriveComputationRelation(ctx context.Context, source computationSource, ro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if source.prog == nil || source.prog.Prog == nil || root == nil || root.Prog != source.prog.Prog {
-		return nil, computationRefusal(root, token.NoPos, "local relation root has no selected owner")
+	binder, err := newSelectedSourceBinder(ctx, source, root, selectedSourceLimits{work: limits.work, depth: limits.depth, bytes: limits.bytes})
+	if err != nil {
+		return nil, err
 	}
-	c := &computationRelationChecker{ctx: ctx, source: source, builder: bitrelation.NewBuilder(limits.nodes), limits: limits,
-		active: map[*ssa.Function]bool{}, bound: map[*ssa.Function]computationRelationDependency{}, pkgs: map[*types.Package]*packages.Package{}, metas: map[string]listPkg{}, packages: map[*packages.Package]computationRelationPackage{}}
-	for _, p := range source.prog.Pkgs {
-		if err := c.tick(root, root.Pos()); err != nil {
-			return nil, err
-		}
-		if p == nil || p.Types == nil || c.pkgs[p.Types] != nil {
-			return nil, computationRefusal(root, root.Pos(), "duplicate or absent selected typed package")
-		}
-		if err := c.chargeBytes(root, root.Pos(), len(p.ID)); err != nil {
-			return nil, err
-		}
-		if err := c.chargeBytes(root, root.Pos(), len(p.Types.Path())); err != nil {
-			return nil, err
-		}
-		c.pkgs[p.Types] = p
-	}
-	for _, m := range source.metas {
-		if err := c.tick(root, root.Pos()); err != nil {
-			return nil, err
-		}
-		if err := c.chargeBytes(root, root.Pos(), len(m.ImportPath)); err != nil {
-			return nil, err
-		}
-		if _, exists := c.metas[m.ImportPath]; exists {
-			return nil, computationRefusal(root, root.Pos(), "duplicate selected package metadata")
-		}
-		c.metas[m.ImportPath] = m
-	}
+	c := &computationRelationChecker{selectedSourceBinder: binder, builder: bitrelation.NewBuilder(limits.nodes), contexts: limits.contexts,
+		active: map[*ssa.Function]bool{}, relations: map[*ssa.Function]computationRelationDependency{}}
 	entry := &computationContext{fn: root}
 	fail := func(err error) (*computationRelation, error) {
 		return nil, computationEntryFailure(err, entry, computationSubjectPhase)
@@ -181,342 +135,31 @@ func deriveComputationRelation(ctx context.Context, source computationSource, ro
 		inputs: inputs, outputs: slices.Clone(outputs), open: computationRelationObligations{true, true, true, true, true}}, nil
 }
 
-func (c *computationRelationChecker) tick(fn *ssa.Function, at token.Pos) error {
-	if err := c.ctx.Err(); err != nil {
-		return err
-	}
-	c.work++
-	if c.work > c.limits.work {
-		return computationRefusal(fn, at, "local relation work budget exhausted")
-	}
-	return nil
-}
-
-// chargeBytes accounts for input payload before any scan/copy/format, and for
-// encoded bytes before hashing them. The remaining-budget comparison cannot
-// overflow even for an adversarial string length.
-func (c *computationRelationChecker) chargeBytes(fn *ssa.Function, at token.Pos, n int) error {
-	if err := c.tick(fn, at); err != nil {
-		return err
-	}
-	if n < 0 || n > c.limits.bytes-c.bytes {
-		return computationRefusal(fn, at, "local relation byte budget exhausted")
-	}
-	c.bytes += n
-	return nil
-}
-
-type computationRelationHash struct {
-	c   *computationRelationChecker
-	fn  *ssa.Function
-	at  token.Pos
-	h   hash.Hash
-	err error
-}
-
-func (c *computationRelationChecker) hasher(fn *ssa.Function, at token.Pos) *computationRelationHash {
-	return &computationRelationHash{c: c, fn: fn, at: at, h: sha256.New()}
-}
-
-func (w *computationRelationHash) Write(p []byte) (int, error) {
-	if w.err != nil {
-		return 0, w.err
-	}
-	if w.err = w.c.chargeBytes(w.fn, w.at, len(p)); w.err != nil {
-		return 0, w.err
-	}
-	n := 0
-	for len(p) != 0 {
-		if w.err = w.c.tick(w.fn, w.at); w.err != nil {
-			return n, w.err
-		}
-		chunk := min(len(p), 4096)
-		w.h.Write(p[:chunk])
-		n += chunk
-		p = p[chunk:]
-	}
-	return n, nil
-}
-
-func (w *computationRelationHash) sum() [32]byte {
-	var sum [32]byte
-	copy(sum[:], w.h.Sum(nil))
-	return sum
-}
-
-// Canonical selected syntax preserves import order and literal spelling. Use
-// the printer directly: format.Node may first print an entire unsorted-import
-// file to its own unrestricted buffer and reparse it, bypassing our writer.
-// The printer's token buffer and build-constraint normalization are bounded by
-// syntax preflight; tabular padding then streams through the byte-limited,
-// cancellable destination.
-func computationRelationPrint(dst *computationRelationHash, fset *token.FileSet, node ast.Node) error {
-	config := printer.Config{Mode: printer.TabIndent | printer.UseSpaces, Tabwidth: 8}
-	return config.Fprint(dst, fset, node)
-}
-
-// ast.Walk has no early-termination result: returning nil only prunes one
-// subtree and still walks all remaining siblings. The private sentinel unwinds
-// the entire walk at the first refusal, without swallowing unrelated panics.
-type computationRelationWalkStop struct{ err error }
-type computationRelationAST struct {
-	c                                *computationRelationChecker
-	fn                               *ssa.Function
-	at                               token.Pos
-	depth                            int
-	constraintUnits, constraintBytes int
-}
-
-func (v *computationRelationAST) Visit(n ast.Node) ast.Visitor {
-	if n == nil {
-		v.depth--
-		return nil
-	}
-	v.depth++
-	stop := func(err error) {
-		if err != nil {
-			panic(computationRelationWalkStop{err})
-		}
-	}
-	// Node.Pos itself recursively descends left operands/selectors. Diagnostics
-	// must not traverse an unchecked subtree before its depth/work guard.
-	stop(v.c.tick(v.fn, v.at))
-	if v.depth > v.c.limits.depth {
-		stop(computationRefusal(v.fn, v.at, "local relation syntax depth budget exhausted"))
-	}
-	// Punctuation and indentation can generate output even for empty payloads.
-	// Charging their conservative envelope bounds the printer's internal buffer,
-	// in addition to the exact textual payload charges below.
-	stop(v.c.chargeBytes(v.fn, v.at, 32))
-	for range v.depth {
-		stop(v.c.chargeBytes(v.fn, v.at, 8))
-	}
-	var text string
-	switch n := n.(type) {
-	case *ast.Ident:
-		text = n.Name
-	case *ast.BasicLit:
-		text = n.Value
-	case *ast.Comment:
-		text = n.Text
-	case *ast.File:
-		text = n.GoVersion
-	}
-	stop(v.c.chargeBytes(v.fn, v.at, len(text)))
-	if comment, ok := n.(*ast.Comment); ok {
-		if strings.HasPrefix(comment.Text, "//go:") && !strings.HasPrefix(comment.Text, "//go:build ") {
-			stop(computationRefusal(v.fn, v.at, "unsupported local implementation directive"))
-		}
-		stop(v.buildConstraint(comment.Text))
-	}
-	return v
-}
-
-// buildConstraint bounds the hidden expression tree go/printer constructs when
-// it joins legacy build lines, then renders recursively before calling Write.
-// A lexical envelope suffices: each tag run reserves a leaf and an implicit
-// join; punctuation reserves an operator and a possible empty legacy tag.
-// Across the whole file their sum bounds recursion (including joins between
-// lines), and bytes times nodes bounds repeated subtree copying.
-// Count both spellings conservatively, independent of which one the printer
-// selects. Ordinary labels have no semantic significance to this resource test.
-func (v *computationRelationAST) buildConstraint(text string) error {
-	if !constraint.IsGoBuild(text) && !constraint.IsPlusBuild(text) {
-		return nil
-	}
-	units := 0
-	inTag := false
-	for _, r := range text {
-		if err := v.c.tick(v.fn, v.at); err != nil {
-			return err
-		}
-		switch {
-		case unicode.IsSpace(r):
-			inTag = false
-		case strings.ContainsRune("!(),&|", r):
-			units += 2
-			inTag = false
-		default:
-			if !inTag {
-				units += 2
-			}
-			inTag = true
-		}
-		if units > v.c.limits.depth-v.constraintUnits {
-			return computationRefusal(v.fn, v.at, "local relation build-constraint depth budget exhausted")
-		}
-	}
-	// Eight bytes per lexical unit cover generated separators, parentheses,
-	// negations and the parser's replacement of malformed tags by "ignore".
-	// Reserve each new unit's copies of all old text, and all units' copies of
-	// new text. Division checks keep the accounting safe before multiplication.
-	total := v.constraintUnits + units
-	chargeCopies := func(size, copies int) error {
-		if copies != 0 && size > (v.c.limits.bytes-v.c.bytes)/copies {
-			return computationRefusal(v.fn, v.at, "local relation build-constraint byte budget exhausted")
-		}
-		return v.c.chargeBytes(v.fn, v.at, size*copies)
-	}
-	if err := chargeCopies(v.constraintBytes, units); err != nil {
-		return err
-	}
-	if err := chargeCopies(len(text), total); err != nil {
-		return err
-	}
-	for range 8 {
-		if err := chargeCopies(units, total); err != nil {
-			return err
-		}
-	}
-	v.constraintUnits = total
-	v.constraintBytes += len(text) + 8*units
-	return nil
-}
-
-func (c *computationRelationChecker) preflightSyntax(fn *ssa.Function, file *ast.File) (err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			if stop, ok := p.(computationRelationWalkStop); ok {
-				err = stop.err
-			} else {
-				panic(p)
-			}
-		}
-	}()
-	v := &computationRelationAST{c: c, fn: fn}
-	if fn != nil {
-		v.at = fn.Pos()
-	}
-	ast.Walk(v, file)
-	// ast.Walk omits File.Comments. They include unattached comments which the
-	// printer still consumes, as well as already charged attached comments.
-	for _, group := range file.Comments {
-		ast.Walk(v, group)
-	}
-	return nil
-}
-
-// selectedPackage validates and hashes each selected package once per derivation.
-// All files are preflighted before any formatter runs: go/printer
-// may internally buffer, so a bounded destination alone would be too late.
-func (c *computationRelationChecker) selectedPackage(fn *ssa.Function, p *packages.Package) (computationRelationPackage, error) {
-	if prior, ok := c.packages[p]; ok {
-		return prior, nil
-	}
-	var zero computationRelationPackage
-	m, ok := c.metas[p.ID]
-	if !ok {
-		return zero, computationRefusal(fn, fn.Pos(), "selected package metadata is absent")
-	}
-	m.ForTest = ""
-	if err := computationPackageInputs(m, ""); err != nil {
-		return zero, computationRefusal(fn, fn.Pos(), err.Error())
-	}
-	files := map[string]bool{}
-	if err := c.chargeBytes(fn, fn.Pos(), len(m.Dir)); err != nil {
-		return zero, err
-	}
-	for _, name := range m.GoFiles {
-		if err := c.chargeBytes(fn, fn.Pos(), len(name)); err != nil {
-			return zero, err
-		}
-		if err := c.chargeBytes(fn, fn.Pos(), len(m.Dir)); err != nil {
-			return zero, err
-		}
-		files[filepath.Clean(filepath.Join(m.Dir, name))] = true
-	}
-	if len(files) == 0 || len(files) != len(p.Syntax) || len(files) != len(p.CompiledGoFiles) {
-		return zero, computationRefusal(fn, fn.Pos(), "incomplete local selected source")
-	}
-	names := make([]string, len(p.Syntax))
-	for i, file := range p.Syntax {
-		if err := c.tick(fn, fn.Pos()); err != nil {
-			return zero, err
-		}
-		if file == nil {
-			return zero, computationRefusal(fn, fn.Pos(), "nil selected syntax")
-		}
-		name := p.Fset.PositionFor(file.Pos(), false).Filename
-		if err := c.chargeBytes(fn, file.Pos(), len(name)); err != nil {
-			return zero, err
-		}
-		if err := c.chargeBytes(fn, file.Pos(), len(p.CompiledGoFiles[i])); err != nil {
-			return zero, err
-		}
-		name = filepath.Clean(name)
-		if !files[name] || name != filepath.Clean(p.CompiledGoFiles[i]) {
-			return zero, computationRefusal(fn, file.Pos(), "local selected source disagrees with syntax")
-		}
-		delete(files, name)
-		names[i] = name
-		if err := c.preflightSyntax(fn, file); err != nil {
-			return zero, err
-		}
-	}
-	content := c.hasher(fn, fn.Pos())
-	selected := computationRelationPackage{declarations: map[*ssa.Function]*ast.FuncDecl{}}
-	for i, file := range p.Syntax {
-		if err := c.tick(fn, file.Pos()); err != nil {
-			return zero, err
-		}
-		if _, err := fmt.Fprintf(content, "%q\n", names[i]); err != nil {
-			return zero, err
-		}
-		if err := computationRelationPrint(content, p.Fset, file); err != nil {
-			if content.err != nil {
-				return zero, content.err
-			}
-			return zero, computationRefusal(fn, file.Pos(), "selected syntax cannot be encoded")
-		}
-		for _, d := range file.Decls {
-			if err := c.tick(fn, d.Pos()); err != nil {
-				return zero, err
-			}
-			decl, ok := d.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			obj, _ := p.TypesInfo.Defs[decl.Name].(*types.Func)
-			if obj == nil {
-				continue
-			}
-			bound := c.source.prog.Prog.FuncValue(obj)
-			if bound == nil {
-				continue
-			}
-			if selected.declarations[bound] != nil {
-				return zero, computationRefusal(fn, decl.Pos(), "duplicate selected function declaration")
-			}
-			selected.declarations[bound] = decl
-		}
-	}
-	selected.digest = content.sum()
-	c.packages[p] = selected
-	return selected, nil
-}
-
 // bind is deliberately claim-local: it binds only packages actually used by the
 // expression. Unlike declarations it does not assert anything about package
 // variables or initializers. Those obligations remain open on the certificate.
 // File membership, typed declaration and body ownership are still checked.
 func (c *computationRelationChecker) bind(fn *ssa.Function) (computationRelationDependency, *packages.Package, error) {
 	var zero computationRelationDependency
-	if fn == nil || fn.Pkg == nil || fn.Prog != c.source.prog.Prog {
-		return zero, nil, computationRefusal(fn, token.NoPos, "callee has no selected source package")
+	bound, err := c.bindDeclaration(fn)
+	if err != nil {
+		return zero, nil, err
 	}
-	p := c.pkgs[fn.Pkg.Pkg]
-	if prior, ok := c.bound[fn]; ok {
+	p := bound.pkg
+	if prior, ok := c.relations[fn]; ok {
 		return prior, p, nil
 	}
-	if p == nil || p.TypesInfo == nil || p.Fset == nil || p.TypesSizes == nil || c.source.prog.Prog.Package(p.Types) != fn.Pkg {
-		return zero, p, computationRefusal(fn, fn.Pos(), "incomplete local selected package or type-size binding")
+	// Scalar policy is deliberately separate from selected input identity. A
+	// region consumer can inventory these boundaries without approving them.
+	m := c.metas[p.ID]
+	m.ForTest = ""
+	if err := computationPackageInputs(m, ""); err != nil {
+		return zero, p, computationRefusal(fn, fn.Pos(), err.Error())
 	}
-	selected, err := c.selectedPackage(fn, p)
-	if err != nil {
-		return zero, p, err
+	if len(c.packages[p].directives) != 0 {
+		return zero, p, computationRefusal(fn, fn.Pos(), "unsupported local implementation directive")
 	}
-	decl := selected.declarations[fn]
-	if decl == nil || decl.Body == nil || fn.Syntax() != decl || fn.Object() != p.TypesInfo.Defs[decl.Name] {
+	if bound.decl.Body == nil {
 		return zero, p, computationRefusal(fn, fn.Pos(), "selected function body binding disagrees")
 	}
 	if len(fn.Blocks) == 0 || fn.Synthetic != "" || len(fn.FreeVars) != 0 || parameterizedBody(fn) {
@@ -526,11 +169,6 @@ func (c *computationRelationChecker) bind(fn *ssa.Function) (computationRelation
 	if word != 32 && word != 64 {
 		return zero, p, computationRefusal(fn, fn.Pos(), "unsupported selected integer word size")
 	}
-	// Preserve the selected declaration's canonical bytes without asking SSA's
-	// diagnostic printer to buffer the entire graph. The context's arguments and
-	// immutable checked output terms retain its interpretation separately; changing
-	// the composing owner's variable scope does not change source-body identity.
-	body := c.hasher(fn, fn.Pos())
 	for _, block := range fn.Blocks {
 		if block == nil {
 			return zero, p, computationRefusal(fn, fn.Pos(), "nil local block")
@@ -544,20 +182,15 @@ func (c *computationRelationChecker) bind(fn *ssa.Function) (computationRelation
 			}
 		}
 	}
-	if err := computationRelationPrint(body, p.Fset, decl); err != nil {
-		if body.err != nil {
-			return zero, p, body.err
-		}
-		return zero, p, computationRefusal(fn, fn.Pos(), "selected function syntax cannot be encoded")
-	}
-	dep := computationRelationDependency{packageID: p.ID, function: fn.String(), position: p.Fset.PositionFor(fn.Pos(), false).String(), source: selected.digest, body: body.sum(), wordBits: word}
+	identity := bound.identity
+	dep := computationRelationDependency{packageID: identity.packageID, function: identity.function, position: identity.position, source: identity.source, body: identity.body, wordBits: word}
 	for _, param := range fn.Params {
 		dep.parameters = append(dep.parameters, computationRelationTypeOf(param.Type(), p.TypesSizes))
 	}
 	for i := 0; i < fn.Signature.Results().Len(); i++ {
 		dep.results = append(dep.results, computationRelationTypeOf(fn.Signature.Results().At(i).Type(), p.TypesSizes))
 	}
-	c.bound[fn] = dep
+	c.relations[fn] = dep
 	return dep, p, nil
 }
 
@@ -590,7 +223,7 @@ func (c *computationRelationChecker) function(current *computationContext, args 
 	if err := c.tick(fn, fn.Pos()); err != nil {
 		return nil, err
 	}
-	if depth >= c.limits.depth || len(c.deps) >= c.limits.contexts {
+	if depth >= c.limits.depth || len(c.deps) >= c.contexts {
 		return fail("local relation context/depth budget exhausted")
 	}
 	if c.active[fn] {

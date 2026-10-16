@@ -74,8 +74,8 @@ func TestComputationRelationOwnsInputsBeforeCallbacks(t *testing.T) {
 	}
 }
 
-func relationSyntaxChecker(ctx context.Context, limits computationRelationLimits) *computationRelationChecker {
-	return &computationRelationChecker{ctx: ctx, limits: limits}
+func relationSyntaxChecker(ctx context.Context, limits computationRelationLimits) *selectedSourceBinder {
+	return &selectedSourceBinder{ctx: ctx, limits: selectedSourceLimits{work: limits.work, depth: limits.depth, bytes: limits.bytes}}
 }
 
 // A left-associated expression's Pos recursively reaches this sentinel even
@@ -106,14 +106,14 @@ func TestComputationRelationSyntaxPositionIsBounded(t *testing.T) {
 					limits.work = 64
 					want = "work budget"
 				}
-				if err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), want) {
+				if _, err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("deep left chain: %v", err)
 				}
 			}
 		})
 	}
 	file := relationParseSyntax(t, "func F(x int32)int32{return x+x+x+x+x+x+x+x}")
-	if err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
+	if _, err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
 		t.Fatal("bounded left-associated control", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestComputationRelationBuildConstraintBounds(t *testing.T) {
 	} {
 		file := relationParseSyntax(t, text+"\nfunc F(x int32)int32{return x}")
 		c := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits())
-		if err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "build-constraint") {
+		if _, err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "build-constraint") {
 			t.Fatalf("printer normalization was not bounded: %v", err)
 		}
 		if c.work > 8192 || c.bytes > c.limits.bytes {
@@ -169,7 +169,7 @@ func TestComputationRelationBuildConstraintBounds(t *testing.T) {
 	file := relationParseSyntax(t, text+"\nfunc F(x int32)int32{return x}")
 	limits := defaultComputationRelationLimits()
 	limits.bytes = 8192
-	if err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "build-constraint byte") {
+	if _, err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "build-constraint byte") {
 		t.Fatal("constraint copies bypassed byte budget", err)
 	}
 	for _, text := range []string{
@@ -207,14 +207,14 @@ func TestComputationRelationSyntaxByteAndDepthBounds(t *testing.T) {
 			limits.bytes = 8192
 			ctx := &relationCallbackContext{Context: t.Context()}
 			c := relationSyntaxChecker(ctx, limits)
-			if err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "byte budget") {
+			if _, err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "byte budget") {
 				t.Fatalf("unbounded payload: %v", err)
 			}
 			if c.bytes > limits.bytes || c.work > limits.work || ctx.checks > 512 {
 				t.Fatalf("payload was scanned without bounded accounting: bytes=%d work=%d callbacks=%d", c.bytes, c.work, ctx.checks)
 			}
 			control := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits())
-			if err := control.preflightSyntax(nil, file); err != nil {
+			if _, err := control.preflightSyntax(nil, file); err != nil {
 				t.Fatalf("adequate budget control: %v", err)
 			}
 			s := relationFixture(t, tc.text, 64)
@@ -231,16 +231,16 @@ func TestComputationRelationSyntaxByteAndDepthBounds(t *testing.T) {
 	version.GoVersion = strings.Repeat("g", 32768)
 	versionLimits := defaultComputationRelationLimits()
 	versionLimits.bytes = 8192
-	if err := relationSyntaxChecker(t.Context(), versionLimits).preflightSyntax(nil, version); err == nil || !strings.Contains(err.Error(), "byte budget") {
+	if _, err := relationSyntaxChecker(t.Context(), versionLimits).preflightSyntax(nil, version); err == nil || !strings.Contains(err.Error(), "byte budget") {
 		t.Fatal("file string payload was not charged", err)
 	}
 	file := relationParseSyntax(t, "func F(x int32)int32{return "+strings.Repeat("(", 32)+"x"+strings.Repeat(")", 32)+"}")
 	limits := defaultComputationRelationLimits()
 	limits.depth = 16
-	if err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "syntax depth") {
+	if _, err := relationSyntaxChecker(t.Context(), limits).preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "syntax depth") {
 		t.Fatalf("syntax depth: %v", err)
 	}
-	if err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
+	if _, err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -253,17 +253,17 @@ func TestComputationRelationSyntaxStopsWideWalk(t *testing.T) {
 	limits.work = 64
 	ctx := &relationCallbackContext{Context: t.Context()}
 	c := relationSyntaxChecker(ctx, limits)
-	if err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "work budget") || c.work != limits.work+1 || ctx.checks != limits.work+1 {
+	if _, err := c.preflightSyntax(nil, file); err == nil || !strings.Contains(err.Error(), "work budget") || c.work != limits.work+1 || ctx.checks != limits.work+1 {
 		t.Fatalf("wide refusal: %v work=%d callbacks=%d", err, c.work, ctx.checks)
 	}
 	base, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	ctx = &relationCallbackContext{Context: base, at: 64, callback: cancel}
 	c = relationSyntaxChecker(ctx, defaultComputationRelationLimits())
-	if err := c.preflightSyntax(nil, file); !errors.Is(err, context.Canceled) || ctx.checks != 64 {
+	if _, err := c.preflightSyntax(nil, file); !errors.Is(err, context.Canceled) || ctx.checks != 64 {
 		t.Fatalf("wide cancellation: %v callbacks=%d", err, ctx.checks)
 	}
-	if err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
+	if _, err := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits()).preflightSyntax(nil, file); err != nil {
 		t.Fatalf("wide positive control: %v", err)
 	}
 }
@@ -312,7 +312,8 @@ func TestComputationRelationBoundedHashAndCanonicalPackage(t *testing.T) {
 		t.Fatal("callee selected package binding disagrees")
 	}
 	c = relationSyntaxChecker(t.Context(), defaultComputationRelationLimits())
-	c.source, c.metas, c.packages = s, map[string]listPkg{s.metas[0].ImportPath: s.metas[0]}, map[*packages.Package]computationRelationPackage{}
+	c.source, c.metas, c.packages = s, map[string]listPkg{s.metas[0].ImportPath: s.metas[0]}, map[*packages.Package]selectedSourcePackage{}
+	c.pkgs = map[*types.Package]*packages.Package{p.Types: p}
 	selected, err := c.selectedPackage(s.prog.Roots["F"], p)
 	if err != nil {
 		t.Fatal(err)
@@ -340,23 +341,23 @@ func TestComputationRelationPrinterOutputBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := relationSyntaxChecker(t.Context(), defaultComputationRelationLimits())
-	if err := c.preflightSyntax(nil, file); err != nil {
+	if _, err := c.preflightSyntax(nil, file); err != nil {
 		t.Fatal(err)
 	}
 	c.limits.bytes = c.bytes + 512
 	w := c.hasher(nil, token.NoPos)
-	if err := computationRelationPrint(w, fset, file); err == nil || w.err == nil || !strings.Contains(err.Error(), "byte budget") || c.bytes > c.limits.bytes {
+	if err := selectedSourcePrint(w, fset, file); err == nil || w.err == nil || !strings.Contains(err.Error(), "byte budget") || c.bytes > c.limits.bytes {
 		t.Fatalf("unbounded encoded padding: %v bytes=%d limit=%d", err, c.bytes, c.limits.bytes)
 	}
 	c = relationSyntaxChecker(t.Context(), defaultComputationRelationLimits())
-	if err := c.preflightSyntax(nil, file); err != nil {
+	if _, err := c.preflightSyntax(nil, file); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	c.ctx = &relationCallbackContext{Context: ctx, at: 2, callback: cancel}
 	w = c.hasher(nil, token.NoPos)
-	if err := computationRelationPrint(w, fset, file); !errors.Is(err, context.Canceled) {
+	if err := selectedSourcePrint(w, fset, file); !errors.Is(err, context.Canceled) {
 		t.Fatalf("printer ignored cancellation: %v", err)
 	}
 }
