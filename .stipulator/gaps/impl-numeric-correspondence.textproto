@@ -1,0 +1,9 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-numeric-correspondence"
+reason: "Clause-scoped source/native derivation, exact multi-result composition, selected-package artifact positives and adversarial examples support local numeric correspondence. Complete invariant evidence across all six clauses remains outstanding: bounded scalar/rewrite grammars, small-width exhaustive grids and wide-value samples do not establish every accepted source context, path, effect/exception, native state, equality inference and certificate dependency together. This record alleges no implementation contradiction. Pass-local correspondence retains its explicit initialization, harness, actual-use, source/artifact-span and applicability obligations and supplies no public runtime grant."
+content_hash: "8ff9b9f5829ae00a83c2bb507251b775f7cbc8870e8bc85ffcac20c331d1e00c"
+source_hash: "d64b90dbbb1721a661ab99adcd4acab96d4a7e99f44fb441c6b709b1e8d82c0a"
+lands { manual { condition: "tooling-redesign 5.1w.2b.3a: property witnesses or analyzer evidence establish the complete conditional numeric-correspondence invariant for the supported language and native model, including selected typed ownership and widths, exact contexts and argument/result mapping, every branch and result equality, effect/exception preservation, rewrite side conditions, immutable dependencies and bounded/cancelled refusal. Converged source-resource and composer review and the complete selected same-build positive/negative population remain required. Ordinary whole-operation coverage stays at 5.1w.2b.3b and producing/current/historical applicability at 5.1w.2b.4; local equality cannot discharge them." } }
+excuses: GAP_EXCUSE_UNCOVERED

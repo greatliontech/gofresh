@@ -1,0 +1,142 @@
+package nativeproof
+
+import (
+	"context"
+	"fmt"
+)
+
+// Check validates a proposal against freshly decoded image bytes and a separately
+// selected entry/interface. Changing a proposal cannot enlarge those conditions.
+// The caller must keep its proposal stable for this call; the certificate retains
+// none of its mutable slices. The image container is captured before any context
+// callback; subsequent replacement of that container cannot alter the check or
+// certificate. Cancellation returns no certificate.
+func Check(ctx context.Context, im *Image, entry uint64, face Interface, p Proposal) (Certificate, error) {
+	im = im.snapshot()
+	if err := ctx.Err(); err != nil {
+		return Certificate{}, err
+	}
+	if err := validInterface(entry, face); err != nil {
+		return Certificate{}, err
+	}
+	if im == nil || len(im.data) == 0 {
+		return Certificate{}, refuse(entry, "image-binding", "missing constructed image")
+	}
+	if p.Entry != entry || p.Interface != face {
+		return Certificate{}, refuse(entry, "proposal-binding", "entry or interface differs")
+	}
+	g, err := decodeGraph(ctx, im, entry)
+	if err != nil {
+		return Certificate{}, err
+	}
+	// Zero means missing; otherwise the slot identifies the caller's node plus
+	// one. Proposal order is independent of discovery and topological order.
+	proposed := make([]int, len(g.nodes))
+	var extra map[uint64]struct{}
+	for j, n := range p.Nodes {
+		if err := ctx.Err(); err != nil {
+			return Certificate{}, err
+		}
+		index, exists := g.byPC[n.PC]
+		if !exists {
+			if _, duplicate := extra[n.PC]; duplicate {
+				return Certificate{}, g.failure(n.PC, refuse(n.PC, "proposal-inventory", "duplicate instruction start"))
+			}
+			if extra == nil {
+				extra = make(map[uint64]struct{})
+			}
+			extra[n.PC] = struct{}{}
+			continue
+		}
+		if proposed[index] != 0 {
+			return Certificate{}, g.failure(n.PC, refuse(n.PC, "proposal-inventory", "duplicate instruction start"))
+		}
+		proposed[index] = j + 1
+	}
+	for _, index := range g.order {
+		if err := ctx.Err(); err != nil {
+			return Certificate{}, err
+		}
+		ins := &g.nodes[index]
+		pc := ins.pc
+		if proposed[index] == 0 {
+			return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+		}
+		n := p.Nodes[proposed[index]-1]
+		if n.Size != ins.size || len(n.Successors) != int(ins.count) {
+			return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+		}
+		for edge, next := range ins.next[:ins.count] {
+			if n.Successors[edge] != g.nodes[next].pc {
+				return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+			}
+		}
+	}
+	if len(extra) != 0 {
+		return Certificate{}, refuse(entry, "proposal-inventory", "unreachable or invented instruction")
+	}
+	return checkGraph(ctx, im, entry, face, g)
+}
+
+// checkGraph consumes only a graph independently decoded from the privately
+// captured image, never a caller-owned inventory. Both conditional frontends use
+// this same operand, effect, flag-definedness and preserved-context judgment.
+func checkGraph(ctx context.Context, im *Image, entry uint64, face Interface, g *graph) (Certificate, error) {
+	// An all-unknown incoming state is legitimate; the initialized bit separates
+	// it from a node whose first predecessor has not yet propagated its state.
+	type incoming struct {
+		value       state
+		initialized bool
+	}
+	states := make([]incoming, len(g.nodes))
+	for reg, mask := range face.Inputs {
+		states[0].value.regs[reg].defined = mask
+	}
+	states[0].initialized = true
+	b := Bound{ImageDigest: im.digest, Rules: RuleModel, Entry: entry, Interface: face, Instructions: make([]Span, 0, len(g.nodes))}
+	for _, index := range g.order {
+		if err := ctx.Err(); err != nil {
+			return Certificate{}, err
+		}
+		ins := &g.nodes[index]
+		pc := ins.pc
+		s := states[index].value
+		if err := transfer(pc, ins.inst, &s, face); err != nil {
+			return Certificate{}, g.failure(pc, err)
+		}
+		b.Instructions = append(b.Instructions, Span{pc, pc + uint64(ins.size)})
+		for _, next := range ins.next[:ins.count] {
+			if states[next].initialized {
+				states[next].value = join(states[next].value, s)
+			} else {
+				states[next] = incoming{value: s, initialized: true}
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Certificate{}, err
+	}
+	return Certificate{&checked{image: im, bound: b}}, nil
+}
+
+func validInterface(pc uint64, face Interface) error {
+	c := face.Conditions
+	if c.Machine != MachineModel || !c.InstructionMapping || !c.ReturnSlot || !c.EntryInputs || !c.IsolatedInvocation {
+		return refuse(pc, "machine-premises", "all explicit machine, mapping, input, return and isolation conditions are required")
+	}
+	if face.Inputs[RSP]|face.Results[RSP]|face.Preserved[RSP] != 0 {
+		return refuse(pc, "return-interface", "RSP belongs to the return interface")
+	}
+	var result uint64
+	for _, m := range face.Results {
+		result |= m
+	}
+	if result == 0 {
+		return refuse(pc, "result-interface", "no result bits declared")
+	}
+	return nil
+}
+
+func missingBits(pc uint64, reg int, want, have uint64) error {
+	return refuse(pc, "result-input-bound", fmt.Sprintf("register %d result bits %#x depend on undeclared entry state", reg, want&^have))
+}

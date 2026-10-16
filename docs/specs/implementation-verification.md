@@ -173,6 +173,165 @@ the property is false. Demonstrated source or guard drift retains its ordinary
 stale disposition; an unsupported optional refinement cannot erase that drift.
 Cancellation obeys REQ-fresh-context and supplies no partial positive proof.
 
+## Conditional native-entry derivations
+
+A native-entry derivation is a conditional implementation fact about execution
+from one identified entry under an explicit machine interface. It is subordinate
+evidence under the existing claim and authority contracts, not a new invocation
+result model. The inspected artifact of REQ-fresh-inspected-artifact supplies
+observed inputs; inspection alone establishes none of the following semantics.
+
+**REQ-impl-native-entry** (invariant): An accepted native-entry derivation MUST
+establish its stated value, dependence or effect bound under these obligations:
+
+- **bound-interface** — The claim identifies the observed artifact and immutable
+  bytes it describes, the entry within its executable image, the machine model
+  and rule identities, and the entry/return interface. The interface specifies
+  input and output locations, bit widths and value interpretation, required
+  preserved context, and all preconditions. Unspecified entry registers, bits,
+  flags and scratch state remain arbitrary. An ABI name or document interprets
+  an interface; it does not establish that an actual caller obeys it. Applying
+  the conditional claim later requires establishing that interface and its
+  preconditions at the relevant use.
+- **machine-applicability** — Instruction-set mode, feature requirements,
+  applicable address and memory semantics, valid code mappings and code-integrity
+  premises are explicit. Faults, undefined results and nondeterminism remain in
+  the model unless a justified precondition excludes them. Assumptions about
+  asynchronous interference, scheduling, external termination or protected
+  execution context are exposed, not inferred from successful sample executions.
+  Foundational instruction and primitive-effect semantics follow
+  REQ-impl-premise-boundary; decoding an instruction form under those rules is
+  distinct from approving a native function by name or handwritten summary.
+- **image-binding** — Instruction bytes come from the bound artifact's actual
+  executable-image mapping, with bounds, address arithmetic and mapping ambiguity
+  checked. Claim-relevant relocation, loading and non-file-backed content are
+  accounted for or refused, never replaced with convenient file bytes. Symbols,
+  debug tables, compiler reports and proposed extents can locate candidates but
+  cannot establish entry applicability, instruction boundaries or proof coverage.
+  Changing that metadata cannot supply missing instruction evidence.
+- **reachable-coverage** — Starting at the bound entry, the checker establishes
+  actual instruction boundaries and every reachable successor from decoded bytes.
+  Fallthrough, both conditional successors, call targets and continuations, returns
+  and applicable fault outcomes are accounted for. Omitting a path requires a
+  checked argument under the declared preconditions. A symbol-size limit, debug
+  range, proposed block list or byte budget is never a successful stopping rule.
+  Truncated or unavailable bytes, incompatible overlapping decodes, a transfer
+  into an unestablished instruction boundary, unresolved successors, unsupported
+  operations or exhausted exploration leave the dependent claim unsupported.
+  A bounded checker may refuse cycles or other unsupported control flow, but
+  cannot omit their paths. Cancellation supplies no partial positive derivation.
+- **state-transfer** — Checked transfers preserve the selected instruction's
+  actual operand order, addressing form, widths, register aliases, partial-write
+  preservation or extension, modular arithmetic and defined or undefined flag
+  behavior. A familiar mnemonic cannot authorize an unchecked operand form or
+  turn a memory access into register computation. Output projection uses exactly
+  the declared result bits: a narrow result does not imply canonical values in
+  the rest of its register. An input-dependence claim establishes its bound for
+  every admissible entry state, including arbitrary scratch state; undeclared
+  incoming values or undefined flags cannot silently become initialized inputs.
+  An effect-only claim still checks the transfers and path facts its effect
+  bound needs; an accepted instruction inventory alone proves no value relation.
+- **effects-and-return** — The claim states exactly which effects and outcomes
+  it bounds. An absence-of-ordinary-data-access or call claim does not erase
+  instruction fetch or the return mechanism's effects and faults. A return may
+  end the scoped path only under the explicit continuation interface, including
+  any required valid protected return slot and preservation of caller context.
+  That slot's contents are control context, not an implicit scalar input to a
+  value computation. Other data accesses, calls, wrappers and runtime helpers
+  need their own checked accounting or refusal; a successful run or familiar
+  callee name cannot hide a slow path. The returned state must satisfy every
+  projected result, dependence and context-preservation property actually claimed.
+- **independent-evidence** — A proposer may supply candidate entries, mappings,
+  paths or state relations. Under REQ-impl-independent-check the checker
+  re-derives reachable coverage and validates transfers against the actual bound
+  bytes and identified semantic rules, rather than accepting the proposer's
+  conclusions or a disassembly listing as premises. Evidence retains immutable
+  input ownership and the complete artifact, interface, model, rule and
+  subordinate-claim dependencies required by REQ-impl-derivation-reuse.
+- **composition-boundary** — The accepted fact grants only its conditional
+  native-entry proposition. An effect or input-dependence bound does not establish
+  equivalence to a source value specification, execution of that entry, termination,
+  timing behavior or a whole-process property. It does not cover surrounding
+  dispatch, startup, other lowering choices or inline instances merely because
+  they share a source name. Ordinary source-subject reuse still requires the
+  independently checked correspondence and complete implementation coverage of
+  REQ-impl-build-selection, together with its producing/current evidence and
+  ordinary guards. This derivation alone selects no public invocation result
+  model, supplies no historical execution authority and discharges no maximal-tier
+  blocker.
+
+## Conditional numeric source/native correspondence
+
+Numeric correspondence relates a selected source computation to a bound native
+entry. It is a subordinate all-input fact, not a result about a sampled execution
+or a replacement for the existing test and benchmark result models.
+
+**REQ-impl-numeric-correspondence** (invariant): An accepted conditional numeric
+source/native relation MUST satisfy these obligations:
+
+- **bound-scope** — The source side identifies the exact selected typed root,
+  specialization and call context, its owning source/build snapshot, language
+  semantics, and argument/result interpretations. Architecture-dependent word
+  widths come from that build, not the verifier host. Every substituted source
+  callee belongs to the same coherent selection with its exact context and
+  dependencies. The native side identifies the immutable observed image, entry,
+  machine model and checked interface of REQ-impl-native-entry. The relation
+  explicitly maps source arguments to native inputs and source results to the
+  projected native output bits, retaining all preconditions and preserved-context
+  obligations. Matching names or digests cannot replace these bindings.
+- **all-input-relation** — The checked proposition relates typed scalar values,
+  effects and exceptional outcomes for every admitted input and every admissible
+  native entry state, including arbitrary unspecified scratch bits and flags.
+  Signed interpretation and narrow result projection remain distinct from
+  unspecified high register bits. Equality of returned values alone cannot erase
+  a source hook, discarded call, other effect or exceptional path. Completion and
+  machine premises remain explicit; a normal-return premise cannot silently
+  dispose of behavior the claimed relation must cover. Sample agreement, a native
+  input-dependence bound or independent effect-free classifications do not prove
+  this relation. Two pure computations with the same interface qualify only if
+  their typed values and the other claimed behaviors actually correspond; the
+  proposition is semantic, not equality of declaration names.
+- **control-and-calls** — Coverage includes every source and native branch and
+  terminal path within the bound scopes. A merged source value, including a phi,
+  uses its actual predecessor and path condition; an omitted branch requires a
+  checked exclusion. Call substitution preserves argument binding, the callee's
+  value relation, effects, exceptional behavior and continuation under the exact
+  context. A default source body, unchecked purity flag or separately proved
+  fallback cannot stand in for a selected intrinsic, dispatch or native instance.
+  Inlining within the checked entry may be related without a surviving call, but
+  only through checked semantics of that actual entry. The relation covers no
+  other inline copy or implementation instance by implication.
+- **checked-equality** — Proposed equalities or rewrites are checked locally
+  against identified source and native semantics under REQ-impl-independent-check.
+  Each inference establishes its width, overflow or modular-wrap, signedness,
+  range and path side conditions where relevant; arithmetic normalization cannot
+  replace a partial or exceptional operation with an unjustified total one.
+  Native transfers retain the instruction semantics of REQ-impl-native-entry.
+  A bounded arithmetic rewrite calculus may establish equality, but a proposed
+  equivalent-expression flag, matching hash or unverified expected result is no
+  inference rule. Unclosed control or call cycles, incomplete path relations,
+  unsupported operations, unproved equality, exhausted budgets or cancellation
+  produce no positive correspondence certificate. No bounded prefix is treated
+  as the complete computation.
+- **certificate-authority** — The certificate retains the source root, contexts,
+  typed output projections, native image and interface, preconditions, proved
+  value/effect/exception relation and preserved-context relation, with their
+  complete dependencies and rule identities. Reuse follows
+  REQ-impl-derivation-reuse. Observed source and artifact inputs, derived relations
+  and attributable executor assertions remain distinguishable; neither possession
+  of the certificate nor an interface description authenticates actual invocation.
+- **composition-boundary** — A function-local relation may leave initialization,
+  actual-use linkage, surrounding dispatch and harness obligations explicitly
+  open. It cannot remove those obligations from whole-source effect checking or
+  supply ordinary source-subject implementation coverage. Source-only reasoning
+  remains independent of observation support under REQ-impl-authority-channels;
+  a selected observation obligation is not discharged by correspondence. This
+  certificate introduces no public result model or invocation protocol, proves
+  no general termination or timing property, and grants no maximal-tier discharge.
+  Ordinary runtime reuse still requires the complete coverage of
+  REQ-impl-build-selection and separately established producing, current and
+  historical applicability evidence under the existing result model.
+
 ## Observation obligations
 
 **REQ-impl-observation-claims** (invariant): Observation-based support MUST

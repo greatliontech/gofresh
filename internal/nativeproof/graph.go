@@ -1,0 +1,291 @@
+package nativeproof
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"golang.org/x/arch/x86/x86asm"
+)
+
+type instruction struct {
+	pc       uint64
+	inst     operation
+	next     [2]int
+	count    uint8
+	size     uint8
+	parent   int
+	indegree int
+}
+
+// operation retains only what scalar transfer reads. The complete decoder
+// result is checked for mode, prefixes, encoding shape and extra operands before
+// this projection is made; discarding those fields does not bypass their checks.
+type operation struct {
+	Op   x86asm.Op
+	Args [2]x86asm.Arg
+}
+
+// Decoding produces target addresses; discovery resolves them to node indices.
+// The supported grammar has at most two successors. Targets are not retained
+// beside the resolved edges: their PCs come from the graph's destination nodes.
+type decodedInstruction struct {
+	inst    operation
+	targets [2]uint64
+	count   uint8
+	size    uint8
+}
+
+type graph struct {
+	nodes []instruction
+	byPC  map[uint64]int
+	order []int
+}
+
+func (g *graph) failure(pc uint64, err error) error {
+	r, ok := err.(*Refusal)
+	if !ok {
+		return err
+	}
+	path := []uint64{pc}
+	if index, ok := g.byPC[pc]; ok {
+		for parent := g.nodes[index].parent; parent >= 0; parent = g.nodes[parent].parent {
+			path = append(path, g.nodes[parent].pc)
+		}
+	}
+	slices.Reverse(path)
+	r.Path = path
+	return r
+}
+
+// Propose discovers an untrusted graph. Check performs a fresh traversal of the
+// bound image; neither this graph nor the proposer's interface is authoritative.
+// The image container is captured before any context callback.
+func Propose(ctx context.Context, im *Image, entry uint64, face Interface) (Proposal, error) {
+	im = im.snapshot()
+	g, err := decodeGraph(ctx, im, entry)
+	if err != nil {
+		return Proposal{}, err
+	}
+	p := Proposal{Entry: entry, Interface: face, Nodes: make([]Node, len(g.order))}
+	edgeCount := 0
+	for _, index := range g.order {
+		edgeCount += int(g.nodes[index].count)
+	}
+	edges := make([]uint64, edgeCount)
+	at := 0
+	for j, index := range g.order {
+		ins := &g.nodes[index]
+		n := Node{PC: ins.pc, Size: ins.size}
+		if ins.count != 0 {
+			end := at + int(ins.count)
+			n.Successors = edges[at:end:end]
+			for k, next := range ins.next[:ins.count] {
+				n.Successors[k] = g.nodes[next].pc
+			}
+			at = end
+		}
+		p.Nodes[j] = n
+	}
+	return p, nil
+}
+
+func decodeGraph(ctx context.Context, im *Image, entry uint64) (*graph, error) {
+	return decodeGraphLimited(ctx, im, entry, 0)
+}
+
+// A nonzero limit is a refusal boundary, never a successful coverage boundary.
+func decodeGraphLimited(ctx context.Context, im *Image, entry uint64, limit int) (*graph, error) {
+	// Decode the root before allocating graph storage: an unsupported entry has
+	// no discovered graph, and its refusal already carries the entry-only path.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	first, err := decode(im, entry)
+	if err != nil {
+		return nil, err
+	}
+	g := &graph{
+		nodes: make([]instruction, 1, 1+int(first.count)),
+		byPC:  map[uint64]int{entry: 0},
+	}
+	g.nodes[0] = instruction{pc: entry, parent: -1}
+	// Discovery order is the queue; membership and parent ownership are recorded
+	// once when a target first receives its index. Occupancy is a different fact:
+	// it records decoded byte extents, including instruction interiors.
+	occupied := make(map[uint64]uint64)
+	for at := 0; at < len(g.nodes); at++ {
+		pc := g.nodes[at].pc
+		var ins decodedInstruction
+		if at != 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if owner, ok := occupied[pc]; ok && owner != pc {
+			return nil, g.failure(pc, refuse(pc, "instruction-overlap", fmt.Sprintf("target enters instruction at %#x", owner)))
+		}
+		if at == 0 {
+			ins = first
+		} else {
+			ins, err = decode(im, pc)
+			if err != nil {
+				return nil, g.failure(pc, err)
+			}
+		}
+		for off := uint64(0); off < uint64(ins.size); off++ {
+			if owner, ok := occupied[pc+off]; ok && owner != pc {
+				return nil, g.failure(pc, refuse(pc, "instruction-overlap", fmt.Sprintf("instruction intersects start %#x", owner)))
+			}
+			occupied[pc+off] = pc
+		}
+		g.nodes[at].inst = ins.inst
+		g.nodes[at].count = ins.count
+		g.nodes[at].size = ins.size
+		for edge, target := range ins.targets[:ins.count] {
+			next, exists := g.byPC[target]
+			if !exists {
+				if limit > 0 && len(g.nodes) >= limit {
+					return nil, g.failure(pc, refuse(pc, "relation-budget", "instruction graph budget"))
+				}
+				next = len(g.nodes)
+				g.byPC[target] = next
+				g.nodes = append(g.nodes, instruction{pc: target, parent: at})
+			}
+			// Appending can move the node slice. Resolve through its current base
+			// rather than keeping a node pointer across discovery of a successor.
+			g.nodes[at].next[edge] = next
+			g.nodes[next].indegree++
+		}
+	}
+	// A topological traversal both rejects cycles and ensures all incoming states
+	// are joined before an instruction transfer. No arbitrary depth cutoff is used.
+	g.order = make([]int, 0, len(g.nodes))
+	for index := range g.nodes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if g.nodes[index].indegree == 0 {
+			g.order = append(g.order, index)
+		}
+	}
+	// The ready queue becomes the final order in place.
+	for at := 0; at < len(g.order); at++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ins := &g.nodes[g.order[at]]
+		for _, next := range ins.next[:ins.count] {
+			g.nodes[next].indegree--
+			if g.nodes[next].indegree == 0 {
+				g.order = append(g.order, next)
+			}
+		}
+	}
+	if len(g.order) != len(g.nodes) {
+		for _, ins := range g.nodes {
+			if ins.indegree != 0 {
+				pc := ins.pc
+				return nil, g.failure(pc, refuse(pc, "acyclic-control", "reachable cycle is unsupported"))
+			}
+		}
+	}
+	return g, nil
+}
+
+func decode(im *Image, pc uint64) (decodedInstruction, error) {
+	b, err := im.instructionBytes(pc)
+	if err != nil {
+		return decodedInstruction{}, err
+	}
+	i, err := x86asm.Decode(b, 64)
+	if err != nil || i.Op == 0 || i.Len <= 0 || i.Len > len(b) {
+		return decodedInstruction{}, refuse(pc, "instruction-decode", "invalid or truncated instruction")
+	}
+	b = b[:i.Len]
+	if err := legalPrefixes(pc, b, i); err != nil {
+		return decodedInstruction{}, err
+	}
+	for _, arg := range i.Args[2:] {
+		if arg != nil {
+			return decodedInstruction{}, refuse(pc, "instruction-shape", "extra operands")
+		}
+	}
+	for _, arg := range i.Args {
+		if _, memory := arg.(x86asm.Mem); memory && i.Op != x86asm.LEA && i.Op != x86asm.NOP {
+			return decodedInstruction{}, refuse(pc, "data-memory", "decoded data-memory operand is outside the leaf bound")
+		}
+	}
+	next, ok := plus(pc, uint64(i.Len))
+	if !ok {
+		return decodedInstruction{}, refuse(pc, "control-target", "instruction end overflow")
+	}
+	n := decodedInstruction{inst: operation{Op: i.Op, Args: [2]x86asm.Arg{i.Args[0], i.Args[1]}}, size: uint8(i.Len)}
+	switch i.Op {
+	case x86asm.RET:
+		if len(b) != 1 || b[0] != 0xc3 || i.Args[0] != nil {
+			return decodedInstruction{}, refuse(pc, "return-interface", "only unprefixed ordinary near RET is modeled")
+		}
+	case x86asm.JMP, x86asm.JA, x86asm.JAE, x86asm.JB, x86asm.JBE, x86asm.JE, x86asm.JNE, x86asm.JL, x86asm.JLE, x86asm.JG, x86asm.JGE:
+		rel, ok := i.Args[0].(x86asm.Rel)
+		if !ok || i.Args[1] != nil {
+			return decodedInstruction{}, refuse(pc, "control-target", "only direct relative branches are modeled")
+		}
+		target, ok := relative(next, int64(rel))
+		if !ok {
+			return decodedInstruction{}, refuse(pc, "control-target", "relative target overflow")
+		}
+		if i.Op != x86asm.JMP {
+			n.targets[n.count] = next
+			n.count++
+		}
+		n.targets[n.count] = target
+		n.count++
+	case x86asm.MOV, x86asm.ADD, x86asm.XOR, x86asm.AND, x86asm.LEA, x86asm.SHR, x86asm.CMP,
+		x86asm.SETA, x86asm.SETAE, x86asm.SETB, x86asm.SETBE, x86asm.SETE, x86asm.SETNE, x86asm.SETL, x86asm.SETLE, x86asm.SETG, x86asm.SETGE:
+		n.targets[0], n.count = next, 1
+	case x86asm.NOP:
+		if !(len(b) == 1 && b[0] == 0x90 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90) {
+			return decodedInstruction{}, refuse(pc, "instruction-shape", "unsupported NOP encoding")
+		}
+		n.targets[0], n.count = next, 1
+	default:
+		return decodedInstruction{}, refuse(pc, "instruction-semantics", i.Op.String()+" is unsupported")
+	}
+	return n, nil
+}
+
+// A decoded mnemonic is not evidence that the encoding is legal. This subset
+// admits at most one operand-size override (only MOV16 or the exact 6690 NOP),
+// followed by at most one REX. All ignored/invalid prefix metadata refuses, as
+// do LOCK, REP, segments, address overrides, VEX/EVEX and redundant prefixes.
+func legalPrefixes(pc uint64, b []byte, i x86asm.Inst) error {
+	if i.Mode != 64 || i.AddrSize != 64 {
+		return refuse(pc, "instruction-prefix", "unsupported addressing mode")
+	}
+	count, size, rex := 0, false, false
+	for _, p := range i.Prefix {
+		if p == 0 {
+			break
+		}
+		if p&(x86asm.PrefixInvalid|x86asm.PrefixIgnored) != 0 {
+			return refuse(pc, "instruction-prefix", "invalid or ignored prefix")
+		}
+		v := byte(p)
+		if v == 0x66 && !size && !rex {
+			size = true
+		} else if v >= 0x40 && v <= 0x4f && !rex {
+			rex = true
+		} else {
+			return refuse(pc, "instruction-prefix", "unsupported or duplicate prefix")
+		}
+		count++
+	}
+	if count >= len(b) {
+		return refuse(pc, "instruction-prefix", "missing opcode")
+	}
+	if size && !(i.Op == x86asm.MOV && i.DataSize == 16 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90) {
+		return refuse(pc, "instruction-prefix", "unsupported operand-size override")
+	}
+	return nil
+}

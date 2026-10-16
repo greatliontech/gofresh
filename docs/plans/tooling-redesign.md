@@ -233,19 +233,37 @@
             CALL/RET protocols to private feasibility experiments; do not introduce
             a public tracing/program-build API or cache-hit tracing requirement
             as a substitute for those consumer obligations.
+            - [ ] 5.1w.2b.3b.1 Establish conditional readonly-descriptor and actual
+              callback/argument/return transfer relations. Distinguish immutable
+              descriptors from writable registration rows; retain unsupported
+              relocation, alias, context and target premises explicitly.
+            - [ ] 5.1w.2b.3b.2 Check actual selected generated-main initialization
+              and registration/callback provenance through its uses. Account for
+              mutation, shuffle, closures, goroutine capture and concrete interface
+              dispatch; names and unused lookalike tables supply no coverage.
+            - [ ] 5.1w.2b.3b.3 Compose harness noninterference and native-to-logical
+              invocation conditions for the actual test result. Derive required
+              frames for explicit clock/runtime/locking/cleanup operations and
+              identify implicit lowering precisely; no ample-stack or isolated
+              native-entry condition is silently imposed on ordinary executions.
+              Preserve benchmark protocol and environment acceptance separately.
         - [ ] 5.1w.2b.4 Carry the accepted implementation evidence through native
           records, current applicability and independent producing/checking close.
           Reject missing historical premises and unsupported current artifacts;
           expose structured refusals before restoring runtime discharge and its
           preserved useful-positive acceptance population.
-    - [ ] 5.1w.2p Profile artifact capture and repeated validation, then the usable
-      native/source proof paths. Record cold/warm workloads, accepted/refused
+          Keep genuinely source-only support distinct from incomplete selected
+          observation: an absent capture cannot satisfy today's observing unit
+          protocol, and a source-only claim acquires no log-delivery requirement.
+    - [ ] 5.1w.2p After the feature implementation and rewrite/refactor are complete,
+      run the full performance pass over artifact capture, repeated validation and
+      the usable native/source proof paths. Record cold/warm workloads, accepted/refused
       populations, latency, allocation volume and retained memory. Use exclusive
       quiet benchmark runs with CPU/allocation profiles; distinguish filesystem
       cache warmth from proof-cache reuse. Optimize demonstrated costs, preserve
       complete evidence and cancellation guarantees, and compare equivalent
-      before/after workloads. Carry these checks into later implementation chunks
-      whenever changes affect the dominant costs; do not trade refusal or weaker
+      before/after workloads. Reuse the existing component baselines and measure
+      the completed consumer paths; do not trade refusal or weaker
       proof coverage for speed.
       - [x] 5.1w.2p.1 Measure retained-artifact capture and repeated validation;
         remove avoidable image allocation, copying and hashing while preserving
@@ -253,7 +271,7 @@
       - [ ] 5.1w.2p.2 Profile native image preparation, cold derivation and repeated
         roots against identical accepted/refused populations. Measure shared-image
         retention separately from allocation volume, and address demonstrated
-        bottlenecks before adopting the native path in ordinary consumers.
+        bottlenecks in the full performance pass after functional adoption.
     - [ ] 5.1w.3 Extend compositional proofs across the runtime/native boundaries
       required by the selected useful workload. Establish each primitive's exact
       semantic premises and interpret actual selected native instructions under
