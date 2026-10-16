@@ -241,6 +241,30 @@
               and registration/callback provenance through its uses. Account for
               mutation, shuffle, closures, goroutine capture and concrete interface
               dispatch; names and unused lookalike tables supply no coverage.
+              - [ ] 5.1w.2b.3b.2a Establish mechanically checked lowering-origin
+                and applicability evidence before composing an implicit language
+                operation: bind the exact selected typed operation and context
+                through relevant transformations to complete decoded fragments,
+                operands, successors and continuations. Compiler reports propose
+                candidates; names, compatible call shapes and graph alignment
+                alone cannot establish that association.
+              - [ ] 5.1w.2b.3b.2b Check the required symbolic stack, allocation and
+                ABI-transition relations, including relocation, suspension/retry,
+                fresh storage, logical-heap preservation and TLS context
+                restoration. Compose only established lowering applicability or
+                checked selected-implementation behavior; do not silently assume
+                an ample stack or promote an opaque runtime helper to a primitive.
+              - [ ] 5.1w.2b.3b.2c Compose one rooted source/native control-and-state
+                derivation from the selected first flag-initialization branch,
+                through its actual construction, name guards and native byte
+                search, to the actual Value.String boundary. Derive operands from
+                their contributing callers and check result reloads, frames and
+                continuations, including inlined instances. Close association
+                inside this prefix rather than retain it as an unexplained premise.
+              - [ ] 5.1w.2b.3b.2d Discharge that prefix's outer generated-main and
+                initialization entry conditions, then complete the remaining
+                registration-to-use chain with mutation, shuffle, capture,
+                interface and exceptional-outcome coverage.
             - [ ] 5.1w.2b.3b.3 Compose harness noninterference and native-to-logical
               invocation conditions for the actual test result. Derive required
               frames for explicit clock/runtime/locking/cleanup operations and
