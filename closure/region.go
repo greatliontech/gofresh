@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@4"
+const regionRules = "gofresh/source-region-transport@5"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -446,6 +446,16 @@ func regionInt(v regionValue) (int64, bool) {
 		return 0, false
 	}
 	return constant.Int64Val(v.scalar)
+}
+
+// Strings use the existing immutable scalar representation. Their extent and
+// indices count bytes, including NUL and invalid UTF-8, never decoded runes.
+// Capture/ownership validation bounds constant storage before any transfer.
+func regionString(v regionValue) (string, bool) {
+	if v.kind != regionConstant || v.scalar == nil || v.scalar.Kind() != constant.String {
+		return "", false
+	}
+	return constant.StringVal(v.scalar), true
 }
 
 func regionBool(v regionValue) (bool, bool) {

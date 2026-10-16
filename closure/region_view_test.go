@@ -320,6 +320,19 @@ func TestRegionScalarViewActualFlagRegistration(t *testing.T) {
 	if len(varCall.Call.Args) != 4 {
 		t.Fatal("actual Var signature changed")
 	}
+	// Candidate names only discover these actual selected calls. Log their SSA
+	// so the tested source path and the next unsupported boundary are explicit.
+	inspect := regionInput{root: varCall.Call.StaticCallee()}
+	for _, next := range []string{"HasPrefix", "HasPrefix"} {
+		var body strings.Builder
+		inspect.root.WriteTo(&body)
+		t.Log(body.String())
+		_, selected := regionViewStopCall(t, inspect, next)
+		inspect.root = selected.Call.StaticCallee()
+	}
+	var prefixBody strings.Builder
+	inspect.root.WriteTo(&prefixBody)
+	t.Log(prefixBody.String())
 	boolVarInput.use.operand = varCall.Call.Args[1]
 	construction := regionViewSourcePrefix(t, source, boolVarInput)
 	out := construction.packet.observations[0]
@@ -341,6 +354,7 @@ func TestRegionScalarViewActualFlagRegistration(t *testing.T) {
 	if construction.calls[0].bound.identity.body == ([32]byte{}) {
 		t.Fatal("constructor lost selected body identity")
 	}
+	assertRegionStringActualFlagPrefix(t, source, construction, varCall)
 	t.Logf("selected path: %s -> %s -> %s -> %s -> %s; endpoint before %s", init, wrapperInput.root, boolInput.root, boolVarInput.root, construction.calls[0].call.target, varCall)
 	var body strings.Builder
 	construction.calls[0].call.target.WriteTo(&body)

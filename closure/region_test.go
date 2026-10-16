@@ -293,6 +293,17 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					t.Fatalf("oracle unary %v", x)
 				}
 			case *ssa.Slice:
+				if text, ok := get(x.X).(string); ok {
+					lo, hi := int64(0), int64(len(text))
+					if x.Low != nil {
+						lo = get(x.Low).(int64)
+					}
+					if x.High != nil {
+						hi = get(x.High).(int64)
+					}
+					values[x] = text[lo:hi]
+					break
+				}
 				var s regionConcreteSlice
 				switch base := get(x.X).(type) {
 				case regionConcretePointer:
@@ -329,13 +340,31 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			case *ssa.Field:
 				values[x] = get(x.X).([]any)[x.Field]
 			case *ssa.Index:
-				values[x] = get(x.X).([]any)[get(x.Index).(int64)]
+				if text, ok := get(x.X).(string); ok {
+					values[x] = int64(text[get(x.Index).(int64)])
+				} else {
+					values[x] = get(x.X).([]any)[get(x.Index).(int64)]
+				}
 			case *ssa.BinOp:
 				a, b := get(x.X), get(x.Y)
 				if x.Op == token.EQL {
 					values[x] = regionConcreteEqual(x.X.Type(), a, b)
 				} else if x.Op == token.NEQ {
 					values[x] = !regionConcreteEqual(x.X.Type(), a, b)
+				} else if left, ok := a.(int64); ok {
+					right := b.(int64)
+					switch x.Op {
+					case token.LSS:
+						values[x] = left < right
+					case token.LEQ:
+						values[x] = left <= right
+					case token.GTR:
+						values[x] = left > right
+					case token.GEQ:
+						values[x] = left >= right
+					default:
+						t.Fatalf("oracle comparison %s", x)
+					}
 				} else {
 					t.Fatalf("oracle comparison %s", x)
 				}
@@ -377,6 +406,10 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					} else {
 						values[x] = result
 					}
+					break
+				}
+				if text, ok := get(x.Call.Args[0]).(string); ok && b.Name() == "len" {
+					values[x] = int64(len(text))
 					break
 				}
 				s := get(x.Call.Args[0]).(regionConcreteSlice)

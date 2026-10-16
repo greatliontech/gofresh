@@ -2409,3 +2409,69 @@ bindings {
   shape_hash: "bdedd45a567772509f7ff7f96fd813142f29f22ea4457f14a3db117a4aff3da9"
   clause_label: "memory-and-callables"
 }
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionStringConcreteOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "57d0d95a3f41d38cf284a27efe90d6dfecf4045a1ddb1b0b37ac58d55299702b"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionStringBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f6b2325b97d9644df7db09e6b6c85ee0ee76de726c13611c09576502d15ee504"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionStringUnknownAndEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f288280ae7637d4fc5c47b39abcd242d494ad0ff56a7d8dc5e489545ac6a132d"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionStringForgedPrefix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "93291ba48ec04caa5c6c71a0c080287c1f2df24a421bb848975ebf99b85d3315"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionStringOwnershipAndBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "09685f1b4b91ba15f8654e794c3b945e2c6bd1166aabc3602add6190558c1f04"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzRegionStringOperations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "25d2db5d90aba07a19f191ecbc1a3793a46e75610e39591ff09cce09f5bfab02"
+  clause_label: "inductive-transfer"
+}

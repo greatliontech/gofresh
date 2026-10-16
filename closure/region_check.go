@@ -1019,8 +1019,14 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return regionError("unsupported unary transfer")
 	case *ssa.Slice:
 		v := get(x.X)
+		text, stringBase := regionString(v)
 		var length, capacity, start int64
-		if v.kind == regionPointer {
+		if stringBase {
+			if x.Max != nil {
+				return regionError("three-index string slice is not a Go operation")
+			}
+			length, capacity = int64(len(text)), int64(len(text))
+		} else if v.kind == regionPointer {
 			t := k.locationType(v.location)
 			if t == nil {
 				return regionError("unknown slice backing")
@@ -1048,6 +1054,9 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !a || !b || !c || low < 0 || low > high || high > max || max > capacity {
 			return regionError("slice bounds may panic")
 		}
+		if stringBase {
+			return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeString(text[low:high])})
+		}
 		return set(x, regionValue{typ: x.Type(), kind: regionSlice, location: v.location, start: start + low, length: high - low, capacity: max - low})
 	case *ssa.Field:
 		v := get(x.X)
@@ -1060,6 +1069,12 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		index, known := regionInt(get(x.Index))
 		if !known || index < 0 {
 			return regionError("unknown value index")
+		}
+		if text, ok := regionString(v); ok {
+			if index >= int64(len(text)) {
+				return regionError("string index may panic")
+			}
+			return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeInt64(int64(text[index]))})
 		}
 		if v.kind != regionAggregate || index >= int64(len(v.elements)) {
 			return regionError("value index may panic")
@@ -1130,7 +1145,15 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		v := get(x.Call.Args[0])
 		var n int64
-		if v.kind == regionSlice {
+		if basic, ok := v.typ.Underlying().(*types.Basic); ok && basic.Info()&types.IsString != 0 && builtin.Name() == "len" {
+			text, known := regionString(v)
+			if !known {
+				// len is total even when the string is unknown. No bound on
+				// that unknown value is inferred for a later slice or index.
+				return set(x, regionUnknownValue(x.Type()))
+			}
+			n = int64(len(text))
+		} else if v.kind == regionSlice {
 			n = v.length
 			if builtin.Name() == "cap" {
 				n = v.capacity
