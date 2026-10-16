@@ -2475,3 +2475,333 @@ bindings {
   shape_hash: "25d2db5d90aba07a19f191ecbc1a3793a46e75610e39591ff09cce09f5bfab02"
   clause_label: "inductive-transfer"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckValueCall"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "94f8000fe61dca1ed807461ce9147518045b4995cd057fa06a819eb65ae0c4f3"
+  clause_label: "bound-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckValueCall"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "94f8000fe61dca1ed807461ce9147518045b4995cd057fa06a819eb65ae0c4f3"
+  clause_label: "reachable-coverage"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.valueCallChecker.step"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "e82d1651943a4f83a5a991672bfe32d0e4a342fbf28b56f32157b0d8b80f3ec1"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.valueCallChecker.vector"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "8cfafaf61e5b0006d981f255c93f973f7ecb189524120fcc2a6dd12fbc1d9613"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallSSEEncoding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "71cf8248a575c7a87c885309d8db529a5f261e9d59bdf824f30372f4036edae9"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallBranchesAndIntegerSemantics"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e544b07ab9dbd6ec42dafd0f65fcc228ea06c54f3e8db4937580e475bd7f1db9"
+  clause_label: "reachable-coverage"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallBranchesAndIntegerSemantics"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e544b07ab9dbd6ec42dafd0f65fcc228ea06c54f3e8db4937580e475bd7f1db9"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallPaddingIsNotString"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "df7cc42a60f357c45524cc1b90af186996a520c910f938bf781f223899118dc2"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzValueCallShortSearch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b75277bb74d01b2c0a6da719c5a884c25c5becca232727f576198f76706e6934"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallWrongImageDoesNotBorrow"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "32ef83563ca95a7f6c3b0e0f90d90cc1e19d9a9d88a490941263fc1652ea6f2d"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallOwnsAndCancels"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4e49fc183a86aa16800a37d3cc109a5910cf96bc83a696bb36d5aa44a8ee54a9"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.valueCallChecker.finish"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "36b8044d87c6a75a8dbfe387fa95ceecaa043c1d5364ea5e9c2d071b7db5ef18"
+  clause_label: "effects-and-return"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallCalleeMustProduceResult"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "96f628b0a930200b386706219cb99995b7eb540340b4a9c5ff176a0cb5887f55"
+  clause_label: "effects-and-return"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.valueCallChecker.initialValues"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "16ceb9c0cdf74cbeae46c8ac528314e171985778c0dcf6bc7636e6babd884157"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.Image.readonlyBytes"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "d4ec544bb63d330c79f6c1bec7213d928fbb125d564cb91d919b3c4672eb3416"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallBoundaryRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a458abf7cbd571cdea83d678b71e3d7bb2bffd76bef8fc9b098c2c106932ba54"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.valueCallChecker.memoryAccess"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "d8956f0778b3f905c1dceb0706130bd3e634a7b9a68f099e85c2b0310046e1f1"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallShortSearch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "73c1c78b9abecfdd030fc08d22c3defc05b17a5c1d7884a5e4887370254cabf5"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallZeroLengthNeedsNoDataLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a360de318f9ebafb73815adfd887fa11071144e49c529308c7f0ce2cfb5ab3c4"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckValueCall"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "94f8000fe61dca1ed807461ce9147518045b4995cd057fa06a819eb65ae0c4f3"
+  clause_label: "calls-and-primitives"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallBranchesAndIntegerSemantics"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e544b07ab9dbd6ec42dafd0f65fcc228ea06c54f3e8db4937580e475bd7f1db9"
+  clause_label: "calls-and-primitives"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckValueCall"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "94f8000fe61dca1ed807461ce9147518045b4995cd057fa06a819eb65ae0c4f3"
+  clause_label: "composition-boundary"
+}
+
+bindings {
+  requirement_id: "REQ-impl-callback-transfer"
+  content_hash: "c50bc8c264756909a1747e151aeda2da6c21a46eb800b46c7a04ca9d30b6a3c0"
+  source_hash: "02ac359c6dd38019e01ef1d0a4419ad8e0b352b57bc70e348f10d8b61e41604e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckValueCall"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "94f8000fe61dca1ed807461ce9147518045b4995cd057fa06a819eb65ae0c4f3"
+  clause_label: "decoded-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-callback-transfer"
+  content_hash: "c50bc8c264756909a1747e151aeda2da6c21a46eb800b46c7a04ca9d30b6a3c0"
+  source_hash: "02ac359c6dd38019e01ef1d0a4419ad8e0b352b57bc70e348f10d8b61e41604e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallBoundaryRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a458abf7cbd571cdea83d678b71e3d7bb2bffd76bef8fc9b098c2c106932ba54"
+  clause_label: "decoded-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-callback-transfer"
+  content_hash: "c50bc8c264756909a1747e151aeda2da6c21a46eb800b46c7a04ca9d30b6a3c0"
+  source_hash: "02ac359c6dd38019e01ef1d0a4419ad8e0b352b57bc70e348f10d8b61e41604e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallDefaultOptimizedArtifact"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9e344cfb7e2ebe68b50f7a77a0ffb919f94599828da9e16e1ea66f1839c5052b"
+  clause_label: "decoded-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallVectorOperandsAndSelectors"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "72952a3b219604900755e5ed378b19241e54560f882e9d28ee80f60842d84309"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallVectorUnknownLanes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "22afadcd5748d534bd3441aff8e70528b9ba7c1fcacbb94bbad4619cc9f935f3"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallArithmeticFlagBoundaries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5c841e32b879c7e2c26a7dc0811bc999ef4c76229da646390093e01afc8f0b9f"
+  clause_label: "reachable-coverage"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzValueCallVectorInstructionForms"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bb9587f96a28b9cd01d5a1f724cd6738a7f291265832be2d2dd6a6a2886dadb9"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzValueCallArithmeticFlags"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "95883227b31f7572895c6745d854908367fd23dbcd4c55dc3403cc7150025ca0"
+  clause_label: "state-transfer"
+}

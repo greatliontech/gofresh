@@ -211,6 +211,24 @@ func decode(im *Image, pc uint64) (decodedInstruction, error) {
 // grammar or the call-fragment grammar interprets operands. A decoded boundary
 // alone does not assert that the instruction's effects have been checked.
 func decodeEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
+	i, b, err := decodeBytes(im, pc)
+	if err != nil {
+		return x86asm.Inst{}, nil, err
+	}
+	if err := legalPrefixes(pc, b, i); err != nil {
+		return x86asm.Inst{}, nil, err
+	}
+	for _, arg := range i.Args[2:] {
+		if arg != nil {
+			return x86asm.Inst{}, nil, refuse(pc, "instruction-shape", "extra operands")
+		}
+	}
+	return i, b, nil
+}
+
+// decodeBytes does structural decoding only. Every consumer must apply its own
+// explicit encoding/form validation before interpreting the returned instruction.
+func decodeBytes(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 	b, err := im.instructionBytes(pc)
 	if err != nil {
 		return x86asm.Inst{}, nil, err
@@ -220,14 +238,6 @@ func decodeEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 		return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid or truncated instruction")
 	}
 	b = b[:i.Len]
-	if err := legalPrefixes(pc, b, i); err != nil {
-		return x86asm.Inst{}, nil, err
-	}
-	for _, arg := range i.Args[2:] {
-		if arg != nil {
-			return x86asm.Inst{}, nil, refuse(pc, "instruction-shape", "extra operands")
-		}
-	}
 	return i, b, nil
 }
 
@@ -287,6 +297,11 @@ func decodeControl(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, erro
 // followed by at most one REX. All ignored/invalid prefix metadata refuses, as
 // do LOCK, REP, segments, address overrides, VEX/EVEX and redundant prefixes.
 func legalPrefixes(pc uint64, b []byte, i x86asm.Inst) error {
+	allow16 := i.Op == x86asm.MOV && i.DataSize == 16 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90
+	return legalScalarPrefixes(pc, b, i, allow16)
+}
+
+func legalScalarPrefixes(pc uint64, b []byte, i x86asm.Inst, allow16 bool) error {
 	if i.Mode != 64 || i.AddrSize != 64 {
 		return refuse(pc, "instruction-prefix", "unsupported addressing mode")
 	}
@@ -311,7 +326,7 @@ func legalPrefixes(pc uint64, b []byte, i x86asm.Inst) error {
 	if count >= len(b) {
 		return refuse(pc, "instruction-prefix", "missing opcode")
 	}
-	if size && !(i.Op == x86asm.MOV && i.DataSize == 16 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90) {
+	if size && !allow16 {
 		return refuse(pc, "instruction-prefix", "unsupported operand-size override")
 	}
 	return nil

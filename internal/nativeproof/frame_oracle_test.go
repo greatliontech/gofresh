@@ -115,6 +115,7 @@ type concreteFrame struct {
 	permissions                 map[uint64]uint8
 	pc                          uint64
 	carry, zero, sign, overflow bool
+	returnSlot                  *Span // nil selects the original entry slot; fragments supply theirs
 }
 
 func oracleReg(r x86asm.Reg) (int, uint, uint) {
@@ -192,7 +193,11 @@ func (o *concreteFrame) access(address uint64, width int, kind AccessKind) {
 	if kind == FrameWrite {
 		stack := o.b.Interface.Stack
 		start := o.b.Interface.Regions[stack.Region].Bytes.Start + stack.Min
-		if address < start+8 && start < end {
+		slot := Span{start, start + 8}
+		if o.returnSlot != nil {
+			slot = *o.returnSlot
+		}
+		if address < slot.End && slot.Start < end {
 			o.t.Fatal("concrete write corrupts return context")
 		}
 		for _, p := range o.b.Interface.Protected {

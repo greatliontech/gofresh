@@ -155,30 +155,40 @@ func (im *Image) instructionBytes(pc uint64) ([]byte, error) {
 // second mapping of any backing page is refused, even when it is readonly: this
 // finite loader model does not establish a shared-page alias relation.
 func (im *Image) readonlyWord(address uint64) (uint64, Span, error) {
-	end, ok := plus(address, 8)
-	if im == nil || !ok || end > 1<<47 {
-		return 0, Span{}, refuse(address, "descriptor-mapping", "missing image or descriptor extent overflow")
+	b, region, err := im.readonlyBytes(address, 8, "descriptor-mapping", "descriptor-alias")
+	if err != nil {
+		return 0, Span{}, err
+	}
+	return binary.LittleEndian.Uint64(b), region, nil
+}
+
+// readonlyBytes lends an internal immutable view, after checking the complete
+// loaded span and backing-page aliases. The caller bounds width before calling.
+func (im *Image) readonlyBytes(address, width uint64, premise, aliasPremise string) ([]byte, Span, error) {
+	end, ok := plus(address, width)
+	if im == nil || width == 0 || !ok || end > 1<<47 {
+		return nil, Span{}, refuse(address, premise, "missing image or readonly extent overflow")
 	}
 	for index, m := range im.loads {
 		if address < m.va || end > m.end {
 			continue
 		}
 		delta := address - m.va
-		if !m.readable || m.writable || delta > m.filesz || m.filesz-delta < 8 {
-			return 0, Span{}, refuse(address, "descriptor-mapping", "descriptor must be readable, nonwritable and entirely file-backed")
+		if !m.readable || m.writable || delta > m.filesz || m.filesz-delta < width {
+			return nil, Span{}, refuse(address, premise, "span must be readable, nonwritable and entirely file-backed")
 		}
 		start := m.off + delta
-		lo, hi := start&^uint64(4095), (start+8+4095)&^uint64(4095)
+		lo, hi := start&^uint64(4095), (start+width+4095)&^uint64(4095)
 		for j, alias := range im.loads {
 			// A BSS load with an unaligned start can still map the preceding
 			// file-page prefix. Its logical Filesz==0 does not remove that alias.
 			if j != index && (alias.filesz != 0 || alias.off%4096 != 0) && lo < (alias.off+alias.filesz+4095)&^uint64(4095) && alias.off&^uint64(4095) < hi {
-				return 0, Span{}, refuse(address, "descriptor-alias", "descriptor backing page has another PT_LOAD alias")
+				return nil, Span{}, refuse(address, aliasPremise, "readonly backing page has another PT_LOAD alias")
 			}
 		}
-		return binary.LittleEndian.Uint64(im.data[start : start+8]), Span{m.va, m.end}, nil
+		return im.data[start : start+width], Span{m.va, m.end}, nil
 	}
-	return 0, Span{}, refuse(address, "descriptor-mapping", "descriptor crosses or misses a load boundary")
+	return nil, Span{}, refuse(address, premise, "readonly span crosses or misses a load boundary")
 }
 
 // Identity is ownership, not a digest comparison. Snapshots retain the same

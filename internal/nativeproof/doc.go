@@ -46,6 +46,17 @@
 // remain unsupported in this domain. FrameRules identifies these distinct rules;
 // ordinary Go isolation and suspension/resumption lifting remain open obligations.
 //
+// CheckValueCall adds a distinct conditional value/frame scope: explicit entry
+// constants and checked immutable image bytes, a bounded state-sensitive graph,
+// and one actual direct CALL through every callee return. The enabled-SSE2 model
+// interprets exact scalar/vector forms; decoded predicates alone exclude paths.
+// Its output is the derived memory result and complete access/frame bound at the
+// immediate decoded continuation, not a scalar-register or enclosing-caller
+// result. Unknown bits/bytes remain arbitrary, undefined flags remain unsupported
+// when consumed, and CPU selectors or loops are never removed by ABI/CPU labels.
+// ValueCallRules and ValueCallMachine retain this scope separately: neither the
+// old leaf Certificate nor FrameCertificate can express its initial-value facts.
+//
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span
 // binding before composing this claim. Even that composition supplies neither

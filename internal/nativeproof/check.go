@@ -130,8 +130,12 @@ func checkGraph(ctx context.Context, im *Image, entry uint64, face Interface, g 
 }
 
 func validInterface(pc uint64, face Interface) error {
+	return validInterfaceAt(pc, face, true)
+}
+
+func validInterfaceAt(pc uint64, face Interface, requireReturn bool) error {
 	c := face.Conditions
-	if c.Machine != MachineModel || !c.InstructionMapping || !c.ReturnSlot || !c.EntryInputs || !c.IsolatedInvocation {
+	if c.Machine != MachineModel || !c.InstructionMapping || requireReturn && !c.ReturnSlot || !c.EntryInputs || !c.IsolatedInvocation {
 		return refuse(pc, "machine-premises", "all explicit machine, mapping, input, return and isolation conditions are required")
 	}
 	if face.Inputs[RSP]|face.Results[RSP]|face.Preserved[RSP] != 0 {

@@ -244,8 +244,14 @@ func overlap(a, b Span) bool { return a.Start < b.End && b.Start < a.End }
 func pages(s Span) Span      { return Span{s.Start &^ uint64(4095), (s.End + 4095) &^ uint64(4095)} }
 
 func (m *frameChecker) validate() error {
+	return m.validateEntry(true)
+}
+
+// A call fragment starts in an already allocated caller frame, not at a function
+// return slot. The actual CALL establishes its protected return context later.
+func (m *frameChecker) validateEntry(requireReturn bool) error {
 	f := m.face
-	if err := validInterface(m.pc, Interface{Preserved: f.Preserved, Conditions: f.Conditions.Conditions}); err != nil {
+	if err := validInterfaceAt(m.pc, Interface{Preserved: f.Preserved, Conditions: f.Conditions.Conditions}, requireReturn); err != nil {
 		return err
 	}
 	if !f.Conditions.MemoryMapping || !f.Conditions.NoHiddenAliases || !f.Conditions.UnalignedAccess {
@@ -305,14 +311,16 @@ func (m *frameChecker) validate() error {
 	if stack.Min != stack.Max || f.Regions[stack.Region].Image {
 		return refuse(m.pc, "frame-stack", "stack must be an exact external-region pointer")
 	}
-	span, err := m.extent(stack, 0, 8)
-	if err != nil {
-		return err
+	if requireReturn {
+		span, err := m.extent(stack, 0, 8)
+		if err != nil {
+			return err
+		}
+		if !f.Regions[stack.Region].Readable || span.End >= 1<<47 {
+			return refuse(m.pc, "frame-stack", "return slot must be readable with a canonical post-RET RSP")
+		}
+		m.returnSlot = span
 	}
-	if !f.Regions[stack.Region].Readable || span.End >= 1<<47 {
-		return refuse(m.pc, "frame-stack", "return slot must be readable with a canonical post-RET RSP")
-	}
-	m.returnSlot = span
 	for _, span := range f.Protected {
 		if err := m.tick(1); err != nil {
 			return err

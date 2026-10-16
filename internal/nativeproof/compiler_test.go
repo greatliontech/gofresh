@@ -164,6 +164,12 @@ func TestDecoderBoundariesAgainstGNU(t *testing.T) {
 	for _, k := range kernels {
 		raw = append(raw, hexBytes(t, k.code)...)
 	}
+	// The connected memory/value domain adds the real legacy-SSE2 short-search
+	// forms. Check their boundaries beside the original integer population.
+	// Stop after both short return paths. The later VEX tail is not admitted:
+	// x86asm and GNU disagree on its VZEROUPPER length, and no VEX execution
+	// receives semantic authority from this domain.
+	raw = append(raw, hexBytes(t, searchBodyHex)[:0xb6]...)
 	// Broad register-form sample with varying ModRM, REX extension and width.
 	for _, op := range []byte{0x89, 0x01, 0x31, 0x21, 0x39} {
 		for modrm := 0xc0; modrm <= 0xff; modrm++ {
