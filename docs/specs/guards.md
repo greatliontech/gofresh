@@ -34,9 +34,11 @@ identity — the version string including any experiment or custom suffix that a
 code generation — so a toolchain change, which moves the standard library and
 generated code the closure deliberately does not hash, stales every result recorded
 under the old toolchain. This reported identity is not proof that selected
-standard-library source has unchanged content. Dependent analysis and recorded
-proof admission additionally obey REQ-fresh-dependency-identities; the label
-does not replace the content evidence or its compatibility judgment.
+standard-library source has unchanged content or justified semantics. Dependent
+analysis and recorded proof additionally obey REQ-fresh-dependency-identities
+and [implementation-verification.md](implementation-verification.md); the label
+does not replace complete selected-content evidence, a checked derivation or
+its compatibility judgment.
 The identity is read from the pass's one environment
 snapshot (`GOVERSION` with `GOHOSTOS/GOHOSTARCH`), byte-identical to the `go version`
 line minus its prefix, so a pass samples its toolchain once; a snapshot answering
@@ -171,8 +173,9 @@ silently becomes the next check's current state.
 **REQ-guard-cache** (invariant): Persisted closure evidence MUST be treated as
 memoization keyed by complete dependency identities, not a commit address or
 reported toolchain label alone — source membership/content, resolved build
-configuration, subject scope, derivation and any selected-content or admission
-policy on which the fact depends (REQ-fresh-dependency-identities) — never
+configuration, subject scope, inference rules, checked subordinate claims and
+selected implementation content on which the fact depends
+(REQ-fresh-dependency-identities and REQ-impl-derivation-reuse) — never
 as the source of truth, so recomputing or discarding it never changes source
 equivalence, and evidence that disagrees with recomputation from source can never
 make an unsound result look valid.

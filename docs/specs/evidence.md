@@ -12,6 +12,10 @@ defines the distinct caller-responsible assertion channels. The authority and
 ownership rules here apply to those forms alike; they do not broaden an
 admitted observation operation or supply a missing producing premise.
 
+[Implementation verification](implementation-verification.md) governs derived
+semantic claims about selected implementations. Dependency identity identifies
+the inputs to that judgment; it does not confer their behavioral meaning.
+
 ## Claims and authority
 
 **result model** (term): the result owner's declared meaning of a result, the
@@ -96,7 +100,8 @@ process having run, but says nothing about that subject's runtime outcome.
 certificate MUST depend on every input that can change its claimed fact,
 including source membership and content, selected views and their relevant
 precedence, resolved configuration, classifier or derivation identity, and
-the policy and toolchain content that any admitted analysis depends on.
+the inference rules, checked subordinate claims and selected implementation
+content that the analysis depends on.
 Changing an unrecorded dependency prevents serving from that certificate.
 Missing or incompatible dependencies require re-derivation or an explicit
 unknown answer, never a fabricated execution receipt. Re-deriving a static
@@ -132,35 +137,36 @@ coherent snapshot. Public behavior equivalence does not promise byte-equal
 diagnostics across source spellings it deliberately treats as equivalent.
 
 **REQ-fresh-dependency-identities** (invariant): Every memoized or recorded
-derived claim MUST carry or identify all dependencies needed to justify its
-reuse, including selected toolchain source content and admission policy when
-the claim depends on audited standard-library semantics. Neither unchanged
-reported version nor an admitted/not-admitted Boolean substitutes for those
-dependencies. A memo representation change can require recomputation without
-invalidating semantically compatible historical evidence; a changed proof,
-outcome or admission rule that changes what evidence establishes requires a
-distinguishable compatibility judgment even when the bytes still decode. A
-recognized compatibility rule can preserve only the authority it establishes;
-missing historical dependencies cannot be supplied by reading today's tree or
-by inserting today's identity during decoding. Without sufficient recognized
-support the dependent claim is unavailable, though independent applicable
-evidence and explicit assertions retain their own specified authority.
+derived claim MUST preserve these identity and authority boundaries:
 
-Content admission concerns the files selected by the analysis' actual build
-configuration and the policy governing them. It is separate from language
-series compatibility and the reported toolchain label. Correctness of the
-compiler/linker and integrity of toolchain-mediated caches remain the stated
-model premises; those premises do not exempt legitimate changes to the
-selected source content from the content-admission or dependency judgments.
-
-Producing and checking snapshots each establish their own present facts. A
-current content digest can reject a dependent historical claim or participate
-in an explicitly licensed compatibility check; it cannot certify which bytes
-an earlier execution used. Source/build and runtime drift retain their own
-refusal precedence, and evidence compatibility never bypasses a failing guard.
-Readable history with unsupported evidence remains history, not a current
-pass. No new wire fields or alternate encodings are implied by these identity
-roles; a published record format determines which roles it can represent.
+- **complete-dependencies** — Every dependency needed to justify reuse is carried
+  or identified, including selected implementation content, inference rules and
+  checked subordinate claims when implementation semantics are used. Unchanged
+  reported versions and admission Booleans cannot substitute for dependencies.
+- **semantic-authority** — Dependence identity concerns the actual build's
+  selected inputs, separately from checked derivations of their semantics.
+  Neither is a language-series judgment or toolchain label. Compiler/linker
+  correctness and toolchain-mediated-cache integrity neither exempt selected
+  content changes nor assert implementation behavior beyond the foundational
+  premises of REQ-impl-premise-boundary. Existing admission-policy identities
+  identify inference and compatibility rules, not approved implementations.
+- **compatibility** — A memo representation change may require recomputation
+  without invalidating semantically compatible history. A changed proof, outcome
+  or inference rule that changes what evidence establishes requires a
+  distinguishable compatibility judgment even when bytes still decode. A
+  recognized compatibility rule preserves only the authority it establishes;
+  unsupported dependent claims are unavailable while independent evidence and
+  explicit assertions retain their own specified authority.
+- **historical-dependencies** — Missing historical dependencies cannot be supplied
+  from today's tree or inserted during decoding. Producing and checking snapshots
+  each establish their own present facts; a current digest can reject a historical
+  claim or participate in a licensed compatibility check, but cannot certify
+  which bytes an earlier execution used. Unsupported readable history remains
+  history, not a current pass.
+- **guard-precedence** — Source/build and runtime drift retain their ordinary
+  refusal precedence. Evidence compatibility never bypasses a failing guard.
+- **representation** — These identity roles imply no new wire fields or alternate
+  encodings; a published record format determines which roles it can represent.
 
 ## Ownership vocabulary
 
@@ -360,52 +366,51 @@ another attempt supplies an independently eligible witness. Grouping publication
 does not license unioning their evidence or replacing the original history.
 
 **REQ-fresh-package-unit** (behavior): The built-artifact producing boundary MUST
-also admit one package-test process over a nonempty, explicitly selected subject
-set from one package. The set is fixed before preparation, deduplicated in first
-request order and owned by the unit. Every subject the process executes belongs
-to that set, including subjects for which the consumer does not want a reusable
-record; a result or observation arriving later cannot define the executed set.
-Unknown members refuse as a complete batch before producing work. A declared
-single-subject execution model refuses a larger set; selecting the package form
-does not silently change the session's accepted assertion policy.
+admit package-process production under these obligations:
 
-One process has one retained-artifact binding, frame, actual environment,
-exclusively assigned capture and explicit terminal disposition. A second
-registration refuses. Its outcome support is prepared over the whole selected
-set and requires every member's admitted inventory, not just members whose
-records the consumer intends to publish. Unsupported inventory preserves
-identity-only evidence rather than treating package isolation or normal
-completion as operation-outcome support. The observation stream has no
-per-subject attribution: each subject's fingerprint retains all identities and
-refusals from that process, alongside its own source/proof and assertion facts.
-A subject's purity override changes neither the process observation's authority
-nor a sibling subject's judgment.
-
-Closing finalizes the capture once and exposes subject-indexed native evidence
-and judgments only after the whole execution's closing validation succeeds.
-The final account retains the declared process and artifact identity, actual
-terminal assertion, and separate observation-completeness and outcome-support
-dispositions. These are neither per-test outcome verdicts nor durable-write
-receipts. Missing registration or terminal disposition, a never-started process,
-failed validation, cancellation or a winning abort exposes no executed subject
-evidence. An ordinarily completed failing test remains compatible with normal
-harness completion; an abnormal process cannot gain supported evidence from an
-earlier passing row or a complete-looking log.
-
-A separate, non-authorizing process account remains available when reusable
-closing refuses. It preserves the registered process and artifact, the supplied
-terminal disposition when present, and observation facts already established by
-finalization, with an explicit unknown or incomplete disposition for work not
-completed. It supplies no reusable subject fingerprint, final applicability
-judgment or transferable producing support. Reading this account performs no
-additional observation and does not continue cancelled work; an account of a
-completed process is not a successful closing or durable-publication receipt.
-
-The singleton and package forms share these lifecycle rules. Each retry owns
-another transaction, frame, selected obligations, attachments and closing seal;
-it neither repairs nor absorbs a prior attempt's evidence. Immutable snapshot
-facts may be shared, but completion or failure of one unit does not seal another.
-A source-drift retry requires a newly observed snapshot. Consumer-wide retry
-selection, package publication gates and outcome aggregation remain the result
-owner's responsibilities. No new runtime-manifest or fingerprint encoding is
-implied by the package form.
+- **subject-scope** — One package-test process covers a nonempty, explicitly
+  selected subject set from one package, fixed before preparation, deduplicated
+  in first request order and owned by the unit. Every executed subject belongs
+  to it, including those for which no reusable record is wanted. Later results
+  or observations cannot define the executed set. Unknown members refuse as a
+  complete batch before producing work. A declared single-subject model refuses
+  a larger set; the package form does not change accepted assertion policy.
+- **process-binding** — One process has one retained-artifact binding, frame,
+  actual environment, exclusively assigned capture and explicit terminal
+  disposition. A second registration refuses. The observation stream has no
+  per-subject attribution: each subject's fingerprint retains all process
+  identities and refusals beside its own source/proof and assertion facts.
+- **outcome-scope** — Outcome support is prepared over the whole selected set
+  and requires every member's admitted inventory, not just published members.
+  Unsupported inventory preserves identity-only evidence; package isolation and
+  normal completion do not establish outcome support. A subject's purity override
+  changes neither process observation authority nor a sibling's judgment.
+- **closing-protocol** — Closing finalizes the capture once and exposes
+  subject-indexed native evidence and judgments only after the whole execution's
+  closing validation succeeds. The final account retains the process and artifact,
+  actual terminal assertion and separate observation-completeness and outcome-support
+  dispositions, not per-test verdicts or durable-write receipts. Missing registration
+  or terminal disposition, a never-started process, failed validation, cancellation
+  or a winning abort exposes no executed subject evidence. An ordinarily completed
+  failing test can complete normally; an abnormal process cannot gain supported
+  evidence from an earlier passing row or complete-looking log.
+- **process-account** — A separate non-authorizing account remains available when
+  reusable closing refuses. It retains the registered process and artifact,
+  supplied terminal disposition and already-established observation facts, with
+  unknown or incomplete dispositions for unfinished work. It supplies no reusable
+  fingerprint, final applicability judgment or transferable producing support.
+  Reading it performs no observation or cancelled work; a completed-process account
+  is not a successful closing or durable-publication receipt.
+- **runtime-failure-finalization** — Finalization records established observation
+  facts before refusing a demonstrated runtime-input span failure. The structured
+  closing failure carries the deciding runtime-input cause; diagnostics are a
+  projection. No finalized subject evidence escapes, while the process account
+  retains the typed guard failure, terminal disposition and attribution. Caller
+  cancellation and a winning abort retain their precedence.
+- **transaction-isolation** — Singleton and package forms share these lifecycle
+  rules. Each retry owns a new transaction, frame, obligations, attachments and
+  closing seal, neither repairing nor absorbing an earlier attempt. Immutable
+  snapshot facts may be shared, but one unit's completion or failure seals no
+  other. A source-drift retry requires a new snapshot. Consumer-wide retry
+  selection, package publication and outcome aggregation remain the owner's
+  responsibilities. The package form implies no new manifest or fingerprint encoding.

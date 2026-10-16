@@ -56,6 +56,8 @@ a second home would mean a second implementation.
 ## Documents
 
 - [evidence.md](evidence.md) — result models, authority and ownership.
+- [implementation-verification.md](implementation-verification.md) — generic
+  implementation claims, dependency identity and checked semantic derivations.
 - [controls.md](controls.md) — control ownership and operation scope.
 - [closure.md](closure.md) — the source closure and its tiers.
 - [guards.md](guards.md) — the guards beside the closure.
@@ -164,6 +166,16 @@ valid nor shown stale by source alone.
 
 ## The contract
 
+The semantic authority of every implementation-dependent claim is governed by
+[implementation-verification.md](implementation-verification.md). Selected content
+identity and semantic justification are separate: no name, flavor, version or
+digest-approval registry establishes implementation behavior. References to
+implementation admission or admission-policy identity identify the applicable
+derivation rules and compatibility judgment, not approval membership. A source
+audit or named implementation summary confers no derived authority without the
+checked derivation that contract requires. Source-only and explicit assertion
+channels retain their own obligations and authority.
+
 **REQ-fresh-verdict** (behavior): gofresh MUST report a subject's stored
 fingerprint as exactly one verdict against the current tree — valid when every
 applicable guard holds over a sound over-approximation of the source closure, so
@@ -237,28 +249,34 @@ purity, result kind, and guard values, their record form the fingerprint's
 (REQ-fresh-fingerprint-record). Empty assertion and proof evidence means the lift was not selected; partial,
 unknown, or internally inconsistent evidence confers no proof.
 
-**REQ-fresh-toolchain-dependencies** (behavior): A fingerprint MUST retain
-the selected standard-library content identity separately from the reported
-toolchain version and the admission-policy identity. The content inventory
-covers a shared standard-library inventory, including packages outside the
-audited admission surface. Every standard node of the subject's actual graph
-agrees with that inventory's source selection or analysis refuses; wildcard
-discovery alone does not establish coverage of explicitly imported packages.
-The inventory deliberately includes unused packages as an over-approximation.
-A known content difference is stale
-even under an explicit purity assertion. Missing historical or current content
-evidence cannot yield validity; concrete source or runtime drift still reports
-stale before an unavailable-dependency answer. Admission-policy movement
-requires re-derivation of dependent memoized facts and prevents lifting a
-closure refusal with an incompatible recorded proof, but does not revoke an
-independent applicable purity assertion. A proof's integrity evidence and its
-prepared outcome-subject identity bind both dependencies. Neither filling a
-missing field nor copying a current dependency beside an old proof or outcome
-establishes producing evidence. Every construction supplies its own dependencies
-to its memos, and producer and checking closure comparisons retain them through
-sibling selection, applicability extension and closing validation. The proof
-compatibility strategy is `gofresh/observation-rta@44`; older proofs remain
-readable without acquiring these dependencies or the new compatibility claim.
+**REQ-fresh-toolchain-dependencies** (behavior): Fingerprints MUST retain and
+judge toolchain dependencies under these distinct obligations:
+
+- **selected-content** — The selected standard-library content identity is
+  separate from the reported toolchain version and inference-policy identity.
+  The shared inventory includes packages outside any particular claim's scope;
+  every standard node of the actual subject graph agrees with its source
+  selection or analysis refuses. Wildcard discovery alone does not establish
+  coverage of explicitly imported packages. Unused packages may be included as
+  a sound over-approximation.
+- **content-drift** — A known content difference is stale even under explicit
+  purity. Missing historical or current content evidence cannot yield validity;
+  concrete source or runtime drift reports stale before unavailable dependencies.
+- **compatibility** — Inference-policy movement requires re-derivation of
+  dependent memoized facts and prevents lifting a closure refusal with an
+  incompatible recorded proof. It does not revoke independent applicable purity.
+- **evidence-binding** — A proof's integrity evidence and prepared outcome-subject
+  identity bind both content and policy dependencies. Filling a missing field or
+  copying a current dependency beside an old proof or outcome establishes no
+  producing evidence.
+- **dependency-propagation** — Every construction supplies its own dependencies
+  to its memos. Producer and checking closure comparisons retain them through
+  sibling selection, applicability extension and closing validation.
+- **historical-authority** — The proof compatibility strategy identifies the
+  semantic rules established under REQ-impl-historical-authority. Historical
+  `gofresh/observation-rta@44` proofs and earlier strategies acquire no generic
+  implementation-verification authority merely by remaining readable or
+  retaining matching dependency identities.
 
 **REQ-fresh-observation-lifecycle** (invariant): Observability proof MUST be selected
 as a producing obligation before execution wherever the declared model needs
@@ -790,7 +808,8 @@ the operation knows it, its position among the operation's units; once per
 operation and memo class, the distinct packages a persistent memo served in
 place of a unit; and, when an operation returns its caller's context error, what
 it persisted before stopping, so a rerun's served set is known. A phase that
-carries a diagnostic — an unaudited toolchain selection, an unavailable
+carries a diagnostic — an unsupported implementation claim with its failed
+premise, an unavailable
 analysis's per-subject provenance, an exhausted analysis budget with the count
 of subjects it left unproven, a listing this build cannot model, what a cancelled
 operation persisted — delivers it on the event's own diagnostic field,

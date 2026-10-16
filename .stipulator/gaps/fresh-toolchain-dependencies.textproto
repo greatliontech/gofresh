@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-toolchain-dependencies"
+reason: "Selected-content drift and evidence-binding examples survive, but approval-policy compatibility and @44 history do not establish new generic checked semantics."
+content_hash: "c10d47d9a824437e93ecb87e8eebf96fda2fc88779c7e9e572f28b753aad2412"
+source_hash: "08591f62d815ebb2db424ac3e9667dc9e014b9d5275a60e1eeddd8c014c62d20"
+lands { manual { condition: "tooling-redesign 5.1w.6: all construction/checking/closing paths retain content and checked policy dependencies without upgrading older approval proofs, while independent purity and guard drift retain precedence" contradicted: true } }

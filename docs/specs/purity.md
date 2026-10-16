@@ -16,14 +16,20 @@ to freshness evaluation, a predicate over subjects, so that a whole-run assertio
 a per-symbol one reduce to the same engine input and gofresh itself never decides
 purity — the mechanism is one, the ways of sourcing it many.
 
-**REQ-purity-override** (behavior): A purity assertion for a subject MUST suppress all
-of that subject's *inferred* unverifiability — both its closure's
-unverifiable-dependence marker and its runtime-input manifest's own blind spots — so a
-subject that only reads a fixed asserted input can reach valid, while every hashable
-guard it still has, the closure hash and the observed-input digest and the toolchain
-and build guards, keeps holding and still stales the result on a real change. An
-explicit external-state declaration is not inferred unverifiability and is never
-suppressed (REQ-external-precedence).
+**REQ-purity-override** (behavior): A purity assertion MUST retain these bounds:
+
+- **inferred-blindspots** — It suppresses the subject's inferred unverifiability,
+  both its closure's unverifiable-dependence marker and its runtime-input
+  manifest's blind spots, so a subject reading a fixed asserted input can reach
+  valid. This remains assertion authority, not a checked implementation claim.
+- **guard-drift** — Every applicable hashable guard still holds: source closure,
+  observed-input digest, selected implementation content, toolchain and build
+  guards continue to stale the result on a real change.
+- **producing-motion** — A demonstrated producing-span mismatch is a guard
+  failure, never an inferred blind spot. Purity cannot rebind a post-run digest
+  to different values consumed by the producing run, even after restoration.
+- **externality** — An explicit external-state declaration is never suppressed;
+  it retains the precedence specified by REQ-external-precedence.
 
 **REQ-purity-directive** (behavior): A durable source directive `//gofresh:pure` on a
 symbol MUST be honored as a purity assertion for that subject by every consumer of the
@@ -146,7 +152,7 @@ Validity needs no comparison over the record: a withdrawn vouch resurfaces the
 culprit in the current derivation and the verdict refuses on its own, while the
 explain surface still derives a vouched variable's chain on request — the vouch
 suppresses the verdict's downgrade, never the derivation a caller audits. The
-single-subject-process attestation (the audited pooling set's
+single-subject-process attestation (the checked pooling claim's
 discharge condition, REQ-closure-shared-dynamic-state-audited-discharges
 in [closure.md](closure.md)) is the same kind of unverifiable caller
 assertion and records under exactly this requirement's

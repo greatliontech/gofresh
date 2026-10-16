@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-independent-check"
+reason: "Existing admitted effect summaries are not independently validated derivations. New checker code being developed has no independently verified binding in this record alignment."
+content_hash: "be21a9146786e539643c8737046984d0fb8334752ebbad58e701c94d8bce6d76"
+source_hash: "3c85a79984aa8e3a1824b2cc73433e6e3eb16935ca5bc48a21cb80d79bb71411"
+lands { manual { condition: "tooling-redesign 5.1w.2: the source vertical checks every proposed inference and bound input independently, then native and observation extensions converge under 5.1w.3/5/6" contradicted: true } }

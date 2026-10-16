@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-toolchain-key"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "2dd11bc5cbf8c6d34fdae0fe3919a3dfc0c7b9129f413ce0bb23c19d8f81d128"
-source_hash: "49b79c6c8cc179ae7f1f0e860c12ca30f657151796ad4949d6a283fe9b12cf81"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Inventory, integrity and cancellation examples remain clause-scoped. Selection-wide approval chains still supply semantic authority; claim-local complete checked derivations, observation premises and rechecking remain unimplemented across existing consumers. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "f364eab4928e40f9b7edb62e717e0e2087537971c35faf534ca205af84660a00"
+source_hash: "6e7bfddbfca0585d1d83c747b8d8a0e67afd1401a86edda5206efb93c95c7c60"
+lands { manual { condition: "tooling-redesign 5.1w.6: the useful checked source/native/observation verticals from 5.1w.2-3/5 retain complete claim identities, premise-local refusals and rechecking across every tier; approval chains and canaries retire in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

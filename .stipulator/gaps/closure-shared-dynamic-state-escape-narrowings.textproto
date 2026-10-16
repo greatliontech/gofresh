@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-shared-dynamic-state-escape-narrowings"
-reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "a4af0c8e320a8d77c02ced47c6e474c32788fbe1985f2fc1845aac48474a6c64"
-source_hash: "f1d2aab759449f20bc25e625bd8e62ea894739f8e27faa45bd6c7c40cd4d2de3"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Immutable errors/fmt/reflect constructions, clone helper value-plane effects and generated test-main registration exclusions retain unchecked implementation summaries; carrier-link examples do not discharge those new premises. Existing independent obligation: invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
+content_hash: "4fffdc5b77a061c6120b40c3134785a64a1e4e18027fbfc7802acaeb3d0ca17e"
+source_hash: "2bd1a41b6c92a77e165e3963f636b7b3e06896edb27000f06828332f144c916b"
+lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

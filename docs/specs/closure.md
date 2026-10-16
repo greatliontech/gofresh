@@ -7,6 +7,16 @@ subject reported valid while source it depends on has changed. This document def
 what the closure covers and how every gap in the static picture is dispositioned so
 the covered set never narrows below the truth.
 
+Implementation claims follow
+[implementation-verification.md](implementation-verification.md). The operation
+families below specify properties and use-site obligations to verify, not
+permission obtained by recognizing a package, declaration, type, version or
+generated-file label. Every positive implementation claim requires a checked
+derivation over its selected implementation, including the subordinate claims
+it uses. A summary may replace walking a body only with that authority.
+Conservative classifications remain available without a positive proof, and
+explicit caller assertions retain their separate authority.
+
 **blind spot** (term): a runtime-reachable code path the static call graph does not
 see — dispatch chosen from runtime data, a computed call, a linked side effect — so
 that trusting the call graph alone would under-cover the closure.
@@ -50,8 +60,10 @@ moves the closure hash even when every function body is byte-identical.
 declarations from the hash while still traversing call edges through them — the
 standard-library dependency is represented by toolchain evidence rather than
 duplicated in every subject's closure. A reported version alone does not
-establish source-content identity: admitted analyses obey
-REQ-fresh-dependency-identities and the selected-content audit. A callback
+establish source-content identity or implementation semantics: analyses obey
+REQ-fresh-dependency-identities and REQ-impl-compositional-derivation. Excluding
+standard declarations from the closure hash does not exclude their dependencies
+from implementation identity or grant a semantic claim about their behavior. A callback
 from a standard-library function back into the subject's own code still stays
 reachable and hashed.
 
@@ -63,22 +75,37 @@ able to affect the subject — so soundness holds by construction, the worst cas
 being the maximal source set and never less, and every precision gain being a
 provably safe shrink rather than an optimistic guess.
 
-**REQ-closure-view-maximal** (behavior): A multi-subject analysis view MUST use the
-maximal selected test-binary closure of each subject's package as its default source
-guard, hashing every non-standard dependency whole — each member by its canonical
-form where REQ-closure-canonical-member affords one, by its bytes otherwise — and salting that package closure
-with the subject identity. The subject package's own test-variant nodes' source
-members are excluded from that core hash: their production members already ride the
-base package's contribution, and their test-only members fold into the test-variant
-compartment instead (REQ-closure-test-variant-hash). Test-only dependency
-nodes — packages reachable only through test imports — remain core contributions
-whole, dependency nodes recompiled against the test binary included, because a new
-package's initialization enters the test binary's behavior. Subjects in one package
-therefore observe the same source set without making fingerprints transferable
-between identities; an unrelated sibling edit may still stale them together — the
-deliberately safe price for analysis whose time and live memory are bounded
-independently of subject count — but a sibling-test edit now stales them through the
-compartment, where a consumer can recognize it, rather than through the core.
+**REQ-closure-view-maximal** (behavior): A multi-subject analysis view MUST
+preserve the source guard separately from implementation refinement:
+
+- **maximal-identity** — The default source guard is the maximal selected
+  test-binary closure of each subject's package, hashing every non-standard
+  dependency whole — each member by its canonical form where
+  REQ-closure-canonical-member affords one, by its bytes otherwise — and salting
+  that package closure with the subject identity. The subject package's own
+  test-variant nodes' source members are excluded from that core hash: their
+  production members already ride the base package's contribution, and their
+  test-only members fold into the test-variant compartment instead
+  (REQ-closure-test-variant-hash). Test-only dependency nodes remain core
+  contributions whole, including dependency nodes recompiled against the test
+  binary, because a new package's initialization enters its behavior. Subjects
+  in one package observe the same source set without making fingerprints
+  transferable between identities. An unrelated sibling edit may still stale
+  them together — the safe price for hashing whose time and live memory are
+  bounded independently of subject count — while a sibling-test edit stales
+  through the compartment rather than the core.
+- **implementation-refinement** — A checked per-subject implementation claim
+  may refine ordinary maximal-tier unverifiability without narrowing or
+  replacing either hash. It identifies the structured blocker and its subject,
+  selected source, startup dependencies and effect scope, and establishes the
+  exact obligation represented by that blocker. Discharge covers only those
+  typed blockers; a diagnostic string, package name or undifferentiated proof
+  bit cannot select them. Every other blocker and applicable guard remains
+  decisive. Nominal Go bodies alone cannot discharge runtime dependences:
+  REQ-impl-build-selection additionally binds the claim to compiler-selected
+  implementations and any intrinsic/fallback dispatch. This refinement grants
+  no observation coverage, delivery, outcome or harness-completion authority,
+  and retains the declared model's machine, timing and termination limits.
 
 **REQ-closure-test-variant-hash** (behavior): A fingerprint MUST record,
 beside the maximal closure, the subject package's test-variant compartment: the
@@ -277,23 +304,26 @@ dispositions, each chosen never to under-cover:
   subject's verdict becomes
   unverifiable, its closure never reported valid on source alone.
 
+A conservative blocker is a candidate for the checked refinement in
+REQ-closure-view-maximal only when its represented obligation is proved
+satisfied. A demonstrated external dependence cannot be dropped merely because
+some reached value computation is verified; unaccounted effects or opaque
+leaves retain their own downgrade.
+
 A blind spot is never left to silently narrow the closure; when no disposition can be
-proven, it widens. At the file-scan floor, a file whose every
-`//go:linkname` directive is the two-argument pull form naming a target
-in the audited linkname-target set — `runtime.getAuxv`,
-`runtime.vgetrandom`, and `syscall.prlimit`, each a read-only standard
-trampoline whose effect class the file's remaining classifications
-already carry — drops exactly the opaque-linkage effect and keeps every
-other effect it bears; a one-argument form, an unparsable directive, or
-an unaudited target keeps the opaque floor, fail-closed; and because a
-`//go:linkname` file necessarily imports `unsafe`, the file's unsafe
-classifications remain as the effect backstop — dropping the opaque
-flag never leaves an audited-linkname file effect-silent. The set
-grows only by source audit. Assembly is never an analysis surface: an
-assembly-bearing mutable-local package contributes its whole directory to the
-hash, a reached non-toolchain assembly-bearing package widens the subject and
-blocks its observability proof, and toolchain assembly rides the toolchain
-guard like every other toolchain source.
+proven, it widens. At the file-scan floor, a two-argument pull-form
+`//go:linkname` identifies a target but proves nothing about its implementation.
+Dropping the opaque-linkage effect requires a checked derivation that resolves
+the selected target and accounts for every claim-relevant effect through it;
+all other effect classifications remain. This obligation applies equally to
+`runtime.getAuxv`, `runtime.vgetrandom`, `syscall.prlimit`, and any other target.
+A one-argument form, unparsable directive or unsupported target retains the
+opaque floor. An assembly-bearing mutable-local package contributes its whole
+directory to the hash, and reached non-toolchain assembly widens the subject
+and blocks its observability proof. Selected toolchain assembly participates
+in implementation dependence identity; hashing it is not a semantic proof.
+Any claim reaching an unsupported opaque leaf refuses under
+REQ-impl-opaque-leaves, including a leaf behind an otherwise analyzed trampoline.
 
 **REQ-closure-shared-dynamic-state** (invariant): A package-level variable able to
 carry dynamic behavior — a function, an interface, a channel of dynamic carriers,
@@ -305,8 +335,8 @@ package graph links the owning package MUST be unverifiable — unless a
 recorded discharge channel of this requirement lifts it: a caller vouch for
 the specific variable (REQ-vouch-discharge in
 [purity.md](purity.md); version-pinned dependencies only, the acceptance
-recorded on the evidence), an audited-set admission (the synchronization,
-pooling, mapping, and memoization sets below), the author's
+recorded on the evidence), a checked implementation discharge (the synchronization,
+pooling, mapping, and memoization claims below), the author's
 `//gofresh:single-subject` variable directive and the generated-proto
 descriptor cluster under the caller's attestation,
 or the reachability judgments — the attestation-scoped per-subject
@@ -338,23 +368,26 @@ maximal-tier scan block, their call sites carrying no
 unsafe-pointer-typed value the walk can price; the non-Go write
 channels — assembly, `//go:linkname`, cgo — MUST remain scan blockers.
 
-**REQ-closure-shared-dynamic-state-atomic** (invariant): The audited atomic transparency governs every carrier walk of this
+**REQ-closure-shared-dynamic-state-atomic** (invariant): Checked atomic transparency governs every carrier walk of this
 judgment — REQ-closure-shared-dynamic-state's trigger, the openness a
 parameter, receiver, or constraint term confers on its subject
 (REQ-closure-analysis), and
 REQ-closure-shared-dynamic-state-mutation-shape's alias-handing read
 judgment: each walk MUST see the toolchain's
-`sync/atomic.Pointer[T]` as `*T`. The ground is a source audit of the
-toolchain's type: its internal unsafe pointer is an implementation
+`sync/atomic.Pointer[T]` as `*T` only when a checked derivation establishes
+the selected implementation's transparency. The required property is that
+its internal unsafe pointer is an implementation
 cell the zero-width `*T` field and the whole method set type-pin to
-`*T`, never an unsafe channel; a shadowing module is a load error (an
+`*T`, never an unsafe channel, including through its native or intrinsic
+operations; a shadowing module is a load error (an
 ambiguous import), so no type-checked program carries a foreign
 `sync/atomic`; a defined wrapper type inherits no methods and its
 cell is reached only through an address conversion the escape rules
 already mark, so it keeps the fail-closed judgment; and a
 dynamic-carrying `*T` still triggers everywhere. One rule at every
-tier, riding the toolchain guard — no attestation, no evidence
-record.
+tier, retaining the derivation's dependencies and authority rather than
+requiring an attestation. An unproved implementation keeps the ordinary unsafe
+carrier classification; type shape or a toolchain guard alone cannot discharge it.
 
 **REQ-closure-shared-dynamic-state-mutation-shape** (invariant): Mutation MUST be judged
 fail-closed by carrier shape. A by-value carrier (a function value, or a struct,
@@ -420,7 +453,8 @@ through or an escape of a tainted value refuses, and only the method's own
 return position hands one out — a return inside a nested function literal is
 an escape position, since the literal outlives the body carrying what it
 captured and no call-site result judgment sees through a signature — and it chains only into sibling methods already proven or into
-the audited synchronization set, a dispatch of an UNEXPORTED method through a
+checked synchronization claims under
+REQ-closure-shared-dynamic-state-audited-discharges, a dispatch of an UNEXPORTED method through a
 receiver-reachable interface value chaining into every in-package
 declaration of that name under the same fixed point (only the package's own
 types can declare it, and a composite promotes one of those declarations;
@@ -437,22 +471,24 @@ declaration of the method (a member promoting it refuses), while any other
 exported dispatch keeps the escape, a composite being able to promote it
 from a foreign type — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
-each hand out no mutable reach or are audited-immutable (reflect.Type,
-runtime-canonical and never written after construction; reflect.TypeOf, its
-pure constructor, admitted with it at the effect classification tiers); a call to any unproven,
+each hand out no mutable reach or have checked immutable-implementation claims
+(for reflect.Type this requires runtime-canonical descriptors never written
+after construction, and for reflect.TypeOf a separately checked pure-constructor
+claim at the effect classification tiers); a call to any unproven,
 unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
 the fail-closed mark.
 
-**REQ-closure-shared-dynamic-state-audited-discharges** (invariant): The audited synchronization set — sync.Mutex and
+**REQ-closure-shared-dynamic-state-audited-discharges** (invariant): A synchronization discharge — sync.Mutex and
 sync.RWMutex with their lock operations, and sync.Once's Do (a done flag
 under a mutex running the caller's own function once, program code judged
 where it is written), receiver-neutral and never
-process-external because lock state cannot change dispatch — is admitted
-identically at the effect classification tiers, and grows only by source
-audit. The audited pooling set — `sync.Pool` with its `Get` and `Put`
-operations — is admitted by source audit at two tiers with two
-distinct grounds. At the effect classification tiers the admission is
-unconditional and receiver-neutral exactly as lock state's: `Get` and
+process-external because lock state cannot change dispatch — MUST require a
+checked derivation of those properties for the selected implementation,
+including its native leaves. The same claim applies identically at the effect
+classification tiers. Pooling — `sync.Pool` with its `Get` and `Put`
+operations — has two distinct claims at two tiers, each requiring its own
+checked derivation. At the effect classification tiers the required claim is
+receiver-neutral and independent of the execution-model assertion: `Get` and
 `Put` touch only process memory fed by the analyzed program, so they
 introduce no external input channel whatever the execution schedule.
 The shared-dynamic-state discharge holds on two grounds. Under the
@@ -478,7 +514,8 @@ engine-proven sibling, admitting the same `Get` and `Put` calls in
 any execution model: the cross-subject channel the attestation
 otherwise closes is the planted value's dispatch plane, so a pool
 whose contents provably carry no dispatch needs no execution model at
-all. A pool is content-proven exactly when its owning package's
+all. Conditional on the checked pooling implementation claims, a pool is
+content-proven exactly when its owning package's
 syntax shows every content source and every use conforming: an
 unexported package-level `sync.Pool` variable — unexported so every
 reference site lies in the owning package's compilation variants,
@@ -512,8 +549,8 @@ switch, or method dispatch can distinguish subject orders; what stays
 order-sensitive is the data plane, which the invariant's type-level
 trigger already leaves out of scope (a mutable data-only package
 variable is never a culprit). Like the memoization set's, this
-discharge is the engine's own verdict, not a caller assertion: it
-needs no attestation and rides no evidence record. An exported pool,
+discharge is the engine's own derived verdict, not a caller assertion: it
+needs no attestation, but retains its checked derivation dependencies. An exported pool,
 an element of a package-level array or slice of `sync.Pool`, and
 every shape the proof cannot see keep the attestation requirement.
 The attestation is part of the persisted fact identity, so
@@ -521,15 +558,15 @@ attested and unattested sessions never serve each other's facts, and a
 load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
 auditable and never silent (REQ-vouch-recorded in
-[purity.md](purity.md)). The set MUST grow only by source audit. The
-audited mapping set — `golang.org/x/sys/unix`'s package-level `mapper`
+[purity.md](purity.md)). Every additional implementation discharge requires the
+same generic checked derivation. The mapping claim —
+`golang.org/x/sys/unix`'s package-level `mapper`
 bookkeeping, written by the mapping calls (`Mmap`, `Munmap`, and their
-variants) — is admitted in any execution model, on the deepened
-source audit and exactly for the audited versions of the
-version-pinned module (v0.8.0, v0.26.0, v0.33.0, v0.40.0, v0.43.0,
-v0.45.0, v0.46.0, v0.47.0 — the per-GOOS declaration split included;
-an unaudited version, later or earlier, refuses fail-closed until its
-source is audited, exactly the memoization set's rule): mapper's
+variants) — is admissible in any execution model only under a checked
+derivation over the selected module and its dependencies, including the
+per-GOOS declaration split and any claim-relevant kernel or native behavior.
+Version pins identify source; they confer no behavioral approval. The required
+properties are that mapper's
 state is
 process-local, fed exclusively by the analyzed program's own mapping
 calls; its callable fields (`mmap`, `munmap`, `mremap`) are written
@@ -537,7 +574,8 @@ only in the variable's declarations, so no schedule can change
 dispatch through the carrier; and its bookkeeping maps each live
 mapping's last-byte address to its data-only byte slice, which hands
 out no dynamic carrier. Cross-subject entries are disjoint while
-their mappings live (the kernel's contract); the raw-pointer paths
+their mappings live, a property that itself requires established semantic
+support rather than an assumed kernel summary; the raw-pointer paths
 (`MunmapPtr`, `MremapPtr`) leave entries stale, and a reissued address could
 then steer `Munmap`'s error-plane outcome by subject order — an
 exposure that is unobservable exactly because any subject able to
@@ -547,13 +585,12 @@ therefore part of this discharge's ground, not merely an adjacent
 fact. The discharge spans the variable's mutation, escape, and
 environment-audit marks alike (the raw callable-field reads the
 `*Ptr` paths take are covered by the init-only-fields leg of the
-audit). Like the memoization set's, the discharge is
-the engine's own source-audited verdict: no attestation, no evidence
-record. It covers exactly the named variable in the
-shared-dynamic-state judgment — a mutable-local checkout keeps every
-mark and every other variable of the module keeps its own judgment.
-The set grows
-only by source audit. The `//gofresh:single-subject` variable
+derivation). Like the memoization claim, the discharge is
+the engine's own derived verdict: no attestation, with complete checked
+dependencies. It covers only variables for which these properties are
+established. A module version or mutable-local origin neither establishes nor
+refutes the claim; missing semantic support retains the marks.
+The `//gofresh:single-subject` variable
 directive is the mapping set's own-code dual: a durable in-source
 directive on a package-level variable declaration — discovered under
 the same build-flag-selected source discipline as `//gofresh:pure`
@@ -575,56 +612,34 @@ variant declaring the variable carries it (a variant without the
 directive keeps every mark, fail-closed), and a load-bearing
 discharge is recorded on the subject's evidence with the
 attestation's other discharges (REQ-vouch-recorded in
-[purity.md](purity.md)). The generated-proto descriptor cluster is the
-directive's generated-file sibling: a package-level variable declared
-in a protoc-generated file of the audited generator set — a
-pre-package comment line reading "Code generated by <generator> ... DO
-NOT EDIT." for exactly protoc-gen-go and protoc-gen-go-grpc, each name
-token-bound so an unaudited prefix-sharing sibling (protoc-gen-gogo)
-never matches — the
-regeneration-stable in-source assertion no hand directive could
-survive regeneration to make — holds the protobuf runtime's build-once
-descriptor state and its lazy message-info memo, content-invariant
-functions of the compiled-in schema audited at the pinned
-google.golang.org/protobuf runtime for protoc-gen-go output and the
-pinned google.golang.org/grpc runtime for protoc-gen-go-grpc output —
-exactly the audited versions (protobuf v1.36.11; grpc v1.82.1): an
-unaudited version, an absent runtime, or a mutable-local checkout
-refuses fail-closed until its source is audited. Under the caller's single-subject
-attestation such a variable's shared-dynamic-state marks discharge,
-own-code and pinned-dependency generated files alike (the header is
-the author's half, the attestation the protocol's half — the
-directive's two-leg trust model applied to the generated idiom). A
-pinned dependency's generated header confers where its hand directive
-would be refused because the soundness rests on the audited pinned
-runtime, not on the dependency author's judgment: the header only
-classifies which variables the runtime carries, an actor forging a
-generated header inside a dependency is a supply-chain-level
-compromise outside this judgment's threat model, and a hand directive
-is a semantic claim only the code's own reviewer can stand behind. A
-load-bearing discharge riding the subject's evidence with the
-attestation's other discharges; a hand-written sibling file's
-variables keep every mark. The audited memoization set —
+[purity.md](purity.md)). The generated-proto descriptor cluster is an
+implementation claim about build-once descriptor state and lazy message-info
+memoization: the stored values are content-invariant functions of the compiled-in
+schema. Discharge requires a checked derivation over the selected generated
+source, its protobuf or gRPC runtime and all subordinate implementation claims,
+together with the caller's single-subject-process assertion. A
+generated-file header, generator name or runtime version is neither an author
+assertion nor a proof. The same derivation rules apply to generated and
+handwritten source, pinned dependencies and mutable-local checkouts. A
+load-bearing execution-model assertion remains recorded with its discharged
+variables; unsupported implementation behavior retains the marks.
+The memoization claim —
 `gopkg.in/yaml.v3`'s `structMap`, a mutex-guarded type-to-structInfo
 cache filled at exactly one site by a pure function of the type
 (field ordering by struct index, no map-iteration order in stored
 data, no options input, values never rewritten after the store) — is
-admitted by source audit for the version-pinned module, exactly
-the audited variable, and exactly the audited versions (v3.0.0 and
-v3.0.1): the audit is a property of those versions' source that no
-other version inherits, so an unaudited version — later or earlier —
-refuses fail-closed until its source is audited. The derivation is
+admissible only when a checked derivation establishes those properties for
+the selected implementation, with no version-approved exception. The required
+property is that the memoized computation is
 content-invariant, so a prior
 subject's population changes timing and internal pointer identity
 that never leave the package's unexported internals, never a
 looked-up value — so the discharge needs no
-execution attestation and rides no evidence record (it is the
-engine's own source-audited verdict, not a caller assertion; the
-pooling set's content proof and the mapping set's deepened audit
-reach the same class by their own grounds). The set
-is the source-audited precursor of a structural get-or-compute
-discharge; its entries retire to that proof when it lands. It grows
-only by source audit. The data memo is that discharge's content-typed
+execution attestation, while retaining checked dependencies (it is the
+engine's own derived verdict, not a caller assertion; pooling and mapping
+reach the same authority class by their own checked grounds). This is a
+structural get-or-compute claim, with every synchronization and implementation
+premise independently justified. The data memo is its content-typed
 form, the engine's own verdict: an unexported package-level variable of
 type sync.Map by value whose every use in its package is the receiver
 of a Load, Store, or LoadOrStore call whose key and value arguments have
@@ -633,17 +648,18 @@ resolving through every direct call site's argument the same way, a
 written, escaped, or uncalled function's parameter, and the trailing
 parameter of a variadic function, refusing —
 never holds a carrier, so it is the data-only variable this invariant
-leaves out and its calls mark nothing, under no attestation and on no
-evidence record; any other use — Range, Delete, Swap, CompareAndSwap,
+leaves out and its calls mark nothing, under no attestation but with the
+checked map implementation claim required below; any other use — Range, Delete, Swap, CompareAndSwap,
 CompareAndDelete, Clear, the address taken, the variable passed, bound, or
 rebound — and an exported or pointer variable keep every mark. At the
-effect classification tiers the audited memo set is sync.Map itself and
+effect classification tiers the memo claim covers sync.Map itself and
 its Load, Store, and LoadOrStore — process-memory reads and writes fed by
-the analyzed program alone, admitted unconditionally exactly as the
-pooling set's Get and Put are, the values stored and produced keeping
+the analyzed program alone, requiring a checked implementation derivation
+independent of execution-model assertions, as the pooling claim does, the values stored and produced keeping
 their own pricing, and a file that merely declares a sync.Map recording no
 effect at the file fold — while the map's other operations keep the
-unaudited fallback at the walks.
+unsupported fallback at the walks unless their own checked claims establish
+the required properties. No method name proves the selected body's effects.
 
 **REQ-closure-shared-dynamic-state-reachability** (invariant): Under the caller-attested single-subject-process
 execution model the shared-dynamic-state judgment MUST additionally scope per subject: the
@@ -717,7 +733,7 @@ carried value — while a callable variable keeps a markless execution
 channel (its call is a tolerated read) and its environment refusal
 never discharges. The inventory is per variable and class-blind: any
 foreclosing mark keeps every rank's refusal for that
-variable. The audited discharge channels
+variable. The checked implementation and explicit assertion discharge channels
 — pooling, mapping, memoization, the vouches, and the
 `//gofresh:single-subject` directive — decide before this scoping and
 are never weakened by it: they remain the channels for state the
@@ -730,7 +746,7 @@ culprit for the subject — records the discharged variables on that
 subject's evidence with the attestation's other discharges,
 canonically and never silently (REQ-vouch-recorded in
 [purity.md](purity.md)): the discharges are attestation-borne exactly
-as the audited sets' are. Under the caller-attested PACKAGE-PROCESS
+as the implementation discharges using that assertion are. Under the caller-attested PACKAGE-PROCESS
 execution model — every process that runs a measured subject is the
 subject package's OWN test binary, under any subject schedule — the
 judgment scopes to the analyzed BINARY instead: the multi-subject
@@ -783,10 +799,11 @@ the escape class alone (the escape marks
 REQ-closure-shared-dynamic-state-mutation-shape defines): an
 interface-typed variable is object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
-package — is a provably-immutable audited construction (`errors.New`; any
-value of static type `reflect.Type` whatever expression produced it — the
-interface is sealed by unexported methods, so its every referent is the
-runtime's canonical type descriptor, never written after construction, a
+package — is a construction with a checked immutability derivation
+(`errors.New`; a value of static type `reflect.Type` only when the selected
+implementation proves every possible referent is a runtime-canonical type
+descriptor never written after construction — the interface's unexported
+methods alone do not prove this — a
 `reflect.TypeOf` result, a chained view method's result, and a rebind from
 another descriptor alike, the producing expression's operands keeping their
 own pricing at the use walks;
@@ -813,11 +830,12 @@ an object-closed value can mutate the shared object, so escapes of the value are
 not mutation, while rebinding the variable remains mutation everywhere; the
 discharge extends to method calls and method-value binds through the
 variable, because every admissible referent's method set is read-only over
-immutable data by the same source audit (`errorString` and the fmt wrap
+immutable data by the same checked derivation (`errorString` and the fmt wrap
 errors' `Error` and `Unwrap`, the runtime type descriptors' view methods), a
 constant-boxed referent dispatches value-receiver copies that cannot reach
 the box, and a nil referent panics before writing. The
-audited-construction set grows only by source audit. An escape MUST NOT
+construction claim requires checked implementation evidence at every new
+selection; a familiar type or constructor name supplies none. An escape MUST NOT
 discharge by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
 rules; `init` bodies and qualified helpers are scanned exactly for
@@ -968,12 +986,12 @@ it was handed instead of deferring — a parameter handed onward to a
 plain named callee chaining through that callee's own insertion fact,
 and a capture-broken component poisoning the parameter outright —
 absence is poison, fail-closed. A caller's plain-named call to an
-unaudited callee (audited value-plane helpers are proven non-mutating
-and classify nothing) classifies every argument by the write path its
+callee without a checked value-plane claim (a checked non-mutating helper
+claim can discharge only the effects it proves absent) classifies every argument by the write path its
 value hands the callee, gating on the value's OWN type — a value
 handing no mutable reach copies, so element reads, copied function
 values, and fresh-and-copying derivations (make and new, append and
-audited value-plane clones whose container elements hand no reach,
+value-plane clones with checked copying claims whose container elements hand no reach,
 conversions of clean operands) classify nothing: a tracked
 chain-rooted argument whose value hands out mutable reach defers over
 a conditional edge naming the callee's parameter key, resolved with
@@ -1037,10 +1055,10 @@ derivation edges judging by its external sources and stores alone —
 recirculation contributes no new values — an append
 of judged elements (an append onto the binding itself flowing only the
 new elements), a conversion of a judged value, an instantiated
-reference of a named function, a call of an audited value-plane
-standard helper with judged arguments — slices.Clone, slices.Concat,
-and maps.Clone, a closed set whose results carry exactly their
-arguments' values — and a call of a plain named callee with
+reference of a named function, a call of a value-plane helper with judged
+arguments and a checked claim that its results carry exactly those arguments'
+values — slices.Clone, slices.Concat and maps.Clone require this same
+implementation proof, including their copying and native dependencies — and a call of a plain named callee with
 judged arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
@@ -1082,8 +1100,8 @@ composite-literal operand addressing fresh storage whose embedded
 tracked reach the bind link carries in bind position and the
 returned-literal audit in return position, while in argument position
 the embedded tracked names break — the callee holds a write path into
-their backing the population sweep never sees; audited value-plane
-callees, proven non-mutating, keep the exemption; builtin callees are
+their backing the population sweep never sees; value-plane
+callees with checked non-mutation claims keep that scoped exemption; builtin callees are
 likewise exempt, append and copy never holding the argument beyond the
 call, their destinations covered by the bind link and the copy
 target-break — the implicit
@@ -1134,10 +1152,12 @@ are. Function bodies nested in package-level declarations,
 in `init` bodies, or in qualified helpers are program code, not initialization;
 non-Go writes need no rule here — packages built with cgo or
 assembly sources are already downgraded whole by the native-code and linkage
-blind-spot dispositions. The toolchain-generated test-main package is startup
-scaffolding, not an analysis surface: its registration tables contribute neither
-declarations nor mutations, the same disposition REQ-closure-analysis gives its
-registration initializer. A dynamic-capable variable the program never
+blind-spot dispositions. The toolchain-generated test-main package's registration
+tables may be excluded from this mutation judgment only under a checked
+scaffolding claim that they introduce no relevant mutation or dispatch channel
+beyond the declared harness model. Their implementation dependencies remain
+covered, as REQ-closure-analysis requires for its registration initializer.
+A dynamic-capable variable the program never
 mutates under these rules is ordinary source — the closure hashes its initializer like any
 declaration — and confers no downgrade; the unconditional type-level blanket would
 refuse verifiability to nearly every real program, since hook-typed package
@@ -1178,16 +1198,12 @@ conferring term — the first type parameter, receiver, or parameter whose type
 carries dynamic reach under REQ-closure-analysis's openness rule — and its
 channel: bounding that type away from dynamic carriers, or the purity
 responsibility; the term is the persisted open-world fact itself, so an open
-subject without its term is unrepresentable. Under an unaudited
-toolchain selection every tier refusal — the closure tier, the observability
-tier, signature dynamism, shared dynamic state — carries the selection's owned
-attribution, the degraded axis, appended at the tier's own composition: a
-statement that the judgment ran with the standard-library admissions disabled,
-never a promise that walking the selection lifts it (a network reach refuses
-under every selection; whether a refusal survives the walk is the walk's
-answer); an author's external declaration and an ambiguous identity carry none,
-being no degraded judgment. The reached operation, the conferring term, the
-channel, and the attributed axis are the contract; the spellings are
+subject without its term is unrepresentable. A refusal depending on an
+unsupported implementation claim carries that claim's failed premise and
+dependency path under REQ-impl-claim-refusal. It does not attribute unrelated
+refusals to a global disabled-admission state. An author's external declaration
+and an ambiguous identity are their own causes. The reached operation, the
+conferring term, the channel, and the attributed premise are the contract; the spellings are
 illustrative.
 
 ## Analysis requirements
@@ -1197,8 +1213,12 @@ whole-program SSA with standard-library bodies present and generic instantiation
 materialized, and root the reachability walk at the subject, every linked source
 package initializer, and — for a subject that executes through the test harness (one
 declared in a test file) — the user-defined test main. The toolchain-generated test
-main's registration initializer is not a source initializer and does not root every
-alternative test or benchmark into a caller-selected subject. Standard-library
+main's registration initializer does not by itself root every alternative test
+or benchmark into a caller-selected subject. Excluding those roots requires the
+declared execution scope and a checked claim that the selected harness and
+generated registration implementation preserve it. Generated scaffolding
+remains an implementation dependency even where it is not an ordinary source
+initializer. Standard-library
 bodies remain present so a user method dispatched inside a
 standard-library function stays visible, generics materialized so each instantiation
 dispatches concretely, initializer roots included so a concrete type registered in
@@ -1233,7 +1253,7 @@ its type set away from dynamic carriers — methodless, with at least one
 bounding element whose every term is free of dynamic reach under the same
 carrier rule ordinary parameters answer to (interface, function, and
 unsafe reach open; a channel opens exactly when its element does; the
-toolchain's `sync/atomic.Pointer[T]` reads as `*T` under the audited
+toolchain's `sync/atomic.Pointer[T]` reads as `*T` only under the checked
 atomic transparency, REQ-closure-shared-dynamic-state-atomic);
 `any` and `comparable` bound nothing — closes
 the caller's choice, anything else keeps the subject open-world,
@@ -1316,17 +1336,18 @@ build selection, and subject attribution of REQ-closure-analysis, and preserves
 root provenance: any external effect attributable to a package initializer
 rather than the subject is outside subject-time observation and blocks the
 proof, while subject flow is classified against the admitted observation
-set. User test-main flow classifies within subject-time observation: the
-test log installs in the toolchain-generated test-main package's
-initializer — after every dependency initializer and before the user test
-main — so a user test-main read is a bracketed observation input, admitted
+set. Classifying user test-main flow within subject-time observation requires
+a checked derivation that the selected test log installs in the generated
+test-main initializer, after every dependency initializer and before the user
+test main, and remains effective through every covered phase. Under that
+premise a user test-main read is a bracketed observation input, admitted
 per effect through the same per-site observation admissions subject flow
 answers to, with a blocking test-main effect refusing under its own
-reason. The canonical test-main epilogue `os.Exit` is harness protocol,
-not an effect: it runs post-bracket and adds no input channel to any
-subject's execution (an exit before the harness run means no measurement
-ever runs — an execution condition, not an observability leak). The
-benchmark harness's pacing is harness protocol likewise: the iteration count
+reason. The canonical test-main epilogue `os.Exit` can be treated as harness
+protocol only under a checked claim that it runs post-bracket and adds no
+input channel or lost required observation. An exit before the harness run
+supplies no subject execution or completion evidence. The benchmark harness's
+pacing likewise requires a checked protocol claim: the iteration count
 `b.N`, the `b.Loop` protocol, and the timer controls (ResetTimer, StartTimer,
 StopTimer) are the harness's own — the count derived from its flags and its
 previous iteration's timing, the controls moving only its clock and allocation
@@ -1337,16 +1358,17 @@ caller sets deliberately, never a guard of this engine's
 (REQ-guard-machine-transient's principle in [guards.md](guards.md)) — an
 obligation on every consumer serving measurement results: its recording
 identity carries the pacing flags, or a benchmark whose outcome branches on the
-count is served across a flag change; they are admitted harness facts, the file fold
-recording nothing for them and the walk alone recording the fact — an audited
-harness call is no purity evidence — without descending into the harness body,
+count is served across a flag change. Conditional on that declared result model
+and the checked implementation claim, they are harness facts, the file fold
+recording nothing for them and the walk retaining the claim — a harness
+protocol claim is no purity evidence. A checked summary can replace descent
+into the harness body,
 while every other benchmark surface keeps its class: Elapsed and RunParallel
 their test-runtime classification, and the harness's remaining surface
-(ReportMetric, ReportAllocs, SetBytes) the fallback exemption every testing
-symbol has, recording nothing while its body is walked. The
-observed walk admits it throughout user test-main flow — helpers
-included, since an exit anywhere in that flow means the harness
-protocol ended or never ran a measurement — while the package-scan
+(ReportMetric, ReportAllocs, SetBytes) requires body analysis or its own
+checked summary, never a package-wide exemption. The observed walk can apply
+the exit protocol claim throughout user test-main flow, helpers included,
+only where its completion and delivery premises hold, while the package-scan
 backstop scopes its admission to the syntactic `TestMain(*testing.M)`
 declaration, the conservative direction for text the scan cannot
 attribute to flow.
@@ -1354,9 +1376,10 @@ attribute to flow.
 **REQ-closure-outcome-inventory** (invariant): Analysis MUST distinguish an
 observable effect set from a set whose operation outcomes have an admitted
 derivation. The `gofresh/immutable-environment@1` derivation is available only
-under an audited Linux toolchain selection when the observability proof succeeds
+when checked implementation claims establish its semantics under the actual
+selected build and the observability proof succeeds
 and every external input effect in subject and user test-main flow is an admitted
-`os.Getenv` or `os.LookupEnv` operation, including the empty effect set. Audited
+`os.Getenv` or `os.LookupEnv` operation, including the empty effect set. Checked
 harness logging, benchmark pacing and closed subtest execution retain their
 existing protocol meaning; they do not introduce an external input outcome, and
 their user callbacks remain subject to the same complete effect judgment.
@@ -1368,8 +1391,10 @@ that the analyzed subjects actually executed under the supplied environment;
 construction still owes those premises and the complete contributing-subject set.
 The derivation assumes the complete inherited environment is held unchanged for
 the contributing execution, including initialization, cleanup and concurrent
-contributors; the return value and presence bit then follow from the audited
-process-local lookup semantics. A positive observation admission alone, an empty
+contributors; a separate checked derivation must establish that return values
+and presence bits follow from that complete environment, with no additional
+unaccounted initialization, synchronization or native input. Neither Linux nor
+any other platform name establishes these semantics. A positive observation admission alone, an empty
 identity log, a purity assertion, or a missing cached inventory cannot supply
 the derivation. Warm and cold analysis report the same inventory, and its method
 identity participates in analysis compatibility.
@@ -1391,13 +1416,13 @@ blank spellings record the effect outright —
 structural findings, mutations, and every classification not expressly
 down-ranked (standard input, network, plugin, native, linkage included)
 rank top; then the generic file read; then ambient formatting and
-environment; then the unaudited and test-runtime classifications; the
+environment; then the unsupported-implementation and test-runtime classifications; the
 legacy projection alone adds one weakest stratum below all of these, the
-audited harness fact — with the refusal's ties resolved by the effect
+checked harness fact — with the refusal's ties resolved by the effect
 projection's total order and the legacy projection's ties resolved
 lexicographically on the reason text, so both diagnostics are
 deterministic and causal-first. A complete maximal-tier negative scan
-may reject opaque linkage, native code, process execution, dot imports, unaudited
+may reject opaque linkage, native code, process execution, dot imports, unsupported
 standard-library access, or other unclassified external-capable syntax, but can never
 grant the proof on its own.
 
@@ -1416,141 +1441,105 @@ or string is a testlog-invisible read. The SSA builder's internal iterator
 and deferred-call stack handles are lowering tokens, not source unsafe
 values; their source operands and callbacks remain independently judged.
 
-**REQ-closure-observability-audited-set** (invariant): The audited-pure standard set — packages and named
-operations through which every ambient effect MUST enter via a flagged
-constructor or global of an effect-bearing package, adding no
-testlog-invisible input channel of their own and no machine-variant
-results (fmt's Sprint family included: argument methods stay visible to
-reachability; math/big included whole — software arbitrary-precision
-arithmetic over its operands, the CPU-selected kernels computing
-bit-identical integer results, its only state invisible memoization and
-scratch pooling, its only entropy the caller's *rand.Rand or a
-value-seeded source, and its two reaches into math — a Log2 that only sizes
-a conversion buffer whose content is invariant, and a correctly-rounded Sqrt
-seeding a Newton iteration — leave every result invariant, so the
-math-family exclusion's CPU-dispatch rationale does not reach it;
-time's fixed-argument construction and value computation included —
-Date, FixedZone, ParseDuration, and the calendar, clock-field,
-zone-accessor (In, Zone, ZoneBounds), rounding (Round, Truncate, IsZero),
-formatting, comparison, and duration operations over Time, Duration,
-Month, and Weekday values, none of the operations named here reading the
-clock, the local zone, or the exported time.UTC variable: the ambient
-channels enter only through
-Now, Since, Until, and the timers (the clock), Local, the Unix constructors
-(which install the local zone on the value they construct), and the
-loading constructors (the local zone and the zone database), Parse (which
-consults Local for zone abbreviations) — all of which stay refused,
-time.UTC being an exported mutable variable that refuses like any other
-where program code names it; the admission is by bare name at the fold,
-which sees no method call, so a name shared by a pure declaration and an
-ambient one — After, Local, UTC, Unix, UnixMilli, UnixMicro, Location,
-AddDate — is excluded there whole, while the walk tiers, which know the
-callee's receiver, admit the pure method form the receiver distinguishes
-— its method value alike, the bound wrapper declaring the method it
-delegates to and judged as that method at the enumerated-target arm, its
-own body never walked: (Time).After,
-(Time).Unix, (Time).UnixMilli, (Time).UnixMicro, (Time).UTC (the unexported
-UTC location, never the variable), and (Time).AddDate, which re-enters Date
-through its own standard-internal Location call — the exported variable's
-value being the runtime's constant in every admitted program, since only
-program code spelling time.UTC can assign it and that spelling refuses at
-the fold over every compiled Go and cgo file of the subject's non-standard
-dependency and test listing (the audited property-harness modules and the
-generated test main excepted), a time.UTC spelling anywhere in that listing
-blocking the package's every subject as an unaudited-standard effect the
-package-scan backstop never carves out; an admitted method also hands out no
-pointer into package time's own state, so (Time).Location stays refused —
-for a location-less Time it returns the exported variable's value, the
-address of the package's own UTC location, a store through which no tier
-sees — and (Time).Local stays refused, installing the local zone on its
-result; net/url's
-escaping and composition included by symbol — QueryEscape, QueryUnescape,
-PathEscape, PathUnescape, User, UserPassword, the URL, Values, Userinfo, Error,
-EscapeError, and InvalidHostError type names, and the value methods of URL,
-Values, Userinfo, and the error types — string computation over their operands,
-so the always-external rule over the net tree exempts net/url alone, while every
-operation reaching the package's two GODEBUG settings stays refused — Parse,
-ParseRequestURI, ParseQuery, JoinPath, (URL).Parse, (URL).Query,
-(URL).UnmarshalBinary — because a setting is read through the runtime's debug
-registry, an input no code-result guard pins (REQ-guard-runtimeconfig in
-[guards.md](guards.md) bears on timing results alone) and one that a
-sibling's Setenv moves in-process, exactly the channel that excludes
-encoding/gob; path/filepath's lexical operations included by symbol — Clean,
-IsLocal, Localize, ToSlash, FromSlash, SplitList, Split, Join, Ext, IsAbs, Rel,
-Base, Dir, VolumeName, Match, the deprecated HasPrefix, the Separator and
-ListSeparator constants, and the WalkFunc type name — each a string computation
-over its operands and the build-selected GOOS, while Abs (the working
-directory), EvalSymlinks, Glob, Walk, and WalkDir (the filesystem) stay refused
-and the package's exported error variables refuse as unaudited selectors at the
-file fold, which composes every reached package's scan; crypto/rand's
-operations — Read and Text reading the kernel's entropy directly, Prime
-through a reader the toolchain ignores since Go 1.26 unless a GODEBUG setting
-says otherwise, Int through the reader it is given, an operand no read-side
-admission proves — are the entropy class in the one classification table both
-tiers consult, an external system call named as such (an input no guard pins
-and no bracket records, never observable), the exported Reader refusing as an
-unaudited selector at the file fold, flag's CommandLine the one exported
-mutable variable an audited symbol row admits (REQ-closure-observability-flag-registration: every channel it carries is a method refused by name, and
-the walk's standard-global arm refuses its subject-time read), and the
-unseeded math/rand sources keeping
-the unaudited fallback at both tiers until their own audit — the fold binding
-an unnamed import to its path's last element and, past a trailing
-major-version element, additionally to the element before it (the identifier
-the toolchain's package clause declares for every importable standard package)
-where no import binds that name and no second import derives it, so
-math/rand/v2's selectors resolve there while an API-version directory's v1 and
-v2 stay their own names — an explicit alias binding over either derived name
-and a derived last element over a derived version-stripped name, a lower tier
-never displacing a higher — and refusing a file whose imports bind one
-identifier within a tier, a clash this tier cannot tell from the one the
-language forbids since a package's declared name is not its to know, two
-derived version-element last elements excepted since their identifiers live on
-their secondaries — the walk's
-standard-global arm covers every standard package's exported variable and is
-the sole guard for the packages admitted whole, whose selectors the fold admits
-(io.EOF's shape); execution-free references
-included: an audited type or constant name — fmt.Stringer, time.Time,
-time.Month, time.Duration, time.Weekday and their constants, time's
-layout constants — declares or denotes and executes nothing, every dispatch through a
-value of such a type classified at its own site, and the pure value
-methods sharing an audited name admitted with it). The set is deliberately bounded by two exclusions that
-are soundness, not caution, each stated as its own contract below
+**REQ-closure-observability-audited-set** (invariant): A value-computation
+claim MUST establish that every ambient effect enters through an independently
+classified operand, constructor or global, with no unaccounted observation
+channel or machine-variant result. It requires a checked derivation over the
+selected implementation, not membership in a package or symbol set. The same
+claim and its dependencies govern the file fold and precise walks; a fold
+unable to resolve the declaration or discharge a premise cannot grant it.
+The following families state the properties such derivations must establish:
+
+- Formatting, including fmt's Sprint family, computes from its operands;
+  argument methods remain visible to reachability and independently classified.
+- Arithmetic such as math/big must establish result invariance across any
+  CPU-selected kernels, including relevant native implementations. Memoization
+  and scratch pooling must not introduce an observable input channel. Supplied
+  random sources retain their own input obligations. Any use of approximate
+  arithmetic, such as buffer sizing or iteration seeding, must be shown unable
+  to change the claimed result. A package name does not prove bit-identical
+  kernels or make a native leaf transparent.
+- Fixed-argument time computation, including Date, FixedZone, ParseDuration,
+  calendar and clock-field accessors, zone views, rounding, formatting,
+  comparison and duration arithmetic, must establish dependence only on its
+  arguments and guarded implementation inputs. Clock reads, local-zone state,
+  zone-database loads and mutable exported globals retain their effects.
+  Method and package-function forms such as After, UTC, Unix, Location and
+  AddDate are judged by the selected declaration and receiver, not shared
+  spelling. A claim relying on time.UTC stability must cover every write or
+  escaping alias in the analyzed program, including harness and generated
+  code. A location accessor that hands out mutable package state cannot inherit
+  a value-computation claim. A bound method wrapper needs a checked delegation
+  argument as well as the target's claim.
+- URL escaping and composition, including QueryEscape, QueryUnescape,
+  PathEscape, PathUnescape, User, UserPassword and the URL, Values and Userinfo
+  value operations, must establish string computation over operands alone.
+  Parse, ParseRequestURI, ParseQuery, JoinPath and methods that consult runtime
+  debug settings retain that dependence unless separately guarded or discharged.
+  Importing net/url does not grant a blanket exception to external-effect
+  classification, and a code result does not acquire a measurement-only
+  runtime-configuration guard (REQ-guard-runtime-relevance).
+- Lexical filepath operations, including Clean, IsLocal, Localize, ToSlash,
+  FromSlash, SplitList, Split, Join, Ext, IsAbs, Rel, Base, Dir, VolumeName,
+  Match and HasPrefix, must establish computation over operands and the selected
+  platform alone. Working-directory and filesystem operations such as Abs,
+  EvalSymlinks, Glob, Walk and WalkDir keep their own input obligations.
+- Encoding operations such as base32 and base64 must establish computation
+  over supplied data; io-interface wrappers retain the effects of their
+  concrete operands, and exported encoding variables require state analysis.
+
+Entropy operations, including crypto/rand's Read, Text, Prime and Int and
+unseeded math/rand sources, retain their input classification unless a checked
+claim accounts for every relevant source. A supplied reader, familiar API name
+or reported Go release does not prove which source the implementation uses.
+Mutable exported globals, including Reader, io.EOF-shaped variables and
+flag.CommandLine, require their own state judgment; the registration claim in
+REQ-closure-observability-flag-registration is not a global-read exemption.
+
+A reference to a type or constant can be execution-free under language
+semantics once its declaration and use are resolved. It supplies no claim about
+a method with the same name or dispatch through a value of that type.
+Import bindings come from the selected package declarations; a name heuristic
+may conservatively flag an effect but cannot authorize a positive claim.
+Reflection and registration retain the additional obligations below
 (REQ-closure-observability-reflect-exclusion and
 REQ-closure-observability-flag-registration).
 
-**REQ-closure-observability-reflect-exclusion** (invariant): reflect defeats static
-reachability itself, so only its invoke-nothing members MUST be admitted to
-the audited set (REQ-closure-observability-audited-set) —
-the runtime-type set; the descriptor-view surface of Type — Kind, Name,
+**REQ-closure-observability-reflect-exclusion** (invariant): Reflection can defeat
+static reachability itself, so an invoke-nothing claim MUST establish both
+absence of hidden dispatch and the required state/effect bounds under
+REQ-closure-observability-audited-set. Candidate properties include immutable
+runtime-type views and the descriptor-view surface of Type — Kind, Name,
 String, PkgPath, Size, Align, FieldAlign, Bits, NumField, Field,
 FieldByIndex, FieldByName, FieldByNameFunc (its callback resolved by the
 enumeration at reflect's own match site whether constant or loaded, a
 constant scanned as an operand besides — classified either way), NumMethod,
 Len, NumIn, NumOut, In, Out,
 IsVariadic, ChanDir, Comparable, Implements, AssignableTo, ConvertibleTo,
-CanSeq, CanSeq2, and the Overflow queries, with Key admitted where the walk
-sees the descriptor's own receiver (its bare name a live iteration read's
-too) — with the Kind and ChanDir constants, the StructField and StructTag
-shapes with Get and Lookup, and every declaration in reflect sharing an
-admitted name (the Value members, the two constants' String, StructTag's
-Get and Lookup, the unexported descriptor forms), each a read of the
-descriptor or of the memory its operand pins; the Elem accessors, admitted by the shared name
-((Type).Elem a read of the runtime's canonical descriptor, (Value).Elem a
-dereference of the interface words or the pointer its operand pins, each
-panicking on any other kind, a Value's every producer keeping its own
-refusal); and the structural comparator DeepEqual, which
-performs no method call and compares function values by nil-ness alone —
-while Method and MethodByName (they build callable Values: the
+CanSeq, CanSeq2, and the Overflow queries, with Key judged against the
+descriptor's actual receiver — with the Kind and ChanDir constants, the
+StructField and StructTag shapes with Get and Lookup. Each declaration needs
+its own checked claim, including Value members, String methods and unexported
+descriptor forms; a shared name transfers no authority. The required property
+is a read of the descriptor or of the memory its operand pins. For the Elem
+accessors, the required claims are a canonical-descriptor read for (Type).Elem
+and a dereference of operand-pinned interface words or pointers for (Value).Elem,
+with the exceptional kind cases accounted for and every Value producer retaining
+its own judgment. For DeepEqual, the required claim excludes hidden method
+calls and compares function values by nil-ness alone. Method and MethodByName
+(they build callable Values: the
 reflective-dispatch channel, with the Call family and MakeFunc), the Value
 producers, the address results Pointer and UnsafePointer with the two Kind
 constants sharing those names (and the deprecated Ptr), and the hand-out
-Interface and Slice stay refused, each by its name.
+Interface and Slice retain their conservative refusals. Merely recognizing
+one of these names is never evidence that the selected implementation lacks
+another effect, and an unsupported native descriptor operation blocks the claim.
 
 **REQ-closure-observability-flag-registration** (invariant): Registration-shaped covert channels — flag registration returns
 pointers whose values change at Parse, and gob registration mutates a
 package-global type registry a sibling subject's decode can depend on —
-are channels the testlog cannot audit. The registration WRITE itself MUST be
-tier-scoped: standard flag registration through the value and pointer
+are channels an identity log alone cannot justify. The registration WRITE itself MUST be
+tier-scoped and conditional on a checked implementation claim: standard flag registration through the value and pointer
 families (Bool through Duration and their *Var forms) reached in
 startup or user test-main flow is a process-local registry mutation
 admitted by those walks and by the package-scan backstop — the
@@ -1586,19 +1575,20 @@ did not attribute — a frame the object drain scans for a referenced
 initializer's content — the operand's functions resolve the site by
 themselves when every one is analyzed content of a package whose bodies
 this walk scans — first-party and indexed, neither standard, nor a
-dependency, nor the generated test main, nor the audited harness — each
+dependency, nor the generated test main, nor a summarized harness — each
 such body being scanned by the walk's own rule for the closures it meets; a
-held function of any other class keeps the computed-call refusal. The FlagSet forms are audited symbols in
-the one table every tier consults — CommandLine, NewFlagSet, the
+held function of any other class keeps the computed-call refusal. The FlagSet
+forms identify claims every tier must judge consistently — CommandLine, NewFlagSet, the
 FlagSet, Flag, Value, Getter, and ErrorHandling names, and the
 ContinueOnError, ExitOnError, and PanicOnError constants — so a
 method-form registration on the default set or on a set any flow
-constructs rides the same sink judgment through its receiver argument,
-constructing a set is an allocation in every flow, a startup-flow
+constructs rides the same sink judgment through its receiver argument, provided
+the selected implementation's checked claim establishes that constructing
+a set is an allocation with no additional effect in every covered flow. A startup-flow
 replacement of the default set adds no channel (the storage judgment is
-per registration call, set-blind), and the ErrorHandling name admits
-the accessor of the same name by bare-name collision (its field is
-written only at construction and by Init, which refuses); a
+per registration call, set-blind), and the ErrorHandling accessor requires
+its own checked claim that its field is written only at construction and by
+Init, which refuses; a
 subject-time read of CommandLine keeps the standard-global refusal, and
 every other flag name keeps its class in every flow — Parse, Parsed,
 Lookup, Set, Args, NArg, Arg, NFlag, Visit, VisitAll, PrintDefaults,
@@ -1627,13 +1617,15 @@ stored into a standard variable is never proven (the standard bodies
 load it unscanned), and every other shape keeps the mark-and-poison
 judgment.
 
-**REQ-closure-observability-writer-sink** (invariant): One admission in the audited set
+**REQ-closure-observability-writer-sink** (invariant): One value-computation claim
 (REQ-closure-observability-audited-set) is operand-sensitive: fmt's
 writer-first print family (Fprint, Fprintf, Fprintln) MUST be
-Sprint-equivalent value computation exactly when the writer
-operand provably pins every dynamic type it can carry to an audited
-in-memory sink — `*bytes.Buffer` or `*strings.Builder`, whose write appends
-to process memory and acquires nothing ambient — judged by a closed-value
+Sprint-equivalent value computation only when checked formatting semantics hold
+and the writer
+operand provably pins every dynamic type it can carry to a sink with a checked
+in-memory-write claim — including `*bytes.Buffer` or `*strings.Builder` only
+when the selected implementation proves that writes append to process memory
+and acquire nothing ambient — judged by a closed-value
 walk under the dispatch admissions' discipline: the pinning MakeInterface's
 concrete type decides, subject-attributed parameter crossing included, and
 startup flow, carrying no subject attribution, closes locally constructed
@@ -1643,183 +1635,114 @@ any mixed or enumeration-refused provenance) — keeps the formatted-output
 classification, while a concrete `*bytes.Buffer`/`*strings.Builder`
 expression pins regardless of which instance it denotes (which instance
 receives the bytes never changes which write runs — the footing a direct
-write on the audited type already has), a dynamically reached Fprint keeps it
+write with the same checked receiver claim already has), a dynamically reached Fprint keeps it
 regardless of site arguments (they belong to the dynamic signature, not
 fmt's shape), and the maximal scan's package-level Fprint finding, blind to
 operands, narrows to a diagnostic so the writer-sensitive tiers decide.
 
-**REQ-closure-observability-toolchain-key** (invariant): Widening the
-audited set changes proof semantics and rides the strategy-version bump like
-any other proof change. Every toolchain-source admission — the audited-pure
-package set (encoding/base32 a member alongside base64, audited on the same
-terms: single-file value computation, io-interface-only wrappers, exported
-Encoding variables never mutated in-package), the class-B operations, the
-sync/pool/reflect symbols, the atomic transparency, the harness channels,
-the writer-sink family, and the linkname-target floor — MUST be keyed to the
-CONTENT the admissions were audited over: per audited surface package, a
-digest of the files the build selects for it under the analysis' effective
-selection, as found in the GOROOT in use; a listing is a row of digests
-labelled by the version it was listed over, and an admission answers true
-exactly when one row's chain lists every surface key's running digest. The
-audit is a property of
-specific standard-library source: no other source inherits a proof, and a
-toolchain whose surface carries a digest no chain lists keeps every symbol's
-ordinary fail-closed classification, refusing loudly and naming the keys
-that moved off the closest row (bounded, the rest counted) — the direction
-that makes an unaudited standard library refuse instead of silently
-inheriting a stale admission, exactly as the version-gated third-party
-harness audit and the version-pinned module audits already behave — while
-a rebuild of identical source admits by equality whatever its version
-string says: an experiment selecting no different file, a vendor flavor
-whose patches the selection does not select, a distro build, a point
-release off the audited surface. The surface is DERIVED, never hand-listed:
-the union of every admission table's standard packages (the linkname-target
-floor's runtime and syscall among them), the packages the go command links
-without any dependency naming them (the detectors' runtimes), and every
-standard package they reach through the listing's dependencies and imports,
-transitively, with no exclusion (the cgo bridge among them, wherever a
-dependency links it) — the implementation packages an
-audited body's behaviour rests on at any depth, and the runtime every
-admission compiles against, where a vendor fork's hooks live — so a table
-added without its package joining the key is unrepresentable, a runtime
-patch moves the key, and an over-wide surface only refuses more; a table
-package that is a version-pinned module's (its own audit keys it) is
-outside the toolchain's surface, and so is the toolchain's code generation
-by premise (the compiler's intrinsics and instrumentation passes, the
-linker: the admissions are judged over source semantics as the language
-specifies them, and a miscompiling toolchain invalidates every proof, not
-the admissions alone). Keys are judged per row chain: a root row lists the
-whole surface, a delta row the keys that differ from its base row's chain
-— a point release, a vendor build's hooks, another platform's split files,
-a build selection's seams (the files the race selection moves —
-internal/race's instrumentation, sync/atomic's assembly, the runtime's, its
-sys delegate's and runtime/race's race files — judged inert; one row per
-toolchain over its own chain, since the runtime's race file is each
-toolchain's own) — and no key of one chain admits beside another chain's: a
-tree mixing two listed releases' packages, one release's race runtime over
-the other's files included, is no listed toolchain; a listed selection's
-rows assert, beside the admissions, the premise identity finalization and
-a process completion receipt rest on, over that selection's testing
-harness (REQ-inputs-identity-facade and REQ-inputs-producer-premises'
-observation-completeness terms; the result owner supplies the harness's
-completion criterion) — every test-log write the harness attempts lands
-or fails the binary — so a selection whose harness drops a failed write
-is unlistable until a build propagates it, whatever its hook files admit.
-The listing canary exercises the dst selections on stock toolchains and
-on godst releases from go1.27.2-dst.15 onward; earlier godst builds retain
-only their separately audited non-dst selections. This canary boundary
-grants no admission without matching content. The packages implementing
-the premise (testing and its test-log
-dependency testing/internal/testdeps, which only the generated test main
-imports) are surface seeds, so a build moving either moves a key; a
-listing whose labels
-collide, whose base names no row, or whose chains cycle is refused by the
-listing's own shape test. A
-toolchain move therefore fails as one named canary (the listing enforcement
-test, which prints the row to list over the moved keys with the closest row
-as its base) rather than a scatter of proof flips, and listing a row
-requires the moved keys' delta walked against the admission bar; an
-unlisted surface additionally announces itself once per engine on the
-progress channel's diagnostic face (a Detail-bearing event, delivered
-exactly when the consumer installs a progress callback and a run reaches
-precise analysis) — the moved keys and the walk needed — so a consuming
-run's log points at the listing instead of reading only the scattered
-ordinary refusals; a consumer that installs no callback forgoes the notice,
-and each engine's announcement is its own, never spent by another engine's
-run. The key binds every tier that answers a toolchain-source claim — the
-purity tier's audited synchronization, pooling, and immutable-type
-admissions and the audited linkname-target floor included — through one
-listing, over the analysis' EFFECTIVE selection as the go command selects
-it: the standard library is listed in the analysis' own environment with
-its explicit build flags, so GOFLAGS merges and an explicit flag overrides
-exactly as the go command does, and the digests are taken over the files
-that listing selects — the platform, the cgo setting, the tags, the
-experiment and FIPS module sets each key the selection exactly as far as
-they select bytes, through the files, never as an axis of their own; a
-flag set the go command refuses lists nothing and is never admitted. A tag
-no surface file is constrained on and an experiment that swaps none yield
-the listed digests and admit by content; a selection that selects other
-bytes (a vendor fork's hook tag selecting its live hook bodies, a tag
-selecting a surface package's constrained files, another platform's split
-files, cgo off) refuses until its own row is listed, announced on the same
-diagnostic face as an unlisted toolchain, never inheriting another
-selection's audit; a platform's or cgo-off row is a delta over the host's
-default row listed from any host carrying the toolchain (every platform's
-files are in the one GOROOT: the audited packages' split files were read
-whole by the walks, and the deeper packages ride the toolchain judgment as
-they do under the default selection), and the listing hosts list a stated
-selection set — their own default, the race seams, cgo off, and the
-platforms the fleet analyzes for from another host. The listing is memoized
-per
-selection scope — the record's version, the explicit flags, the pass
-snapshot's identity and the surface seeds' digest, so a rule whose seeds
-moved misses every record written before it — and the memo retains the shared
-standard-library inventory (`std` and its dependencies) from which the audited
-subset derives. Missing required audited roots never grant admission, and the
-actual subject graph's standard nodes are reconciled against that inventory
-before its content identity can justify a capture or memo.
-A scope-bound integrity commitment rejects incomplete cache payloads; it does
-not authenticate a coherently replaced private payload and commitment. A record
-serves only while every listed directory, the source-discovery tree under
-GOROOT/src under the go command's standard-package search rules, explicitly
-selected package directories outside that search and every selected embed
-pattern's discovery tree, and snapshot-mode FIPS selection
-inputs under GOROOT/lib/fips140 — its aliases, archives and verification inputs,
-empty directories and embed-member discovery included — carry
-exactly the
-entries it was listed over, each with its recorded kind, size, modification time
-and change time (a platform whose stat carries no change time never serves
-the memo): a tree moved under a scope re-lists, and the digests themselves
-are read from the files on every construction, never served. File digests use
-unsigned big-endian 64-bit lengths framing each name and its contents; raw NUL
-bytes cannot encode a different inventory. The digest
-traversal checks its context before every file read, so a construction
-cancelled during it ends at the next file boundary — the file the
-cancellation lands on is the last one read; a read in progress is never
-interrupted — answering the cancellation, and the package-file walk the
-member hashing and the analyzer share runs the package's cancellation
-check at every entry the same way. Source-discovery traversal checks the
-operation context at every entry. Individual directory-stamp reads and the
-comparison of stored stamps are not interrupted, bounded by the recorded
-directory inventory. A discovery inventory containing symlinks, or a discovery
-directory reached through a symlink, is not memoized: every construction
-re-lists it, so changing a followed file's build constraint or an embedded
-directory's membership cannot reuse an unstamped selection. This changes cost,
-not content admission or applicability. The recording
-skew identity (REQ-fresh-toolchain-skew) stays by version: a measurement's
-cache key, not an admission. The verdict's rendering is additionally served
-to consumers as one owned notice — the refusing axis named (the moved keys
-off the closest row, or a surface that could not be listed or read) with
-the walk that would list it, and the notice empty exactly when the
-selection is admitted, so text and verdict can never disagree — and a
-consuming tool can attribute the degradation at the tier where the
-selection was authored (its own policy or configuration record) without
-re-deriving the key.
+**REQ-closure-observability-toolchain-key** (invariant): Toolchain evidence MUST
+preserve these distinct obligations:
 
-**REQ-closure-observability-harness-logging** (invariant): The audited set MUST carry the testing harness's
-failure/logging channel — exactly the testing-package symbols named `Fatal`,
+- **semantic-authority** — Every selected-implementation claim retains its
+  complete dependence identity separately from its checked derivation under
+  REQ-impl-dependence-identity and REQ-impl-compositional-derivation. This applies
+  at every tier, including value computation, observation operations,
+  synchronization, pooling, immutable types, atomic transparency, harness
+  protocol, writer sinks and linkage. There is no whole-selection approval
+  Boolean, approved digest row, flavor gate or declaration-name license.
+  Failure of one premise blocks its dependent claims, not independent claims
+  about the same selection. Changed inference semantics requires a
+  distinguishable compatibility judgment; a cache-layout change alone changes
+  no semantic authority. Compiler/linker correctness supplies no native,
+  intrinsic or instrumented behavior beyond REQ-impl-premise-boundary.
+- **selected-inventory** — The shared standard-library inventory covers `std`
+  and its dependencies and every standard package in the actual subject graph,
+  including selected Go, native, assembly, object and embedded members. Actual
+  subject-graph standard nodes agree with that inventory's selected members
+  before it can justify a capture or memo. Wildcard discovery alone cannot
+  establish that agreement. An over-wide inventory is permitted.
+- **implementation-dependencies** — Each claim additionally identifies all of
+  its implementation dependencies transitively, including implicitly linked
+  packages, detector runtimes, the cgo bridge where linked, selected runtime
+  and native code, and generated harness dependencies such as
+  testing/internal/testdeps. Missing dependencies refuse the dependent claim.
+  Module implementation dependencies retain their own complete identities;
+  their version pins are not semantic proofs.
+- **effective-selection** — Inventory selection uses the analysis' effective
+  environment and explicit build flags as the go command does, including
+  GOFLAGS merging and explicit overrides. Platform, cgo, tags, experiments,
+  instrumentation and FIPS selections contribute actual selected files and
+  further claim-relevant inputs. A rejected build configuration yields no
+  substitute selection. The reported version and language-series skew judgment
+  remain distinct from selected content and semantic authority.
+- **content-identity** — Membership, names and bytes determine selected-file
+  identity. File digests use unsigned big-endian 64-bit lengths framing each
+  name and its contents; raw NUL bytes cannot encode a different inventory.
+  An actually selected empty member set has its empty-sequence identity;
+  failed listing or unreadable selected content is missing evidence, not an
+  empty selection. Digests are read from selected files on every construction,
+  never served from the listing memo. Identical content under another label
+  supplies only the same content identity, not a proof of behavior.
+- **inventory-memo** — Selection inventories may be memoized per complete scope
+  — record representation, explicit flags, pass snapshot identity and discovery
+  roots and rules — retaining the shared inventory and graph reconciliation.
+  Changing discovery dependencies requires re-listing. A scope-bound integrity
+  commitment rejects incomplete payloads; it does not authenticate a coherently
+  replaced private payload and commitment. A record serves only while every
+  listed directory, the GOROOT/src discovery tree under the go command's search
+  rules, explicitly selected package directories outside that search, every
+  selected embed pattern's discovery tree, and snapshot-mode FIPS selection
+  inputs under GOROOT/lib/fips140 carry exactly their recorded entries and
+  kinds, sizes, modification times and change times. This includes FIPS aliases,
+  archives and verification inputs, empty directories and embed-member
+  discovery. A platform without change times never serves this memo. A moved
+  tree re-lists. A discovery inventory containing symlinks, or a discovery
+  directory reached through one, is not memoized: every construction re-lists,
+  so changing followed constraints or embedded membership cannot serve an
+  unstamped selection. These rules change cost, not semantic authority.
+- **cancellation** — Digest traversal checks context before every file read,
+  ending a cancelled construction at the next file boundary with cancellation,
+  never a successful partial construction. A read in progress is not interrupted.
+  The shared package-file walk and source-discovery traversal check context at
+  every entry. Individual directory-stamp reads and stored-stamp comparisons
+  are not interrupted, bounded by the recorded directory inventory.
+- **observation-premises** — Coverage, delivery and outcome binding are distinct
+  under REQ-impl-observation-claims. Delivery establishes that every required
+  observation reaches finalization or its loss prevents supported completion,
+  including failed writes and flushes. A hook name, release label, declaration
+  canary or successful execution cannot establish this. The result owner still
+  supplies the actual harness completion receipt; a delivery derivation supplies
+  no receipt for a particular process.
+- **claim-rechecking** — Changed selected content or other claim dependencies
+  require rechecking affected derivations under REQ-impl-derivation-reuse,
+  never approval by adding a row. Diagnostics identify failed selection
+  observations, dependency disagreements or unsupported claims with their
+  deciding premises and dependency paths. Structured causes and human
+  projections agree; one refusal cannot masquerade as a complete claim inventory.
+
+**REQ-closure-observability-harness-logging** (invariant): A harness logging
+claim MUST establish the selected implementation's failure/logging channel
+properties for the resolved operation — including `Fatal`,
 `Fatalf`, `Error`, `Errorf`, `Log`, `Logf`, `Skip`, `Skipf`, `SkipNow`,
-`Fail`, and `FailNow`, matched by package and symbol name; the admission is
-sound only while every testing-package declaration of an audited name is the
-harness's shared embedded core or an outcome-only delegate to it (today:
-the core plus `(*F).Fail`, a misuse panic delegating to the core), and the
-toolchain's declaration inventory is walked by an enforcement test so drift
-refuses instead of silently widening — whose
+`Fail`, and `FailNow`. Each resolved declaration requires a checked derivation
+that it is the harness's shared core or an outcome-only delegate with these
+properties; neither package/name matching nor a declaration-inventory canary
+establishes the claim. The required behavior is that
 output lands only in the harness's own in-memory buffer and
 the run's captured output, both already part of the recorded test outcome: the
 channel is output-only for outcome bits (the run-flag presentation state the
 logging path reads shapes recorded-output bytes only and is outside the
 proof's claim), argument method sets stay visible to reachability
 exactly as fmt's Sprint family, and the walk records the reached call as an
-admitted harness fact instead of descending into harness internals. The
+checked harness fact whose derivation justifies summarizing the internals. The
 admission applies to statically and RTA-resolved callees only — an
 unresolvable reference stays refused like any other — and the harness's
 ambient-input and mutation surfaces (`Setenv`, `Chdir`, `TempDir`, the
 runtime-configuration reads) keep their own classifications.
 
-**REQ-closure-observability-subtest-driver** (invariant): The audited
-set likewise MUST carry the harness's subtest drivers — exactly `(*T).Run`
-and `(*B).Run`, matched by receiver and name: the driver allocates a
+**REQ-closure-observability-subtest-driver** (invariant): A subtest-driver
+claim MUST establish the selected driver's protocol by checked derivation.
+For `(*T).Run` and `(*B).Run`, the required properties are that the driver allocates a
 child harness handle, prints run-boundary bytes into the recorded
 output, keeps write-only harness bookkeeping no testing API hands back,
 consults run-filter state that shapes selection and recorded-output
@@ -1828,7 +1751,8 @@ presentation state — and runs the caller-supplied callback on a
 harness-managed goroutine it waits for, returning only an outcome bit.
 The callback is subject flow: its body is walked and classified at its
 own sites, and the walk records the reached driver as an admitted
-harness fact instead of descending into harness internals. A parallel
+harness fact backed by that checked derivation instead of descending into
+harness internals again. A parallel
 subtest defers its body past the driver's return; `Parallel` keeps its
 test-runtime classification, so the interleaved shape refuses.
 Receiver discrimination is load-bearing: `(*M).Run` is test-main flow,
@@ -1840,24 +1764,23 @@ subject tier, while the package-scan findings for the driver names,
 blind to receivers, narrow to diagnostics so the subject tiers decide.
 The driver admission applies to static callees only — a driver reached
 as a dynamic target or through a bound value keeps its classification,
-the conservative refusal — and the toolchain's declaration inventory of
-the driver names is walked by an enforcement test so drift refuses
-instead of silently widening.
+the conservative refusal. Receiver and declaration resolution locate the
+implementation to verify; a name-inventory canary can detect drift but cannot
+prove the driver body, callback completion or observation delivery.
 
-**REQ-closure-observability-property-harness** (invariant): The audited property-testing harness —
-exactly `pgregory.net/rapid` — extends the same discipline to a
-third-party harness package: its bodies MUST be cut from every walk and
-from the package-scan backstop, because everything ambient in them is
+**REQ-closure-observability-property-harness** (invariant): A property-testing
+harness, including `pgregory.net/rapid`, MUST be summarized at a walk or
+package-scan boundary only under a checked derivation that everything ambient
+in the summarized behavior is
 the harness's own protocol (the run configuration it reads and the
 clock it paces by surface in its harness-log summary line on every
 outcome, its failure artifacts are output-only reproduction files, and
 its value generation is process-local PRNG state seeded by that same
 log-surfaced configuration), and the property callback is subject
 flow, walked and classified at its own sites through the harness's
-dispatch. The audit is version-gated — it names the releases it
-covers (v1.3.0) plus local source, a deliberate choice rather than a
-silent registry upgrade, and an unlisted release keeps the package's
-ordinary classification. The audit is sound only paired with a
+dispatch. Version pins and local-source identity identify the implementation,
+not its protocol semantics. Unsupported harness or subordinate toolchain
+behavior retains its ordinary classification. The checked claim is sound only paired with a
 boundary gate on every flow that can call into the harness — subject,
 test-main, and startup alike: each dynamic-carrying argument of a
 statically dispatched harness call must be judged closed, where the judgment
@@ -1881,8 +1804,8 @@ callback MakeCheck returns) is admitted as a subject-flow dynamic
 target: it exists only because a gated harness call in some analyzed
 flow created it, which is exactly why every flow carries the gate;
 the test-main and startup arms stay stricter and refuse every
-dynamically reached harness target. Importing the audited harness
-keeps the package unverifiable at the closure tier — the audit admits
+dynamically reached harness target. Importing the property harness
+keeps the package unverifiable at the closure tier — the checked protocol claim admits
 observation, never purity: a property run's outcome rides the
 harness's log-surfaced run configuration, not the sources alone, so
 the package scan records an admitted harness fact where it exempts
@@ -1908,11 +1831,11 @@ a wrapper over sibling-planted shared state refuses exactly as the direct
 invoke would, whatever carried the wrapper to the call — with one
 subject-determined dispatch admission: a site does not widen when its
 RTA-enumerated, subject-attributed target set is non-empty, every
-target is an audited harness method or an analyzed function of an
+target is a harness method with a checked protocol claim or an analyzed function of an
 indexed non-test-main package (an unindexed or test-main target
 refuses the admission; a harness method classifies as the admitted
-harness fact, a standard-library target classifies through the audited
-symbol tables exactly as an enumerated dynamic target always has, and
+harness fact, a standard-library target requires its own checked implementation
+claim or body analysis, and
 every other target's body classifies its own effects into the subject
 exactly as reachable content always does),
 AND the dispatch operand's dynamic types are fully determined by
@@ -1944,8 +1867,8 @@ dispatch a test-planted value after the harness run, refuses on any
 dispatch whose provenance is not locally closed — the operand under the
 same wrapper-carrying closed-value walk, with a static thunk call judged
 by its receiver argument, because the wrapper family's
-toolchain-attributed bodies perform the real dispatch where no walk
-records effects; the planted channel is a load from shared mutable
+toolchain-attributed bodies perform the real dispatch, whose effect accounting
+requires body analysis or a checked wrapper-delegation claim; the planted channel is a load from shared mutable
 state, while a test-main's own calls and constructions keep their
 per-effect classification. Initializer flow keeps attributed-effect recording alone:
 nothing is plantable before tests run, so an initializer's unattributed
@@ -1953,7 +1876,8 @@ dispatch is not the demonstrated channel and stays unwidened.
 
 **REQ-closure-observability-guard-pinned** (invariant): The admitted observation set MUST include the guard-pinned
 toolchain accessor — exactly `runtime.GOROOT`, never the runtime package's other
-surfaces — only when evidence guards its behavior-relevant value, together
+surfaces — only when a checked implementation derivation establishes the
+accessor's effect and value relation and evidence guards its behavior-relevant value, together
 with read-position uses of paths derived from it through constant-component
 joins only where the read content is covered by the recorded evidence. A
 reported version does not by itself fix the root's path or every file beneath
@@ -1986,9 +1910,12 @@ discarded incrementally rather than growing with every subject in the view.
 
 ## Cross-module dependencies
 
-Every memo below follows REQ-fresh-dependency-identities. Where a derivation
-consults audited semantics, its scope includes the selected toolchain content
-and admitting policy, not merely a version or a Boolean admission verdict.
+Every memo below follows REQ-fresh-dependency-identities and
+REQ-impl-derivation-reuse. Where a derivation uses implementation semantics,
+its scope includes the complete selected implementation content, checked
+subordinate claims and inference rules, not merely a version or a Boolean
+admission verdict. Changing any such dependency rechecks the affected claim;
+cache membership supplies no semantic authority.
 The memo's encoding/layout identity and the compatibility of evidence it
 computes are distinct obligations. Stating a toolchain guard in a key does
 not waive the dependency evidence required by that key's actual derivation.
@@ -2005,8 +1932,8 @@ derivation and grants no additional authority.
 **REQ-closure-observability-memo** (behavior): Observability proofs MAY be
 served from a persistent memo because the proof is a pure function of its
 key's complete input identity: the analysis scope (the proof derivation,
-memo representation, analyzing frontend, code guards, selected toolchain
-content and admission policy) plus the
+memo representation, analyzing frontend, code guards, selected implementation
+content, checked subordinate claims and inference rules) plus the
 package test-binary closure hash, which combines the core's source equivalence
 with the test-variant compartment identity, since the compartment partition
 keeps test-only bytes out of the core while the analyzed binary compiles both
@@ -2022,7 +1949,8 @@ every memo class, changing what is recomputed but not the authority or meaning
 of a completed derivation; a miss can leave analysis unavailable under the
 same budget — writes atomically, and a missing, unreadable, corrupt, or
 key-mismatched entry recomputes silently; no entry is
-trusted beyond its key — the key IS the freshness. Entries accumulate one per closure version and the cache is
+trusted beyond its complete dependencies and retained checked authority — key
+agreement alone cannot supply a missing derivation. Entries accumulate one per closure version and the cache is
 deletable wholesale at any time. Proofs persist as each attribution slice
 completes: an analysis deadline expiring mid-group forfeits only the
 interrupted slice's proofs, and a later pass serves every completed
@@ -2043,7 +1971,8 @@ variable identities its code mutates after initialization
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
 (the fact derivation and memo representation, analyzing frontend, code guards,
-dependent selected toolchain content and admission policy, and the execution
+dependent selected implementation content, checked subordinate claims and
+inference rules, and the execution
 attestations, which change what a fact
 records, so attested and unattested sessions never serve each other's
 facts) plus the module's version pin and the version signature of every
@@ -2067,10 +1996,13 @@ change its resolutions, and its plain form need not compile. Module mode is
 assumed: a module-less tree classes every package standard and contributes
 no facts, exactly the analysis's declaration side, which never admitted
 module-less declarations. Standard-library packages
-contribute no facts: the analysis's declaration side excludes module-less
-packages, toolchain source cannot reach module variables (imports are
-acyclic), and toolchain source is not an authoring surface for gofresh
-directives. A memo hit is fact-equivalent to recomputation. The memo is a
+contribute no ordinary module-variable declaration facts: this declaration
+inventory excludes module-less packages, standard source cannot directly name
+module variables through imports, and it is not an authoring surface for
+gofresh directives. This inventory boundary establishes no absence of
+standard-library state, callbacks or effects. Any dependent implementation
+claim still requires checked state and effect derivations; omitting a standard
+declaration here cannot discharge it. A memo hit is fact-equivalent to recomputation. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
 sibling directory under the consumer-controlled store, atomic writes, silent
 recomputation on any miss, corruption, or key mismatch, deletable wholesale
@@ -2078,17 +2010,20 @@ at any time; changing fact semantics bumps the fact-strategy version.
 
 **REQ-closure-effect-scan-memo** (behavior): The fold of a version-pinned
 package's per-file effect scans MAY be served from a persistent memo,
-because that fold is a pure syntactic function of its key's complete input
+because that fold is a deterministic function of selected syntax and any
+checked classification claims, under its key's complete input
 identity: the scan-strategy version and the analyzing frontend's version
 (the frontend the analyzing process scans with, a cache-miss defense
 distinct from the analyzed selection's toolchain, a guard) — joined by
-the selected toolchain content and admission-policy identity on which its
-audited-set consultations depend, for every selection including the default;
-an admission Boolean cannot distinguish different dependent content or rules — plus the
+the selected implementation content, checked subordinate claims and inference
+rules on which its classifications depend, for every selection including the
+default; an admission Boolean cannot distinguish those dependencies — plus the
 module's version pin, the package's import path, and the identity — with
 its Go/cgo partition — of the file set the current listing selects for it.
-No type-environment signature participates, because the per-file scan reads
-no types (the typed testing-effect scan is separately governed).
+The per-file scan reads no types, so it contributes no direct type-environment
+signature (the typed testing-effect scan is separately governed). A checked
+classification claim still retains every dependency of its own derivation,
+including any type environment it used; the syntax-only consumer cannot erase it.
 Package-level effect facts — assembly, system objects, cgo linkage
 metadata — are functions of the live listing's build configuration, which
 the key does not carry: every pass recomputes them from the listing in hand
@@ -2113,7 +2048,7 @@ included — bumps the scan-strategy version.
 testing-effect scan MAY be served from a persistent memo, because the scan
 is a pure function of its key's complete input identity: the scan-strategy
 version and memo representation plus the code guards, selected toolchain
-content and admission policy that the type environment and classification
+content, checked subordinate claims and inference rules that the type environment and classification
 depend on, plus the analyzing frontend's version,
 plus the package test-binary closure
 hash, which pins the combined core and test-variant source equivalence,
@@ -2140,8 +2075,8 @@ persistent memo, because every output is a pure function of its key's
 complete input identity — the shared-dynamic-state judgment reads the
 package's own graph and nothing of its sibling view packages
 (REQ-closure-shared-dynamic-state): the fact-strategy version, the analyzing frontend's version, and the code guards
-(toolchain and build configuration), dependent selected toolchain content and
-admission policy, the memo representation, the execution attestations, and the
+(toolchain and build configuration), dependent selected implementation content,
+checked subordinate claims and inference rules, the memo representation, the execution attestations, and the
 caller's vouch set — the scope — plus the package scan key: the maximal
 closure hash joined with the test-variant compartment identity, which
 pins the core and test-variant source equivalence of the test binary's graph
@@ -2181,7 +2116,9 @@ workspace, of the workspace root, the workspace file and its sum file
 as the environment resolved them or the workspace file's absence along
 the directory's ancestors, and the absence of a module
 file between the working directory and the main module root; the
-toolchain-generated test main is scaffolding outside the model;
+toolchain-generated test main's own bytes may be derived outside this listing
+memo, but any inputs selecting its graph or supporting a harness claim remain
+dependencies of their respective judgments;
 version-pinned modules are immutable under the pin go.sum carries, and
 the standard library's listing dependencies ride complete selected-source
 evidence rather than the snapshot's reported version alone. The inputs that

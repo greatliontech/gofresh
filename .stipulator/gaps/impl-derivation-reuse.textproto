@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-derivation-reuse"
+reason: "Existing policy/memo identity hashes approval inventories; matching keys cannot establish omitted checked subordinate claims or rule semantics."
+content_hash: "9c17ac80e2ddfe1ae8774a59f7b32b3d910b63a03702f88e6922483c83519ee4"
+source_hash: "7fcec57d6f59b1ce8de66d66affdf2c17f4873a7572341b623f899aadad0b81b"
+lands { manual { condition: "tooling-redesign 5.1w.6: cold, warm and discarded-cache judgments retain complete checked rule/premise/dependency authority, with content/policy movement and historical compatibility negatives" contradicted: true } }

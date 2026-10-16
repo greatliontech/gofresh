@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-historical-authority"
+reason: "Current observation compatibility still accepts approval-policy strategy @44; current source or reassigned identity cannot establish the new generic authority for its history."
+content_hash: "72f5fceaff9172d0b6938010f587b83d6e2eedea77ccff0abf8cd1d121360f88"
+source_hash: "6b8bba0b9796124c237f96cc8d3368b55678aacc7937e67b6dbc1ec9355e7474"
+lands { manual { condition: "tooling-redesign 5.1w.6: older approval-policy evidence gains no generic authority without a justified compatibility judgment, preserving independent assertions/source evidence and the v1-v3 refusal gate from 5.1w.4" contradicted: true } }

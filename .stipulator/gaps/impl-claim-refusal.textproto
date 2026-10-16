@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-claim-refusal"
+reason: "Current global selection-admission refusal can disable unrelated claims and report closest approved rows instead of structured claim-local premise paths."
+content_hash: "fc69915e61b4eed74cae26cc109f3827c41873e13fde3adb3f777d8df477392b"
+source_hash: "e58aa8c292cf6c9d0852d72cf072112d9db325a8fb0a21a0665f567766e9c78c"
+lands { manual { condition: "tooling-redesign 5.1w.6: all tiers preserve independent claim judgments and expose deciding premise/dependency paths, with budget/cancellation and stronger drift precedence" contradicted: true } }

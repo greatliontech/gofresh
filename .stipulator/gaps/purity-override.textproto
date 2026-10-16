@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-purity-override"
+reason: "Ordinary inferred-blindspot and externality examples are clause-scoped. Current movement-as-unverifiable state can be waived by accepted purity; no typed producing failure is enforced."
+content_hash: "e2eb7650e42f3c2ffb5da1daffa63aacdc44a2da34ff594f64a30fb1d972043a"
+source_hash: "38030b73621bebdc44a26922f0f5ec0ad1a4bd7ca4768b97f6fb8347b1d4bf68"
+lands { manual { condition: "tooling-redesign 5.1w.4: known producing-span movement remains a stale guard failure under purity and after restoration, while inferred unknown, explicit externality and ordinary guard-drift controls retain their authority" contradicted: true } }

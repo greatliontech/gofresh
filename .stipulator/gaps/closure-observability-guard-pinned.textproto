@@ -2,8 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-guard-pinned"
-reason: "Existing examples do not establish the invariant and the current accessor/root admission relies on the former version-pins-root premise. The dependency repair must guard a behavior-relevant root value and actual covered content, or refuse, while preserving the existing receiver, startup, dynamic-reference and mutation exclusions."
-content_hash: "b6fc21663997b825d27834fdd39c8c2fe4b2fbe528178d4c1c2dba17171d37b2"
-source_hash: "43fa756013988b523c92a5aa5a8468b61f3211106f77dc488fb04dc48f7a8b2f"
-lands { manual { condition: "A property witness or analyzer proof enforces the complete guarded-accessor rule, including changed root spelling and uncovered GOROOT data under an unchanged reported version and the retained startup/dynamic/mutation exclusions." contradicted: true } }
-excuses: GAP_EXCUSE_UNCOVERED
+reason: "The runtime.GOROOT admission still uses the named accessor/toolchain assumption rather than checked semantics with the actual root value and read content guarded. Existing independent obligation: Existing examples do not establish the invariant and the current accessor/root admission relies on the former version-pins-root premise. The dependency repair must guard a behavior-relevant root value and actual covered content, or refuse, while preserving the existing receiver, startup, dynamic-reference and mutation exclusions."
+content_hash: "614baf75452129da6e8ed0aa7177be46b71a0c734a55254bfa514a1cf520f3c0"
+source_hash: "e79242742b4240ac3ac61936bfc7acd7151ab958400bcf9d24286d4fea91e85f"
+lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: A property witness or analyzer proof enforces the complete guarded-accessor rule, including changed root spelling and uncovered GOROOT data under an unchanged reported version and the retained startup/dynamic/mutation exclusions." contradicted: true } }

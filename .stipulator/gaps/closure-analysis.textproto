@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-analysis"
+reason: "Generated harness registration roots and atomic transparency still rely on existing exclusions/admissions without the newly required checked implementation claims."
+content_hash: "a05d61646e633fed10a0ed88256c3aa2c5f361d87d920ab992305c207ad075f7"
+source_hash: "1343a758d5687ae648db9ca43d01ec0ee7db2369c4945736450fe76af4dea3a5"
+lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

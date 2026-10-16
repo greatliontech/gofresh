@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-inputs-producer-premises"
+reason: "Existing receipt/roster/environment attachment examples do not establish separate checked implementation coverage, delivery and outcome semantics. Current positive support still relies on admitted summaries."
+content_hash: "4c095a23fd7aca769dd1d8ecf8048f56b067ab9d831b0e4eb98753e254b8b8aa"
+source_hash: "4be39b682152ac6ba9f790fde52c1ab9cb46abf760ec99786d9edf42bd8f984e"
+lands { manual { condition: "tooling-redesign 5.1w.5: checked observation claims compose with actual contributing executions and complete binding evidence after the 5.1w.4 producing-span gate, with borrowed-support and lost-record negatives and consumer integration in 5.1w.6" contradicted: true } }

@@ -13,8 +13,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-toolchain"
-  content_hash: "138ce127d060e3d5b4083d5b7b41c4060587ddafee2d99582d8c69dafe7b4325"
-  source_hash: "5c6223a34b3e775ea67a9383580bad8616f74cadfed4e47befbc39414e73b78d"
+  content_hash: "012539ac477a2182a6ebb664df2d87ea3272e417bb9ad6801f377f0cabc2d139"
+  source_hash: "93cb8de5a13d32d4766a1b4a5ff42c79c3a73943d18edd7fc7fbc6c7eab42e92"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestCaptureNonEmpty"
   role: BINDING_ROLE_TESTS
@@ -172,16 +172,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-guard-cache"
-  content_hash: "7b6bafa8de71e5b83fe3b69d229f3a6ee474747d55775e7721f0b31b51056549"
-  source_hash: "1007c603f24d31a0c1313f22d68a25b02796440816d6767e8790a3f347632396"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
-}
-
-bindings {
   requirement_id: "REQ-guard-selective-capture"
   content_hash: "6bcd6f49d6daf81444aae333af9799749c103b12e2e6b731e81069c6c9598aa1"
   source_hash: "2c1995458ed32094140a280d928357586c52ff815eff3f4f1a67638e0c8226c9"
@@ -333,8 +323,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-toolchain"
-  content_hash: "138ce127d060e3d5b4083d5b7b41c4060587ddafee2d99582d8c69dafe7b4325"
-  source_hash: "5c6223a34b3e775ea67a9383580bad8616f74cadfed4e47befbc39414e73b78d"
+  content_hash: "012539ac477a2182a6ebb664df2d87ea3272e417bb9ad6801f377f0cabc2d139"
+  source_hash: "93cb8de5a13d32d4766a1b4a5ff42c79c3a73943d18edd7fc7fbc6c7eab42e92"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/guard.TestToolchainGuardIsGoVersionsOwnForm"
   role: BINDING_ROLE_TESTS
@@ -343,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-toolchain"
-  content_hash: "138ce127d060e3d5b4083d5b7b41c4060587ddafee2d99582d8c69dafe7b4325"
-  source_hash: "5c6223a34b3e775ea67a9383580bad8616f74cadfed4e47befbc39414e73b78d"
+  content_hash: "012539ac477a2182a6ebb664df2d87ea3272e417bb9ad6801f377f0cabc2d139"
+  source_hash: "93cb8de5a13d32d4766a1b4a5ff42c79c3a73943d18edd7fc7fbc6c7eab42e92"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestViewObservationPassBatchesToolchainProbes"
   role: BINDING_ROLE_TESTS

@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-fresh-outcome-attachment"
+reason: "Existing receipt/roster/environment attachment examples do not establish separate checked implementation coverage, delivery and outcome semantics. Current positive support still relies on admitted summaries."
+content_hash: "72129cde50a24660b1c2cb9b238de2f13b2307f5194ac55405f0c5f6df8f5e48"
+source_hash: "10fc67b5657fccbb6573d7c686489391064999c25b2aad77a47bc1d2c2c4d514"
+lands { manual { condition: "tooling-redesign 5.1w.5: checked observation claims compose with actual contributing executions and complete binding evidence after the 5.1w.4 producing-span gate, with borrowed-support and lost-record negatives and consumer integration in 5.1w.6" contradicted: true } }

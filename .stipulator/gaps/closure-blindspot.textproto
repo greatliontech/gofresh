@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-blindspot"
+reason: "The file-scan linkname floor still recognizes approved target names instead of deriving claim-relevant selected target effects; existing cgo/assembly examples do not establish that new premise."
+content_hash: "d8aea4e7cc7edaa03ba6b1897b8296fbbee7826f3efa0ce3a91baeaa99fbde91"
+source_hash: "15f5faa2c3160dcae0684683a8c350ed322e6888227a8a463202fc31239d9588"
+lands { manual { condition: "tooling-redesign 5.1w.3: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

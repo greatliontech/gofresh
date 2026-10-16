@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-flag-registration"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "0b89bd6c3e5523fd7a2428e9783adde8a02f85ee67c4f782f493e7a83be4f91f"
-source_hash: "4fda7332b5b4291ddbea62e39124276510f78ccdc0a5ef6ed8592986e3a8ba60"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Use-site sink checks do not establish the selected flag implementation allocation, registration and accessor properties now required by each positive admission. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "7ef280ed0fb71629a5742278cee0ba084ee141749da1373d8a244cf508b2eadb"
+source_hash: "0b1b535ba754288ad921ce5cc4599888596d51d0703bcb715f33cf4c960b1735"
+lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

@@ -1,0 +1,128 @@
+# Replace toolchain-variation admission with generic verification
+
+Lands: docs/plans/tooling-redesign.md 5.1w.7.
+
+Constituents: 5.1w.1 settles the contract; 5.1w.2-3 establish useful semantic
+derivations; 5.1w.4-5 establish sound producing evidence; 5.1w.6 migrates every
+claim consumer and dependent cache. This work precedes Stipulator 5.2d/5.2e.
+
+## Demonstrated structural defect
+
+`closure/toolchainaudit.go` stores approved selected-package digest chains.
+`closure/toolchainsource.go` admits a selection when one expanded chain covers
+all running keys. Matching is by content, not the diagnostic label, but it is
+still manual approval of implementation combinations. The nodwarf5 row changes
+only `internal/goexperiment`, followed by separate race, platform and cgo rows.
+Its own comment says the change introduces no effectful standard-library body.
+
+One `SelectionAudited` answer gates ordinary source-only classifications,
+shared-state analysis, observability and outcome support. An unmatched key can
+therefore withdraw unrelated summaries; compatible changes require additional
+combination rows rather than composition of their semantic derivations. These
+are concrete maintenance and precision costs, not a demonstrated false-valid
+path in the current fail-closed registry.
+
+## Required replacement
+
+The governing contract is [implementation verification](../specs/implementation-verification.md).
+The user selected generic implementation verification, retaining the existing
+trust boundary rather than assuming additional platform/observation guarantees.
+No toolchain label, selected-content whitelist, capability-name declaration or
+equivalent indirect variation registry may authorize a semantic claim. Hashes
+retain dependency identity; cold derivation must establish the same authority
+as a valid memo hit. Unknown native and observation-delivery premises remain
+explicitly unsupported, never ordinary Go conformance by implication.
+
+The same obligation applies when a checked claim would otherwise borrow a
+version-approved dependency or generated-code summary as an unchecked premise.
+Those summaries migrate with their consumers; module/version/content identities
+continue to detect drift, and explicit caller vouches remain assertions under
+their own rules. Moving the approval lookup to a subordinate summary does not
+establish independent checking.
+
+Acceptance requires useful end-to-end positives, not merely refusing every
+selection. The existing SSA infrastructure does not itself verify arbitrary
+native leaves or the bodies currently replaced by audited summaries. Complete
+that work, migrate every consumer and remove the old mechanisms before closing.
+
+## Summary-consumer inventory
+
+Each row is an implementation premise to replace, not a newly approved summary.
+The first computation vertical lands at 5.1w.2, required native/runtime
+derivations at 5.1w.3, observation claims at 5.1w.5, and all remaining consumer
+adoption at 5.1w.6. The shared mechanism is removed at 5.1w.7. Preserve the
+existing useful cases and add changed-implementation negatives for each family.
+
+| Claim family | Current mechanism | Deciding replacement obligation |
+|---|---|---|
+| Whole-package computation | `internal/auditset` pure packages; `closure.isSourceOnlyStandardPackage` | Reachable computation, callbacks and initialization, including machine-dependent kernels |
+| Symbol/receiver computation | `closure.auditedStandardCallee`, receiver tables | Actual return/effect bounds; familiar receiver or method names confer nothing |
+| Synchronization, Once, Pool, Map | `purity.go` synchronization/pooling/data-memo rules | Concurrency, retained population and callback bounds, with execution-model assertions kept separate |
+| Atomic-pointer transparency | `closure.AuditedAtomicPointerElem` | Selected storage/type-flow, unsafe and native operation semantics |
+| Immutable constructions | `recordOpaqueDynamicVars`, `immutableRuntimeType` | Actual object closure, retention and descriptor immutability; these rules are not all gated by selection approval |
+| Container clone/concat | `auditedValuePlane` | Return population, mutation and alias bounds, including runtime linkname targets |
+| Flag registration | `flagRegistrationFacts`, `flagSetProvenance` | Selected registration/parser effects in addition to caller storage provenance |
+| Formatting sinks | `inMemoryFormattedSink`, writer-type tables | Formatter callbacks and actual writer effects, not receiver-name approval |
+| Standard harness families | `stdBodyCut`, harness logging/subtest/pacing rules | Complete callback and phase coverage under the declared result model |
+| Environment/file wrappers | `classBEffect`, `observableCallEffect`, returned-handle rules | Separate coverage, aliases/path identities and operation outcomes; no hidden native-body exemption |
+| Linkname floor | `auditedLinknameTargets` | Actual linkage and target effects, retaining every residual uncertainty |
+| Observation delivery | `harnessPremisePackages`, approved testing/testdeps content | Required-record delivery or failure before supported completion, including short writes, buffering and cleanup |
+| Environment outcomes | `immutableEnvironmentMethod` | Actual lookup/state/return semantics, including initialization, hooks and contributing environment mutations |
+| Rapid harness | `auditedPropertyHarnessModule`, body/provenance cuts | Actual selected harness/callback behavior, including mutable-local replacements |
+| x/sys mapper | `auditedSourceListing`, `auditedSourceOut` | Callable stability, bookkeeping/alias bounds and the still-required syscall refusal |
+| yaml metadata memo | `auditedSourceListing`, `auditedSourceOut` | Generic get-or-compute invariance, initialization, publication and nonescaping immutable values |
+| Generated protobuf state | `generatedProtoHeader`, `generatedProtoOut` | Actual generated bodies, schema dependence and selected runtime mutation/retention behavior |
+| Generated gRPC registration | `GeneratedGrpcVars`, `generatedProtoOut` | Actual descriptor/callback capture and nonmutation, with network effects independently judged |
+
+Shared consumers include maximal and precise classification, attributed startup
+and subject traversal, root purity/dynamic-state analysis, source certificates,
+observation/outcome preparation, native capture/check/closing and their memos.
+Every cached claim retains selected-content and semantic-rule dependencies;
+neither a cache hit nor a reused third-party summary bypasses checking authority.
+
+The native boundary is concrete: environment lookup reaches runtime startup
+state and synchronization; test-log delivery reaches buffering, writer wrappers
+and syscall assembly; even `maps.Clone` reaches a bodyless runtime linkname.
+Replacing these with named semantic aliases would leave the original proof
+obligation unmet. No syscall-outcome or timing guarantee follows merely from
+compiling the Go wrapper or observing one successful execution.
+
+## Compiler-selected implementation counterexample
+
+The first uncommitted source-computation prototype incorrectly discharged a
+runtime refusal after checking only the nominal Go bodies. An isolated
+`math/bits` selection with a scalar `OnesCount64` fallback returning zero passed
+that grammar. The actual compiler substituted a CPU-feature-dependent POPCNT
+operation with the Go body as fallback. Under `GOAMD64=v1`, one retained binary
+returned 1 normally and 0 with `GODEBUG=cpu.popcnt=off`, while code-result
+fingerprints agreed and public checking returned Valid without purity or
+observation authority. The local prototype regression is
+`TestComputationAcceptanceCompilerIntrinsicRuntimeDispatch`; its committed
+acceptance belongs to 5.1w.2b. The reproduction preserves the selected library's
+exports, replaces the two de Bruijn byte-array variables with byte-identical
+constant strings, and replaces the linknamed error variables with constant
+strings, so package storage/directives do not independently defeat the source
+grammar. A production-only subject calls `bits.OnesCount64`; its driver prints
+that result for input 1. The driver is compiled once, and both executions and
+the content check retain exactly that binary. The differing runtime settings
+leave the code-result fingerprints equal.
+
+The prototype's runtime grant is cut off until 5.1w.2b establishes actual
+compiler-selected implementation correspondence. Its source checker is not that
+correspondence. Preserve the useful positive acceptance tests; their unfinished
+gate cannot be closed by weakening them to accept universal refusal. Necessary
+native/translation work from 5.1w.3b precedes that grant. An intrinsic-name
+denylist, an assumption that an edited fallback satisfies the intrinsic's
+contract, or silently disabling optimization would not repair the agreed model.
+
+Retained artifact bytes provide a concrete evidence anchor. Compiler objects,
+late intermediate representations, symbols and debug information can propose
+scope and derivations, but need checked correspondence and complete coverage,
+including inline instances and dispatch. The current opaque `BindBuilt` identity
+is an execution-owner declaration, not readable code or an implementation proof.
+Extend the existing generation/build boundary with the required bound evidence
+rather than introducing a parallel execution framework.
+
+The field report about go1.27.2-X:nodwarf5 lacks exact binary/library identities
+and moved-key evidence. This architectural finding does not diagnose every
+reported record or assert that an absent label alone prevents content matching.

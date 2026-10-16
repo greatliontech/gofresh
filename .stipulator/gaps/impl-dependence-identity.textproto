@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-dependence-identity"
+reason: "Shared selected-source inventory is partial substrate; complete claim-specific transitive, generated, linked and native dependencies remain unsupported by current records."
+content_hash: "5dba36a7cf5ce5ca0b7559c81bed749da4b2b513a5756ad55a2e0ac9087b239b"
+source_hash: "2ce10ba58b1d8d36bf4279684828560de7817f8d75c9a696291da78980b439b9"
+lands { manual { condition: "tooling-redesign 5.1w.2: the source vertical and native extension in 5.1w.3 retain complete claim dependencies, propagated through all memo and evidence consumers in 5.1w.6" } }

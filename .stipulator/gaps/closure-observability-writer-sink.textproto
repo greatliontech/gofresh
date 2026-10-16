@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-writer-sink"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "bbf7d4b447a99bb7b2ae6294d23e8bb9aafee46914c5be64763dd81842747bbf"
-source_hash: "cf1a16a5bf2769235445065e9220898b0d1879aef888985e582e8244b72d2e67"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Writer operand closure alone does not prove selected formatting and Buffer/Builder in-memory-write semantics; positive named summaries remain. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "b4e3da0340bb1e8de32f12e4e60edb3cc45ef5878b64585204e0d29c93500df7"
+source_hash: "200350c2d36f88c642dce6506d859abe9ea1ba38a718c1c89ce634c139f84b6c"
+lands { manual { condition: "tooling-redesign 5.1w.3: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-opaque-leaves"
+reason: "Existing named atomic and linkname admissions can drop conservative blockers without a checked argument for claim-relevant opaque/native behavior."
+content_hash: "436d352dc616f0ef0f4fbe40846017bdc8f589c668dbb6aea094a09dd1c150b8"
+source_hash: "673656a4459ae99fe5fa30d561a14d172cd672f2511db421f461435be04bdb33"
+lands { manual { condition: "tooling-redesign 5.1w.3: unsupported opaque boundaries refuse in the 5.1w.2 source vertical and useful native leaves have exact checked premises in 5.1w.3, propagated in 5.1w.6" contradicted: true } }

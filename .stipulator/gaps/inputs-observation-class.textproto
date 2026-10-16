@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-inputs-observation-class"
+reason: "Direct content/metadata digest examples do not establish producer fd-stat coverage. Existing same-toolchain handling lacks the new checked local coverage/refusal obligation."
+content_hash: "f32f64a5c8424ab35eb55e479a9ceb63d1c71435fd5a2a79e11f66a44779957a"
+source_hash: "9c432416b905cdeb51f5ce0b8e031880cc2e7401adac50fa4326298513c3bb83"
+lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

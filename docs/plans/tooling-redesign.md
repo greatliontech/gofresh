@@ -177,6 +177,85 @@
     Reconcile the incoming immediate-staleness report with fixed producer/checker
     identities and reduced tool-owned cases before changing build or artifact
     guards; distinguish expected incompatibility from a demonstrated defect.
+  - [ ] 5.1w Replace toolchain-variation approval with generic implementation
+    verification before resuming 5.2d/5.2e or releasing migrated consumers.
+    Preserve the existing compiler/language and executor premises, with explicit
+    foundational machine and primitive-effect semantics. No implementation-name
+    assertion or relabeled primitive replaces a property that needs proof.
+    - [x] 5.1w.1 Specify claim-scoped semantic derivations, their independently
+      checked premises, opaque-boundary refusal, complete dependency identities
+      and historical non-upgrade. Replace the mandatory content-chain contract;
+      inventory every selection-wide admission consumer and its deciding cases.
+    - [ ] 5.1w.2 Establish a source-derived computation vertical with an
+      independently checked derivation and an actual freshness consumer. Cover
+      useful scalar/string computation, callbacks and relevant initialization;
+      admit harmless selected-source variations without labels or approved hashes.
+      Reject introduced ambient reads, mutable state and unsupported opaque leaves;
+      a disconnected checker or universally refusing replacement is not acceptance.
+      - [ ] 5.1w.2a Check source-computation candidates and complete startup/call
+        inventories without granting runtime authority from nominal bodies alone.
+        Preserve the useful end-to-end positive tests while the binding is absent.
+      - [ ] 5.1w.2b Bind the claim to compiler-selected implementations before
+        enabling maximal-tier discharge. Cover intrinsic/fallback dispatch and
+        its runtime/CPU inputs; the retained math/bits POPCNT counterexample must
+        refuse or be fully guarded without a symbol denylist. Pull necessary
+        native/translation work from 5.1w.3b into this prerequisite. Preserve
+        the requested build, and independently verify any compiler-produced
+        selection or representation used as evidence.
+        Carry the structured failed premise, phase, entry and dependency edges
+        into native/public refusal accounts, including proposal exhaustion;
+        diagnostic text alone does not complete this vertical.
+    - [ ] 5.1w.3 Extend compositional proofs across the runtime/native boundaries
+      required by the selected useful workload. Establish each primitive's exact
+      semantic premises and interpret actual selected native instructions under
+      the identified machine model, without trusting a function name or digest. Keep
+      unsupported properties explicit; measure completed cold/warm work and
+      retained memory without substituting refusal for successful analysis.
+      - [ ] 5.1w.3a Extend checked value, heap, alias and initialization reasoning
+        for the existing computation families; retain precise callback and
+        exceptional-flow bounds. Prove local mutation separately from mutable
+        nonlocal influence, and reject forged object/escape summaries.
+      - [ ] 5.1w.3b Establish selected native-instruction, linkage and ABI
+        derivations for the required leaves under explicit machine/primitive
+        models. Preserve faults, nondeterminism and external inputs; a native
+        function name, code digest or successful execution supplies no summary.
+      - [ ] 5.1w.3c Compose the selected synchronization, atomic, initialization
+        and runtime-state claims needed by the supported families. Keep
+        execution-model assertions separate from checked type, retention,
+        publication and state-effect guarantees; preserve actual concurrency.
+    - [ ] 5.1w.4 Enforce non-waivable producing-span movement and v4-only runtime
+      manifest reuse before accepting new supported observations. Preserve typed
+      failure through current-state checks, conversion, adoption, merge and process
+      accounts; refuse historical v1-v3 authority without rewriting history.
+      Cover unknown siblings, restored values, purity, cancellation and independent
+      successful controls. Release/adopt only after the whole producing gate holds.
+    - [ ] 5.1w.5 Establish observation delivery, reachable-effect coverage and
+      immutable-environment outcome support through separate checked derivations
+      over the actual producing implementation and complete contributing roster.
+      Execute useful positive cases and added-input, lost-write and borrowed-support
+      negatives; neither normal termination nor an empty identity log supplies proof.
+    - [ ] 5.1w.6 Carry checked claims through ordinary/maximal, dynamic-state,
+      precise, observation and outcome consumers, with complete memo dependencies
+      and claim-local refusal causes. Replace version-approved dependency and
+      generated-code summaries wherever they supply implementation premises;
+      preserve version/content identity and explicit caller assertion channels.
+      Verify cold/warm/discarded-cache equivalence,
+      policy/content movement, checking/closing and historical non-upgrade. Migrate
+      native consumers without relabeling assertions or losing identity-only facts.
+    - [ ] 5.1w.7 Remove the selection-wide admission Boolean, approved-content
+      chains, flavor canaries and superseded summary mechanisms after useful
+      positive and adversarial acceptance. Converge independent review, direct
+      affected/full suites, targeted probes and records-only checks; retain the
+      existing restriction on broad witness evaluation and mutation campaigns.
+      Retain the existing supported-family positive population; any newly exposed
+      unsound premise needs a concrete counterexample and disposition, and loss
+      of a supported capability requires explicit scope agreement rather than
+      deleting its positive test or counting refusal as equivalent acceptance.
+      Release the verified shared library and install only consumers whose own
+      acceptance gates have passed. Stipulator follows shared release, source
+      adoption, preserved 5.2d/5.2e verification, then commit/install/restart and
+      actual reader-identity verification before conditional issue retirement.
+      Retire the shared registry issue only after its removal is accepted.
   - [ ] 5.2 Migrate Stipulator's package unit and source-derived resolution
     certificates. Cover all selected views, declaration precedence, classifier
     changes, module mode, untagged toolchain pins and dotted package identities.
@@ -225,7 +304,7 @@
         profile coordinates, off, absent/present/error states, module/workspace
         selection and build-input coherence through capture and closing.
         Accept the dependency adoption together with 5.2d.2's runtime binding:
-        native v3 PWD observations must publish and serve under the actual
+        native current-generation PWD observations must publish and serve under the actual
         package environment rather than the legacy analysis environment.
       - [ ] 5.2d.2 Adopt complete compilation/runtime descriptions, retained test
         artifacts and per-attempt native preparation/finalization/checking.
@@ -257,14 +336,19 @@
       package failure and cancellation, and the independent completed prefix.
       Complete and verify the preparation sharing designed before 5.2d.2's
       consumer migration, using its scoped discovery and certificate cold/warm
-      baseline; fold Stipulator's selection-certificate-preparation-repeated
-      issue through endpoint-local selected-view preparation. Keep retry
+      baseline; preserve endpoint-local selected-view preparation and independent
+      opening/closing observations. Keep retry
       durability/tier/account obligations at 5.3 explicit,
       and prevent another consumer-local reason parser during migration.
       Reconcile structurally readable historical proofs with native
       compatibility judgment; separate refused-record diagnostics from eligible
       evidence. Exercise disappearing export-cache inputs and bounded safe
       refresh or actionable refusal without preserving stale typed answers.
+      Resume after 5.1w: retain the reader-movement regression and investigate
+      the completed full-backend failures in package panic, workspace reporting,
+      timeout names/dumps, selection-envelope isolation and serving round-trip.
+      Require a settled passing backend/workspace gate and current records before
+      commit, installation, reader restart or conditional issue retirement.
   - [ ] 5.3 Preserve Stipulator argument identity and clause-scoped supersede;
     retain per-group witness tiers and package-completion persistence during
     drift retries. Publish operation accounts even when a later step fails.
@@ -370,10 +454,16 @@
     Distinguish inherited wait-status high-water from post-exec driver/build/test
     needs, and shared address-space/page accounting from independent equal-sized
     children. Neither equal counters nor a repeated sample proves shared ownership.
+    Recover Cerebro's candidate/cache identity before scoped-discovery attribution;
+    preserve its selected-witness completion criterion for authorized acceptance
+    at 9.3, without treating synthetic baselines as corpus completion.
   - [ ] 7.8 Share parsing/loading/proofs under complete generation identities;
     reject decisive source/guard mismatches before unnecessary refinement.
     Preserve full-inventory requests and explicit applicability transformations;
     keep declaration-level precision a separately justified refinement.
+    Repair covered test-main listing and generated absolute-source handling in
+    the selected toolchain before claiming covered observation-proof support;
+    preserve the producing coverage selection and native fail-closed analysis.
   - [ ] 7.9a Bound gofresh's persistent memo disk retention and expose shared
     usage/cleanup; docs/issues/persistent-memo-disk-retention.md. Preserve
     cache-miss recomputation and concurrent publication; precedes 7.9b/7.9c.

@@ -3,22 +3,28 @@
 Lands: docs/plans/tooling-redesign.md 5.2d.
 
 Secondary constituent: 5.4 owns Gomutant's producing/checking adoption.
+Prerequisite: 5.1w replaces implementation-approval authority and establishes
+the non-waivable observed-movement guard before consumer acceptance resumes.
 Stipulator's completed 5.2b source-certificate work is a retained control,
 not an unimplemented part of this producer migration.
 
 Native fingerprints carry optional `toolchainContent` and `admissionPolicy`
 keys after `buildConfig`. Their omission preserves historical encoding, not
 applicability: an old result without selected-content evidence cannot become
-valid by inserting today's identity. Observation proof compatibility is
-`gofresh/observation-rta@44`, and proof integrity and prepared outcome-subject
-identities bind the producing content and policy. Consumers retain the native
-form; mirrors and conversion code cannot omit these constituents.
+valid by inserting today's identity. The published observation strategy is
+`gofresh/observation-rta@44`; it grants no new checked-implementation authority.
+Proof integrity and prepared outcome-subject identities bind the producing
+content and policy. Adopt the replacement's explicit compatibility judgment,
+never rewrite a historical strategy to look current. Consumers retain the
+native form; mirrors and conversion code cannot omit these constituents.
 
-Runtime-input manifests now use generation 3, retaining truthful observed PWD
-values as environment dependencies. Generation 2 could omit those reads and
-cannot establish that the omitted dependency was irrelevant. At the explicit
-consumer bump, retain old native records as history but regenerate their runtime
-evidence; do not rewrite the manifest version or insert a current directory.
+Published runtime-input manifests use generation 3, retaining truthful observed
+PWD values, but cannot distinguish known bracket movement from inferred
+unverifiability. The accepted v4-only boundary at 5.1w.4 rejects generations
+1-3 for runtime reuse. Generation 2 also could omit observed PWD. At the
+explicit consumer bump, retain old native records as history but regenerate
+their runtime evidence; do not rewrite the manifest version, infer movement
+from diagnostic text or insert a current directory.
 Exercise same-build/different-runtime-directory checks and restart, including
 identity-only profiles and any adopted or merged observations. A record without
 a runtime-input manifest retains its independently governed evidence rules.

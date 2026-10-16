@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-outcome-inventory"
+reason: "The immutable-environment operation roster remains based on recognized effects, not checked environment, initialization, synchronization and native semantics independent of platform names."
+content_hash: "177bcdd6c12be219789346858a9ff291e591ca6f809f0c16f80832d878ef7a7f"
+source_hash: "73d3a517564693f69c354b67082ececfbda6a772f2a36ad9f4c5b789878058ba"
+lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

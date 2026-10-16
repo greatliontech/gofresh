@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-cause-order"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "8a436cb4d633fad1a1a0240b4b1c65a6859a746f6bc8a8e0fb4bc6e686f6cf3d"
-source_hash: "57592624322087a7ebe5c042706f684bdc8669c18219197d49918ff2bbe45dc5"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
+reason: "Existing classification/deduplication examples establish deterministic cause preference; integration with the new claim-local unsupported implementation causes remains uncovered. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+content_hash: "f54ec2fb1574473db0f678bf6ab81255101a382685b315a93a795bdff4de4ab4"
+source_hash: "72e854a7f43ac520ec9b092a06973fc0d3f20a897864924320c6be3efbd3a76d"
+lands { manual { condition: "tooling-redesign 5.1w.6: complete effect accounting and stronger-cause preference remain intact after checked-claim integration, with no diagnostic selecting semantic participation Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" } }

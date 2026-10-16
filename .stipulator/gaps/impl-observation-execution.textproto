@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-impl-observation-execution"
+reason: "Existing receipts and binding tests are partial execution evidence, not composition with independently checked observation implementations."
+content_hash: "52c4d7744c8468edbfec030498a83c44fa3413d5c404adab268c9afc4c0c8370"
+source_hash: "fb17ce354d7267fdc6ba9eb73ee683af9a915beaacfb80355df6e55e51c0325f"
+lands { manual { condition: "tooling-redesign 5.1w.5: checked claims compose with the complete actual contributing roster, environments, capture and completion receipts after the producing-span gate in 5.1w.4, propagated in 5.1w.6" } }

@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-guard-toolchain"
+reason: "Existing tests establish reported go-version identity and pass sampling, not selected content or implementation semantics required by dependent claims."
+content_hash: "012539ac477a2182a6ebb664df2d87ea3272e417bb9ad6801f377f0cabc2d139"
+source_hash: "93cb8de5a13d32d4766a1b4a5ff42c79c3a73943d18edd7fc7fbc6c7eab42e92"
+lands { manual { condition: "tooling-redesign 5.1w.6: reported identity remains independent of complete selected implementation evidence and checked dependent claims at all consumers" } }

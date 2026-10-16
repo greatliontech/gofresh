@@ -19,8 +19,10 @@ at check time to detect a change and to name which input moved.
 
 **runtime-input manifest encoding** (term): the one canonical encoding is the unpadded
 base64url encoding of a compact JSON object whose keys, in order, are `v`, optional
-`outcome`, optional `subjects`, optional `env`, optional `paths`, and optional
-`unverifiable`; `v` is `3`, `unverifiable` is an
+`outcome`, optional `subjects`, optional `env`, optional `paths`, optional
+`bracketMoved`, and optional `unverifiable`; `v` is `4`, `bracketMoved` is
+`true` when a producing bracket comparison established movement (false is
+omitted), and `unverifiable` is an
 array of strings, `env` is an array of objects with keys `n` (the variable name) and
 `d`, and `paths` is an array of objects with keys `k`, `p`, `d`, and optionally `m`,
 where `k` is
@@ -55,12 +57,14 @@ invalid UTF-8, alternate ordering or escaping, trailing data, and unsupported
 versions rather than silently dropping evidence — exactly one schema is ever
 readable, and an encoding produced by an older tool fails validation and regenerates.
 
-Version 3 retains a truthful observed PWD as an ordinary environment identity
-and digest. Version 2 could omit such a read without retaining its producing
-directory, so no version-2 manifest establishes the complete dependency set,
-even when it appears empty. Checking, adoption, conversion, merge and outcome
-support admission reject it rather than adding a directory or upgrading its
-version from current analysis. The enclosing native fingerprint can retain the
+Version 4 records demonstrated bracket movement independently of inferred
+unverifiability. Version 3 retained truthful observed PWD, but represented known
+movement only among diagnostic unverifiable reasons; it cannot establish the
+new guard distinction. Version 2 could additionally omit an observed PWD read.
+Checking, adoption, conversion, merge and outcome-support admission reject every
+earlier generation rather than inferring guard facts from diagnostic text,
+adding a directory, or upgrading a version from current analysis. The enclosing
+native fingerprint can retain the
 original opaque manifest for historical inspection and serialization; that
 readability grants no runtime-input or outcome authority. Records with no
 runtime-input manifest retain their independently governed evidence rules.
@@ -93,7 +97,8 @@ The combined digest is the first 32 lowercase hexadecimal characters of SHA-256
 over these UTF-8 lines in order, each ending with LF: `version V`; when support
 is present, `outcome METHOD` followed by one `subject ID` per subject identity;
 one `env NAME DIGEST` per environment entry; one `path KIND PATH DIGEST` per path
-entry; and one `unverifiable REASON` per refusal. Uppercase words here denote the
+entry; `bracket-moved` when the movement marker is present; and one
+`unverifiable REASON` per refusal. Uppercase words here denote the
 corresponding values, inserted verbatim; fields are separated by single ASCII
 spaces and sets use canonical manifest order. Identity and refusal validation
 excludes line-framing bytes, and entry digests have fixed width.
@@ -210,19 +215,19 @@ state. A stat observed after an open upgrades the one entry in place; a merge
 of observations that saw the same identity in different classes keeps the
 metadata-bound class; identity-kind conversions preserve the class unchanged.
 The stat record's completeness is a
-producing-toolchain property: the class split is complete only when
+checked producer-implementation property: the class split is complete only when
 fd-based stat surfaces whose result escapes to the caller (os.File.Stat on
 an opened handle) reach the test log, and only when stdlib-internal stats
 whose result never escapes (ReadFile's buffer-sizing stat) stay out of it —
 logging an observation the subject cannot read would collapse the content
 class for the dominant read idiom exactly as omitting a real one
-under-pins it. The dst toolchain draws this line (public method logs,
-non-escaping internal helper does not); a toolchain that omits fd-based
-stats entirely (stock Go through 1.27) leaves an opened file's metadata
-readable unobserved, so under it a subject branching on an opened file's
-modification time can serve across an mtime change — a named residual of
-that toolchain's observation surface, bounded to same-toolchain serves by
-the consumer's toolchain pin. The observation bracket's fingerprint is outside this split and always binds
+under-pins it. These are properties to establish from the actually selected
+implementation under REQ-impl-observation-claims, not from a build flavor or
+version. If metadata can reach the subject without a corresponding supported
+observation and guard class, the dependent observability claim refuses. A
+same-toolchain pin cannot make a known metadata hole sound. Proving that the
+subject cannot reach that metadata surface can discharge the claim locally;
+otherwise the absence of support remains explicit. The observation bracket's fingerprint is outside this split and always binds
 full state: its job is span integrity — detecting any mid-span modification, a
 content-restoring one included — so the metadata the persisted-reuse identity
 drops is exactly what it must keep. Content-bound evidence therefore
@@ -335,6 +340,14 @@ diagnostic execution does not repair missing evidence about the original process
 Unsupported operation classes remain incomplete rather than inheriting the
 semantics of a supported class.
 
+Implementation-derived outcome support obeys
+[implementation-verification.md](implementation-verification.md): a checked
+derivation establishes the operation's relation to guarded inputs independently
+of coverage and delivery claims. Native steps, initialization and exceptional
+paths needed for that relation cannot be replaced by a name or digest-approved
+summary. These obligations apply to outcome-bearing support, not to every
+source-derived certificate, identity-only guard or explicit purity judgment.
+
 These premises govern the producer facade as well as any lower-level construction
 that grants completion-bearing outcome support.
 The facade owns assembly and validation of the conjunction, not invention of a
@@ -386,16 +399,19 @@ environment mutation; no later analysis, read or diagnostic run repairs an
 omitted producing premise.
 
 **REQ-inputs-observable-read-set** (invariant): The read-only observability proof
-MUST model the Go test observation producer as exposing exactly the operation names
-`getenv`, `open`, `stat`, and `chdir`, starting after package initialization when user
-test-main flow calls into the harness; account for the producer omitting an
+MUST model the recognized identity stream as exposing the operation names
+`getenv`, `open`, `stat`, and `chdir`. It must establish from the selected
+implementation which relevant operations reach that stream and its active
+execution phases, including user test-main flow under the initialization and
+coverage obligations of REQ-closure-observability-analysis; account for the producer omitting an
 empty identity or one containing a newline; `open` not encoding access flags; `stat`
 not recording returned metadata; every operation omitting its return values, byte
 counts, and errors; and mutation and child-process operations producing no record.
 The identity-only stream does not establish the outcome part of an
-observation-completeness assertion by itself. Complete toolchain-content and
-admission evidence pins the audited producer semantics, and recognized proof
-compatibility pins the engine's interpretation (REQ-fresh-dependency-identities).
+observation-completeness assertion by itself. Complete implementation dependence
+identity pins the selected inputs; checked derivations establish the producer's
+coverage and delivery claims separately, and recognized proof compatibility
+identifies the engine's interpretation (REQ-fresh-dependency-identities).
 Against that model, the base read-only proof admits only subject-time `os.Getenv`,
 `os.LookupEnv`, `os.Open`, `os.ReadFile`, and
 `os.ReadDir` effects whose identity arguments are proven non-empty, valid UTF-8, and
@@ -405,20 +421,24 @@ congruence and recording the resolved identity or sealing the observation
 fail-closed (REQ-inputs-path-congruence), so no admitted identity can serve
 unresolved. On a read-only file
 handle obtained from that admitted acquisition, only `Close`, `Name`, `Read`,
-`ReadAt`, and `Seek` are admitted. An admitted standard-library wrapper is classified
-atomically at its audited public operation: implementation-internal syscall or native
-steps solely realizing that same logged effect do not become duplicate subject
-effects, while callbacks, additional effects, and returned-value methods remain
-independently classified; any descriptor escape or unaudited implementation path
+`ReadAt`, and `Seek` are admission candidates, each requiring the appropriate
+checked implementation claim. A wrapper may be summarized as one public
+operation only when a checked derivation establishes its complete effects;
+internal syscall or native steps are not discarded because the public operation
+has a familiar name. A derivation establishing that those steps solely realize
+the same accounted-for effect need not report duplicate subject effects, while
+callbacks, additional effects, and returned-value methods remain independently
+classified. Any descriptor escape or unsupported claim-relevant implementation path
 blocks the proof. On a directory entry returned by an admitted `ReadDir`, only `Name`,
 `IsDir`, and `Type` are admitted. Every method of
-every result value is audited independently, unknown methods block, and metadata
+every result value is judged independently, unknown methods block, and metadata
 returning methods such as `File.Stat` and `DirEntry.Info` block because their complete
 values are not hashed. `File.ReadDir` also blocks because filesystem enumeration order
-is not represented by the canonical directory digest. Each admitted operation's
-behavior-affecting return values, byte counts, and errors must be established as
-derivable from its guarded environment value or hashed regular-file or sorted-directory
-value; an identity observation alone never establishes that fact. Every other
+is not represented by the canonical directory digest. Outcome-bearing support
+additionally requires an admitted method establishing each covered operation's
+behavior-affecting return values, byte counts and errors in relation to its
+guarded environment value or hashed regular-file or sorted-directory value.
+Observability alone never establishes that fact. Every other
 environment, filesystem, network, process, metadata,
 mutation, direct-syscall, native, linked, or unknown effect blocks the proof;
 `os.Environ`, `os.Stat`, `os.Lstat`, process execution, and every
@@ -441,50 +461,52 @@ unfinalized or inconsistent producer evidence, and an explicitly incomplete chil
 keeps the deterministic union unverifiable.
 
 **REQ-inputs-value-binding** (invariant): A completed observation of newly read
-values — one whose evidence originates from a producing process's testlog rather
-than from re-admitted persisted evidence (REQ-inputs-adoption) — MUST be
-constructible only against an observation bracket captured before its producing
-process started. Strictly after the manifest digest's last input read, the bracket
-is revalidated with the same hashing semantics as its capture: an unchanged
-fingerprint binds the digest of every bracket-covered recorded path identity to the
-values read at any time in the capture-to-revalidation span, up to an intra-span
-mutation-and-restore interval — the residual REQ-inputs-observation-coherence
-already declares unprovable; a restore is tolerated only when it reproduces content
-and metadata alike — metadata as the fingerprint observes it, so a directory
-object's own size and mtime, which the observation-bracket term carves out,
-never bar a restoration they alone would distinguish. An observed identity is bracket-covered only when the object it
-materializes to under kernel path-walk semantics resolves, after every symlink in
-the walk, to a path under a declared root's own resolved path, and every symlink
-the walk traverses — directory components included — itself lies under a
-declared root's resolved path, so each traversed link's target is fingerprinted
-and a retarget moves the bracket rather than silently rebinding the identity.
-The walk is read from the capture module view's resolved root for a
-module-relative identity and, for an absolute one, from the resolved position
-of its covering root — the declared absolute root whose path lexically
-contains the identity. An absolute root is fingerprinted through its full
-chain, so a retarget above the root moves its digest unless the new object is
-content-and-metadata identical — the tolerated-restore class, under which the
-bound values are identical by construction. An identity whose
-resolution chain leaves every root at any step, or that is lexically under a
-root but resolving outside every root, is unverifiable, never bound; and an
-unchanged bracket binds only covered identities carrying no other unverifiable
-disposition. A revalidation finding the bracket moved — including a root whose
-object changed type, appeared, or disappeared — records an attributable
-unverifiable reason for the observation, and a recorded path identity covered by no
-root records an attributable per-identity unverifiable reason; in both cases the
-observation still constructs, converts, merges, and checks as unverifiable
-evidence, never as bound, so the failure direction is always recomputation.
-Every constructed reason is manifest-representable BY CONSTRUCTION —
-filesystem-derived names it embeds (moved members, escaped links, unhashable
-paths) travel quoted when they carry framing bytes or invalid UTF-8 — so an
-attributable refusal can never fail manifest validation and harden into an
-error. A
-bracket captured after the process started, interpreted under a different module
-view than its capture, or revalidated with different hashing semantics is refused
-rather than read as unchanged. Environment identities require no bracket:
-observation coherence already requires digesting from the exact complete
-environment the producing process inherited, which binds their observed values by
-construction.
+values — evidence originating from a producing process's testlog rather than
+re-admitted persisted evidence (REQ-inputs-adoption) — MUST obey these binding
+and failure obligations:
+
+- **capture-and-revalidation** — An observation bracket is captured before the
+  producing process starts and revalidated strictly after the manifest digest's
+  last input read, using the capture's hashing semantics. An unchanged fingerprint
+  binds every bracket-covered recorded path identity to values read within that
+  span, up to the mutation-and-restore residual of REQ-inputs-observation-coherence.
+  A tolerated restore reproduces content and the metadata the fingerprint observes;
+  a directory object's own size and mtime, excluded by the observation-bracket
+  term, do not distinguish restorations. A late capture, a different module view
+  or different revalidation semantics refuses rather than reading as unchanged.
+- **path-coverage** — A recorded identity is covered only when kernel path-walk
+  semantics resolve its object under a declared root's resolved path and every
+  traversed symlink, including directory components, itself lies under a declared
+  root's resolved path. Each traversed link's target is fingerprinted, so retargeting
+  moves the bracket rather than silently rebinding the identity. Module-relative
+  walks start at the capture module view's resolved root; absolute walks start at
+  the resolved position of the declared absolute root lexically covering the
+  identity. Absolute roots are fingerprinted through their full chain, so an
+  above-root retarget moves the digest unless content and observed metadata are
+  identical, the tolerated-restore case. A resolution chain leaving every root at
+  any step, or a lexically covered identity resolving outside every root, remains
+  unbound. An unchanged bracket binds only covered identities with no other
+  unverifiable disposition.
+- **unknown-binding** — An uncovered identity or binding that cannot be established
+  retains attributable inferred unverifiability. Unknown hashability alone proves
+  no movement. Process facts remain constructible, and unknown binding and
+  independent purity retain their separately governed positive cases.
+- **demonstrated-movement** — Revalidation establishing movement of comparable
+  captured and current root state, including retyping, appearance or disappearance,
+  records an attributable typed runtime-input guard failure and the manifest's
+  `bracketMoved` marker. A known mismatch remains even beside an incomparable root.
+  It is never inferred from diagnostic text, waived by purity or cleared by later
+  agreement with the recorded digest. Process facts remain constructible, but
+  movement supplies no reusable evidence and checks stale. Conversion, adoption
+  and merge preserve the typed failure; any accepted contributing child's movement
+  remains present, including beside incomplete or zero-process evidence.
+- **attribution** — Every constructed reason is manifest-representable by
+  construction. Filesystem-derived names, including moved members, escaped links
+  and unhashable paths, are quoted when they contain framing bytes or invalid UTF-8,
+  so attributable refusal cannot fail manifest validation and harden into an error.
+- **environment-binding** — Environment identities require no bracket; observation
+  coherence requires digesting from the exact complete environment inherited by
+  the producing process, which binds their observed values by construction.
 
 **REQ-inputs-bracket-coverage** (invariant): A declared root MUST be fingerprinted
 with the hashing semantics its materialized object would receive as an observed

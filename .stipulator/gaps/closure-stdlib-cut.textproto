@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-closure-stdlib-cut"
+reason: "Existing contribution examples establish hash exclusion only; excluded standard implementations still require complete identities and checked semantics for every dependent positive claim."
+content_hash: "66dfd99dd2ef80d2502be9b2c0367cdb800a217eca147fce57c57ab66266a103"
+source_hash: "682da028d16df66104877ccf6ce496e1e1fe472eeee163f71a92fac2207cdfba"
+lands { manual { condition: "tooling-redesign 5.1w.6: all positive consumers preserve excluded standard implementation dependencies and checked claims while callbacks remain reachable and hashed" } }
