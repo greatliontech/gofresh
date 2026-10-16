@@ -127,6 +127,7 @@ func TestComputationCallbackCheckedDeadPaths(t *testing.T) {
 		"func no()bool{return false};func native();func F(){if no(){native()}}",
 		"func no()bool{return false};func F(p *int){if no(){*p=7}}",
 		"func no()bool{return false};func F(){if no(){panic(7)}}",
+		"func native();func F(b bool){if b{if !b{native()}}}",
 	} {
 		t.Run(text, func(t *testing.T) {
 			r := relationProve(t, relationFixture(t, text, 64))
@@ -141,9 +142,6 @@ func TestComputationCallbackCheckedDeadPaths(t *testing.T) {
 		"func native();func F(b bool){if b{native()}}",
 		"func F(p *int,b bool){if b{*p=7}}",
 		"func F(b bool){if b{panic(7)}}",
-		// This contradiction currently exceeds the rewrite proposer's rules.
-		// Unknown proof is still a refusal, never permission to omit the call.
-		"func native();func F(b bool){if b{if !b{native()}}}",
 	} {
 		t.Run(text, func(t *testing.T) {
 			s := relationFixture(t, text, 64)

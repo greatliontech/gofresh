@@ -172,6 +172,13 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 		}
 		for i := 0; i < 2; i++ {
 			a, b := n.args[i], n.args[1-i]
+			if a.op == Not && p.eq(a.args[0], b) {
+				value := uint64(0)
+				if n.op == Or {
+					value = 1
+				}
+				return result(BooleanLaw, p.con(Bool(), value))
+			}
 			if a.op != Constant {
 				continue
 			}

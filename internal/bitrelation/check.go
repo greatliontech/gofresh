@@ -270,6 +270,16 @@ func (c *checker) comparisonBound(a, b *node) bool {
 
 func (c *checker) boolean(a, b *node) bool {
 	x, y := a.args[0], a.args[1]
+	// And/Or and Not have exactly Boolean operands by construction. The
+	// complement must match structurally, including variable scope and scratch.
+	if a.op == And && constant(b, 0) || a.op == Or && constant(b, 1) {
+		for i := 0; i < 2; i++ {
+			neg, other := a.args[i], a.args[1-i]
+			if neg.op == Not && c.eq(neg.args[0], other) {
+				return true
+			}
+		}
+	}
 	switch a.op {
 	case Not:
 		return x.op == Not && c.eq(x.args[0], b)
