@@ -58,7 +58,7 @@ func (s *Snapshot) BindArtifact(ctx context.Context, pkg string, description Art
 	if err != nil {
 		return BuildBinding{}, fmt.Errorf("gofresh: artifact path: %w", err)
 	}
-	artifact, err := observeArtifact(ctx, path)
+	artifact, err := readArtifact(ctx, path, nil)
 	if err != nil {
 		return BuildBinding{}, fmt.Errorf("gofresh: inspect artifact %q: %w", path, err)
 	}
@@ -77,24 +77,26 @@ func (a *inspectedArtifact) validate(ctx context.Context) error {
 	if a == nil {
 		return nil // The declaration-only binding selects no artifact observation.
 	}
-	current, err := observeArtifact(ctx, a.path)
+	_, err := readArtifact(ctx, a.path, a)
 	if cause := ctx.Err(); cause != nil {
 		return cause
 	}
 	if err != nil {
 		return fmt.Errorf("%w: artifact %q observation unavailable: %w", ErrViewChanged, a.path, err)
 	}
-	if !os.SameFile(a.file, current.file) || a.digest != current.digest || !bytes.Equal(a.bytes, current.bytes) {
-		return fmt.Errorf("%w: artifact %q identity or content changed", ErrViewChanged, a.path)
-	}
 	return ctx.Err()
 }
 
-// observeArtifact samples metadata only to enforce regular-file and file-identity
-// constraints. Complete bytes, never timestamps, establish content agreement.
-// Context checks bound every read/hash chunk and both sides of filesystem calls;
-// like other filesystem observations, an individual OS call is not interruptible.
-func observeArtifact(ctx context.Context, path string) (artifact *inspectedArtifact, err error) {
+// readArtifact captures an owned image when expected is nil. Otherwise it
+// compares every byte against the immutable expected image and returns that
+// unchanged input on success. Both paths share the same coordinate, identity,
+// read-completeness and cancellation checks. Validation needs only a bounded
+// buffer: reconstructing or hashing a second image adds no comparison evidence.
+// Metadata enforces regular-file and file-identity constraints; complete bytes,
+// never timestamps, establish content agreement. Context checks bound every
+// read/hash chunk and both sides of filesystem calls; like other filesystem
+// observations, an individual OS call is not interruptible.
+func readArtifact(ctx context.Context, path string, expected *inspectedArtifact) (artifact *inspectedArtifact, err error) {
 	defer func() {
 		if cause := ctx.Err(); cause != nil {
 			artifact, err = nil, cause
@@ -128,9 +130,21 @@ func observeArtifact(ctx context.Context, path string) (artifact *inspectedArtif
 	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
 		return nil, fmt.Errorf("%w: artifact changed while opening", ErrViewChanged)
 	}
-	a := &inspectedArtifact{path: path, file: opened}
+	size := opened.Size()
+	if size < 0 || int64(int(size)) != size {
+		return nil, errors.New("artifact size exceeds addressable input")
+	}
+	a := expected
+	if a == nil {
+		// A successful capture owns all bytes, so reserve exactly the observed
+		// size rather than repeatedly allocating and copying a growing image.
+		a = &inspectedArtifact{path: path, file: opened, bytes: make([]byte, 0, int(size))}
+	} else if !os.SameFile(a.file, opened) || int64(len(a.bytes)) != size {
+		return nil, fmt.Errorf("%w: artifact identity or size changed", ErrViewChanged)
+	}
 	hash := sha256.New()
 	var buffer [64 * 1024]byte
+	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -139,8 +153,16 @@ func observeArtifact(ctx context.Context, path string) (artifact *inspectedArtif
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		a.bytes = append(a.bytes, buffer[:n]...)
-		_, _ = hash.Write(buffer[:n])
+		if int64(n) > size-total {
+			return nil, fmt.Errorf("%w: artifact grew during read", ErrViewChanged)
+		}
+		if expected == nil {
+			a.bytes = append(a.bytes, buffer[:n]...)
+			_, _ = hash.Write(buffer[:n])
+		} else if !bytes.Equal(a.bytes[int(total):int(total)+n], buffer[:n]) {
+			return nil, fmt.Errorf("%w: artifact content changed", ErrViewChanged)
+		}
+		total += int64(n)
 		if readErr == io.EOF {
 			break
 		}
@@ -162,9 +184,11 @@ func observeArtifact(ctx context.Context, path string) (artifact *inspectedArtif
 	if err != nil {
 		return nil, err
 	}
-	if !after.Mode().IsRegular() || !coordinate.Mode().IsRegular() || !os.SameFile(opened, after) || !os.SameFile(after, coordinate) || opened.Size() != int64(len(a.bytes)) || after.Size() != opened.Size() || coordinate.Size() != opened.Size() {
+	if !after.Mode().IsRegular() || !coordinate.Mode().IsRegular() || !os.SameFile(opened, after) || !os.SameFile(after, coordinate) || total != size || after.Size() != size || coordinate.Size() != size {
 		return nil, fmt.Errorf("%w: artifact changed during read", ErrViewChanged)
 	}
-	copy(a.digest[:], hash.Sum(nil))
+	if expected == nil {
+		copy(a.digest[:], hash.Sum(nil))
+	}
 	return a, nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -129,6 +130,45 @@ func TestArtifactCoordinatePreservesSymlinkParent(t *testing.T) {
 	}
 	if err := bound.inspected.validate(t.Context()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("same-byte symlink retarget accepted: %v", err)
+	}
+}
+
+func TestArtifactStreamingBoundaries(t *testing.T) {
+	for _, size := range []int{0, 1, 65535, 65536, 65537, 3*65536 + 17} {
+		t.Run(fmt.Sprintf("bytes=%d", size), func(t *testing.T) {
+			snapshot, dir := artifactScopeFixture(t)
+			path := filepath.Join(dir, "retained.test")
+			data := make([]byte, size)
+			for i := range data {
+				data[i] = byte(i*31 + i/251)
+			}
+			writeArtifactFixture(t, path, data)
+			binding, err := snapshot.BindArtifact(t.Context(), "example.com/artifact", ArtifactDescription{Identity: "retained", Path: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(binding.inspected.bytes, data) || binding.inspected.digest != sha256.Sum256(data) {
+				t.Fatal("capture changed the artifact's complete content")
+			}
+			if err := binding.inspected.validate(t.Context()); err != nil {
+				t.Fatalf("unchanged artifact refused: %v", err)
+			}
+			for _, offset := range []int{0, 65535, 65536, size - 1} {
+				if offset < 0 || offset >= size {
+					continue
+				}
+				data[offset] ^= 1
+				writeArtifactFixture(t, path, data)
+				if err := binding.inspected.validate(t.Context()); !errors.Is(err, ErrViewChanged) {
+					t.Fatalf("changed byte %d escaped comparison: %v", offset, err)
+				}
+				data[offset] ^= 1
+				writeArtifactFixture(t, path, data)
+				if err := binding.inspected.validate(t.Context()); err != nil {
+					t.Fatalf("independent equal-content comparison refused: %v", err)
+				}
+			}
+		})
 	}
 }
 

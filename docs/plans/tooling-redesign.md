@@ -218,11 +218,42 @@
           for the ordinary source-subject obligation, including inline instances,
           relevant startup, dispatch, code motion and actual execution binding.
           A narrower native-invocation result cannot substitute for this gate.
+          - [ ] 5.1w.2b.3a Derive complete scalar source/native value and effect
+            relations for a bound root. Independently check every rewrite and
+            native successor; cover inlined callees without assuming debug-map
+            completeness, and reject mismatched pure implementations.
+          - [ ] 5.1w.2b.3b Establish the ordinary consumer's actual whole-operation
+            boundary, argument/result transfer and relevant initialization.
+            Widen enclosing-root analysis where needed; a theorem about an unused
+            out-of-line copy cannot cover a contributing inline instance or
+            justify cutting away surrounding effects. Preserve the source result
+            model and actual requested build form.
+            Keep public acceptance centered on the existing test/benchmark
+            workflows and useful environment verification. Limit traced scalar
+            CALL/RET protocols to private feasibility experiments; do not introduce
+            a public tracing/program-build API or cache-hit tracing requirement
+            as a substitute for those consumer obligations.
         - [ ] 5.1w.2b.4 Carry the accepted implementation evidence through native
           records, current applicability and independent producing/checking close.
           Reject missing historical premises and unsupported current artifacts;
           expose structured refusals before restoring runtime discharge and its
           preserved useful-positive acceptance population.
+    - [ ] 5.1w.2p Profile artifact capture and repeated validation, then the usable
+      native/source proof paths. Record cold/warm workloads, accepted/refused
+      populations, latency, allocation volume and retained memory. Use exclusive
+      quiet benchmark runs with CPU/allocation profiles; distinguish filesystem
+      cache warmth from proof-cache reuse. Optimize demonstrated costs, preserve
+      complete evidence and cancellation guarantees, and compare equivalent
+      before/after workloads. Carry these checks into later implementation chunks
+      whenever changes affect the dominant costs; do not trade refusal or weaker
+      proof coverage for speed.
+      - [x] 5.1w.2p.1 Measure retained-artifact capture and repeated validation;
+        remove avoidable image allocation, copying and hashing while preserving
+        complete coordinate/content comparisons and all refusal precedence.
+      - [ ] 5.1w.2p.2 Profile native image preparation, cold derivation and repeated
+        roots against identical accepted/refused populations. Measure shared-image
+        retention separately from allocation volume, and address demonstrated
+        bottlenecks before adopting the native path in ordinary consumers.
     - [ ] 5.1w.3 Extend compositional proofs across the runtime/native boundaries
       required by the selected useful workload. Establish each primitive's exact
       semantic premises and interpret actual selected native instructions under

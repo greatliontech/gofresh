@@ -123,6 +123,21 @@ is an execution-owner declaration, not readable code or an implementation proof.
 Extend the existing generation/build boundary with the required bound evidence
 rather than introducing a parallel execution framework.
 
+## Public adoption boundary
+
+The user selected existing test/benchmark workflows as the public acceptance
+target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
+entry and source/native relation checks remain useful subordinate mechanisms,
+but a scalar-return fixture does not complete test, benchmark or environment
+verification. Tracing may be investigated privately; a new public tracing or
+program-build API, or a helper process on every cache hit, is not the selected
+adoption path. Resolve actual ordinary-consumer coverage at 5.1w.2b.3b and retain
+the useful-positive gates before admitting runtime reuse.
+
+Profile cold preparation, repeated proofs and consumer-level serving costs under
+the existing workflow. Compare the same accepted/refused populations; excluding
+unsupported work or weakening a proof cannot be reported as an optimization.
+
 The field report about go1.27.2-X:nodwarf5 lacks exact binary/library identities
 and moved-key evidence. This architectural finding does not diagnose every
 reported record or assert that an absent label alone prevents content matching.
