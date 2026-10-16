@@ -60,7 +60,7 @@ func TestBracketCaptureAndRevalidateAgreeOnUnchangedTree(t *testing.T) {
 		t.Fatalf("capture unverifiable: %q", bracket.reason)
 	}
 	for round := 0; round < 2; round++ {
-		unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+		unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,14 +72,14 @@ func TestBracketCaptureAndRevalidateAgreeOnUnchangedTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if normalized.fingerprint != bracket.fingerprint {
+	if normalized.seal != bracket.seal {
 		t.Fatal("equivalent root declarations produced distinct fingerprints")
 	}
 	empty, err := ambientCaptureBracket(moduleDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, reason, err := empty.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+	if unchanged, _, reason, err := empty.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
 		t.Fatalf("empty bracket revalidate = %t %q %v", unchanged, reason, err)
 	}
 }
@@ -223,7 +223,7 @@ func TestBracketMovesOnPersistedMutation(t *testing.T) {
 				t.Fatalf("capture unverifiable: %q", bracket.reason)
 			}
 			tc.mutate(t, moduleDir)
-			unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+			unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,7 +254,7 @@ func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(volatile, "c.txt"), []byte("created"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(moduleDir, "data", "a.txt"), []byte("mutated"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, reason, err = bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err = bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestBracketExclusionsRemoveSubtreeFromFingerprintAndCoverage(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(moduleDir, "data", "d.txt"), []byte("noise"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, reason, err := rootExcluded.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+	if unchanged, _, reason, err := rootExcluded.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
 		t.Fatalf("excluded-root mutation revalidated as moved: %t %q %v", unchanged, reason, err)
 	}
 }
@@ -317,7 +317,7 @@ func TestBracketRootRefusedByHashingSemanticsIsUnverifiable(t *testing.T) {
 	if escaped.reason == "" || !strings.Contains(escaped.reason, "external directory input") || !strings.Contains(escaped.reason, `recorded path "escape" resolves to `+strconv.Quote(resolvedExternal)+` outside the tree`) {
 		t.Fatalf("escaping symlink root reason = %q", escaped.reason)
 	}
-	unchanged, reason, err := escaped.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err := escaped.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
 	if bracket.reason != "" {
 		t.Fatalf("absolute directory root refused: %q", bracket.reason)
 	}
-	if unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+	if unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
 		t.Fatalf("unchanged external tree revalidated as moved: %t %q %v", unchanged, reason, err)
 	}
 	var external *bracketRoot
@@ -365,7 +365,7 @@ func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
 	if err := os.WriteFile(fixed, []byte("package sub // edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestAbsoluteDirectoryRootBindsItsTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(externalDir, "new.go"), []byte("package replace\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, _, err := recaptured.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+	if unchanged, _, _, err := recaptured.revalidate(context.Background(), moduleDir); err != nil || unchanged {
 		t.Fatalf("a file created under the absolute root did not move the bracket: %t %v", unchanged, err)
 	}
 }
@@ -415,7 +415,7 @@ func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
 	if err := os.WriteFile(fixed, []byte("package sub // edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+	if unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || unchanged {
 		t.Fatalf("a rewrite beneath the link's target did not move the bracket: %t %q %v", unchanged, reason, err)
 	}
 
@@ -430,7 +430,7 @@ func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(volatile, "churn"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+	if unchanged, _, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
 		t.Fatalf("churn under an excluded subtree of an absolute root moved the bracket: %t %q %v", unchanged, reason, err)
 	}
 	// The exclusion removes its subtree alone: the rest of the absolute
@@ -438,7 +438,7 @@ func TestAbsoluteDirectoryRootWalksItsResolvedTree(t *testing.T) {
 	if err := os.WriteFile(fixed, []byte("package sub // edited again\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || unchanged {
+	if unchanged, _, reason, err := excluded.revalidate(context.Background(), moduleDir); err != nil || unchanged {
 		t.Fatalf("a rewrite outside the excluded subtree did not move the bracket: %t %q %v", unchanged, reason, err)
 	}
 }
@@ -492,20 +492,21 @@ func TestBracketRevalidateRefusesForeignModuleViewAndUnsealedBracket(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := bracket.revalidate(context.Background(), t.TempDir()); err == nil {
+	if _, _, _, err := bracket.revalidate(context.Background(), t.TempDir()); err == nil {
 		t.Fatal("revalidate accepted a different module view")
 	}
 	var zero Bracket
-	if _, _, err := zero.revalidate(context.Background(), moduleDir); err == nil {
+	if _, _, _, err := zero.revalidate(context.Background(), moduleDir); err == nil {
 		t.Fatal("revalidate accepted a zero bracket")
 	}
 	tampered := bracket
-	tampered.fingerprint = strings.Repeat("0", len(bracket.fingerprint))
-	if _, _, err := tampered.revalidate(context.Background(), moduleDir); err == nil {
+	tampered.roots = append([]bracketRoot(nil), bracket.roots...)
+	tampered.roots[0].facts = newPathFacts()
+	if _, _, _, err := tampered.revalidate(context.Background(), moduleDir); err == nil {
 		t.Fatal("revalidate accepted a tampered bracket")
 	}
 	//lint:ignore SA1012 the nil-context refusal is the behavior under pin
-	if _, _, err := bracket.revalidate(nil, moduleDir); err == nil {
+	if _, _, _, err := bracket.revalidate(nil, moduleDir); err == nil {
 		t.Fatal("revalidate accepted a nil context")
 	}
 }
@@ -561,11 +562,13 @@ func TestCaptureBracketHonorsCancellation(t *testing.T) {
 // root moves the fingerprint, while the same mutation under an excluded
 // subtree does not (REQ-inputs-bracket-coverage).
 func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
-	f.Add(uint64(1), uint8(0), false)
-	f.Add(uint64(2), uint8(3), false)
-	f.Add(uint64(3), uint8(7), true)
-	f.Add(uint64(4), uint8(11), true)
-	f.Fuzz(func(t *testing.T, seed uint64, pick uint8, excludeSite bool) {
+	for _, unknown := range []bool{false, true} {
+		f.Add(uint64(1), uint8(0), false, unknown)
+		f.Add(uint64(2), uint8(3), false, unknown)
+		f.Add(uint64(3), uint8(7), true, unknown)
+		f.Add(uint64(4), uint8(11), true, unknown)
+	}
+	f.Fuzz(func(t *testing.T, seed uint64, pick uint8, excludeSite, unknownMember bool) {
 		moduleDir := filepath.Join(t.TempDir(), "mod")
 		root := filepath.Join(moduleDir, "data")
 		rng := rand.New(rand.NewPCG(seed, 7))
@@ -627,6 +630,16 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 			)
 		}
 		chosen := mutations[int(pick)%len(mutations)]
+		if unknownMember {
+			p := filepath.Join(root, "zz-unknown")
+			if err := os.WriteFile(p, []byte("unhashable sibling"), 0000); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.ReadFile(p); !os.IsPermission(err) {
+				t.Skip("requires a read-denied sibling")
+			}
+		}
+		unknown := unknownMember && !(excludeSite && chosen.site == root)
 		var opts []BracketOption
 		if excludeSite {
 			rel, err := filepath.Rel(moduleDir, chosen.site)
@@ -639,26 +652,26 @@ func FuzzBracketSinglePersistedMutationMovesFingerprint(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bracket.reason != "" {
+		if (bracket.reason != "") != unknown {
 			t.Fatalf("capture unverifiable: %q", bracket.reason)
 		}
-		if unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || !unchanged {
+		if unchanged, moved, reason, err := bracket.revalidate(context.Background(), moduleDir); err != nil || moved || unchanged == unknown || (reason != "") != unknown {
 			t.Fatalf("untouched tree revalidate = %t %q %v", unchanged, reason, err)
 		}
 		if err := chosen.apply(); err != nil {
 			t.Fatal(err)
 		}
-		unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+		unchanged, moved, reason, err := bracket.revalidate(context.Background(), moduleDir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if excludeSite {
-			if !unchanged || reason != "" {
+			if moved || unchanged == unknown || (reason != "") != unknown {
 				t.Fatalf("excluded-site mutation moved the fingerprint: %q", reason)
 			}
 			return
 		}
-		if unchanged || reason == "" {
+		if unchanged || !moved || reason == "" {
 			t.Fatalf("persisted mutation at %q revalidated as unchanged (reason %q)", chosen.site, reason)
 		}
 	})
@@ -703,7 +716,7 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 	}
 	revalidateReason := func(t *testing.T, b Bracket, moduleDir string) string {
 		t.Helper()
-		unchanged, reason, err := b.revalidate(context.Background(), moduleDir)
+		unchanged, _, reason, err := b.revalidate(context.Background(), moduleDir)
 		if err != nil {
 			t.Fatal(err)
 		}

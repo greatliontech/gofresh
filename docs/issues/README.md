@@ -8,10 +8,9 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | issue | summary | Lands |
 |---|---|---|
 | [toolchain-variation-admission-registry](toolchain-variation-admission-registry.md) | Replace combination approval with independently checked implementation derivations and useful end-to-end acceptance | tooling-redesign 5.1w.7 |
-| [observed-bracket-motion-waived-by-purity](observed-bracket-motion-waived-by-purity.md) | Known producing-input movement publishes false Valid under purity; preserve a non-waivable typed guard and reject historical ambiguous manifests | tooling-redesign 5.1w.4 |
 | [coverage-testmain-export-load-failure](coverage-testmain-export-load-failure.md) | Covered `go list -test` constructs an invalid generated-source path; preserve refusal until a selected-toolchain repair establishes proof support | tooling-redesign 7.8 |
 | [persistent-memo-disk-retention](persistent-memo-disk-retention.md) | 16 GiB shared memo store without global retention; bound disk growth and expose safe reclamation | tooling-redesign 7.9a |
-| [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | complete producing adoption and historical non-upgrade; source-certificate dependencies already landed | tooling-redesign 5.2d |
+| [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | adopt native dependency evidence and unreleased v4-only runtime evidence end to end, preserving old bytes as history; source-certificate dependencies already landed | tooling-redesign 5.2d |
 | [audit-boundary-residue](audit-boundary-residue.md) | adopt shared package-producing and typed-judgment boundaries, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2d |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
 | [resident-walk-counts-a-vfork-child-twice](resident-walk-counts-a-vfork-child-twice.md) | attribute duplicate held-page accounting for vfork and persistent shared mappings; equal counters and double sampling prove no ownership | tooling-redesign 7.7 |

@@ -4,19 +4,22 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
-// Version-2 values may have omitted a PWD read. A canonical historical payload
-// and even an internally sealed value cannot gain current authority by re-entry.
+// Pre-v4 values cannot distinguish demonstrated movement from inferred refusal;
+// pre-v3 values may also omit PWD. Even internally sealed history cannot upgrade.
 func FuzzHistoricalPWDManifestDoesNotUpgrade(f *testing.F) {
-	f.Add([]byte("empty"), false, false)
-	f.Add([]byte("pwd"), true, false)
-	f.Add([]byte("supported"), true, true)
-	f.Fuzz(func(t *testing.T, value []byte, withEnv, supported bool) {
+	for version := uint8(1); version <= 3; version++ {
+		f.Add([]byte("empty"), false, false, version)
+		f.Add([]byte("pwd"), true, false, version)
+		f.Add([]byte("supported"), true, true, version)
+	}
+	f.Fuzz(func(t *testing.T, value []byte, withEnv, supported bool, version uint8) {
 		dir := t.TempDir()
 		env := []string{"PWD=" + dir, "OBSERVED=" + base64.RawURLEncoding.EncodeToString(value)}
 		m := manifest{Version: manifestVersion}
@@ -41,7 +44,7 @@ func FuzzHistoricalPWDManifestDoesNotUpgrade(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		legacy.Version = 2
+		legacy.Version = 1 + (int(version)+2)%3
 		raw, err := json.Marshal(legacy)
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +62,7 @@ func FuzzHistoricalPWDManifestDoesNotUpgrade(f *testing.F) {
 			"merge old first": func() error { _, err := Merge(dir, env, old, fresh); return err },
 			"merge old last":  func() error { _, err := Merge(dir, env, fresh, old); return err },
 		} {
-			if err := check(); err == nil || !strings.Contains(err.Error(), "unsupported manifest version 2") {
+			if err := check(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unsupported manifest version %d", legacy.Version)) {
 				t.Fatalf("%s upgraded history: %v", name, err)
 			}
 		}

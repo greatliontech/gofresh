@@ -491,10 +491,24 @@ and failure obligations:
   retains attributable inferred unverifiability. Unknown hashability alone proves
   no movement. Process facts remain constructible, and unknown binding and
   independent purity retain their separately governed positive cases.
-- **demonstrated-movement** — Revalidation establishing movement of comparable
-  captured and current root state, including retyping, appearance or disappearance,
+- **demonstrated-movement** — Revalidation establishing movement of independently
+  comparable captured and current facts of a root or its members — namespace,
+  membership, metadata or content, including retyping, appearance or disappearance —
   records an attributable typed runtime-input guard failure and the manifest's
-  `bracketMoved` marker. A known mismatch remains even beside an incomparable root.
+  `bracketMoved` marker. Corresponding facts are comparable only when established
+  at both endpoints; losing or gaining knowledge alone proves no movement. An
+  unavailable read, member or root never erases another established mismatch.
+  Available directory-entry type evidence remains comparable when entry metadata
+  is unavailable. Correspondence preserves observation semantics: followed-target
+  and nonfollowed namespace facts are not interchangeable merely because they
+  name the same path.
+  Same-meaning facts compose across declared roots without losing their root
+  attribution or exclusion scope. Conflicting known observations, including
+  within one endpoint, remain contradictions rather than overwriting one another.
+  A partial directory listing retains its known names but proves no absence;
+  a complete listing can contradict a known name's presence only when that name
+  lies within the complete listing's non-excluded scope.
+  Captured fact values and their availability are integrity-bound together.
   It is never inferred from diagnostic text, waived by purity or cleared by later
   agreement with the recorded digest. Process facts remain constructible, but
   movement supplies no reusable evidence and checks stale. Conversion, adoption
@@ -941,9 +955,10 @@ admitted observation set, exactly as covered-tree metadata and
 listing-as-data dependence already are. The allowlisted identities are exempt
 from value-binding bracket coverage: the binding they get is projection
 equality at revalidation, which catches every change landing after the seal.
-The residual is a projection change inside the read-to-seal window that
-persists — seal and every later check are both post-change, so equality
-holds while the subject branched on the pre-change value; memory hot-add on
+Without an explicit bracket, the residual is a projection change inside the
+read-to-seal window that persists — seal and every later check are both
+post-change, so equality holds while the subject branched on the pre-change
+value; memory hot-add on
 a resizing virtual machine is the realistic instance — a case a pre-run
 bracket would catch, accepted here because the window is one process run
 wide and the facts change only by operator action; a change that reverts
@@ -951,6 +966,14 @@ before the next check evades the bracket and the projection alike. Identities
 outside the allowlist keep ordinary classification — the
 transient-condition surfaces REQ-guard-machine-transient excludes from machine
 identity are exactly what this clause must never absorb.
+
+An explicit observation bracket over these identities observes the same complete
+projection irrespective of which source identity triggered each gather. Those
+samples share one semantic comparison identity while retaining their contributing
+roots and exclusions; a failed gather supplies no projection value. Demonstrated
+bracket movement obeys REQ-inputs-value-binding and is not waived by the
+unbracketed residual. Manifest identities and their entry-digest framing remain
+path-specific.
 
 **REQ-inputs-volatile-os-roots** (behavior): A path under a
 kernel-synthesized volatile filesystem root — `/proc` and `/sys` on

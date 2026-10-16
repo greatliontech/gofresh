@@ -120,7 +120,7 @@ func TestManifestRejectsMalformedEntryDigests(t *testing.T) {
 			t.Fatalf("path digest %q encoded", bad)
 		}
 	}
-	raw := `{"v":3,"env":[{"n":"A","d":"nothex"}]}`
+	raw := `{"v":4,"env":[{"n":"A","d":"nothex"}]}`
 	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(raw)), t.TempDir()); err == nil {
 		t.Fatal("malformed entry digest decoded")
 	}
@@ -130,11 +130,11 @@ func TestManifestRejectsMalformedEntryDigests(t *testing.T) {
 // duplicate identities — including ones distinguished only by digest, which
 // byte-level compaction cannot collapse — refuse decode and encode alike.
 func TestManifestRejectsDuplicateIdentities(t *testing.T) {
-	dupEnv := `{"v":3,"env":[{"n":"A","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"n":"A","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
+	dupEnv := `{"v":4,"env":[{"n":"A","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"n":"A","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
 	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(dupEnv)), t.TempDir()); err == nil {
 		t.Fatal("duplicate env identity decoded")
 	}
-	dupPath := `{"v":3,"paths":[{"k":"rel","p":"x","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"k":"rel","p":"x","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
+	dupPath := `{"v":4,"paths":[{"k":"rel","p":"x","d":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"k":"rel","p":"x","d":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`
 	if _, err := ambientCurrent(base64.RawURLEncoding.EncodeToString([]byte(dupPath)), t.TempDir()); err == nil {
 		t.Fatal("duplicate path identity decoded")
 	}

@@ -1358,6 +1358,9 @@ func runtimeInputVerdict(rec Fingerprint, rt runtimeinput.State) (Verdict, bool)
 	}
 	// Runtime-input guard, when the recording carries a manifest.
 	if rec.RuntimeInputs != "" {
+		if rt.BracketMoved {
+			return refusal(Stale, RuntimeInputsCause, Changed, reasonOr(rt.Reason, "runtimeinputs")), true
+		}
 		if !rt.OK {
 			return refusal(Stale, RuntimeInputsCause, Unavailable, "runtimeinputs"), true
 		}

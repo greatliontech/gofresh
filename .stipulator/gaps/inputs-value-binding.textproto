@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-value-binding"
-reason: "Current native manifests are v3 and encode producing movement only as inferred unverifiability; comparable movement can be hidden by an unknown root and accepted purity can waive matching-digest motion. The v4 typed failure and historical v1-v3 refusal are not implemented."
-content_hash: "09e0d28aa637ccab8dba125075317938b039d5efdc3fb8f6298eeaa07d74515c"
-source_hash: "617a8c44b0bbd5cb9cc0a716936e9237c464140263c97ca5ed154870027c0a6f"
-lands { manual { condition: "tooling-redesign 5.1w.4: v4-only runtime evidence retains typed known movement through current checks, conversion, adoption and merge, including unknown/incomplete/zero siblings and restored values, with unchanged and unknown-only positive controls" contradicted: true } }

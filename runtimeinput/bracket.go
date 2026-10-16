@@ -32,24 +32,22 @@ import (
 // CaptureBracket constructs a usable value; a zero or copied-and-altered
 // Bracket fails its seal and is refused rather than read as unchanged.
 type Bracket struct {
-	moduleDir   string
-	roots       []bracketRoot
-	exclusions  []pathID
-	reason      string // non-empty: the bracket is unverifiable, attributably
-	fingerprint string
-	seal        string
+	moduleDir  string
+	roots      []bracketRoot
+	exclusions []pathID
+	reason     string // non-empty: the bracket is unverifiable, attributably
+	seal       string
 }
 
-// bracketRoot is one declared root with the digest of its captured stream. The
-// per-root digest lets revalidation attribute a moved fingerprint to the root
-// that moved. members is the capture-time listing of the root's directory
+// bracketRoot is one declared root with the comparable facts of its captured
+// stream, including facts established beside unhashable content. members is the capture-time listing of the root's directory
 // walk — every digested entry's slash-form offset — retained so observation
 // ingest can decide whether an observed identity existed before the run
 // (the run-ephemera classification); nil for a root whose capture ran no
 // walk (a file, an absent object).
 type bracketRoot struct {
 	id      pathID
-	digest  string
+	facts   *pathFacts
 	members map[string]bool
 }
 
@@ -136,13 +134,15 @@ func CaptureBracket(ctx context.Context, moduleDir string, roots []string, opts 
 		return Bracket{}, err
 	}
 	b := Bracket{
-		moduleDir:   moduleDir,
-		roots:       capture.roots,
-		exclusions:  exclusions,
-		reason:      capture.reason,
-		fingerprint: capture.fingerprint,
+		moduleDir:  moduleDir,
+		roots:      capture.roots,
+		exclusions: exclusions,
+		reason:     capture.reason,
 	}
 	b.seal = sealBracket(b)
+	if err := ctx.Err(); err != nil {
+		return Bracket{}, err
+	}
 	return b, nil
 }
 
@@ -174,28 +174,27 @@ func (b Bracket) checkModuleView(moduleDir string) error {
 
 // revalidate re-fingerprints the bracket with the same hashing semantics as
 // its capture; the caller runs it strictly after the manifest digest's last
-// input read (REQ-inputs-value-binding). It reports unchanged, or an
-// attributable unverifiable reason: the capture already carried one, the
-// revalidation produced one, or the fingerprint moved — including a root whose
-// object changed type, appeared, or disappeared. A bracket not produced by
+// input read (REQ-inputs-value-binding). It reports agreement and demonstrated
+// movement separately; incomparable roots confer neither. A comparable mismatch
+// takes precedence over unknown siblings. A bracket not produced by
 // capture, or interpreted under a different module view than its capture, is
 // refused rather than read as unchanged.
-func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string, error) {
+func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, moved bool, reason string, err error) {
 	if ctx == nil {
-		return false, "", errors.New("runtimeinputs: nil context")
+		return false, false, "", errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, false, "", err
 	}
 	if err := b.checkSealed(); err != nil {
-		return false, "", err
+		return false, false, "", err
 	}
-	moduleDir, err := filepath.Abs(moduleDir)
+	moduleDir, err = filepath.Abs(moduleDir)
 	if err != nil {
-		return false, "", fmt.Errorf("runtimeinputs: module dir: %w", err)
+		return false, false, "", fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
 	if err := b.checkModuleView(moduleDir); err != nil {
-		return false, "", err
-	}
-	if b.reason != "" {
-		return false, b.reason, nil
+		return false, false, "", err
 	}
 	ids := make([]pathID, len(b.roots))
 	for i, root := range b.roots {
@@ -203,20 +202,23 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (bool, string
 	}
 	current, err := fingerprintBracket(ctx, b.moduleDir, ids, b.exclusions)
 	if err != nil {
-		return false, "", err
+		return false, false, "", err
+	}
+	i, err := movedBracketRoot(ctx, b.roots, current.roots, b.exclusions)
+	if err != nil {
+		return false, false, "", err
+	}
+	if i >= 0 {
+		root := b.roots[i]
+		return false, true, MovedBracketClause(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
+	}
+	if b.reason != "" {
+		return false, false, b.reason, nil
 	}
 	if current.reason != "" {
-		return false, current.reason, nil
+		return false, false, current.reason, nil
 	}
-	if current.fingerprint == b.fingerprint {
-		return true, "", nil
-	}
-	for i, root := range b.roots {
-		if current.roots[i].digest != root.digest {
-			return false, MovedBracketClause(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
-		}
-	}
-	return false, movedBracketClause, nil
+	return true, false, "", nil
 }
 
 // bracketMoveAttribution names WHAT moved inside a refused root, best
@@ -409,36 +411,28 @@ func containsVolatileOSRoot(clean string) string {
 }
 
 type bracketCapture struct {
-	roots       []bracketRoot
-	fingerprint string
-	reason      string
+	roots  []bracketRoot
+	reason string
 }
 
 // fingerprintBracket digests every declared root under one module view. The
-// combined fingerprint pins the module view, the exclusion set, and every
-// per-root digest, so any persisted change to a bracketed object moves it.
+// per-root facts distinguish demonstrated movement from unavailable content.
+// The bracket seal binds them with the module view and exclusions.
 func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions []pathID) (bracketCapture, error) {
-	combined := sha256.New()
-	fprintf(combined, "bracket %d\nmodule %s\n", manifestVersion, moduleDir)
-	for _, q := range exclusions {
-		fprintf(combined, "exclude %s %s\n", q.Kind, q.Path)
-	}
 	var capture bracketCapture
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return bracketCapture{}, err
 		}
-		digest, members, unverifiable, reason, err := fingerprintBracketRoot(ctx, moduleDir, id, exclusions)
+		root, reason, err := fingerprintBracketRoot(ctx, moduleDir, id, exclusions)
 		if err != nil {
 			return bracketCapture{}, err
 		}
-		if unverifiable && capture.reason == "" {
+		if capture.reason == "" {
 			capture.reason = reason
 		}
-		fprintf(combined, "root %s %s %s\n", id.Kind, id.Path, digest)
-		capture.roots = append(capture.roots, bracketRoot{id: id, digest: digest, members: members})
+		capture.roots = append(capture.roots, root)
 	}
-	capture.fingerprint = hex.EncodeToString(combined.Sum(nil))
 	return capture, nil
 }
 
@@ -447,31 +441,35 @@ func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions [
 // (REQ-inputs-bracket-coverage), retaining the walked membership when the
 // object is a directory. A root that is itself excluded contributes a
 // constant: its subtree is removed from the fingerprint entirely.
-func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, exclusions []pathID) (string, map[string]bool, bool, string, error) {
+func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, exclusions []pathID) (bracketRoot, string, error) {
+	root := bracketRoot{id: id}
 	if excludesIdentity(exclusions, id) {
-		return "excluded", nil, false, "", nil
+		return root, "", nil
 	}
 	p, err := materializePath(moduleDir, id)
 	if err != nil {
-		return "", nil, false, "", err
+		return bracketRoot{}, "", err
 	}
 	h := sha256.New()
-	var members map[string]bool
+	root.facts = newPathFacts()
 	visit := func(rel string) {
-		if members == nil {
-			members = map[string]bool{}
+		if root.members == nil {
+			root.members = map[string]bool{}
 		}
-		members[rel] = true
+		root.members[rel] = true
 	}
 	// The bracket fingerprint always binds full state: its job is span
 	// integrity — detecting any mid-span modification, a content-restoring
 	// one included — so the metadata the persisted-reuse identity drops is
 	// exactly what it must keep (REQ-inputs-observation-class).
-	unverifiable, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false, true)
-	if err != nil {
-		return "", nil, false, "", err
+	_, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false, true, root.facts)
+	if ctx.Err() != nil {
+		return bracketRoot{}, "", ctx.Err()
 	}
-	return hex.EncodeToString(h.Sum(nil)), members, unverifiable, reason, nil
+	if err != nil {
+		return bracketRoot{}, "", err
+	}
+	return root, reason, nil
 }
 
 // bracketSkip filters a root's directory walk by exclusion identity: an entry
@@ -668,6 +666,10 @@ func (c bracketCoverage) contains(target string, absOnly bool) bool {
 // that cannot be inspected or exceeds the link-hop budget reports no
 // resolution, leaving the identity uncovered rather than guessed.
 func chainResolve(p string) (string, []string, bool) {
+	return chainResolveObserved(context.Background(), p, nil)
+}
+
+func chainResolveObserved(ctx context.Context, p string, facts *pathFacts) (string, []string, bool) {
 	// maxLinkHops mirrors filepath.EvalSymlinks' link budget; the kernel's
 	// own limit is lower (40 on Linux), so exhausting it here is only ever
 	// more conservative.
@@ -679,6 +681,9 @@ func chainResolve(p string) (string, []string, bool) {
 	var links []string
 	hops := 0
 	for len(pending) > 0 {
+		if ctx.Err() != nil {
+			return "", nil, false
+		}
 		component := pending[0]
 		pending = pending[1:]
 		switch component {
@@ -689,12 +694,30 @@ func chainResolve(p string) (string, []string, bool) {
 			continue
 		}
 		next := filepath.Join(resolved, component)
-		info, err := os.Lstat(next)
+		info, err := lstatRuntimePath(next)
 		if os.IsNotExist(err) {
+			// Only a final lookup establishes the resolved absent entry. A
+			// missing ancestor leaves the suffix uninspected: its lexical join
+			// remains useful to coverage, but is not resolution evidence.
+			if len(pending) == 0 {
+				facts.put(next, namespaceFact, "missing")
+				facts.put(p, resolutionFact, next)
+			}
+			// A missing ancestor makes the root namespace absent, but a
+			// dangling target does not erase the link already observed there.
+			if !facts.knows(p, namespaceFact) {
+				facts.put(p, namespaceFact, "missing")
+			}
 			return filepath.Join(append([]string{next}, pending...)...), links, true
 		}
 		if err != nil {
 			return "", nil, false
+		}
+		facts.put(next, namespaceFact, fmt.Sprintf("type %x", uint32(info.Mode().Type())))
+		if len(pending) == 0 {
+			if !facts.knows(p, namespaceFact) {
+				facts.put(p, namespaceFact, fmt.Sprintf("type %x", uint32(info.Mode().Type())))
+			}
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			resolved = next
@@ -709,6 +732,7 @@ func chainResolve(p string) (string, []string, bool) {
 		if err != nil {
 			return "", nil, false
 		}
+		facts.put(next, linkFact, target)
 		// An empty target — not creatable via os.Symlink, but representable
 		// on disk — splits to one empty component and resolves to the link's
 		// parent.
@@ -720,6 +744,7 @@ func chainResolve(p string) (string, []string, bool) {
 		}
 		pending = append(strings.Split(target, sep), pending...)
 	}
+	facts.put(p, resolutionFact, resolved)
 	return resolved, links, true
 }
 
@@ -872,12 +897,13 @@ func (e bracketEphemera) admits(p string, memo map[string]bool) bool {
 // bracket that capture did not produce.
 func sealBracket(b Bracket) string {
 	h := sha256.New()
-	fprintf(h, "bracket-seal %d\nmodule %s\nfingerprint %s\nreason %s\n", manifestVersion, b.moduleDir, b.fingerprint, b.reason)
+	fprintf(h, "bracket-seal %d\nmodule %s\nreason %s\n", manifestVersion, b.moduleDir, b.reason)
 	for _, q := range b.exclusions {
 		fprintf(h, "exclude %s %s\n", q.Kind, q.Path)
 	}
 	for _, root := range b.roots {
-		fprintf(h, "root %s %s %s\n", root.id.Kind, root.id.Path, root.digest)
+		fprintf(h, "root %s %s\n", root.id.Kind, root.id.Path)
+		root.facts.seal(h)
 		// The membership listing decides run-ephemera admissions at ingest,
 		// so an altered set must fail the seal exactly as an altered digest
 		// would.

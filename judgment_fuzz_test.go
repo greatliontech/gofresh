@@ -20,15 +20,18 @@ func FuzzJudgmentDiagnosticIndependence(f *testing.F) {
 		guards := guard.Guards{Toolchain: "toolchain", BuildConfig: "build"}
 		recorded := Fingerprint{MaximalClosure: "core", TestVariantClosure: "tests", ToolchainContent: "stdlib", AdmissionPolicy: "policy", Guards: guards, RuntimeInputs: "already-validated manifest", RuntimeDigest: "digest", ResultKind: CodeResult}
 		for _, origin := range []closure.RefusalKind{closure.DependenceRefusal, closure.OpenWorldRefusal, closure.SharedDynamicStateRefusal, closure.AmbiguousSubjectRefusal} {
-			for mask := 0; mask < 8; mask++ {
+			for mask := 0; mask < 16; mask++ {
 				cl := closure.Closure{Hash: "core", TestVariants: "tests", ToolchainContent: "stdlib", AdmissionPolicy: "policy", Unverifiable: true, Refusal: origin, Reason: "original diagnostic"}
-				state := runtimeinput.State{OK: true, Digest: "digest", Unverifiable: mask&1 != 0, Reason: "original runtime diagnostic"}
+				state := runtimeinput.State{OK: true, Digest: "digest", Unverifiable: mask&1 != 0, BracketMoved: mask&8 != 0, Reason: "original runtime diagnostic"}
 				var observation ObservationAuthority
 				if mask&2 != 0 {
 					observation = ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: outcome.Method}
 				}
 				purity := testPurityAuthority(mask&4 != 0)
 				before := decideAfterClosureObserved(recorded, cl, guards, state, CodeResult, purity, observation)
+				if state.BracketMoved && (before.Status != Stale || before.Ground.Cause != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) || before.Ground.Accepted != (AcceptedAuthority{})) {
+					t.Fatalf("movement waived by authority mask %d: %+v", mask, before)
+				}
 				cl.Reason, state.Reason = text, text
 				after := decideAfterClosureObserved(recorded, cl, guards, state, CodeResult, purity, observation)
 				before.Reason, after.Reason = "", ""

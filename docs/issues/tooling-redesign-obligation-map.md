@@ -22,7 +22,7 @@ Each issue row names its current source file, whose body supplies the source-tra
 basis and remaining deciding obligation. The bold first destination is its exact
 open primary slot; separately named constituents are additional obligations,
 not alternative primaries. Completed slots record preservation controls only.
-The 153 source issues comprise 51 Gofresh, 53 Gomutant, 40 Stipulator and nine
+The 152 source issues comprise 50 Gofresh, 53 Gomutant, 40 Stipulator and nine
 Pew files, excluding each README and this map. Conditional capabilities retain
 their explicit activation conditions through 9.4; a mapping grants no capability
 implementation or measurement by itself.
@@ -116,7 +116,7 @@ fold at implementation carries every constituent obligation forward.
 
 ## Gofresh issue inventory
 
-Each slug names a file beside this one. There are 51 source issues, excluding
+Each slug names a file beside this one. There are 50 source issues, excluding
 README and this reconciliation document itself.
 
 | Slug | Disposition; primary and constituents | Current source basis; remaining deciding obligation |
@@ -156,10 +156,9 @@ README and this reconciliation document itself.
 | json-record-readers-one-home | A; **9.2**; constituent 5.6 | Manifest raw-byte and fingerprint compacted canonicality differ. Share strict primitives without accepting malformed historical bytes or upgrading support. |
 | loader-spawns-outside-the-runner | A; **7.1**; constituent 5.5 | packages.Config has no spawn hook; non-nil Env currently pins policy. One seam must retain environment/directory/cancellation and expose the actual exclusion, not a forbidden driver workaround. |
 | memo-scope-axes | A; **7.8**; measurement 7.7 | Parallel read/memo and cone/pass result shapes remain after dependency repairs. Closed 315's digest-memo proposal requires measured repeated cost and immutable-generation ownership first. |
-| toolchain-dependency-consumer-adoption | R; **5.2d**; constituent 5.4; prerequisite 5.1w | Native content/policy and current-generation runtime evidence must survive producer/checker adoption. Complete generic implementation verification before resuming acceptance; never synthesize missing historical runtime evidence. |
+| toolchain-dependency-consumer-adoption | R; **5.2d**; constituent 5.4; prerequisite 5.1w | Adopt native content/policy and unreleased v4-only runtime evidence through producing, checking, admission and restart; published dependency remains v0.118.0. Preserve non-waivable movement and old bytes as history requiring runtime remeasurement. Complete generic implementation verification before resuming acceptance; never synthesize missing historical runtime evidence. |
 | toolchain-variation-admission-registry | R; **5.1w.7**; constituents 5.1w.1-6; first runtime-grant prerequisite 5.1w.2b | Replace combination approval with independently checked semantic derivations and migrate all summary consumers, including version/generated-code premises. The source prototype's same-binary POPCNT 1/0 result under runtime GODEBUG reproduced false Valid; its runtime grant is cut off pending compiler-selected correspondence, drawing required native work from 5.1w.3b. Preserve useful positives as unfinished acceptance, not refusal-as-success; checked source alone grants no runtime authority. Hashes identify dependencies, never behavior. |
 | net-url-parse-godebug-channel | A; **7.8** | ParseQuery's recorded GODEBUG result change and in-process Setenv require runtime-relevance authority. Retain parsing refusal until both channels are covered. |
-| observed-bracket-motion-waived-by-purity | R; **5.1w.4** | A retained reader consumed the old value but native closing and historical v3 checking accept the post-write digest under purity. Preserve typed observed movement, reject v1-v3 reuse and retain process accounts without finalized evidence. |
 | per-file-memos-one-shape | R; **7.8** | Effect, ledger and canonical memos duplicate load/pending/merge mechanics. Preserve each complete key, recomputation equivalence and concurrent completed entries. |
 | persistent-memo-disk-retention | R; **7.9a**; precedes 7.9b, 7.9c | Measured 16 GiB shared memo store has no global retention. Bound disposable storage and expose safe usage/cleanup while preserving concurrent publication, recomputation semantics and active temporary writes. |
 | prints-default-one-home | R; **5.6** | Pew retains zeroDefault beside adopted Coverage. Replace it with PrintsDefault while retaining independent pflag type-cliff checks and concrete-type limits. |
@@ -343,8 +342,8 @@ oracle inventory substitutes for any original population.
 ## Raw gap-record routing
 
 This tracking ledger reads the raw `.stipulator/gaps/*.textproto` records, not
-an evaluated gap list or coverage verdict. It contains **135 distinct requirement
-IDs exactly once in the tables below: Gofresh 112, Gomutant 3, Stipulator 14 and
+an evaluated gap list or coverage verdict. It contains **127 distinct requirement
+IDs exactly once in the tables below: Gofresh 104, Gomutant 3, Stipulator 14 and
 Pew 6**. Each row's bold destination is an existing open primary slot in
 `tooling-redesign.md`; a grouped row routes each explicitly named ID there.
 The source for each ID is its owner's gap directory and the filename obtained
@@ -369,13 +368,13 @@ closure requires the deciding evidence, not inference from filenames or flags.
 The named implementation slot carries its own enforcement obligation; 9.3 is
 not authorization for an otherwise unapproved witness run or campaign.
 
-### Gofresh: 112 records
+### Gofresh: 104 records
 
-The 67 implementation-verification records comprise 31 updated and 36 new
-records. Their primary destinations follow the first manual condition in each
-native record; later conditions remain constituents or prerequisites. Earlier
+The 59 retained implementation-verification alignment records follow the first
+manual condition in each native record for their primary destinations; later
+conditions remain constituents or prerequisites. Earlier
 7.8, 9.3 and fleet-adoption obligations remain where named below, including
-their original evidence classes and activation conditions. The other 41 records
+their original evidence classes and activation conditions. The other 45 records
 retain their routing. Shared wording does not merge claims or promote examples.
 
 The source-computation prototype's runtime grant is cut off after the reproduced
@@ -423,7 +422,7 @@ distinct. This census grants no implementation acceptance or new runtime authori
 | REQ-inputs-bracket-coverage | **9.3** | N | Supply the bracket-coverage invariant's property/analyzer evidence. |
 | REQ-inputs-observable-read-set | **5.1w.5**; constituent 9.3 | C | Recognized identities/use-site restrictions do not establish selected producer coverage, delivery, phases or native wrapper effects. Check those claims and the complete invariant, retaining producer and unsupported-read controls. |
 | REQ-inputs-observation-coherence | **9.3** | N | Complete observation-coherence invariant evidence beyond example anchors. |
-| REQ-inputs-observation-disposition | **5.1w.4**; constituent 9.3 | C | Native v3 movement is inferred unverifiability: unknown roots can hide comparable motion and purity can waive matching-digest motion. Enforce v4 typed failure and historical v1-v3 refusal; complete the disposition invariant without promoting partial evidence. |
+| REQ-inputs-observation-disposition | **9.3** | N | Native v4 known movement is separately enforced as a non-waivable guard failure. Example anchors remain; supply property/analyzer evidence for the complete observation-disposition invariant without promoting partial evidence. |
 | REQ-inputs-path-congruence | **9.3** | N | Supply property/analyzer evidence for path congruence. |
 | REQ-purity-observation-separation | **9.3** | N | Record calls for a dynamic-global mutation/assertion-separation generator; purity is not observed support. |
 | REQ-vouch-input | **9.3** | N | Example parsing/refusal/engine-reduction pins do not cover the structural identity grammar; supply its required property/analyzer evidence. |
@@ -438,7 +437,7 @@ distinct. This census grants no implementation acceptance or new runtime authori
 | REQ-fresh-progress | **5.1w.6**; constituent 9.3 | N | Existing unit/event/rendering examples remain; an obsolete selection-wide notice does not witness failed-premise claim diagnostics. Preserve exclusion of diagnostic payload from memo/hash inputs and add its discriminating payload-change witness. This behavior obligation is not automatically an invariant class. |
 | REQ-fresh-producing-evidence | **8.1** | N | Preserve established producing identity through remaining unit adoption and independently verify record-only support with no current runtime read, identity substitution, trust promotion or authenticity inference. |
 | REQ-fresh-unit-roster, REQ-fresh-unit-bindings | **5.2d** | N | Native singleton/package roster, binding and sealing controls landed. Complete fleet coverage of missing/late/conflicting contributions, failed/cancelled close, independent siblings, cut/drift precedence and publication/history, with invariant evidence. |
-| REQ-fresh-unit-close | **5.1w.4**; constituent 5.2d | C | Native closing represents known v3 motion as inferred unverifiability, not a non-waivable typed failure. Enforce that distinction while retaining singleton/package roster, binding, sealing and final-selection controls; complete fleet missing/late/conflicting contributions, failed/cancelled close, sibling/cut/drift and publication/history evidence. A native process unit does not own consumer publication groups or merge retries. |
+| REQ-fresh-unit-close | **5.1w.6**; constituent 5.2d | N | Propagate checked claims and the native non-waivable motion gate through consumer closing. Retain singleton/package roster, binding, sealing and final-selection controls; complete consumer missing/late/conflicting contributions, failed/cancelled close, sibling/cut/drift, post-success finalization and publication/history regressions with full invariant evidence. A native process unit does not own consumer publication groups or merge retries. |
 | REQ-fresh-result-model, REQ-fresh-authority-account | **5.2d** | N | Native declared-model applicability and typed authority preservation landed; remaining consumer adoption and complete invariant evidence remain. Native process closing does not own consumer publication grouping. |
 | REQ-fresh-verdict | **5.2d** | N | Native verdicts expose typed causes, scope and accepted authority independently of diagnostics. Complete consumer projection adoption and clause-appropriate evidence while preserving test-variant projection and integrity-bound history; 7.1 retains wider consolidation. |
 | REQ-fresh-final-evidence-selection | **5.2d** | C | Native singleton/package final selection landed, but legacy consumers still select ordinary/observed checking. Migrate fleet paths without missed producing support, unlicensed transformations or loss of explicit analysis policy/full inventories. |
@@ -451,8 +450,8 @@ distinct. This census grants no implementation acceptance or new runtime authori
 | REQ-inputs-absent-asserted | **5.2d** | N | Current decisions grant no runtime-input or assertion authority from absence. Complete affected-consumer and historical-case coverage for independent input-free analysis, explicit declarations, missing capture and completed-empty execution without backfilling support. |
 | REQ-guidance-single-source | **9.4** | N | Conditional trigger: Gofresh gains its own serving surface. Existing consumers own their guidance obligations; their adoption does not activate this library-local condition. Preserve it without commissioning a surface. |
 
-The following 36 records add explicit implementation-verification and producing
-failure obligations. Their conditions require the named vertical, integration
+The following 32 records retain explicit implementation-verification
+obligations. Their conditions require the named vertical, integration
 at 5.1w.6 and retirement at 5.1w.7 where recorded; the native records retain the
 full conditions. A missing checked premise is not made true by this census.
 
@@ -465,10 +464,9 @@ full conditions. A missing checked premise is not made true by this census.
 | REQ-closure-stdlib-cut | **5.1w.6** | N | Contribution examples establish hash exclusion only. Bind complete identities and checked semantics for every positive claim depending on excluded standard implementation. |
 | REQ-closure-view-maximal | **5.1w.2**; runtime-grant prerequisite 5.1w.2b | N | Core/compartment hash controls do not establish optional exact-blocker refinement. The source prototype missed CPU-feature dispatch; its runtime grant is cut off. Independently check compiler-selected correspondence/inline scope before discharge, preserve requested builds, useful positives, the same-binary POPCNT negative, unaffected blockers and guards, and grant no observation authority. |
 | REQ-fresh-outcome-attachment, REQ-inputs-bound-outcomes, REQ-inputs-producer-premises | **5.1w.5** | C | Receipt/roster/environment attachment examples are partial execution controls, not checked coverage, delivery and outcome semantics. Establish the three independent implementation claims and their actual contributing-execution bindings without borrowing support. |
-| REQ-fresh-package-unit | **5.1w.4** | C | Roster/process-binding/close-protocol/account examples do not establish runtime-span failure finalization. Carry non-waivable typed failure through the package unit instead of v3 inferred-unverifiability state. |
 | REQ-fresh-toolchain-dependencies | **5.1w.6** | C | Selected-content drift and evidence-binding examples survive. Approval-policy compatibility and @44 history do not establish generic checked semantics; retain full dependencies and historical non-upgrade. |
 | REQ-guard-toolchain | **5.1w.6** | N | Reported-version identity and pass sampling are partial evidence, not selected content or implementation semantics. Bind the dependencies and checked claims each consumer actually uses. |
-| REQ-impl-authority-channels | **5.1w.6** | C | Reconcile source-only, identity, assertion and outcome authority with checked implementation premises. Preserve explicit assertions without derived promotion; purity must not waive known producing motion represented as unknown. |
+| REQ-impl-authority-channels | **5.1w.6** | C | Reconcile source-only, identity, assertion and outcome authority with checked implementation premises. Preserve explicit assertions without derived promotion and carry the native non-waivable producing-motion guard through consumer adoption. |
 | REQ-impl-build-selection | **5.1w.2**; runtime-grant prerequisite 5.1w.2b | N | Existing inventory examples do not prove actual effective selection and implicit dependencies. The source prototype's CPU-feature counterexample requires checked compiler-selected correspondence/inline and dispatch scope before runtime discharge; retain the requested build, same-binary POPCNT negative and useful positives. |
 | REQ-impl-claim-refusal | **5.1w.6** | C | Global selection refusal disables unrelated claims and names closest approved rows. Establish structured claim-local failed-premise paths, preserving independent evidence and stronger drift. |
 | REQ-impl-claim-scope | **5.1w.2** | N | Establish each proposition's subjects, phase/model, dependencies and retained premises across implementation admissions; composition cannot enlarge those bounds. |
@@ -486,10 +484,8 @@ full conditions. A missing checked premise is not made true by this census.
 | REQ-impl-observation-execution | **5.1w.5** | N | Receipts/binding tests are partial execution evidence. Compose them with checked observation implementations while retaining actual contributor, environment, completion and span obligations. |
 | REQ-impl-opaque-leaves | **5.1w.3** | C | Named atomic/linkname admissions can remove blockers without checked native/opaque arguments. Interpret required selected leaves under identified models or retain claim-local unsupported status; a semantic alias is no derivation. |
 | REQ-impl-premise-boundary | **5.1w.3**; runtime-grant prerequisite 5.1w.2b | C | Atomic/runtime/linkage/library summaries do not follow from compiler correctness. The CPU-feature counterexample leaves runtime grant cut off until checked compiler-selected correspondence; establish useful native derivations with explicit language/machine/primitive premises, preserving requested builds and the independent POPCNT control. |
-| REQ-inputs-absolute-identities, REQ-inputs-adoption, REQ-inputs-guard, REQ-inputs-merge, REQ-inputs-scratch-namespace, REQ-inputs-value-binding | **5.1w.4** | C | Six distinct records retain current v3 motion-as-unverifiability contradictions: unknown roots can hide comparable movement and purity can waive matching-digest motion. Enforce v4 typed failure and historical v1-v3 refusal through each identity, adoption, checking, merge, scratch and value-binding path without losing independent guards or process accounts. |
 | REQ-inputs-observation-class | **5.1w.5** | C | Direct content/metadata digest examples do not establish producer fd-stat coverage. Check actual local producer coverage or refuse that claim; same-toolchain identity is insufficient. |
 | REQ-inputs-outcome-method | **5.1w.5** | C | Actual environment/receipt bindings do not establish method semantics. Prove outcome support independently of completion and account for native, initialization and exceptional-operation behavior. |
-| REQ-purity-override | **5.1w.4** | C | Ordinary inferred-blindspot/externality examples remain clause-scoped. Accepted purity can waive movement represented as unverifiable; enforce the non-waivable typed producing failure without removing legitimate assertion authority. |
 | REQ-vouch-recorded | **5.1w.6** | N | Explicit-vouch recording remains independent assertion authority. Pool/generated implementation discharges must establish checked premises before recording any load-bearing execution assertion. |
 
 ### Gomutant: three records
@@ -523,15 +519,15 @@ table does not replace them with manual plan triggers or judge them covered.
 | REQ-pew-verb-defaults | **7.6** | C | Table distinguishes informational/enforcing defaults but command admission has not adopted contextual resolution; pin overrides and rendered effective defaults. |
 | REQ-pew-derived-state | **7.8** | N | Shared content/admission repair is adopted. Independent completed cold/warm/discarded-cache, same-version content and source-coordinate controls remain, separate from budget availability and historical backfill; no missing-enforcement contradiction is asserted. |
 
-The reconciliation is 112 + 3 + 14 + 6 = 135. Within Gofresh the primary-slot
+The reconciliation is 104 + 3 + 14 + 6 = 127. Within Gofresh the primary-slot
 totals are seven at 5.1w.2, one each at 5.1w.2b.2 and 5.1w.2b.3a,
 one each at 5.1w.2b.3b.1 and 5.1w.2b.3b.2,
-six at 5.1w.3, ten at 5.1w.4, fourteen at
-5.1w.5, twenty-nine at 5.1w.6, one at 5.1w.7, nineteen at 9.3, four at
+six at 5.1w.3, fourteen at
+5.1w.5, thirty at 5.1w.6, one at 5.1w.7, twenty at 9.3, four at
 7.8, eight at 5.2d, three at 5.5, two each at 7.4 and 5.5a, and one each
-at 8.1, 7.3 and 9.4. Raw contradiction flags remain on 56 Gofresh records
-(48 of the 67 aligned records and eight untouched flags), four Stipulator
-and five Pew records, 65 in all; none of Gomutant's three records uses that
+at 8.1, 7.3 and 9.4. Raw contradiction flags remain on 46 Gofresh records
+(38 of the 59 retained aligned records and eight untouched flags), four Stipulator
+and five Pew records, 55 in all; none of Gomutant's three records uses that
 manual flag. These counts describe stored
 declarations only, not evaluated coverage, firing or resolution.
 

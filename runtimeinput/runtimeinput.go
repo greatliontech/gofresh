@@ -59,9 +59,9 @@ import (
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
-// Version 3 records truthful PWD reads. Earlier manifests cannot distinguish
-// an absent read from one discarded under the former frame-identity premise.
-const manifestVersion = 3
+// Version 4 separates demonstrated producing-span movement from inferred
+// unverifiability. Earlier manifests cannot establish that distinction.
+const manifestVersion = 4
 
 const (
 	pathRel = "rel"
@@ -72,8 +72,11 @@ const (
 // the inputs' state, which a derivation from the recorded manifest
 // under the current tree reproduces, so a consumer compares it whole.
 type State struct {
-	Manifest     string
-	Digest       string
+	Manifest string
+	Digest   string
+	// BracketMoved records demonstrated producing-span drift. Later agreement
+	// cannot repair it, and assertions cannot waive this guard failure.
+	BracketMoved bool
 	Unverifiable bool
 	Reason       string
 	OK           bool
@@ -135,6 +138,7 @@ type manifest struct {
 	Subjects     []string    `json:"subjects,omitempty"`
 	Env          []envInput  `json:"env,omitempty"`
 	Paths        []pathInput `json:"paths,omitempty"`
+	BracketMoved bool        `json:"bracketMoved,omitempty"`
 	Unverifiable []string    `json:"unverifiable,omitempty"`
 }
 
@@ -519,8 +523,8 @@ func WithCompletedProcess(process string) TestLogOption {
 // revalidates the bracket strictly after the manifest digest's last input
 // read: an unchanged bracket binds the digest of every covered recorded
 // identity to the values read at any time in the capture-to-revalidation
-// span, while a moved or capture-unverifiable bracket seals the observation
-// as attributable unverifiable evidence and a recorded identity covered by no
+// span, while a moved bracket records nonwaivable guard failure, an unknown
+// bracket records attributable unverifiability, and an identity covered by no
 // declared root seals per-identity unverifiable — in every case the
 // observation still constructs, converts, merges, and checks, never as bound.
 // A bracket captured under a different module view than the construction, or
@@ -1197,18 +1201,14 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 		return Observation{}, err
 	}
 	// The bracket is revalidated strictly after the manifest digest's last
-	// input read (REQ-inputs-value-binding). A moved bracket — or one already
-	// unverifiable at capture — seals the whole observation as attributable
-	// unverifiable evidence: it still constructs, converts, merges, and
-	// checks, never as bound, so the failure direction is recomputation. The
-	// reason enters the persisted manifest, so the recomputed state is the
-	// one every later revalidation reproduces; the bracket only ever adds
-	// unverifiable reasons, never removes one.
-	unchanged, reason, err := cfg.bracket.revalidate(ctx, moduleDir)
+	// input read (REQ-inputs-value-binding). Demonstrated movement is retained
+	// separately from unknown binding, so purity cannot waive a failed guard.
+	unchanged, moved, reason, err := cfg.bracket.revalidate(ctx, moduleDir)
 	if err != nil {
 		return Observation{}, err
 	}
 	if !unchanged {
+		m.BracketMoved = moved
 		if !strings.HasPrefix(reason, "observation bracket") {
 			reason = "observation bracket unverifiable: " + reason
 		}
@@ -1267,7 +1267,7 @@ func conversionProcessView(name, origin string) string {
 func sealObservation(state State, processes []processObservation, empty bool) Observation {
 	observation := Observation{State: state, processes: append([]processObservation(nil), processes...), empty: empty}
 	h := sha256.New()
-	fprintf(h, "manifest %s\ndigest %s\nunverifiable %t\nreason %s\nok %t\nempty %t\n", state.Manifest, state.Digest, state.Unverifiable, state.Reason, state.OK, empty)
+	fprintf(h, "manifest %s\ndigest %s\nbracket-moved %t\nunverifiable %t\nreason %s\nok %t\nempty %t\n", state.Manifest, state.Digest, state.BracketMoved, state.Unverifiable, state.Reason, state.OK, empty)
 	for _, record := range observation.processes {
 		fprintf(h, "process %s %s %s\n", record.process, record.origin, record.view)
 	}
@@ -1377,6 +1377,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
+		merged.BracketMoved = merged.BracketMoved || m.BracketMoved
 		if len(observation.processes) > 0 {
 			supported = supported && m.Outcome == outcome.Method
 			merged.Subjects = append(merged.Subjects, m.Subjects...)
@@ -1477,7 +1478,7 @@ func envEntryDigest(env []string, name string) string {
 // same framed stream hashPath has always produced, into its own hasher.
 func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string, metadata bool) (string, bool, string, error) {
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true, metadata)
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true, metadata, nil)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -1541,6 +1542,7 @@ func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []
 	return State{
 		Manifest:     encoded,
 		Digest:       manifestDigest(m),
+		BracketMoved: m.BracketMoved,
 		Unverifiable: unverifiable,
 		Reason:       reason,
 		OK:           true,
@@ -1561,6 +1563,9 @@ func manifestDigest(m manifest) string {
 	}
 	for _, entry := range m.Paths {
 		fprintf(h, "path %s %s %s\n", entry.Kind, entry.Path, entry.Digest)
+	}
+	if m.BracketMoved {
+		fprintf(h, "bracket-moved\n")
 	}
 	for _, reason := range m.Unverifiable {
 		fprintf(h, "unverifiable %s\n", reason)
@@ -2322,6 +2327,11 @@ var machineFactIdentities = func() map[string]bool {
 // ungatherable arm is testable; production always points at the guard.
 var currentMachineFacts = guard.CurrentMachineFacts
 
+// These root-lookup seams let tests vary lookup availability independently of
+// directory-entry observations, without changing the objects' metadata.
+var statRuntimePath = os.Stat
+var lstatRuntimePath = os.Lstat
+
 // existenceBindsExternalDirs distinguishes the two hashing consumers:
 // manifest entries bind an external directory's existence
 // (REQ-inputs-external-dir-existence), while a value-binding bracket
@@ -2331,7 +2341,7 @@ var currentMachineFacts = guard.CurrentMachineFacts
 // (REQ-inputs-bracket-coverage): declaring it is the caller's
 // mutation-free assertion over the whole tree, an external replace
 // module as one surface.
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool) (bool, string, error) {
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool, observed *pathFacts) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -2342,10 +2352,21 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		fprintf(h, "path %s %s machine %s\n", id.Kind, id.Path, facts.Fingerprint())
+		// Every allowlisted source gathers the same complete projection. Its
+		// bracket comparison key is source-independent; its root retains source
+		// attribution and exclusions. Manifest framing above stays path-specific.
+		observed.put("", machineFact, facts.Fingerprint())
 		return false, "", nil
 	}
-	info, err := os.Stat(p)
+	if observed != nil {
+		chainResolveObserved(ctx, p, observed)
+		if err := ctx.Err(); err != nil {
+			return false, "", err
+		}
+	}
+	info, err := statRuntimePath(p)
 	if os.IsNotExist(err) {
+		observed.put(p, followedStatFact, "missing")
 		fprintf(h, "path %s %s missing\n", id.Kind, id.Path)
 		return false, "", nil
 	}
@@ -2353,6 +2374,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
 		return true, "unhashable runtime input: " + id.displayPath(), nil
 	}
+	observed.stat(p, followedStatFact, info, metadata)
 	target := p
 	if id.Kind == pathRel {
 		var external bool
@@ -2400,9 +2422,10 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
+		observed.put(p, contentFact, hex.EncodeToString(sum[:]))
 		return false, "", nil
 	case info.IsDir() && (id.Kind == pathRel || !existenceBindsExternalDirs):
-		sum, unv, reason, err := dirHashFiltered(ctx, target, id.displayPath(), skip, visit, metadata)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, id.displayPath(), skip, visit, metadata, observed)
 		if err != nil {
 			return false, "", err
 		}
@@ -2495,6 +2518,10 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 	return sum, nil
 }
 
+// walkRuntimeDirectory uses the standard filesystem walk. The variable permits
+// tests to isolate a listing failure without changing observed object metadata.
+var walkRuntimeDirectory = filepath.WalkDir
+
 // dirHashFiltered digests a directory tree under a skip predicate over
 // the slash-form path of each entry relative to root; a skipped
 // directory's subtree contributes nothing to the digest. A nil skip
@@ -2509,8 +2536,15 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 // walk-relative path), never under the walked absolute position, so
 // the clause is the same from any checkout
 // (REQ-inputs-refusal-attribution's spelling rule).
-func dirHashFiltered(ctx context.Context, root, display string, skip func(rel string) bool, visit func(rel string), metadata bool) ([32]byte, bool, string, error) {
+func dirHashFiltered(ctx context.Context, root, display string, skip func(rel string) bool, visit func(rel string), metadata bool, observed *pathFacts) ([32]byte, bool, string, error) {
 	h := sha256.New()
+	// A failed listing withholds completeness, not the names it did expose.
+	var listings map[string][]string
+	var failedListings map[string]bool
+	if observed != nil {
+		listings = map[string][]string{}
+		failedListings = map[string]bool{}
+	}
 	unverifiable := false
 	reason := ""
 	member := func(path string) string {
@@ -2523,7 +2557,7 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 		}
 		return display + "/" + filepath.ToSlash(rel)
 	}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := walkRuntimeDirectory(root, func(path string, d fs.DirEntry, err error) error {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return contextErr
 		}
@@ -2538,11 +2572,28 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 			}
 		}
 		if err != nil {
+			if observed != nil {
+				failedListings[path] = true
+			}
 			unverifiable = true
 			if reason == "" {
 				reason = "unhashable runtime directory: " + representableReasonName(member(path))
 			}
 			return nil
+		}
+		if observed != nil {
+			// WalkDir exposes os.DirEntry's namespace type before Info may
+			// fail. The OS's unknown d_type is resolved by os before an entry
+			// is returned (or the listing reports an error); Type()==0 on a
+			// returned entry means regular, not fabricated full stat evidence.
+			observed.put(path, namespaceFact, fmt.Sprintf("type %x", uint32(d.Type())))
+			if path != root {
+				parent := filepath.Dir(path)
+				listings[parent] = append(listings[parent], filepath.Base(path))
+			}
+			if d.IsDir() {
+				listings[path] = nil
+			}
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
@@ -2560,6 +2611,7 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 		if visit != nil {
 			visit(rel)
 		}
+		observed.stat(path, namespaceStatFact, info, metadata)
 		switch {
 		case d.IsDir():
 			// A directory object contributes its membership (the walk's
@@ -2582,6 +2634,7 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 				return nil
 			}
 			fprintf(h, "file %s %x\n", rel, sum)
+			observed.put(path, contentFact, hex.EncodeToString(sum[:]))
 		case info.Mode()&os.ModeSymlink != 0:
 			writeStat(h, info, metadata)
 			target, err := os.Readlink(path)
@@ -2593,6 +2646,7 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 				return nil
 			}
 			fprintf(h, "symlink %s %s\n", rel, target)
+			observed.put(path, linkFact, target)
 		default:
 			unverifiable = true
 			if reason == "" {
@@ -2604,6 +2658,16 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 	})
 	if err != nil {
 		return [32]byte{}, false, "", err
+	}
+	for path, names := range listings {
+		if err := ctx.Err(); err != nil {
+			return [32]byte{}, false, "", err
+		}
+		offset, err := filepath.Rel(root, path)
+		if err != nil {
+			return [32]byte{}, false, "", err
+		}
+		observed.listing(path, filepath.ToSlash(offset), names, !failedListings[path])
 	}
 	var sum [32]byte
 	copy(sum[:], h.Sum(nil))

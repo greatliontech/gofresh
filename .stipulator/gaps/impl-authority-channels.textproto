@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-impl-authority-channels"
-reason: "Current source-only, identity, assertion and outcome channels require explicit compatibility with new implementation authority; existing purity can also waive known producing motion represented as unknown."
+reason: "Current source-only, identity, assertion and outcome channels require explicit compatibility with new implementation authority. Native known producing motion is a non-waivable guard failure; remaining consumer adoption must preserve that boundary without promoting independent assertions to derived authority."
 content_hash: "f707d092ba3a9627b974cc17333b00fd4472c10c1f396ed7e3ee942d6e848e97"
 source_hash: "59e33172ace5df704cc2456335ebb4c21edae3689729e7d7442fca1448931650"
 lands { manual { condition: "tooling-redesign 5.1w.6: new consumers preserve source-only and explicit assertion authority without promotion, and the 5.1w.4 non-waivable motion gate remains enforced through all channels" contradicted: true } }

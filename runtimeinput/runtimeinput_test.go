@@ -65,7 +65,7 @@ func TestCurrentStopsBetweenInputsAndFileChunks(t *testing.T) {
 		t.Fatalf("file-chunk cancellation = %v, want context.Canceled", err)
 	}
 	dirCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
-	if _, _, _, err := dirHashFiltered(dirCtx, moduleDir, moduleDir, nil, nil, true); !errors.Is(err, context.Canceled) {
+	if _, _, _, err := dirHashFiltered(dirCtx, moduleDir, moduleDir, nil, nil, true, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("directory-entry cancellation = %v, want context.Canceled", err)
 	}
 }
@@ -1223,7 +1223,7 @@ func TestMergeRejectsChildThatMovedBeforeUnion(t *testing.T) {
 func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	for _, raw := range []string{
-		`{"v":3,"future":true}`,
+		`{"v":4,"future":true}`,
 		`{"v":1}`,
 	} {
 		state := State{
@@ -1250,7 +1250,7 @@ func TestManifestEncodingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantJSON := `{"v":3,"env":[{"n":"A","d":"00000000000000000000000000000000"},{"n":"B","d":"00000000000000000000000000000000"}],"paths":[{"k":"rel","p":"z","d":"00000000000000000000000000000000"}],"unverifiable":["a","z"]}`
+	wantJSON := `{"v":4,"env":[{"n":"A","d":"00000000000000000000000000000000"},{"n":"B","d":"00000000000000000000000000000000"}],"paths":[{"k":"rel","p":"z","d":"00000000000000000000000000000000"}],"unverifiable":["a","z"]}`
 	want := base64.RawURLEncoding.EncodeToString([]byte(wantJSON))
 	if got != want {
 		decoded, _ := base64.RawURLEncoding.DecodeString(got)
@@ -1261,9 +1261,9 @@ func TestManifestEncodingIsCanonical(t *testing.T) {
 func TestManifestDecoderRejectsUnknownAndTrailingData(t *testing.T) {
 	moduleDir, _ := testDirs(t)
 	for _, raw := range []string{
-		`{"v":3,"future":true}`,
-		`{"v":3} {"v":3}`,
-		`{"v":3,"paths":[{"k":"rel","p":"tracked"}],"paths":[]}`,
+		`{"v":4,"future":true}`,
+		`{"v":4} {"v":4}`,
+		`{"v":4,"paths":[{"k":"rel","p":"tracked"}],"paths":[]}`,
 		`{"V":3}`,
 	} {
 		encoded := base64.RawURLEncoding.EncodeToString([]byte(raw))

@@ -310,7 +310,7 @@ func TestScratchNamespaceDanglingLinkAncestorStaysObserved(t *testing.T) {
 }
 
 // The seal covers the retained capture listing: a forged member set
-// fails the seal exactly as a forged digest would, and member framing
+// fails the seal exactly as forged comparable facts would, and member framing
 // distinguishes sets that plain newline framing would collide
 // (REQ-inputs-value-binding's capture-produced-only rule).
 func TestBracketSealCoversCaptureListing(t *testing.T) {
@@ -327,9 +327,9 @@ func TestBracketSealCoversCaptureListing(t *testing.T) {
 	}
 
 	a := bracket
-	a.roots = []bracketRoot{{id: bracket.roots[0].id, digest: "d", members: map[string]bool{"a\nmember b": true}}}
+	a.roots = []bracketRoot{{id: bracket.roots[0].id, members: map[string]bool{"a\nmember b": true}}}
 	b := bracket
-	b.roots = []bracketRoot{{id: bracket.roots[0].id, digest: "d", members: map[string]bool{"a": true, "b": true}}}
+	b.roots = []bracketRoot{{id: bracket.roots[0].id, members: map[string]bool{"a": true, "b": true}}}
 	if sealBracket(a) == sealBracket(b) {
 		t.Fatal("member framing collides distinct capture listings")
 	}
@@ -431,7 +431,7 @@ func TestBracketToleratesRestoredChurnButNotModeChange(t *testing.T) {
 	if err := os.RemoveAll(scratch); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestBracketToleratesRestoredChurnButNotModeChange(t *testing.T) {
 	if err := os.Chmod(packageDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, _, err = bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, _, err = bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}

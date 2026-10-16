@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-package-unit"
-reason: "Existing roster, process-binding, close-protocol and account examples do not establish typed runtime-span failure finalization. Current native v3 observation state lacks that guard-failure distinction."
-content_hash: "d9ca7217c2a200c9977b95d9c49942558eef57a462efed8d17d0c0460d6142ff"
-source_hash: "abfb334f986c463b9872f831564a08b68cca8db0040d5a40fff1ed5ece699837"
-lands { manual { condition: "tooling-redesign 5.1w.4: finalization preserves established typed runtime failure, terminal and attribution in the non-authorizing process account before refusing with no reusable subject evidence, honoring cancellation and abort precedence" contradicted: true } }

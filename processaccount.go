@@ -2,6 +2,22 @@ package gofresh
 
 import "github.com/greatliontech/gofresh/runtimeinput"
 
+// RuntimeInputSpanError refuses producing close after finalization established
+// runtime-input movement. The unit's Account retains the observation and terminal
+// facts, but no reusable evidence escapes. Purity cannot discharge this failure.
+type RuntimeInputSpanError struct {
+	Reason string
+}
+
+func (e *RuntimeInputSpanError) Error() string {
+	return "gofresh: runtime-input producing span changed: " + e.Reason
+}
+
+// Cause identifies the demonstrated guard failure independently of diagnostics.
+func (e *RuntimeInputSpanError) Cause() Cause {
+	return Cause{Kind: RuntimeInputsCause, Condition: Changed}
+}
+
 // ProcessAccount reports declared execution facts and observations already
 // finalized by a unit, including when closing refuses. It is not a reusable
 // result, successful closing judgment or durable-publication receipt. It carries

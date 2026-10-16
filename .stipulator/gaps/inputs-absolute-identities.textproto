@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-absolute-identities"
-reason: "Current native manifests are v3 and encode producing movement only as inferred unverifiability; comparable movement can be hidden by an unknown root and accepted purity can waive matching-digest motion. The v4 typed failure and historical v1-v3 refusal are not implemented."
-content_hash: "aa9dd38430903492ce92d7b37401bc4a97002500ae78df09d089f48b67bcdabd"
-source_hash: "298078b6128e0b343a0f1cbb7041f178b079899e12c6827df9e4253aa80bd2c7"
-lands { manual { condition: "tooling-redesign 5.1w.4: v4-only runtime evidence retains typed known movement through current checks, conversion, adoption and merge, including unknown/incomplete/zero siblings and restored values, with unchanged and unknown-only positive controls" contradicted: true } }

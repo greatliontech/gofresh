@@ -519,11 +519,11 @@ func TestOutcomeManifestRefusesInconsistentSupport(t *testing.T) {
 
 func TestManifestDigestPinsTheWireFold(t *testing.T) {
 	plain := manifest{Version: manifestVersion, Env: []envInput{{Name: "A", Digest: testEntryDigest}}, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "file"}, Digest: strings.Repeat("1", 32)}}, Unverifiable: []string{"reason"}}
-	if got := manifestDigest(plain); got != "a6d0e48e8d04b4d61df704481c73cf04" {
+	if got := manifestDigest(plain); got != "d18d3f32277111a932627632314b8d4c" {
 		t.Fatalf("identity-only wire digest = %q", got)
 	}
 	supported := manifest{Version: manifestVersion, Outcome: outcome.Method, Subjects: []string{supportedSubject}, Env: []envInput{{Name: "A", Digest: testEntryDigest}}}
-	if got := manifestDigest(supported); got != "76792218db1627e7415a437133d478ad" {
+	if got := manifestDigest(supported); got != "bcc147977722ca16ce145847c2ab6a41" {
 		t.Fatalf("supported wire digest = %q", got)
 	}
 }
@@ -533,9 +533,11 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 	f.Add(byte(0), byte(1), byte(0), []byte("identity-only child"))
 	f.Add(byte(2), byte(0), byte(3), []byte("incomplete child"))
 	f.Add(byte(3), byte(3), byte(0), []byte("zero-process identities"))
+	f.Add(byte(4), byte(0), byte(3), []byte("movement beside support and empty evidence"))
+	f.Add(byte(2), byte(4), byte(1), []byte("movement beside incomplete evidence"))
 	f.Fuzz(func(t *testing.T, left, right, third byte, data []byte) {
 		makeObservation := func(mode byte, index int) (Observation, string) {
-			if mode%4 == 3 {
+			if mode%5 == 3 {
 				obs, err := Merge(".", []string{})
 				if err != nil {
 					t.Fatal(err)
@@ -545,11 +547,14 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 			key := sha256.Sum256(append([]byte{byte(index)}, data...))
 			subject := hex.EncodeToString(key[:])
 			m := manifest{Version: manifestVersion}
-			switch mode % 4 {
+			switch mode % 5 {
 			case 0:
 				m.Outcome, m.Subjects = outcome.Method, []string{subject}
 			case 2:
 				m.Unverifiable = []string{"operation-outcome support unavailable"}
+			case 4:
+				m.BracketMoved = true
+				m.Unverifiable = []string{"observation bracket moved: data"}
 			}
 			state, err := stateFromManifest(context.Background(), m, ".", []string{})
 			if err != nil {
@@ -592,7 +597,10 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 		if err != nil || lhs.State != rhs.State {
 			t.Fatalf("associativity: %v", err)
 		}
-		eligible := func(mode byte) bool { return mode%4 == 0 || mode%4 == 3 }
+		if lhs.BracketMoved != (left%5 == 4 || right%5 == 4 || third%5 == 4) {
+			t.Fatal("merge promoted or lost demonstrated movement")
+		}
+		eligible := func(mode byte) bool { return mode%5 == 0 || mode%5 == 3 }
 		want := eligible(left) && eligible(right) && eligible(third)
 		for _, key := range []string{keyA, keyB, keyC} {
 			if HasOutcomeSupport(lhs.Manifest, key) != (want && key != "") {

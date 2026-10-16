@@ -36,7 +36,7 @@ func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.St
 		Version  int      `json:"v"`
 		Outcome  string   `json:"outcome"`
 		Subjects []string `json:"subjects"`
-	}{3, outcome.Method, []string{outcomeSubject(fp, subject)}})
+	}{4, outcome.Method, []string{outcomeSubject(fp, subject)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestJudgmentApplicabilityNeedsCurrentProofAndOriginalSupport(t *testing.T) 
 				// Preserve a readable manifest and matching digest. Removing the
 				// entire manifest would let the independent nonempty-manifest
 				// guard hide a missing outcome-support admission check.
-				fp.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(`{"v":3}`))
+				fp.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(`{"v":4}`))
 				state, err := runtimeinput.Current(t.Context(), fp.RuntimeInputs, t.TempDir(), nil)
 				if err != nil || !state.OK || state.Unverifiable {
 					t.Fatalf("identity-only control is not usable guard evidence: %+v %v", state, err)

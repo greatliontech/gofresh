@@ -245,7 +245,7 @@ func TestInRootSymlinkChainStaysCoveredAndRetargetMovesBracket(t *testing.T) {
 	if err := os.Symlink("alt.txt", link); err != nil {
 		t.Fatal(err)
 	}
-	unchanged, reason, err := bracket.revalidate(context.Background(), moduleDir)
+	unchanged, _, reason, err := bracket.revalidate(context.Background(), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}

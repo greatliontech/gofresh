@@ -548,8 +548,17 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	if err != nil {
 		return FinalizedProcess{}, err
 	}
-	if err := u.view.Validate(ctx); err != nil {
-		return FinalizedProcess{}, err
+	validationErr := u.view.Validate(ctx)
+	if validationErr != nil && !errors.Is(validationErr, ErrAnalysisUnavailable) {
+		return FinalizedProcess{}, validationErr
+	}
+	// Source/view drift retains its established precedence. A missing optional
+	// proof cannot obscure demonstrated runtime movement or authorize reuse.
+	if observation.BracketMoved {
+		return FinalizedProcess{}, &RuntimeInputSpanError{Reason: observation.Reason}
+	}
+	if validationErr != nil {
+		return FinalizedProcess{}, validationErr
 	}
 	if err := x.inspected.validate(ctx); err != nil {
 		return FinalizedProcess{}, err

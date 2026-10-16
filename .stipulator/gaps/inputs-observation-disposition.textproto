@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-inputs-observation-disposition"
-reason: "Current native manifests are v3 and encode producing movement only as inferred unverifiability; comparable movement can be hidden by an unknown root and accepted purity can waive matching-digest motion. The v4 typed failure and historical v1-v3 refusal are not implemented. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+reason: "Invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs for the complete observation-disposition invariant remain pending. Native v4 known movement is separately enforced as a non-waivable guard failure."
 content_hash: "3a36ef274e7375fca3e3c01124e7de3ce9526d598c7c67db9884905f7d1681b1"
 source_hash: "cd173682f255246035284ce09752f4a3f706560eba7aa0465357085279304453"
-lands { manual { condition: "tooling-redesign 5.1w.4: v4-only runtime evidence retains typed known movement through current checks, conversion, adoption and merge, including unknown/incomplete/zero siblings and restored values, with unchanged and unknown-only positive controls Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "tooling-redesign 9.3: a property witness or analyzer proof lands for the complete observation-disposition invariant without promoting partial evidence" } }

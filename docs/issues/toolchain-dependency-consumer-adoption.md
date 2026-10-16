@@ -3,8 +3,9 @@
 Lands: docs/plans/tooling-redesign.md 5.2d.
 
 Secondary constituent: 5.4 owns Gomutant's producing/checking adoption.
-Prerequisite: 5.1w replaces implementation-approval authority and establishes
-the non-waivable observed-movement guard before consumer acceptance resumes.
+Prerequisite: 5.1w replaces implementation-approval authority before consumer
+acceptance resumes; adoption preserves the native non-waivable observed-movement
+guard through producing, checking and publication.
 Stipulator's completed 5.2b source-certificate work is a retained control,
 not an unimplemented part of this producer migration.
 
@@ -18,13 +19,15 @@ content and policy. Adopt the replacement's explicit compatibility judgment,
 never rewrite a historical strategy to look current. Consumers retain the
 native form; mirrors and conversion code cannot omit these constituents.
 
-Published runtime-input manifests use generation 3, retaining truthful observed
-PWD values, but cannot distinguish known bracket movement from inferred
-unverifiability. The accepted v4-only boundary at 5.1w.4 rejects generations
-1-3 for runtime reuse. Generation 2 also could omit observed PWD. At the
-explicit consumer bump, retain old native records as history but regenerate
-their runtime evidence; do not rewrite the manifest version, infer movement
-from diagnostic text or insert a current directory.
+The native runtime-input boundary is v4-only: typed known bracket movement is a
+non-waivable guard failure through closing, checking, conversion, adoption and
+merge. Generations 1-3 cannot establish that distinction and are refused for
+runtime reuse and outcome-support admission. Generation 3 retained truthful
+observed PWD; generation 2 could also omit it. The published dependency remains
+v0.118.0; the native v4 change is unreleased and consumer dependency adoption
+remains open. At the explicit consumer bump, retain old native bytes as history
+and remeasure runtime evidence; do not rewrite the manifest version, infer
+movement from diagnostic text or insert a current directory.
 Exercise same-build/different-runtime-directory checks and restart, including
 identity-only profiles and any adopted or merged observations. A record without
 a runtime-input manifest retains its independently governed evidence rules.
@@ -57,6 +60,12 @@ At each adoption:
 - Exercise ordinary and observed reuse, explicit purity, applicability
   extension, producer closing and restart. A same-version GOROOT edit must not
   reuse an old result, and missing historical evidence must remain missing.
+- Carry typed producing movement through consumer admission and closing: no
+  reusable subject evidence may escape, while the non-authorizing process
+  account retains established terminal and observation facts. Preserve refusal
+  after restoration and across restart, including old-manifest rejection,
+  without losing independent unknown-only purity and supported-observation
+  controls. Cancellation and abort retain their precedence.
 - Preserve the shared contained-query boundary when adopting its Linux
   collected execution. It holds the exited leader waitable through pipe
   draining and cleanup, before reaping. Prepared commands run directly by a
