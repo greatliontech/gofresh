@@ -29,18 +29,27 @@ func Check(ctx context.Context, im *Image, entry uint64, face Interface, p Propo
 	if err != nil {
 		return Certificate{}, err
 	}
+	if err := checkInventory(ctx, g, p.Nodes, "proposal-inventory"); err != nil {
+		return Certificate{}, err
+	}
+	return checkGraph(ctx, im, entry, face, g)
+}
+
+// checkInventory validates complete proposed instruction/edge inventories for
+// every graph domain. Semantic transfer never consumes proposed successors.
+func checkInventory(ctx context.Context, g *graph, nodes []Node, premise string) error {
 	// Zero means missing; otherwise the slot identifies the caller's node plus
 	// one. Proposal order is independent of discovery and topological order.
 	proposed := make([]int, len(g.nodes))
 	var extra map[uint64]struct{}
-	for j, n := range p.Nodes {
+	for j, n := range nodes {
 		if err := ctx.Err(); err != nil {
-			return Certificate{}, err
+			return err
 		}
 		index, exists := g.byPC[n.PC]
 		if !exists {
 			if _, duplicate := extra[n.PC]; duplicate {
-				return Certificate{}, g.failure(n.PC, refuse(n.PC, "proposal-inventory", "duplicate instruction start"))
+				return g.failure(n.PC, refuse(n.PC, premise, "duplicate instruction start"))
 			}
 			if extra == nil {
 				extra = make(map[uint64]struct{})
@@ -49,33 +58,34 @@ func Check(ctx context.Context, im *Image, entry uint64, face Interface, p Propo
 			continue
 		}
 		if proposed[index] != 0 {
-			return Certificate{}, g.failure(n.PC, refuse(n.PC, "proposal-inventory", "duplicate instruction start"))
+			return g.failure(n.PC, refuse(n.PC, premise, "duplicate instruction start"))
 		}
 		proposed[index] = j + 1
 	}
 	for _, index := range g.order {
 		if err := ctx.Err(); err != nil {
-			return Certificate{}, err
+			return err
 		}
 		ins := &g.nodes[index]
 		pc := ins.pc
 		if proposed[index] == 0 {
-			return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+			return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 		}
-		n := p.Nodes[proposed[index]-1]
+		n := nodes[proposed[index]-1]
 		if n.Size != ins.size || len(n.Successors) != int(ins.count) {
-			return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+			return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 		}
 		for edge, next := range ins.next[:ins.count] {
 			if n.Successors[edge] != g.nodes[next].pc {
-				return Certificate{}, g.failure(pc, refuse(pc, "proposal-inventory", "omitted or inconsistent instruction/edge"))
+				return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 			}
 		}
 	}
 	if len(extra) != 0 {
-		return Certificate{}, refuse(entry, "proposal-inventory", "unreachable or invented instruction")
+		entry := g.nodes[0].pc
+		return refuse(entry, premise, "unreachable or invented instruction")
 	}
-	return checkGraph(ctx, im, entry, face, g)
+	return nil
 }
 
 // checkGraph consumes only a graph independently decoded from the privately

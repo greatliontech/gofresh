@@ -100,7 +100,8 @@ func refuse(pc uint64, premise, detail string) *Refusal {
 	return &Refusal{PC: pc, Path: []uint64{pc}, Premise: premise, Detail: detail}
 }
 
-// Span is a checked reachable instruction's half-open extent.
+// Span is a half-open virtual-address extent. Its owner distinguishes a proposed
+// memory region from a checked instruction or data-access footprint.
 type Span struct{ Start, End uint64 }
 
 // Bound is a non-authorizing projection of an opaque checked certificate. The

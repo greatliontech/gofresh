@@ -1925,3 +1925,267 @@ bindings {
   shape_hash: "f4674bea133e8704de2e6887f66698fe2388e3367119935d5e3ff1dafcb496ff"
   clause_label: "bound-scope"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.validate"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "6054dbbdfab5a7e5b89c04f91d9a6e45a0845f8a0c43b542648ad05f30da56ba"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.mapping"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "71252f70dcb93d0177fc024e6a4c670e9185bdea54787262a51dba49550635ce"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.extent"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "476c97b7f50f18d96197bdd83ac445d422add72367a0d1179fa0d15149aef98b"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameRefusesUnjustifiedAccesses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "04a6d4fb2132be864db9f1cc3a9edb9124cd2ae1f751d6344f33ae33658e932f"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameImageDataAndActualPermissions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4b7d169323bddfd801386f82f436b1b085a86a38d56f63f887325eadf52ea60a"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzFrameFullWidthBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ac42f307e1a6d75790fd8e04da79fa7b9270af9c04043d21eec256238d656e26"
+  clause_label: "region-interface"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckFrame"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "032d5324785c9b4c0bfbe4a4a9849f5da928e52d8890b26c0d9a8a87ab9928cc"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.transfer"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "cd8b8667562f3551e83bd8b416ed23ec5668af79f4aafa4d123606ad25b97235"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.store"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "6005792cbaeaa848fa6f6ca13ec1b77df53e0e506be931f3dd3e77a44a8846d3"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.frameChecker.loadPointer"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "881aa7f8531f8bd439a7ab46b7c35ac8af2761f79b601e325774488a5141224e"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameScalarFieldsAndAliases"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cbff0d0636aff757693dad6dd276d027f1e66ded2e57bc3e63e255e8c987fd72"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameStackSpillReloadAndOverlap"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "095a5fde2d7ff7ad9d72ae60bd29da707bddfff1188d255a698b045f25affb02"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameJoinsAllSuccessors"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fda883ae089d525a09f41f95cf394b07fe4563cbed0018ede6f3e81b55100514"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameProposalOwnershipBudgetsAndCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "65dcf552d5c494e4b586c6eb062f490fc74f35cc2e55bd5abb6d23a16541ea88"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameDefaultOptimizedFieldKernels"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "44afbd69fe556ab29d93de6abcd3c4f4c858f47b933ab211be378f6085216641"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzFrameSpillByteInvalidation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "034ce7a45b13ba3edec48b628684b8b3fb19abf11199d432dc92a35c14e0df25"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameRefusesUnjustifiedAccesses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "04a6d4fb2132be864db9f1cc3a9edb9124cd2ae1f751d6344f33ae33658e932f"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.decodeFrame"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "059c968dc4f10aa8d9cc6c9e56e1b58e949098b2c25a1c4b48d9033152da2b77"
+  clause_label: "calls-and-primitives"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameRefusesUnjustifiedAccesses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "04a6d4fb2132be864db9f1cc3a9edb9124cd2ae1f751d6344f33ae33658e932f"
+  clause_label: "calls-and-primitives"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckFrame"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "032d5324785c9b4c0bfbe4a4a9849f5da928e52d8890b26c0d9a8a87ab9928cc"
+  clause_label: "composition-boundary"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameProposalOwnershipBudgetsAndCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "65dcf552d5c494e4b586c6eb062f490fc74f35cc2e55bd5abb6d23a16541ea88"
+  clause_label: "composition-boundary"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.checkInventory"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "01f1cf1b6cd4e1e6e93db5dc94de77a97dec90490415cfa7e627c7fbeca3f17d"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.decodeGraphUsing"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "b15504294eaed14500a3884f348e637b6c226f53ec7b6d13c11643dae9c11de4"
+  clause_label: "reachable-coverage"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameProposalOwnsImageAndCancels"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "20ff14b848b4e116acb5f5373676ba7cfc57b9a3c5ca516a79a141b3294ea90b"
+  clause_label: "reachable-coverage"
+}

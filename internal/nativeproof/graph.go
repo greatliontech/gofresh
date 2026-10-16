@@ -96,12 +96,18 @@ func decodeGraph(ctx context.Context, im *Image, entry uint64) (*graph, error) {
 
 // A nonzero limit is a refusal boundary, never a successful coverage boundary.
 func decodeGraphLimited(ctx context.Context, im *Image, entry uint64, limit int) (*graph, error) {
+	return decodeGraphUsing(ctx, entry, limit, func(pc uint64) (decodedInstruction, error) { return decode(im, pc) })
+}
+
+// All native domains share instruction occupancy, successor closure and acyclic
+// scheduling. A domain's decoder supplies forms, never an asserted edge list.
+func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne func(uint64) (decodedInstruction, error)) (*graph, error) {
 	// Decode the root before allocating graph storage: an unsupported entry has
 	// no discovered graph, and its refusal already carries the entry-only path.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	first, err := decode(im, entry)
+	first, err := decodeOne(entry)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +134,7 @@ func decodeGraphLimited(ctx context.Context, im *Image, entry uint64, limit int)
 		if at == 0 {
 			ins = first
 		} else {
-			ins, err = decode(im, pc)
+			ins, err = decodeOne(pc)
 			if err != nil {
 				return nil, g.failure(pc, err)
 			}
@@ -231,6 +237,12 @@ func decodeLeaf(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, error) 
 			return decodedInstruction{}, refuse(pc, "data-memory", "decoded data-memory operand is outside the leaf bound")
 		}
 	}
+	return decodeControl(pc, i, b)
+}
+
+// decodeControl checks the shared scalar/control inventory after each domain
+// has admitted its memory forms. Transfer still validates every operand shape.
+func decodeControl(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, error) {
 	next, ok := plus(pc, uint64(i.Len))
 	if !ok {
 		return decodedInstruction{}, refuse(pc, "control-target", "instruction end overflow")

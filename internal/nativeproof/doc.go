@@ -35,6 +35,17 @@
 // the descriptor, or lift isolated invocation to ordinary Go suspension/resumption.
 // CallbackRules identifies this composition separately from the leaf RuleModel.
 //
+// CheckFrame derives byte-region read/write footprints and context preservation
+// through a bounded acyclic graph. Its memory permissions, entry pointer ranges,
+// lifetimes, return slot and absence of hidden aliases are explicit conditions;
+// image overlap and load permissions are independently checked. Stores invalidate
+// overlapping pointer-byte facts, and only checked full-word spills/reloads
+// preserve pointer provenance. Unknown loaded values cannot authorize addressing.
+// The frame does not establish memory-value or scalar-output determinism, source
+// correspondence, or whole-harness noninterference. Calls and external primitives
+// remain unsupported in this domain. FrameRules identifies these distinct rules;
+// ordinary Go isolation and suspension/resumption lifting remain open obligations.
+//
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span
 // binding before composing this claim. Even that composition supplies neither

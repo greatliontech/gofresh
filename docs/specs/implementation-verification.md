@@ -460,6 +460,66 @@ contracts:
   Existing result models and producing/current obligations remain in force, with
   no public discharge or tracing protocol supplied by this local relation.
 
+## Conditional native frame bounds
+
+**REQ-impl-native-frame** (invariant): A checked native read/write/frame claim
+MUST derive its effect bound under REQ-impl-native-entry and the following
+obligations. A frame specifies permitted accesses and preserved state, not merely
+equality of memory before and after execution.
+
+- **region-interface** — The interface identifies byte regions, their read/write
+  permissions, extents, lifetimes and possible aliases or overlaps, together with
+  the origins and allowed ranges of entry pointers in registers and stack memory,
+  including the stack pointer. Access bounds include the full operand width and
+  checked address arithmetic, overflow and alignment under the selected machine
+  model. Required initial contents, protected return context and preserved logical
+  context are explicit; unspecified state remains arbitrary. Code and data
+  mappings, permissions, loading, relocation and dynamic target dependencies must
+  support the claimed accesses under the identified model. Missing or unsupported
+  mapping or loading semantics refuse the dependent claim.
+- **instruction-effects** — Independent checking derives every reachable read,
+  write, control transfer and fault effect from actual selected instructions,
+  including implicit accesses and relevant atomic or ordering semantics. Every
+  possible access is included in the claimed bound, with permissions and possible
+  faults checked; permission to write a region does not establish its contents
+  or disjointness from protected state. Stores invalidate overlapping value and
+  pointer facts unless checked byte-level transfer re-establishes them. A stack
+  spill/reload preserves provenance only through the actual stored and loaded
+  bytes, widths, intervening writes and aliases. Unknown loaded pointers retain
+  their uncertainty: treating them as scalar results cannot justify subsequent
+  addressing, dispatch or heap stability. The decoded control-flow graph is
+  covered under REQ-impl-native-entry; any proposed invariants include all admitted
+  entry states and are preserved on every edge, including backedges. Finite unrolling,
+  unclosed invariants, unsupported effects, exhausted bounds or cancellation
+  provide no accepted prefix of a frame theorem.
+- **calls-and-primitives** — Each call composes a separately checked callee frame
+  at the actual target, arguments, context and continuation under
+  REQ-impl-callback-transfer. Callee writes, escapes, callbacks and exceptional
+  effects remain accounted for as required by REQ-impl-region-transport; an
+  arbitrary return value is no substitute. Primitive external effects use only
+  identified instruction-set or operating-system semantics under
+  REQ-impl-premise-boundary, with exact argument and applicability preconditions.
+  A syscall relation retains its reads, writes, partial effects, failures and
+  nondeterministic outcomes, including effects before failure. Wrappers and vDSO
+  functions remain selected implementations requiring derivation; names, hashes
+  and ABI labels cannot turn them into primitive aliases. Unresolved dynamic
+  targets or unavailable callee/primitive models leave the dependent frame
+  unsupported.
+- **composition-boundary** — A frame may retain explicit memory, isolation,
+  stack and interference premises; applying it to ordinary Go execution still
+  requires the checked lifting and suspension/resumption relation of
+  REQ-impl-callback-transfer. The source-language implicit-lowering boundary is
+  unchanged. Absence of writes outside the stated regions establishes neither
+  value/outcome determinism nor harness relevance or noninterference. An unused
+  clock result does not establish the clock implementation's frame. Whole-harness
+  composition must separately establish the relevance/noninterference and
+  value/outcome properties required by its claimed proposition and declared result
+  model, and discharge the local premises. Complete dependencies and
+  producing/current applicability remain
+  required under REQ-impl-build-selection and REQ-impl-derivation-reuse; this
+  subordinate theorem supplies no execution evidence, public result model or
+  runtime-reuse discharge by itself.
+
 ## Observation obligations
 
 **REQ-impl-observation-claims** (invariant): Observation-based support MUST
