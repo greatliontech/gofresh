@@ -61,6 +61,17 @@ func (r Relation) Bound() (Bound, bool) {
 	return r.checked.effects.Bound()
 }
 
+// Effects returns the exact opaque effect/frame certificate checked while
+// deriving this relation. It preserves the certificate's image ownership and
+// conditional interface; unlike Bound, it can be consumed by checked composition.
+// A zero relation returns a zero certificate with no authority.
+func (r Relation) Effects() Certificate {
+	if r.checked == nil {
+		return Certificate{}
+	}
+	return r.checked.effects
+}
+
 // Rules identifies all semantic rules used by this value relation.
 func (r Relation) Rules() string {
 	if r.checked == nil {
