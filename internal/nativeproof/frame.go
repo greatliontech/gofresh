@@ -16,10 +16,7 @@ type framePointer struct {
 
 // A byte carries provenance only as one lane of an actual full pointer-word
 // store (or an explicit initial word premise). Scalar writes erase these facts.
-type frameByte struct {
-	pointer framePointer
-	lane    uint8
-}
+type frameByte = pointerLane[framePointer]
 
 type frameState struct {
 	scalar state

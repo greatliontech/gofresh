@@ -22,6 +22,7 @@ type Image struct {
 	data   []byte
 	digest [32]byte
 	loads  []mapping
+	entry  uint64
 }
 
 // snapshot owns the container before any caller callback can replace it. A
@@ -63,7 +64,7 @@ func NewImage(ctx context.Context, input []byte) (*Image, error) {
 	if f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB || f.Machine != elf.EM_X86_64 || f.Type != elf.ET_EXEC {
 		return nil, refuse(0, "image-format", "requires ELF64 little-endian x86-64 ET_EXEC")
 	}
-	im := &Image{data: data}
+	im := &Image{data: data, entry: f.Entry}
 	copy(im.digest[:], h.Sum(nil))
 	for _, s := range f.Sections {
 		if err := ctx.Err(); err != nil {

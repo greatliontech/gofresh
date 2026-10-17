@@ -262,6 +262,79 @@ establish its stated value, dependence or effect bound under these obligations:
   model, supplies no historical execution authority and discharges no maximal-tier
   blocker.
 
+## Conditional native transitions
+
+A native transition relates machine states at an entry and a declared cut before
+the cut instruction executes. It is subordinate evidence for composing native
+segments, not a return theorem, completed bootstrap or public invocation model.
+An executable's declared entry identifies an input to this judgment; it does not
+establish that a process actually entered there.
+
+**REQ-impl-native-transition** (invariant): An accepted conditional native
+entry-to-cut transition MUST satisfy these obligations:
+
+- **bound-scope** — The claim binds its immutable image, entry, cut, machine and
+  inference rules, admissible entry states, memory conditions and interference
+  exclusions. An executable-entry claim starts at the entry read from that image's
+  executable format, rather than a substituted symbol or proposed start. All
+  unspecified register bits, flags and memory remain arbitrary. Entry facts and
+  their authority are retained separately from derived outputs; an expected output
+  is not an input premise. The image, instruction and machine applicability
+  obligations of REQ-impl-native-entry remain required.
+- **complete-cut** — The checker reconstructs every reachable instruction and
+  successor before the cut from bound image bytes. It establishes the cut as a
+  reachable instruction boundary and retains its decoded instruction separately
+  as unexecuted boundary evidence. Every maximal path in the claimed scope reaches
+  that cut; cycles require a checked finite-progress argument or refusal. A fault
+  or unsupported transfer before the cut cannot be hidden by assuming normal
+  completion. Applicable synchronous faults must be excluded by established
+  premises. Proposed extents, symbol sizes, instruction counts and exhausted
+  budgets never establish an endpoint. Calls, returns, indirect transfers and
+  external effects require their actual rules and obligations or refusal, not a
+  fabricated return or silently truncated successor inventory.
+- **symbolic-origins** — An address origin is universally quantified over its
+  declared bounds, congruence and memory predicates, not a sampled runtime address.
+  Pointer provenance identifies the origin and checked byte offset and agrees with
+  the derived scalar value. Numerical equality alone supplies no provenance.
+  Offset arithmetic and full access extents preserve canonical-address and
+  nonwrapping conditions for every admissible origin. Alignment transfers derive
+  their new offsets from the actual mask, origin congruence and operand semantics;
+  they cannot use alignment of an invented concrete base. An address envelope
+  grants neither access permission nor initial contents. One-past pointers may be
+  represented but cannot authorize a read. Pointer-word provenance survives a
+  memory round trip only through its complete correctly ordered bytes; partial or
+  overlapping writes invalidate affected provenance.
+- **state-and-effects** — The checker derives the claimed register, flag and
+  byte-memory relations from exact operand forms and execution order. Instruction
+  fetch and every data access remain accounted for, including writes whose final
+  value happens to equal the old value. Memory outside the write footprint and
+  claimed preserved context remain unchanged under the retained frame premises.
+  Undefined flags stay undefined; omitting a flag value from a projection does not
+  establish that the flag was preserved.
+  Image zero-fill or source-language zero initialization supplies no initial
+  native-memory value without its applicable initialization relation. Raw input
+  words and pointer bytes acquire no argument, environment or Go-object meaning
+  from a familiar address or symbol.
+- **independent-evidence** — Candidate endpoints, instruction inventories and
+  state relations are proposals. The checker validates their coverage, transfers,
+  origin side conditions and dependencies independently of proposed conclusions.
+  Cancellation, exhausted bounds, empty or inconsistent entry conditions, or any
+  unclosed obligation yield no transition certificate. Evidence retains owned
+  inputs and all image, interface, origin, rule and subordinate dependencies under
+  REQ-impl-derivation-reuse; copying a projection grants no authority.
+- **conditional-composition** — A successor transition starts at the checked cut
+  under the same bound image and compatible origin, state, memory and machine
+  premises. The cut instruction belongs to that successor's executed scope.
+  Origin names, matching output bytes or digests cannot replace this relation.
+  The transition remains distinct from normal-return, complete-function,
+  source-startup and completed-bootstrap evidence. Applying it to an ordinary
+  process additionally establishes actual image/entry binding and the applicable
+  process-entry layout and memory relation; no observed stack address is required
+  when that relation establishes the symbolic premises. Numeric native storage
+  still needs checked source-storage, representation and linkage correspondence
+  before it can supply source state. The transition grants no historical execution
+  authority, source-subject coverage or public runtime discharge.
+
 ## Conditional numeric source/native correspondence
 
 Numeric correspondence relates a selected source computation to a bound native

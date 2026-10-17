@@ -140,6 +140,7 @@ func TestFrameStackSpillReloadAndOverlap(t *testing.T) {
 		"c6442403ff", // scalar byte in the middle of the spill
 		"895c2404",   // scalar upper-word store
 		"48895c2404", // overlapping unaligned whole-word store
+		"4889442401", // same pointer with shifted byte lanes
 	} {
 		im := image(t, hexBytes(t, "4883ec1048890424"+mutation+"488b0c244889194883c410c3"))
 		c, err := proveFrame(t, im, testEntry, memoryFace())
@@ -416,13 +417,31 @@ func FuzzFrameSpillByteInvalidation(f *testing.F) {
 	for _, offset := range []uint8{0, 3, 7, 8, 15} {
 		f.Add(offset)
 	}
+	for _, offset := range []uint8{0, 1, 3, 7, 8} {
+		f.Add(offset | 0x80)
+	}
 	f.Fuzz(func(t *testing.T, offset uint8) {
-		offset %= 16
-		code := hexBytes(t, "4883ec1048890424c6442400ff488b0c244889194883c410c3")
-		code[11] = offset
+		pointerWrite := offset&0x80 != 0
+		offset &= 0x7f
+		var code []byte
+		invalid := false
+		if pointerWrite {
+			// Keep the full store within the allocated sixteen-byte frame.
+			// A same-pointer overwrite at offset zero is complete; shifted
+			// overlapping lanes must not acquire full-word provenance.
+			offset %= 9
+			code = hexBytes(t, "4883ec10488904244889442400488b0c244889194883c410c3")
+			code[12] = offset
+			invalid = offset > 0 && offset < 8
+		} else {
+			offset %= 16
+			code = hexBytes(t, "4883ec1048890424c6442400ff488b0c244889194883c410c3")
+			code[11] = offset
+			invalid = offset < 8
+		}
 		im := image(t, code)
 		c, err := proveFrame(t, im, testEntry, memoryFace())
-		if offset < 8 {
+		if invalid {
 			frameRefusal(t, c, err, "frame-address")
 			return
 		}

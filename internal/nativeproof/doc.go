@@ -57,6 +57,22 @@
 // ValueCallRules and ValueCallMachine retain this scope separately: neither the
 // old leaf Certificate nor FrameCertificate can express its initial-value facts.
 //
+// CheckTransition establishes a distinct ELF-entry-to-unexecuted-cut relation.
+// One fresh stack origin is universally quantified over explicit bounds,
+// congruence and external/image-page disjointness; joint nonemptiness is checked
+// before deriving state. Relative address envelopes, memory permissions and
+// arbitrary initial byte/word contents are separate. Exact scalar expressions
+// share the value calculus, while origin arithmetic and alignment justify their
+// pointer provenance under the retained conditions. Full ordered pointer lanes
+// survive spills and reloads; numeric coincidence cannot create an origin.
+// The first transition grammar admits full-width MOV, base/displacement LEA,
+// constant SUB, justified alignment AND and relative JMP/fallthrough. Graph
+// occupancy and acyclic closure establish that every path reaches the decoded
+// cut. Its instruction is not executed or relabeled RET. Arithmetic flag values
+// may be unprojected, never invented or mistaken for preservation. No normal
+// return, source storage, process-argument meaning, completed bootstrap or public
+// runtime authority follows from this conditional state relation.
+//
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span
 // binding before composing this claim. Even that composition supplies neither

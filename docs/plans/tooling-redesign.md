@@ -276,6 +276,19 @@
                       relevant inherited-descriptor state from the identified
                       process-entry model through selected bootstrap and initialization,
                       accounting for intervening native effects and frames.
+                      - [x] 5.1w.2b.3b.2a.2.2.2.1 Check the conditional ELF-entry
+                        transition through the first argument spills with a universal
+                        stack origin, validated cut and complete value/access relation;
+                        preserve ASLR independence without a traced-address input.
+                      - [ ] 5.1w.2b.3b.2a.2.2.2.2 Check the required startup
+                        continuations after completing supported-transition invariant
+                        evidence and enforcing predecessor-to-successor implication;
+                        cover CPU/TLS operations, call frames and primitive effects
+                        through argument/environment and descriptor preparation.
+                      - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
+                        selected-source storage and initialization correspondence before
+                        supplying compiler source state; names and numeric addresses
+                        cannot substitute for that association.
                   - [ ] 5.1w.2b.3b.2a.2.3 Check the rooted main/frontend transfer
                     through the selected typed package and whole enclosing body,
                     retaining actual compiler-state and representation association.

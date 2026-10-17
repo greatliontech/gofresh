@@ -342,8 +342,8 @@ oracle inventory substitutes for any original population.
 ## Raw gap-record routing
 
 This tracking ledger reads the raw `.stipulator/gaps/*.textproto` records, not
-an evaluated gap list or coverage verdict. It contains **128 distinct requirement
-IDs exactly once in the tables below: Gofresh 105, Gomutant 3, Stipulator 14 and
+an evaluated gap list or coverage verdict. It contains **129 distinct requirement
+IDs exactly once in the tables below: Gofresh 106, Gomutant 3, Stipulator 14 and
 Pew 6**. Each row's bold destination is an existing open primary slot in
 `tooling-redesign.md`; a grouped row routes each explicitly named ID there.
 The source for each ID is its owner's gap directory and the filename obtained
@@ -368,14 +368,16 @@ closure requires the deciding evidence, not inference from filenames or flags.
 The named implementation slot carries its own enforcement obligation; 9.3 is
 not authorization for an otherwise unapproved witness run or campaign.
 
-### Gofresh: 105 records
+### Gofresh: 106 records
 
 The 59 retained implementation-verification alignment records follow the first
 manual condition in each native record for their primary destinations; later
 conditions remain constituents or prerequisites. Earlier
 7.8, 9.3 and fleet-adoption obligations remain where named below, including
 their original evidence classes and activation conditions. The other 46 records
-retain their routing. Shared wording does not merge claims or promote examples.
+retain their routing. The additional native-transition record retains the new
+entry-to-cut invariant's evidence and successor-composition obligations. Shared
+wording does not merge claims or promote examples.
 
 The source-computation prototype's runtime grant is cut off after the reproduced
 same-binary POPCNT 1/0 counterexample under runtime GODEBUG. Source candidates at
@@ -477,6 +479,7 @@ full conditions. A missing checked premise is not made true by this census.
 | REQ-impl-independent-check | **5.1w.2** | C | Existing effect summaries are not independently checked derivations. Validate inference steps, side conditions and selected-input correspondence independently of the proposed conclusion; new checker code has no accepted binding here. |
 | REQ-impl-no-approval-registry | **5.1w.7** | C | Effect/dynamic-state consumers still grant claims through package/symbol/version tables and approved-content chains. Remove all superseded authority mechanisms only after useful positive and adversarial acceptance and full consumer migration. |
 | REQ-impl-native-entry | **5.1w.2b.2**; constituents 5.1w.2b.3b and 5.1w.2b.4 | N | Complete invariant evidence for the supported image/instruction model remains beyond the scoped examples and bounded generated properties. Preserve actual-byte coverage, machine/interface premises, transfer and return bounds, ownership and refusal; the conditional theorem supplies no ordinary-use or historical authority. |
+| REQ-impl-native-transition | **5.1w.2b.3b.2a.2.2.2.2**; constituents 5.1w.2b.3b.2a.2.2.2.3 and 5.1w.2b.4 | N | Scoped entry/cut, symbolic-origin, alignment, permission, value/provenance and immutable-evidence controls support the conditional checker. Complete invariant evidence remains beyond bounded properties and sampled ISA/byte oracles sharing instruction decoding; successor composition must enforce output implication and the same image/origin/state before use. Actual loader/process inputs, bootstrap, source-storage association and historical authority remain separate. |
 | REQ-impl-numeric-correspondence | **5.1w.2b.3a**; constituents 5.1w.2b.3b and 5.1w.2b.4 | N | Selected-source/native positives and adversarial controls support local correspondence; complete invariant evidence across contexts, paths, effects, equality rules and dependencies remains. Keep initialization, harness, actual use, source/artifact span and applicability open until separately established. |
 | REQ-impl-callback-transfer | **5.1w.2b.3b.1**; constituents 5.1w.2b.3b.3 and 5.1w.2b.4 | N | Conditional descriptor and decoded-call examples support exact target, argument, frame and return transfer. Complete invariant evidence remains; incoming descriptor provenance, ordinary Go suspension and actual-use/harness applicability are not supplied by a local fragment. |
 | REQ-impl-region-transport | **5.1w.2b.3b.2**; constituents 5.1w.2b.3b.3 and 5.1w.2b.4 | N | Checked region invariants and actual generated-registration examples retain correlated rows and consuming operands. Complete invariant evidence and interprocedural composition remain; source/build, initialization, intervening frames, native use and harness obligations stay explicit. |
@@ -520,9 +523,10 @@ table does not replace them with manual plan triggers or judge them covered.
 | REQ-pew-verb-defaults | **7.6** | C | Table distinguishes informational/enforcing defaults but command admission has not adopted contextual resolution; pin overrides and rendered effective defaults. |
 | REQ-pew-derived-state | **7.8** | N | Shared content/admission repair is adopted. Independent completed cold/warm/discarded-cache, same-version content and source-coordinate controls remain, separate from budget availability and historical backfill; no missing-enforcement contradiction is asserted. |
 
-The reconciliation is 105 + 3 + 14 + 6 = 128. Within Gofresh the primary-slot
+The reconciliation is 106 + 3 + 14 + 6 = 129. Within Gofresh the primary-slot
 totals are seven at 5.1w.2, one each at 5.1w.2b.2 and 5.1w.2b.3a,
-one each at 5.1w.2b.3b.1, 5.1w.2b.3b.2 and 5.1w.2b.3b.3,
+one each at 5.1w.2b.3b.1, 5.1w.2b.3b.2, 5.1w.2b.3b.3 and
+5.1w.2b.3b.2a.2.2.2.2,
 six at 5.1w.3, fourteen at
 5.1w.5, thirty at 5.1w.6, one at 5.1w.7, twenty at 9.3, four at
 7.8, eight at 5.2d, three at 5.5, two each at 7.4 and 5.5a, and one each

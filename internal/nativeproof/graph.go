@@ -9,6 +9,7 @@ import (
 )
 
 type instruction struct {
+	boundary boundaryKind
 	pc       uint64
 	inst     operation
 	next     [2]int
@@ -30,10 +31,11 @@ type operation struct {
 // The supported grammar has at most two successors. Targets are not retained
 // beside the resolved edges: their PCs come from the graph's destination nodes.
 type decodedInstruction struct {
-	inst    operation
-	targets [2]uint64
-	count   uint8
-	size    uint8
+	boundary boundaryKind
+	inst     operation
+	targets  [2]uint64
+	count    uint8
+	size     uint8
 }
 
 type graph struct {
@@ -41,6 +43,16 @@ type graph struct {
 	byPC  map[uint64]int
 	order []int
 }
+
+// A cut is decoded but unexecuted. It is never a return instruction or evidence
+// for a return interface; domains select their own permitted terminal kind.
+type boundaryKind uint8
+
+const (
+	boundaryNone boundaryKind = iota
+	boundaryReturn
+	boundaryCut
+)
 
 func (g *graph) failure(pc uint64, err error) error {
 	r, ok := err.(*Refusal)
@@ -146,6 +158,7 @@ func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne fu
 			occupied[pc+off] = pc
 		}
 		g.nodes[at].inst = ins.inst
+		g.nodes[at].boundary = ins.boundary
 		g.nodes[at].count = ins.count
 		g.nodes[at].size = ins.size
 		for edge, target := range ins.targets[:ins.count] {
@@ -263,6 +276,7 @@ func decodeControl(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, erro
 		if len(b) != 1 || b[0] != 0xc3 || i.Args[0] != nil {
 			return decodedInstruction{}, refuse(pc, "return-interface", "only unprefixed ordinary near RET is modeled")
 		}
+		n.boundary = boundaryReturn
 	case x86asm.JMP, x86asm.JA, x86asm.JAE, x86asm.JB, x86asm.JBE, x86asm.JE, x86asm.JNE, x86asm.JL, x86asm.JLE, x86asm.JG, x86asm.JGE:
 		rel, ok := i.Args[0].(x86asm.Rel)
 		if !ok || i.Args[1] != nil {

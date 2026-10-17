@@ -67,17 +67,7 @@ func (m *frameChecker) loadPointer(s *frameState, span Span, width int) framePoi
 		return framePointer{}
 	}
 	start := m.cell(span.Start)
-	p := s.memory[start].pointer
-	if !p.known {
-		return framePointer{}
-	}
-	for lane := 0; lane < 8; lane++ {
-		cell := s.memory[start+lane]
-		if cell.pointer != p || cell.lane != uint8(lane) {
-			return framePointer{}
-		}
-	}
-	return p
+	return orderedPointer(s.memory[start : start+8])
 }
 
 func (m *frameChecker) store(s *frameState, span Span, width int, p framePointer) error {
