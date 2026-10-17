@@ -7,7 +7,7 @@ import (
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including their decoder, expression and ordered pointer-lane dependencies.
-const TransitionRules = "gofresh/native-transition@1;" + ValueRules + ";" + FrameRules
+const TransitionRules = "gofresh/native-transition@2;" + ValueRules + ";" + FrameRules
 
 // RelativeSpan is a half-open byte extent relative to the single stack origin.
 // An envelope permits its End as a pointer, but grants no memory permission.
@@ -29,7 +29,9 @@ type RelativeRegion struct {
 }
 
 // TransitionConditions retains machine, loading, fault and interference premises
-// for a prefix only. Machine uses MachineModel's baseline execution restrictions;
+// for an entry-to-cut scope. A continuation retains these as premises over the
+// entire longer scope, not as observed stability facts from its predecessor.
+// Machine uses MachineModel's baseline execution restrictions;
 // no return slot or normal-completion premise is imported. EntryState asserts
 // applicability of the declared symbolic state at the ELF entry. InstructionMapping
 // has Conditions' static ELF/4KiB meaning. IsolatedExecution excludes asynchronous
@@ -57,7 +59,9 @@ type TransitionInterface struct {
 }
 
 // TransitionLimits bounds graph/expression work and finite declared memory.
-// Zero selects defaults; exhaustion never establishes an endpoint.
+// Zero selects defaults; exhaustion never establishes an endpoint. Continuations
+// inherit the root's normalized limits, cumulative construction work and complete
+// instruction inventory (including the new unexecuted cut).
 type TransitionLimits struct {
 	RelationLimits
 	Regions, Bytes int
@@ -66,6 +70,7 @@ type TransitionLimits struct {
 // TransitionProposal is an untrusted complete entry-to-cut instruction inventory.
 // The checker obtains Entry independently from the owned ELF header. The cut node
 // has no executed successors; its actual instruction is retained separately.
+// A continuation still supplies this complete inventory from the original entry.
 type TransitionProposal struct {
 	ImageDigest [32]byte
 	Entry, Cut  uint64
@@ -157,8 +162,13 @@ type TransitionBound struct {
 // Its zero value carries no authority; projections cannot reconstruct it.
 type TransitionCertificate struct{ checked *checkedTransition }
 type checkedTransition struct {
-	image *Image
-	bound TransitionBound
+	image  *Image
+	bound  TransitionBound
+	limits TransitionLimits
+	work   int
+	// Only private condition predicates supplement the bound's sole register
+	// and byte-state snapshot. No builder or predecessor certificate is retained.
+	flags [flagCount]br.Term
 }
 
 func cloneTransitionInterface(f TransitionInterface) TransitionInterface {
@@ -172,7 +182,10 @@ func (c TransitionCertificate) Bound() (TransitionBound, bool) {
 	if c.checked == nil {
 		return TransitionBound{}, false
 	}
-	b := c.checked.bound
+	return cloneTransitionBound(c.checked.bound), true
+}
+
+func cloneTransitionBound(b TransitionBound) TransitionBound {
 	b.Interface = cloneTransitionInterface(b.Interface)
 	b.ExcludedOrigins = append([]Span(nil), b.ExcludedOrigins...)
 	b.InitialMemory = append([]TransitionByte(nil), b.InitialMemory...)
@@ -181,5 +194,5 @@ func (c TransitionCertificate) Bound() (TransitionBound, bool) {
 	b.Instructions = append([]Span(nil), b.Instructions...)
 	b.Accesses = append([]TransitionAccess(nil), b.Accesses...)
 	b.Boundary.Bytes = append([]byte(nil), b.Boundary.Bytes...)
-	return b, true
+	return b
 }

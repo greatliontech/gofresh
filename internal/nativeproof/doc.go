@@ -76,13 +76,23 @@
 // share the value calculus, while origin arithmetic and alignment justify their
 // pointer provenance under the retained conditions. Full ordered pointer lanes
 // survive spills and reloads; numeric coincidence cannot create an origin.
-// The first transition grammar admits full-width MOV, base/displacement LEA,
-// constant SUB, justified alignment AND and relative JMP/fallthrough. Graph
+// The transition grammar admits full-width MOV, canonical MOV r32,imm32,
+// base/displacement LEA, constant SUB, justified alignment AND and relative
+// JMP/fallthrough. Narrow register writes clear pointer provenance. Graph
 // occupancy and acyclic closure establish that every path reaches the decoded
 // cut. Its instruction is not executed or relabeled RET. Arithmetic flag values
 // may be unprojected, never invented or mistaken for preservation. No normal
 // return, source storage, process-argument meaning, completed bootstrap or public
 // runtime authority follows from this conditional state relation.
+//
+// CheckTransitionContinuation consumes only an immutable predecessor and a full
+// root-to-new-cut proposal. It rechecks the complete graph and predecessor prefix,
+// inherits the same symbolic inputs and derived state, and executes only the
+// suffix. Normalized root limits and cumulative work also govern inherited terms,
+// copies and the combined graph; a new segment cannot reset those bounds. Mapping
+// and interference conditions remain premises over the longer scope, rather than
+// actual stability facts inferred from the predecessor. No replacement image,
+// interface, heap, expected result or per-segment limits can be supplied.
 //
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span

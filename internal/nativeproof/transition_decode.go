@@ -18,13 +18,32 @@ func simpleBase(arg x86asm.Arg) bool {
 	return ok && base && m.Segment == 0 && m.Index == 0
 }
 
-// validateTransitionForm admits exact full-width forms before the scalar builder
-// sees them. Immediate extension is checked against encoding bytes, not inferred
-// from a mnemonic. All memory forms have one full register base and displacement.
+// validateTransitionForm admits exact full-width forms and MOV r32,imm32 before
+// the scalar builder sees them. Immediate extension is checked against encoding
+// bytes, not inferred from a mnemonic. All memory forms have one full register
+// base and displacement.
 func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
-	bad := func() error { return refuse(pc, "transition-form", "unsupported full-width encoding or operand form") }
+	bad := func() error { return refuse(pc, "transition-form", "unsupported transition encoding or operand form") }
 	if i.Op == x86asm.JMP {
 		if _, ok := i.Args[0].(x86asm.Rel); !ok || i.Args[1] != nil || !(len(b) == 2 && b[0] == 0xeb || len(b) == 5 && b[0] == 0xe9) {
+			return bad()
+		}
+		return nil
+	}
+	// The sole narrow form is MOV r32, imm32, with only canonical REX.B
+	// for R8D..R15D. Check the register and all immediate bits independently.
+	if i.Op == x86asm.MOV && i.DataSize == 32 {
+		op, extension := 0, 0
+		if len(b) == 6 && b[0] == 0x41 {
+			op, extension = 1, 8
+		}
+		if len(b) != op+5 || b[op] < 0xb8 || b[op] > 0xbf {
+			return bad()
+		}
+		r, ok := i.Args[0].(x86asm.Reg)
+		a, valid := register(r)
+		imm, immediate := i.Args[1].(x86asm.Imm)
+		if !ok || !valid || a.width != 32 || a.reg != extension+int(b[op]-0xb8) || !immediate || int64(imm) != int64(int32(binary.LittleEndian.Uint32(b[op+1:]))) {
 			return bad()
 		}
 		return nil

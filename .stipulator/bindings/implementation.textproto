@@ -3597,3 +3597,135 @@ bindings {
   shape_hash: "32843b25428d2fcbba828808efcc3dcc6f0d18352a41848fb02a8200b9730f27"
   clause_label: "complete-cut"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.CheckTransitionContinuation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "ec5a3bf95d28425fa08e7fcf681e91aed5b1a4bbae4f5ebf38b482019271678f"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationState"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ca2ca2674cb04d72158419bcad2a35362a620a3d384f52b683768a7b52a7f617"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationPremisesCannotStrengthen"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5778477dbd4fd242599aaf83e2863c1c041eeb20f8c608e3189d079c316ccf99"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationMOV32AndFlags"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f2741184f4a0c39aed5b5232936b3c7fe7079387533bd9ac4cebd96833cb1579"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "09816e7bc52d764faa7d0d104b5e607fb04285463d575d793a5d4f06be5894a6"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationBackwardAcyclic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "74d5b2015c08222cd375e4154ffc2ba63bd54954139b156b27e5e152f4ff3bc2"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationOwnershipCancellationAndSiblings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aa801734b7bb67fe7a6f226fba00a6f78cfddf1bb4956809a773a30b854c4892"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationCumulativeBudgets"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b80c10d5573de22399865c70272f6e92a9fc1fd1a0796ab12d9ebf53681e5e8c"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationRetainedExpressionUnion"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d10f5ad05869a2d8ba2ff5eca9fb0adc5f755e451a88eb2e45e181ebbf1fe98f"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionContinuationSignedDisplacement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0705a6a57f1821f425df4224ecdf30f31d5903302c8ca2e32310e10d2c097751"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeneratedSyntheticContinuations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3f83a1781cf983aeed4e847432cdae35f845adab5997c5ea25519ea13e9335b4"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionSyntheticContinuation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "893076a0c09748b2ac4b900af2fa060684a7977db6409d0ade9c14efc428b359"
+  clause_label: "conditional-composition"
+}

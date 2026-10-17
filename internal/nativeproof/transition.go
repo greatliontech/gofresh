@@ -1,8 +1,10 @@
 package nativeproof
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"math/bits"
 	"slices"
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
@@ -39,14 +41,14 @@ func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
 	return l, nil
 }
 
-func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits) (*transitionChecker, error) {
+func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits, work int) (*transitionChecker, error) {
 	if ctx == nil {
 		return nil, refuse(0, "transition-context", "missing context")
 	}
 	if im == nil || len(im.data) == 0 {
 		return nil, refuse(0, "image-binding", "missing constructed image")
 	}
-	m := &transitionChecker{im: im, limits: l, valueBuilder: &valueBuilder{ctx: ctx, limits: l.RelationLimits, pc: im.entry, depth: make(map[br.Term]int)}}
+	m := &transitionChecker{im: im, limits: l, valueBuilder: &valueBuilder{ctx: ctx, limits: l.RelationLimits, work: work, pc: im.entry, depth: make(map[br.Term]int)}}
 	if !m.tick() {
 		return nil, m.err
 	}
@@ -90,7 +92,7 @@ func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits Transi
 	if err != nil {
 		return TransitionProposal{}, refuse(0, "transition-budget", err.Error())
 	}
-	m, err := newTransitionChecker(ctx, im, l)
+	m, err := newTransitionChecker(ctx, im, l, 0)
 	if err != nil {
 		return TransitionProposal{}, err
 	}
@@ -126,20 +128,19 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 	if err != nil {
 		return TransitionCertificate{}, refuse(0, "transition-budget", err.Error())
 	}
-	if len(face.Regions) > l.Regions || len(face.Words) > l.Bytes/8 || len(proposal.Nodes) > l.Instructions {
+	if len(face.Regions) > l.Regions || len(face.Words) > l.Bytes/8 {
 		return TransitionCertificate{}, refuse(0, "transition-budget", "input inventory exceeds limits")
 	}
-	for _, n := range proposal.Nodes {
-		if len(n.Successors) > 1 {
-			return TransitionCertificate{}, refuse(n.PC, "transition-proposal", "unsupported successor count")
-		}
+	work := 0
+	if err := transitionCopyWork(&work, l.Work, len(face.Regions), len(face.Words)); err != nil {
+		return TransitionCertificate{}, err
+	}
+	proposal, err = captureTransitionProposal(proposal, l, &work)
+	if err != nil {
+		return TransitionCertificate{}, err
 	}
 	face = cloneTransitionInterface(face)
-	proposal.Nodes = append([]Node(nil), proposal.Nodes...)
-	for j := range proposal.Nodes {
-		proposal.Nodes[j].Successors = append([]uint64(nil), proposal.Nodes[j].Successors...)
-	}
-	m, err := newTransitionChecker(ctx, im, l)
+	m, err := newTransitionChecker(ctx, im, l, work)
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -162,14 +163,92 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 	if err := m.initial(); err != nil {
 		return TransitionCertificate{}, err
 	}
-	for _, idx := range g.order {
+	return m.finish(g, 0)
+}
+
+// CheckTransitionContinuation extends opaque checked evidence to a new cut. The
+// proposal inventories the FULL original ELF-entry-to-new-cut graph. Only the
+// suffix executes, starting with the predecessor's unexecuted boundary. Original
+// terms, permissions, origin domain and normalized limits are inherited exactly;
+// the result is conditional on the mapping and interference premises holding over
+// the entire longer scope. A parent's theorem does not observe their stability.
+// Caller containers are captured before any context callback. Failure publishes
+// no certificate and cannot change the predecessor or an independent sibling.
+func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCertificate, proposal TransitionProposal) (TransitionCertificate, error) {
+	if predecessor.checked == nil {
+		return TransitionCertificate{}, refuse(0, "transition-predecessor", "missing checked predecessor")
+	}
+	prior := *predecessor.checked
+	if prior.bound.Rules != TransitionRules {
+		return TransitionCertificate{}, refuse(0, "transition-predecessor", "unrecognized complete transition rules")
+	}
+	work := prior.work
+	proposal, err := captureTransitionProposal(proposal, prior.limits, &work)
+	if err != nil {
+		return TransitionCertificate{}, err
+	}
+	m, err := newTransitionChecker(ctx, prior.image, prior.limits, work)
+	if err != nil {
+		return TransitionCertificate{}, err
+	}
+	if proposal.Entry != prior.bound.Entry || proposal.ImageDigest != prior.bound.ImageDigest {
+		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or ELF entry differs")
+	}
+	if proposal.Cut == prior.bound.Boundary.PC {
+		return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "cut must advance beyond predecessor")
+	}
+	for _, span := range prior.bound.Instructions {
+		if !m.tick() {
+			return TransitionCertificate{}, m.err
+		}
+		if proposal.Cut >= span.Start && proposal.Cut < span.End {
+			return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "cut intersects executed predecessor")
+		}
+	}
+	g, err := m.graph(proposal.Cut)
+	if err != nil {
+		return TransitionCertificate{}, err
+	}
+	if err := checkInventory(&relationContext{Context: ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal"); err != nil {
+		return TransitionCertificate{}, err
+	}
+	start := len(prior.bound.Instructions)
+	if len(g.order) <= start+1 {
+		return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "missing predecessor or suffix")
+	}
+	for j, span := range prior.bound.Instructions {
+		if !m.tick() {
+			return TransitionCertificate{}, m.err
+		}
+		i := g.nodes[g.order[j]]
+		if span != (Span{i.pc, i.pc + uint64(i.size)}) || i.boundary != boundaryNone {
+			return TransitionCertificate{}, refuse(i.pc, "transition-continuation", "executed predecessor is not exact ordered prefix")
+		}
+	}
+	old := prior.bound.Boundary
+	next := g.nodes[g.order[start]]
+	_, encoded, err := decodeBytes(prior.image, next.pc)
+	if err != nil {
+		return TransitionCertificate{}, err
+	}
+	if next.pc != old.PC || int(next.size) != old.Instruction.Len || !bytes.Equal(encoded, old.Bytes) {
+		return TransitionCertificate{}, refuse(next.pc, "transition-continuation", "predecessor boundary differs")
+	}
+	if err := m.inherit(prior); err != nil {
+		return TransitionCertificate{}, err
+	}
+	return m.finish(g, start)
+}
+
+func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, error) {
+	for _, idx := range g.order[start:] {
 		ins := g.nodes[idx]
 		m.pc = ins.pc
 		if !m.tick() {
 			return TransitionCertificate{}, g.failure(ins.pc, m.err)
 		}
 		if ins.boundary == boundaryCut {
-			i, bytes, err := decodeBytes(im, ins.pc)
+			i, bytes, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
 				return TransitionCertificate{}, g.failure(ins.pc, err)
 			}
@@ -182,22 +261,37 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 		m.bound.Instructions = append(m.bound.Instructions, Span{ins.pc, ins.pc + uint64(ins.size)})
 	}
 	for r := range m.state.regs {
+		if !m.tick() {
+			return TransitionCertificate{}, m.err
+		}
 		m.bound.Registers[r] = TransitionValue{m.state.regs[r], m.pointers[r]}
 	}
 	m.bound.Memory = m.projectMemory()
 	if !m.tick() {
 		return TransitionCertificate{}, g.failure(m.pc, m.err)
 	}
-	return TransitionCertificate{&checkedTransition{im, m.bound}}, nil
+	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags}}, nil
 }
 
 func (m *transitionChecker) projectMemory() []TransitionByte {
+	if !m.tick() {
+		return nil
+	}
 	bytes := make([]TransitionByte, 0, len(m.memory))
 	for _, b := range m.memory {
 		if !m.tick() {
 			return nil
 		}
 		bytes = append(bytes, b)
+	}
+	// Reserve comparison-scale sorting work independently of randomized map
+	// iteration. Cancellation/budget failure stops before entering the sort.
+	for range 4 * bits.Len(uint(len(bytes))) {
+		for range bytes {
+			if !m.tick() {
+				return nil
+			}
+		}
 	}
 	slices.SortFunc(bytes, func(a, b TransitionByte) int {
 		if a.Offset < b.Offset {
@@ -217,6 +311,9 @@ func (m *transitionChecker) initial() error {
 	for r := range m.state.regs {
 		m.state.regs[r] = m.scratch(br.Bits(64))
 		m.bound.Preserved[r] = ^uint64(0)
+	}
+	for f := range m.state.flags {
+		m.state.flags[f] = m.scratch(br.Bool())
 	}
 	m.bound.Origin = m.state.regs[RSP]
 	m.bound.InitialRegisters = m.state.regs
@@ -331,7 +428,7 @@ func (m *transitionChecker) step(i operation) error {
 			return m.err
 		}
 	}
-	a, _ := fullRegister(i.Args[0])
+	a, _ := register(i.Args[0].(x86asm.Reg))
 	m.bound.Preserved[a.reg] = 0
 	var p OriginPointer
 	switch i.Op {
@@ -367,13 +464,11 @@ func (m *transitionChecker) step(i operation) error {
 				return err
 			}
 		}
-		m.state.regs[a.reg] = m.binary(br.Add, m.state.regs[a.reg], m.con(br.Bits(64), uint64(delta)))
-		m.pointers[a.reg] = p
 		// SUB defines all six arithmetic flags. Their values are deliberately
-		// unprojected; no branch in this grammar can consume an omitted value.
+		// unprojected; shared scalar transfer retains the accurate private CF,
+		// ZF and SF!=OF predicates for continuation.
 		f := TransitionFlag{Defined: true}
 		m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
-		return m.err
 	case x86asm.AND:
 		old := m.pointers[a.reg]
 		k := -uint64(i.Args[1].(x86asm.Imm))
@@ -400,7 +495,7 @@ func (m *transitionChecker) step(i operation) error {
 		m.bound.Flags = TransitionFlags{CF: zero, OF: zero, SF: zero, ZF: z, PF: TransitionFlag{Defined: true}}
 	}
 	// All operands, prefixes, widths and immediate extensions were validated by
-	// decodeTransition. The shared value interpreter now supplies MOV/LEA/AND
+	// decodeTransition. The shared value interpreter now supplies MOV/LEA/SUB/AND
 	// scalar semantics. Origin rules above justify conditional value/provenance
 	// agreement separately; bitrelation.Check accepts no external hypotheses.
 	if err := m.valueBuilder.transfer(m.pc, i, &m.state); err != nil {

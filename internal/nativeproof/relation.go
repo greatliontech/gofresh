@@ -344,8 +344,18 @@ func (m *valueBuilder) make(op br.Op, sort br.Sort, imm uint64, args ...br.Term)
 		m.expressionError(err)
 		return br.Term{}
 	}
-	m.depth[t] = depth
+	m.remember(t, depth)
 	return t
+}
+
+// remember accounts for the union of imported nodes and newly constructed
+// nodes. The arena's own bound covers only its allocations, not foreign operands.
+func (m *valueBuilder) remember(t br.Term, depth int) {
+	if m.depth[t] == 0 && len(m.depth) >= m.limits.Nodes {
+		m.err = refuse(m.pc, "relation-budget", "combined expression nodes")
+		return
+	}
+	m.depth[t] = depth
 }
 
 func (m *valueBuilder) scratch(sort br.Sort) br.Term {
@@ -358,7 +368,7 @@ func (m *valueBuilder) scratch(sort br.Sort) br.Term {
 		m.expressionError(err)
 		return br.Term{}
 	}
-	m.depth[t] = 1
+	m.remember(t, 1)
 	return t
 }
 
@@ -586,6 +596,8 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 		return m.err
 	case x86asm.ADD:
 		v = m.binary(br.Add, left, right)
+	case x86asm.SUB:
+		v = m.binary(br.Sub, left, right)
 	case x86asm.CMP:
 		s.flags[flagCarry] = m.compare(br.ULT, left, right)
 		s.flags[flagZero] = m.compare(br.Equal, left, right)
@@ -600,6 +612,9 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 	}
 	s.flags[flagZero] = m.compare(br.Equal, v, m.con(v.Sort(), 0))
 	switch i.Op {
+	case x86asm.SUB:
+		s.flags[flagCarry] = m.compare(br.ULT, left, right)
+		s.flags[flagLess] = m.compare(br.SLT, left, right)
 	case x86asm.ADD:
 		s.flags[flagCarry] = m.compare(br.ULT, v, left)
 		sign, leftSign, rightSign := m.sign(v), m.sign(left), m.sign(right)
