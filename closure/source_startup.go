@@ -14,7 +14,7 @@ import (
 
 type sourceInitializationModel uint8
 
-const sourceStartupRules = "gofresh/source-startup@2"
+const sourceStartupRules = "gofresh/source-startup@3"
 
 const (
 	sourceInitializationAbsent sourceInitializationModel = iota
@@ -26,6 +26,8 @@ const (
 // image. Unknown or externally supplied initialization has no zero-storage rule.
 // Linker options are retained separately; this grammar supports none (including
 // -X). A source owner alone does not silently select the language-only model.
+// Unused external function declarations are inert only in this model; admitting
+// their identity establishes neither linker agreement nor actual compiler startup.
 type sourceStartupInput struct {
 	source         computationSource
 	initialization sourceInitializationModel
@@ -365,16 +367,11 @@ func (c *sourceStartupChecker) graph(root *sourceStartupPackage) ([]*sourceStart
 			return fail("inventory", err)
 		}
 		p.input = inventory
-		if len(inventory.directives) != 0 || len(inventory.otherInputs) != 0 || len(m.CgoLDFLAGS)+len(m.CgoCFLAGS)+len(m.CgoCPPFLAGS)+len(m.CgoCXXFLAGS)+len(m.CgoFFLAGS)+len(m.CgoPkgConfig) != 0 {
+		if len(inventory.otherInputs) != 0 || len(m.CgoLDFLAGS)+len(m.CgoCFLAGS)+len(m.CgoCPPFLAGS)+len(m.CgoCXXFLAGS)+len(m.CgoFFLAGS)+len(m.CgoPkgConfig) != 0 {
 			return fail("external-storage", regionError("selected directives or non-Go inputs have unsupported initialization"))
 		}
-		for _, decl := range inventory.declarations {
-			if err := c.tick(nil, 0); err != nil {
-				return fail("external-storage", err)
-			}
-			if decl.Body == nil {
-				return fail("external-storage", regionError("selected package has a bodyless implementation boundary"))
-			}
+		if err := c.sourceStartupDirectives(selected, inventory); err != nil {
+			return fail("external-storage", err)
 		}
 		p.initialization, err = c.bindInitialization(selected)
 		if err != nil {

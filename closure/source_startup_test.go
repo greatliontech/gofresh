@@ -272,7 +272,7 @@ func TestSourceStartupTransitiveBlankAndExternalInputs(t *testing.T) {
 				extra = "\n//go:linkname X foreign.X\nvar X int"
 			}
 			if mode == "bodyless" {
-				extra = "\nfunc foreign()"
+				extra = "\nfunc foreign()\nfunc init(){foreign()}"
 			}
 			in, main, use := startupFixture(t, map[string][]string{"hidden": {"package hidden" + extra}, "mid": {`package mid; import _ "hidden"`}, "main": {`package main; import _ "mid"; func consume(int){};func main(){consume(0)}`}})
 			switch mode {

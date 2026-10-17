@@ -43,6 +43,7 @@ type selectedSourceInput struct{ kind, name string }
 type selectedSourceDirective struct {
 	text string
 	at   token.Pos
+	file *ast.File
 }
 
 // The source digest preserves the existing canonical selected-Go encoding.
@@ -571,7 +572,7 @@ func (v *selectedSourceAST) Visit(n ast.Node) ast.Visitor {
 	if comment, ok := n.(*ast.Comment); ok {
 		if strings.HasPrefix(comment.Text, "//go:") && !strings.HasPrefix(comment.Text, "//go:build ") && !v.seenDirectives[comment] {
 			v.seenDirectives[comment] = true
-			v.directives = append(v.directives, selectedSourceDirective{comment.Text, comment.Slash})
+			v.directives = append(v.directives, selectedSourceDirective{text: comment.Text, at: comment.Slash})
 		}
 		stop(v.buildConstraint(comment.Text))
 	}
@@ -652,6 +653,9 @@ func (c *selectedSourceBinder) preflightSyntax(fn *ssa.Function, file *ast.File)
 	// as attached comments already charged conservatively above.
 	for _, group := range file.Comments {
 		ast.Walk(v, group)
+	}
+	for i := range v.directives {
+		v.directives[i].file = file
 	}
 	return v.directives, nil
 }

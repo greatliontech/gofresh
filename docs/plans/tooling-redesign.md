@@ -268,6 +268,14 @@
                   - [ ] 5.1w.2b.3b.2a.2.2 Establish relevant external-storage,
                     linkage and configuration-input relations without importing
                     unsupported package state as language-zero storage.
+                    - [x] 5.1w.2b.3b.2a.2.2.1 Distinguish inert opaque function
+                      declarations from storage-affecting or unclassified inputs
+                      through exact selected typed ownership; every reached opaque
+                      invocation retains its implementation obligation.
+                    - [ ] 5.1w.2b.3b.2a.2.2.2 Derive arguments, environment and
+                      relevant inherited-descriptor state from the identified
+                      process-entry model through selected bootstrap and initialization,
+                      accounting for intervening native effects and frames.
                   - [ ] 5.1w.2b.3b.2a.2.3 Check the rooted main/frontend transfer
                     through the selected typed package and whole enclosing body,
                     retaining actual compiler-state and representation association.

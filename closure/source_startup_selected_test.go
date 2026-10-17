@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/constant"
 	"go/token"
+	"go/types"
 	"strings"
 	"testing"
 
@@ -84,8 +85,8 @@ func TestSourceStartupSelectedCompilerBoundary(t *testing.T) {
 	}
 	result, err := prepareSourceEntry(t.Context(), sourceStartupInput{source: source, initialization: sourceLanguageInitialization}, main, use, limits)
 	var failure *sourceStartupFailure
-	if result != nil || !errors.As(err, &failure) || failure.packageID != "os" || failure.phase != sourceStartupSelection || failure.operation != "external-storage" {
-		t.Fatalf("want the selected os external-input admission boundary, got %v, %v", result, err)
+	if result != nil || !errors.As(err, &failure) || failure.phase != sourceStartupSelection || failure.operation != "external-storage" {
+		t.Fatalf("want a selected external-input admission boundary, got %v, %v", result, err)
 	}
 	if len(failure.dependencyPath) == 0 || failure.dependencyPath[0] != "cmd/compile" || failure.dependencyPath[len(failure.dependencyPath)-1] != failure.packageID {
 		t.Fatalf("unrooted compiler refusal: %+v", failure)
@@ -112,27 +113,113 @@ func TestSourceStartupSelectedCompilerBoundary(t *testing.T) {
 		}
 		// Read the selected inputs independently of the startup refusal. An
 		// admitted buildcfg graph cannot grant external initialization authority.
-		var linkage, bodyless bool
-		for _, file := range p.Syntax {
-			for _, group := range file.Comments {
-				for _, comment := range group.List {
-					if comment.Text == "//go:linkname runtime_rand runtime.rand" {
-						linkage = true
-						t.Logf("selected unsupported linkage at %s: %s", p.Fset.Position(comment.Pos()), comment.Text)
+		var boundary *computationFailure
+		blocked := false
+		if errors.As(err, &boundary) && boundary.at.IsValid() {
+			if strings.Contains(boundary.premise, "budget") {
+				t.Fatalf("source budget stopped before directive classification: %v", err)
+			}
+			for _, file := range p.Syntax {
+				for _, group := range file.Comments {
+					for _, comment := range group.List {
+						if comment.Pos() != boundary.at {
+							continue
+						}
+						text := comment.Text
+						if !strings.HasPrefix(text, "//go:") || strings.HasPrefix(text, "//go:build ") {
+							t.Fatal("refusal coordinate is not an implementation directive")
+						}
+						if !strings.HasPrefix(text, "//go:linkname ") {
+							blocked = true // no other directive grammar is admitted
+						} else {
+							fields := strings.Fields(text)
+							if len(fields) != 2 && len(fields) != 3 {
+								t.Fatal("selected compiler source has malformed linkage")
+							}
+							object := p.Types.Scope().Lookup(fields[1])
+							if _, storage := object.(*types.Var); storage {
+								blocked = true
+							}
+							for _, declaringFile := range p.Syntax {
+								for _, node := range declaringFile.Decls {
+									if decl, ok := node.(*ast.FuncDecl); ok && p.TypesInfo.Defs[decl.Name] == object && decl.Body != nil {
+										blocked = true
+									}
+								}
+							}
+						}
+						t.Logf("selected unsupported directive at %s: %s", p.Fset.Position(comment.Pos()), text)
 					}
 				}
 			}
-			for _, node := range file.Decls {
-				if decl, ok := node.(*ast.FuncDecl); ok && decl.Name.Name == "runtime_rand" && decl.Body == nil {
-					bodyless = true
+		} else {
+			for _, m := range source.metas {
+				if m.ImportPath == id {
+					blocked = len(m.CgoFiles)+len(m.CFiles)+len(m.CXXFiles)+len(m.MFiles)+len(m.HFiles)+len(m.FFiles)+len(m.SFiles)+len(m.SwigFiles)+len(m.SwigCXXFiles)+len(m.SysoFiles)+len(m.EmbedFiles)+len(m.CgoLDFLAGS)+len(m.CgoCFLAGS)+len(m.CgoCPPFLAGS)+len(m.CgoCXXFLAGS)+len(m.CgoFFLAGS)+len(m.CgoPkgConfig) != 0
 				}
 			}
 		}
-		if !linkage || !bodyless {
-			t.Fatalf("refused package %s lacks the selected runtime.rand linkage/bodyless boundary", id)
+		if !blocked {
+			t.Fatalf("refusal lacks independently demonstrated unsupported input: %v", err)
 		}
 	}
 	t.Logf("selected compiler admission boundary: %s (%s); no initialization state published", strings.Join(failure.dependencyPath, " -> "), failure.operation)
+}
+
+func TestSourceStartupUnusedLinknameCompiledOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads and executes compiled unused-linkname declarations")
+	}
+	const module = "example.com/unusedlinkage"
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"go.mod": "module " + module + "\n\ngo 1.27\n",
+		"dep/decl.go": `package dep
+import _ "unsafe"
+//go:linkname renamedAbsent no.such.package/remote.Value
+func renamedAbsent()int
+//go:linkname anotherAbsent
+func anotherAbsent(string)
+var Value=7
+func init(){Value=9}
+`,
+		"main.go": `package main
+import "example.com/unusedlinkage/dep"
+func main(){println(dep.Value)}
+`,
+	})
+	source, main, h := loadSourceCommandFixture(t, dir, module)
+	var use regionUse
+	for _, block := range main.Blocks {
+		for i, ins := range block.Instrs {
+			if call, ok := ins.(*ssa.Call); ok {
+				if builtin, ok := call.Call.Value.(*ssa.Builtin); ok && builtin.Name() == "println" {
+					use = regionUse{at: regionPoint{block, i}, operand: call.Call.Args[0]}
+				}
+			}
+		}
+	}
+	if use.operand == nil {
+		t.Fatal("oracle output operand missing")
+	}
+	result, err := prepareSourceEntry(t.Context(), sourceStartupInput{source: source, initialization: sourceLanguageInitialization}, main, use, registrationLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := startupScalar(t, result).ExactString(); got != "9" {
+		t.Fatalf("source model lost imported initialization: %s", got)
+	}
+	// Successful real compilation/linking and execution is independent of the
+	// source checker: the unresolved declarations must be dead, not stubbed or
+	// resolved by an invented native implementation.
+	command, err := h.runner.Command(t.Context(), h.dir, h.env, "run", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := command.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "9" {
+		t.Fatalf("unused unresolved declarations failed the compiled oracle: %v\n%s", err, output)
+	}
 }
 
 func TestSourceStartupNativeBranchOracle(t *testing.T) {
