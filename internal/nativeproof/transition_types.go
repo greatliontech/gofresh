@@ -19,8 +19,10 @@ type RelativeSpan struct{ Start, End int64 }
 // are conjunctive and must admit at least one S; no concrete runtime S is input.
 type OriginDomain struct{ Min, Max, Modulus, Residue uint64 }
 
-// RelativeRegion declares stable ordinary RAM and exact access permissions,
-// independently of the address envelope. Overlaps must agree on permissions.
+// RelativeRegion declares stable ordinary RAM and bounds the accesses this proof
+// may use, independently of the address envelope. Mapping premises require every
+// granted permission; false grants none without asserting that the underlying
+// page lacks it. Overlapping regions must agree on their declared permissions.
 type RelativeRegion struct {
 	Bytes              RelativeSpan
 	Readable, Writable bool
