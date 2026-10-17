@@ -198,7 +198,9 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	var remember func(regionValue)
 	remember = func(v regionValue) {
 		if v.kind == regionPointer || v.kind == regionSlice {
-			k.preexisting[v.location.object] = true
+			if !session.completed[v.location.object.invocation.root] {
+				k.preexisting[v.location.object] = true
+			}
 		}
 		for _, list := range [][]regionValue{v.elements, v.environment} {
 			for _, item := range list {
@@ -208,7 +210,9 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	}
 	if !fullReturns {
 		for object, value := range in.initial.memory {
-			k.preexisting[object] = true
+			if !session.completed[object.invocation.root] {
+				k.preexisting[object] = true
+			}
 			remember(value)
 		}
 		for _, value := range in.initial.values {
@@ -466,13 +470,17 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 	if err != nil {
 		return nil, err
 	}
-	if p == nil || p.input.owner != in.owner || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use ||
-		!slices.Equal(p.input.premises, in.premises) {
-		return nil, regionError("proposal is not bound to the complete input")
-	}
 	k, err := newRegionKernel(ctx, in, limits)
 	if err != nil {
 		return nil, err
+	}
+	return checkRegionKernel(k, p)
+}
+
+func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, error) {
+	in := k.input
+	if p == nil || p.input.owner != in.owner || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || !slices.Equal(p.input.premises, in.premises) {
+		return nil, regionError("proposal is not bound to the complete input")
 	}
 	k.session.proofs = p.calls
 	if err := k.validateState(p.input.initial); err != nil {
@@ -491,7 +499,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
 	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used}, nil
@@ -752,23 +760,23 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				}
 			case *ssa.Return:
 				if !k.fullReturns {
-					return nil, nil, regionError("terminal path is outside the named use boundary")
+					return nil, nil, &regionOperationFailure{instruction, regionError("terminal path is outside the named use boundary")}
 				}
 				value, err := k.returnValue(x, s)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, &regionOperationFailure{instruction, err}
 				}
 				observations = append(observations, regionObservation{value: value, state: s})
 			case *ssa.Call:
 				if _, builtin := x.Call.Value.(*ssa.Builtin); builtin {
 					if err := k.transfer(&s, x); err != nil {
-						return nil, nil, err
+						return nil, nil, &regionOperationFailure{instruction, err}
 					}
 					continuing = append(continuing, s)
 				} else {
 					returned, err := k.call(x, s)
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, &regionOperationFailure{instruction, err}
 					}
 					for _, after := range returned {
 						var err error
@@ -780,7 +788,7 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				}
 			default:
 				if err := k.transfer(&s, x); err != nil {
-					return nil, nil, err
+					return nil, nil, &regionOperationFailure{instruction, err}
 				}
 				continuing = append(continuing, s)
 			}

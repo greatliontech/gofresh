@@ -163,6 +163,16 @@ func (*checkedRegion) openObligations() []string {
 
 func regionError(message string) error { return fmt.Errorf("source-region transport: %s", message) }
 
+// Keep the actual failed operation and its enclosing call chain for consumers
+// that need scoped refusals. Diagnostic text is not an operation classifier.
+type regionOperationFailure struct {
+	instruction ssa.Instruction
+	cause       error
+}
+
+func (f *regionOperationFailure) Error() string { return f.cause.Error() }
+func (f *regionOperationFailure) Unwrap() error { return f.cause }
+
 type regionMeter struct {
 	ctx                 context.Context
 	limits              regionLimits
@@ -187,10 +197,14 @@ func (m *regionMeter) tick() error {
 // mutate caller-owned slices/maps. Cancellation is checked before graph or
 // lattice expansion. The immutable SSA owner is a retained input premise.
 func regionCapture(input regionInput, proposal *regionProposal, limits regionLimits) (regionInput, *regionProposal, error) {
+	return regionCaptureMeter(input, proposal, &regionMeter{limits: limits})
+}
+
+func regionCaptureMeter(input regionInput, proposal *regionProposal, m *regionMeter) (regionInput, *regionProposal, error) {
+	limits := m.limits
 	if !limits.valid() {
 		return regionInput{}, nil, regionError("invalid budget")
 	}
-	m := &regionMeter{limits: limits}
 	copyInput := func(in regionInput) (regionInput, error) {
 		if len(in.premises) > limits.nodes {
 			return regionInput{}, regionError("premise budget exhausted")
@@ -207,7 +221,10 @@ func regionCapture(input regionInput, proposal *regionProposal, limits regionLim
 	if len(proposal.entries) > limits.nodes || len(proposal.calls) > limits.nodes-len(proposal.entries) {
 		return regionInput{}, nil, regionError("node budget exhausted")
 	}
-	m.nodes = len(proposal.entries) + len(proposal.calls)
+	m.nodes += len(proposal.entries) + len(proposal.calls)
+	if m.nodes > limits.nodes {
+		return regionInput{}, nil, regionError("node budget exhausted")
+	}
 	p := &regionProposal{entries: make(map[*ssa.BasicBlock][]regionState, len(proposal.entries))}
 	p.input, err = copyInput(proposal.input)
 	if err != nil {
@@ -390,15 +407,19 @@ func proposeRegion(ctx context.Context, input regionInput, limits regionLimits) 
 	if err != nil {
 		return nil, err
 	}
+	return proposeRegionKernel(k)
+}
+
+func proposeRegionKernel(k *regionKernel) (*regionProposal, error) {
 	k.session.proposing = true
 	entries, err := k.proposeEntries()
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &regionProposal{input: in, entries: entries, calls: k.session.proofs}, nil
+	return &regionProposal{input: k.input, entries: entries, calls: k.session.proofs}, nil
 }
 
 func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, error) {

@@ -248,6 +248,27 @@
                 operands, successors and continuations. Compiler reports propose
                 candidates; names, compatible call shapes and graph alignment
                 alone cannot establish that association.
+                - [x] 5.1w.2b.3b.2a.1 Derive source-model startup heaps from the
+                  complete selected package graph, eligible language-zero storage,
+                  ready-package initialization order and checked initializer effects.
+                  Consume those heaps through the actual main-entry prefix without
+                  accepting caller-supplied compiler or helper state. Keep external
+                  initialization and selected-executable applicability explicit.
+                - [ ] 5.1w.2b.3b.2a.2 Establish the selected compiler's input and
+                  initialization relations, including branching initializer graphs
+                  and externally supplied configuration, then check the relevant
+                  main/frontend transfer to the complete typed operation and
+                  enclosing body.
+                  Justify every omitted-state frame or equivalent representation;
+                  observed diagnostic snapshots cannot supply the entry heap.
+                - [ ] 5.1w.2b.3b.2a.3 Check operation/context correspondence through
+                  inlining, escape/order/walk, SSA construction and subsequent
+                  transformations, preserving explicit-call distinctions and exact
+                  memory, ABI, spill and allocation-instance relations.
+                - [ ] 5.1w.2b.3b.2a.4 Close backend preprocessing, instruction
+                  emission and linkage against complete decoded fragments, including
+                  stack checks, slow paths and retry edges; consume that evidence
+                  when selecting implicit-operation transport obligations.
               - [ ] 5.1w.2b.3b.2b Check the required symbolic stack, allocation and
                 ABI-transition relations, including relocation, suspension/retry,
                 fresh storage, logical-heap preservation and TLS context

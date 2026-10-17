@@ -47,6 +47,11 @@ type regionCallSession struct {
 	proofs      []*regionCallProof
 	results     map[*regionCallProof][]regionObservation
 	used        []*regionCallProof
+	// Only the startup composer supplies completed roots, after checking every
+	// outcome of that phase. Their allocations cannot execute again in this
+	// invocation: the new root has a distinct call-string namespace. The ordinary
+	// conditional-region API supplies none and retains its conservative rule.
+	completed map[*ssa.Function]bool
 }
 
 func newRegionCallSession(ctx context.Context, in regionInput, limits regionLimits) *regionCallSession {

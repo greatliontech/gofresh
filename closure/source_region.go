@@ -30,6 +30,12 @@ func checkSourceRegion(ctx context.Context, source computationSource, input regi
 	if err != nil {
 		return nil, err
 	}
+	return b.checkSourceRegion(packet)
+}
+
+// checkSourceRegion composes the checked transport with exact selected ownership.
+// A whole-program source consumer shares this binder across its startup phases.
+func (b *selectedSourceBinder) checkSourceRegion(packet *checkedRegion) (*sourceRegion, error) {
 	root, err := b.bindCallable(packet.input.root)
 	if err != nil {
 		return nil, err
