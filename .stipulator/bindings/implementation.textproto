@@ -2981,3 +2981,47 @@ bindings {
   shape_hash: "f1b10458e587aafdb0d757f98de06eb853302fce1674e2611942dcab57aa7628"
   clause_label: "conditional-composition"
 }
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceInitializationPathProgress"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4e0b9afe1b2f3c9a9f0da63c5de6ba568548911ff6ce22f4d498f104c3aa8dce"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceInitializationGraphBudgetAndCancellation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "983d604e333fd01d18ec8ab65d3718f26e6788309279cc97f82e184c45f2c009"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceStartupBranchEffectsAndSuffix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "08a9f9d76e1194506f49b2b67fc86a65b6f631334cf8159e99378182127973c0"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "3ba9deb48da43d24b69bc0e19f4d6b80bd30247c44e9b2b8761c5145e4c90653"
+  source_hash: "a58fe6f703cbe82665220dd294152be2b23c70da8c61ac1fb3b93fc95639f5cd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceStartupNativeBranchOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "040435c8709626a62fbd50209222869fdff4bfe711b0944c5ad685fc69e3f114"
+  clause_label: "conditional-composition"
+}

@@ -115,6 +115,12 @@ func TestSourceStartupMainEntry(t *testing.T) {
 		{"main-prefix", `package main; var X int; func init(){X=3}; func change(){X=9}; func consume(int){}; func main(){change(); consume(X)}`, "9"},
 		{"heap-alias", `package main; var P=new(int); func init(){*P=3}; func consume(int){}; func main(){q:=P; *q=9; consume(*P)}`, "9"},
 		{"helper-alloc", `package main; func makeP()*int{return new(int)}; var P=makeP(); func init(){*P=3}; func consume(int){}; func main(){*P=9; consume(*P)}`, "9"},
+		{"or-left", `package main; var A=true;var B=false;var X=A||B;func consume(bool){};func main(){consume(X)}`, "true"},
+		{"or-right", `package main; var A=false;var B=true;var X=A||B;func consume(bool){};func main(){consume(X)}`, "true"},
+		{"or-false", `package main; var A=false;var B=false;var X=A||B;func consume(bool){};func main(){consume(X)}`, "false"},
+		{"and-left", `package main; var A=false;var B=true;var X=A&&B;func consume(bool){};func main(){consume(X)}`, "false"},
+		{"and-right", `package main; var A=true;var B=false;var X=A&&B;func consume(bool){};func main(){consume(X)}`, "false"},
+		{"and-true", `package main; var A=true;var B=true;var X=A&&B;func consume(bool){};func main(){consume(X)}`, "true"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in, main, use := startupFixture(t, map[string][]string{"main": {tc.source}})
@@ -129,6 +135,35 @@ func TestSourceStartupMainEntry(t *testing.T) {
 				t.Fatal("lost owner/actual main entry")
 			}
 		})
+	}
+}
+
+// The same source is also run by the compiled oracle. Comparisons and constant
+// assignments expose skipped/taken RHS effects without adding arithmetic grammar.
+const startupBranchSource = `package main
+var Trace="before"
+var A=true
+var B=false
+func step(before, after string) bool { if Trace!=before {panic("order")}; Trace=after; return true }
+var C=A||step("never", "bad")
+var D=B||step("before", "or")
+var E=B&&step("never", "bad")
+var F=A&&step("or", "and")
+var After=Trace
+func init(){if !C || !D || E || !F || After!="and" {panic("branch")}; Trace="first"}
+func init(){if Trace!="first" {panic("suffix order")}; Trace="complete"}
+func consume(string){}
+func main(){consume(Trace)}
+`
+
+func TestSourceStartupBranchEffectsAndSuffix(t *testing.T) {
+	in, main, use := startupFixture(t, map[string][]string{"main": {startupBranchSource}})
+	result, err := prepareSourceEntry(t.Context(), in, main, use, registrationLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := constant.StringVal(startupScalar(t, result)); got != "complete" {
+		t.Fatalf("skipped/taken RHS or explicit suffix effects lost: %q", got)
 	}
 }
 

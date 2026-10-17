@@ -261,6 +261,16 @@
                   enclosing body.
                   Justify every omitted-state frame or equivalent representation;
                   observed diagnostic snapshots cannot supply the entry heap.
+                  - [x] 5.1w.2b.3b.2a.2.1 Bind complete acyclic initializer graphs
+                    with compatible per-path initialization progress and common
+                    explicit-init coverage, including selected compiler configuration
+                    short-circuit expressions and side-effectful RHS controls.
+                  - [ ] 5.1w.2b.3b.2a.2.2 Establish relevant external-storage,
+                    linkage and configuration-input relations without importing
+                    unsupported package state as language-zero storage.
+                  - [ ] 5.1w.2b.3b.2a.2.3 Check the rooted main/frontend transfer
+                    through the selected typed package and whole enclosing body,
+                    retaining actual compiler-state and representation association.
                 - [ ] 5.1w.2b.3b.2a.3 Check operation/context correspondence through
                   inlining, escape/order/walk, SSA construction and subsequent
                   transformations, preserving explicit-call distinctions and exact

@@ -2,7 +2,9 @@ package closure
 
 import (
 	"errors"
+	"go/ast"
 	"go/constant"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -35,10 +37,55 @@ func TestSourceStartupSelectedCompilerBoundary(t *testing.T) {
 	// than exercising the separately tested small-fixture budget refusal.
 	limits := defaultRegistrationLimits()
 	limits.source.work, limits.source.bytes = 16<<20, 512<<20
+	binder, err := newSelectedSourceBinder(t.Context(), source, main, limits.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buildcfgBound bool
+	for _, p := range source.prog.Pkgs {
+		if p.PkgPath != "internal/buildcfg" {
+			continue
+		}
+		binding, err := binder.bindInitialization(p)
+		if err != nil {
+			t.Fatalf("selected buildcfg initializer still refuses: %v", err)
+		}
+		init := source.prog.Prog.Package(p.Types).Func("init")
+		global, ok := init.Pkg.Members["FramePointerEnabled"].(*ssa.Global)
+		if !ok || binding.function != init || len(init.Blocks) <= 3 {
+			t.Fatal("missing exact selected branching buildcfg owner")
+		}
+		var branching, stored, typedShortCircuit bool
+		for _, initializer := range p.TypesInfo.InitOrder {
+			if len(initializer.Lhs) == 1 && initializer.Lhs[0] == global.Object() {
+				expr, ok := initializer.Rhs.(*ast.BinaryExpr)
+				typedShortCircuit = ok && expr.Op == token.LOR
+			}
+		}
+		for _, block := range init.Blocks[1:] {
+			for _, ins := range block.Instrs {
+				if _, ok := ins.(*ssa.If); ok {
+					branching = true
+				}
+				if store, ok := ins.(*ssa.Store); ok && store.Addr == global {
+					phi, ok := store.Val.(*ssa.Phi)
+					stored = ok && phi.Block() == block && len(phi.Edges) == 2 && len(block.Preds) == 2
+				}
+			}
+		}
+		if !typedShortCircuit || !branching || !stored || binding.end.at.block != init.Blocks[0].Succs[0] {
+			t.Fatal("buildcfg positive lacks actual branch/store/return evidence")
+		}
+		buildcfgBound = true
+		t.Logf("selected internal/buildcfg initialization bound: %d actual blocks, FramePointerEnabled stored", len(init.Blocks))
+	}
+	if !buildcfgBound {
+		t.Fatal("selected compiler graph omitted internal/buildcfg")
+	}
 	result, err := prepareSourceEntry(t.Context(), sourceStartupInput{source: source, initialization: sourceLanguageInitialization}, main, use, limits)
 	var failure *sourceStartupFailure
-	if result != nil || !errors.As(err, &failure) || failure.phase != sourceStartupSelection || failure.operation != "initialization-binding" {
-		t.Fatalf("want an atomic initialization-graph admission refusal, got %v, %v", result, err)
+	if result != nil || !errors.As(err, &failure) || failure.packageID != "os" || failure.phase != sourceStartupSelection || failure.operation != "external-storage" {
+		t.Fatalf("want the selected os external-input admission boundary, got %v, %v", result, err)
 	}
 	if len(failure.dependencyPath) == 0 || failure.dependencyPath[0] != "cmd/compile" || failure.dependencyPath[len(failure.dependencyPath)-1] != failure.packageID {
 		t.Fatalf("unrooted compiler refusal: %+v", failure)
@@ -63,16 +110,69 @@ func TestSourceStartupSelectedCompilerBoundary(t *testing.T) {
 			}
 			continue
 		}
-		// Check the actual refused graph independently of diagnostic wording.
-		// Short-circuit variable initialization adds blocks beyond the admitted
-		// guard/body/return shape; it cannot become a supplied entry-heap value.
-		init := source.prog.Prog.Package(p.Types).Func("init")
-		if init == nil || len(init.Blocks) <= 3 {
-			t.Fatalf("refused package %s has no demonstrated initialization CFG boundary", id)
+		// Read the selected inputs independently of the startup refusal. An
+		// admitted buildcfg graph cannot grant external initialization authority.
+		var linkage, bodyless bool
+		for _, file := range p.Syntax {
+			for _, group := range file.Comments {
+				for _, comment := range group.List {
+					if comment.Text == "//go:linkname runtime_rand runtime.rand" {
+						linkage = true
+						t.Logf("selected unsupported linkage at %s: %s", p.Fset.Position(comment.Pos()), comment.Text)
+					}
+				}
+			}
+			for _, node := range file.Decls {
+				if decl, ok := node.(*ast.FuncDecl); ok && decl.Name.Name == "runtime_rand" && decl.Body == nil {
+					bodyless = true
+				}
+			}
 		}
-		t.Logf("unsupported selected initialization graph: %s, %d blocks", id, len(init.Blocks))
+		if !linkage || !bodyless {
+			t.Fatalf("refused package %s lacks the selected runtime.rand linkage/bodyless boundary", id)
+		}
 	}
 	t.Logf("selected compiler admission boundary: %s (%s); no initialization state published", strings.Join(failure.dependencyPath, " -> "), failure.operation)
+}
+
+func TestSourceStartupNativeBranchOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads and executes a compiled branching initialization oracle")
+	}
+	const module = "example.com/branchoracle"
+	dir := t.TempDir()
+	text := strings.Replace(startupBranchSource, "consume(Trace)", "println(Trace)", 1)
+	writeTree(t, dir, map[string]string{"go.mod": "module " + module + "\n\ngo 1.27\n", "main.go": text})
+	source, main, h := loadSourceCommandFixture(t, dir, module)
+	var use regionUse
+	for _, block := range main.Blocks {
+		for i, ins := range block.Instrs {
+			if call, ok := ins.(*ssa.Call); ok {
+				if builtin, ok := call.Call.Value.(*ssa.Builtin); ok && builtin.Name() == "println" {
+					use = regionUse{at: regionPoint{block, i}, operand: call.Call.Args[0]}
+				}
+			}
+		}
+	}
+	if use.operand == nil {
+		t.Fatal("oracle output operand missing")
+	}
+	result, err := prepareSourceEntry(t.Context(), sourceStartupInput{source: source, initialization: sourceLanguageInitialization}, main, use, registrationLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := constant.StringVal(startupScalar(t, result))
+	if got != "complete" {
+		t.Fatalf("source branch effects: %q", got)
+	}
+	command, err := h.runner.Command(t.Context(), h.dir, h.env, "run", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := command.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != got {
+		t.Fatalf("source %q disagrees with compiled oracle %q: %v", got, output, err)
+	}
 }
 
 func TestSourceStartupNativeOrderOracle(t *testing.T) {

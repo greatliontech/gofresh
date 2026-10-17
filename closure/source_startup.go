@@ -14,7 +14,7 @@ import (
 
 type sourceInitializationModel uint8
 
-const sourceStartupRules = "gofresh/source-startup@1"
+const sourceStartupRules = "gofresh/source-startup@2"
 
 const (
 	sourceInitializationAbsent sourceInitializationModel = iota
