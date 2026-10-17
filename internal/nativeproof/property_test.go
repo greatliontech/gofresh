@@ -68,7 +68,8 @@ func FuzzMappedInstructions(f *testing.F) {
 	for _, k := range kernels {
 		f.Add(hexBytes(f, k.code))
 	}
-	for _, s := range []string{"f04801d8c3", "39c074ff90c3", "ebfe", "488b00c3", "48", "c20800"} {
+	for _, s := range []string{"f04801d8c3", "39c074ff90c3", "ebfe", "488b00c3", "48", "c20800",
+		"488d80f8ffffffc3", "488d84d800000080c3", "488d04ddffffff7fc3", "488d05f8ffffffc3", "48a1f8ffffff01000000c3"} {
 		f.Add(hexBytes(f, s))
 	}
 	f.Fuzz(func(t *testing.T, code []byte) {

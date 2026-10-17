@@ -251,7 +251,41 @@ func decodeBytes(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 		return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid or truncated instruction")
 	}
 	b = b[:i.Len]
+	normalizeDisplacements(&i, b)
 	return i, b, nil
+}
+
+// x86asm v0.32 represents ModRM/SIB disp32 as an unsigned value, but 64-bit
+// effective addresses sign-extend it. disp8 is already signed and absent
+// displacements are zero. A0..A3 instead encode full-width absolute addresses;
+// locate those opcodes in the actual bytes so their moffs operands are never
+// truncated. This structural prefix scan confers no encoding/form admission:
+// every consumer still applies its own prefix and operand validators.
+func normalizeDisplacements(i *x86asm.Inst, b []byte) {
+	if i.Mode != 64 || i.AddrSize != 64 {
+		return
+	}
+	at := 0
+prefixes:
+	for at < len(b) {
+		switch b[at] {
+		case 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67, 0xf0, 0xf2, 0xf3,
+			0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+			0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f:
+			at++
+		default:
+			break prefixes
+		}
+	}
+	if at < len(b) && b[at] >= 0xa0 && b[at] <= 0xa3 {
+		return
+	}
+	for j, arg := range i.Args {
+		if mem, ok := arg.(x86asm.Mem); ok {
+			mem.Disp = int64(int32(mem.Disp))
+			i.Args[j] = mem
+		}
+	}
 }
 
 func decodeLeaf(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, error) {

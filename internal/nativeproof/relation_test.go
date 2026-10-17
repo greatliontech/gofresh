@@ -263,6 +263,21 @@ func TestRelationExactAliasesAndShiftCounts(t *testing.T) {
 	}
 }
 
+func TestRelationSignedDisp32(t *testing.T) {
+	f := face(Masks{RAX: math.MaxUint64}, Masks{RAX: math.MaxUint64})
+	inputs, terms := relationBindings(t, f.Inputs)
+	r, err := DeriveRelation(t.Context(), image(t, hexBytes(t, "488d80f8ffffffc3")), testEntry, f, inputs, RelationLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []uint64{8, 0, 1, math.MaxUint64} {
+		got := evalRelationTerm(t, r.Results()[0].Value, map[br.Term]uint64{terms[RAX]: x}, math.MaxUint64)
+		if want := x - 8; got != want {
+			t.Fatalf("LEA RAX,[RAX-8]; RET: x=%#x got=%#x want=%#x", x, got, want)
+		}
+	}
+}
+
 // big.Int supplies independent signed-overflow and unsigned-carry arithmetic.
 func arithmeticFlags(op string, x, y uint64, width int) (carry, zero, sign, overflow bool) {
 	m := mask(width)

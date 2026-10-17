@@ -7,10 +7,11 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-// This concrete interpreter shares only instruction decoding. It uses actual
-// register values and byte-addressed memory, no frame pointer tokens, region
-// lookup helpers, abstract transfer, joins or provenance. Samples check soundness
-// of footprints, untouched state and optional pointer facts, not completeness.
+// This concrete interpreter shares only structural instruction decoding. It uses
+// actual register values and byte-addressed memory, no frame pointer tokens,
+// region lookup helpers, abstract transfer, joins or provenance. Samples check
+// soundness of footprints, untouched state and optional pointer facts, not
+// completeness.
 func checkFrameOracle(t testing.TB, im *Image, b FrameBound, samples int) {
 	t.Helper()
 	rng := rand.New(rand.NewPCG(0x127, 0x993))
@@ -116,6 +117,29 @@ type concreteFrame struct {
 	pc                          uint64
 	carry, zero, sign, overflow bool
 	returnSlot                  *Span // nil selects the original entry slot; fragments supply theirs
+}
+
+// Interpret decoder displacement bits independently of the production operand
+// adapter: subtraction in the signed integer domain, with the documented opcode
+// field distinguishing full-address moffs. The concrete oracle admits only the
+// 64-bit addressing exercised by its fixture grammar.
+func oracleInstruction(t testing.TB, raw []byte) x86asm.Inst {
+	t.Helper()
+	i, err := x86asm.Decode(raw, 64)
+	if err != nil || i.Mode != 64 || i.AddrSize != 64 {
+		t.Fatalf("concrete decode: %+v, %v", i, err)
+	}
+	op := i.Opcode >> 24
+	if op >= 0xa0 && op <= 0xa3 {
+		return i
+	}
+	for j, arg := range i.Args {
+		if mem, ok := arg.(x86asm.Mem); ok && mem.Disp >= 1<<31 {
+			mem.Disp -= 1 << 32
+			i.Args[j] = mem
+		}
+	}
+	return i
 }
 
 func oracleReg(r x86asm.Reg) (int, uint, uint) {
@@ -229,10 +253,7 @@ func (o *concreteFrame) step() bool {
 	if err != nil {
 		o.t.Fatal(err)
 	}
-	i, err := x86asm.Decode(raw, 64)
-	if err != nil {
-		o.t.Fatal(err)
-	}
+	i := oracleInstruction(o.t, raw)
 	next := o.pc + uint64(i.Len)
 	operand := func(a x86asm.Arg) uint64 {
 		switch a := a.(type) {

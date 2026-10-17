@@ -487,17 +487,23 @@ func TestFrameProposalOwnsImageAndCancels(t *testing.T) {
 
 func FuzzFrameFullWidthBounds(f *testing.F) {
 	for _, seed := range []struct {
-		offset          int8
+		offset          int32
 		maximum, width  uint8
 		write, writable bool
 	}{
 		{0, 0, 3, true, true}, {24, 0, 3, true, true}, {25, 0, 3, true, true}, {-1, 0, 0, false, true},
 		{16, 7, 3, false, true}, {16, 8, 3, true, false}, {16, 9, 3, true, true},
+		{-8, 0, 0xc3, true, true}, {-9, 0, 0xc3, false, true}, {-8, 7, 0xc3, false, true},
+		{math.MinInt32, 0, 3, false, true}, {math.MaxInt32, 0, 3, false, true},
 	} {
 		f.Add(seed.offset, seed.maximum, seed.width, seed.write, seed.writable)
 	}
-	f.Fuzz(func(t *testing.T, offset int8, maximum, widthCode uint8, write, writable bool) {
-		maximum %= 33
+	f.Fuzz(func(t *testing.T, offset int32, maximum, widthCode uint8, write, writable bool) {
+		start := uint64(0)
+		if widthCode&0x40 != 0 {
+			start = 8 // Retain entry-at-zero cases and add valid negative offsets.
+		}
+		maximum %= uint8(33 - start)
 		width := 1 << (widthCode % 4)
 		var code []byte
 		if width == 8 {
@@ -513,13 +519,19 @@ func FuzzFrameFullWidthBounds(f *testing.F) {
 		if width == 1 {
 			op--
 		}
-		code = append(code, op, modrm, byte(offset), 0xc3)
+		if offset >= -128 && offset <= 127 && widthCode&0x80 == 0 {
+			code = append(code, op, modrm, byte(offset))
+		} else {
+			code = append(code, op, modrm+0x40) // mod=10 selects disp32
+			code = binary.LittleEndian.AppendUint32(code, uint32(offset))
+		}
+		code = append(code, 0xc3)
 		face := memoryFace()
-		face.Pointers[0].Pointer.Max = uint64(maximum)
+		face.Pointers[0].Pointer = RegionPointer{0, start, start + uint64(maximum)}
 		face.Regions[0].Writable = writable
 		im := image(t, code)
 		c, err := proveFrame(t, im, testEntry, face)
-		bounded := offset >= 0 && int(maximum)+int(offset)+width <= 32
+		bounded := int64(start)+int64(offset) >= 0 && int64(start)+int64(maximum)+int64(offset)+int64(width) <= 32
 		if !bounded {
 			frameRefusal(t, c, err, "frame-bounds")
 			return

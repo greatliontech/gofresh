@@ -3388,3 +3388,113 @@ bindings {
   shape_hash: "4568c6db53cb74afcb648748e45c2d1c90e1b09fed0855f193e4a270da909291"
   clause_label: "state-and-effects"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.normalizeDisplacements"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "245a22c3c6cf19f2a243c6e8541eff1f235a0227ec63a54f04de76bb094eb523"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestDecodedMemoryDisplacements"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f6aea4d34a0b1cc89f0f9e9a4dc26b7d3ce5cffcd0146e36636b46bf147d1ed3"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestDisplacementNormalizationPreservesEncodingRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b29a29aa3a7a3ce640d2d3a0a9f64c25f49c59a55391fe6007274fe225f19490"
+  clause_label: "machine-applicability"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestRelationDisplacementsAgainstIntegers"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "195a96f00fe242faaac047f62ed24a22a164edd6e38c053737e62aa3ec293fd3"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestRelationSignedDisp32"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "733854d79876eefc5d75e1adaa95412b1fa5f5e431bbcf2561c2b368f00f888b"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-entry"
+  content_hash: "425a6c01048d5b770ebfdd8818598225946174afa7dd84b2c0cdbf4b1de53d12"
+  source_hash: "21264656e0a3f3ecb7cf5aecae111279ecd07b8f145e008c0a5de4e74fbd483e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzRelationDisplacements"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8edf231582e492b2975fb92f33239f57d2a9c53667ead69ca97ce090ee9bf87e"
+  clause_label: "state-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionSignedDisplacement"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5b21b5ede9fd7b9aa5f8f044a20073dcf12e0ce1a88f9f815805e3dfdeb1106e"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameSignedDisplacementFootprints"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4f1d11a487dfbf4658a4c0f6bc4662f3ab6fbe9bc95fb2347f88a5463c4e97bd"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestFrameRIPDisplacementDoesNotSelectDecoy"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dc4a9f1f98bef36a12460225fcf52285519e4f99b1f3ca21eaa1f0de21501120"
+  clause_label: "instruction-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-frame"
+  content_hash: "fc289b43666044f9b054c0e6597d3466e6e3db521a25ea280ec799a3bfe7a908"
+  source_hash: "b8006c227e563682f091ed7c3767ce9d68607b833e0cde294d3340b377228cc9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestValueCallDisplacementDoesNotSelectDecoy"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e8ef0479e30b8b7a81684bb30e40edc354feb5394e10d4fd355d216356c198f7"
+  clause_label: "instruction-effects"
+}

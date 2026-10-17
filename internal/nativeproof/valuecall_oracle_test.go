@@ -78,10 +78,7 @@ func checkValueCallOracle(t testing.TB, im *Image, b ValueCallBound, samples int
 			if err != nil {
 				t.Fatal(err)
 			}
-			i, err := x86asm.Decode(raw, 64)
-			if err != nil {
-				t.Fatal(err)
-			}
+			i := oracleInstruction(t, raw)
 			next := o.pc + uint64(i.Len)
 			vec := func(arg x86asm.Arg) int {
 				r, ok := arg.(x86asm.Reg)

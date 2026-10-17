@@ -13,8 +13,11 @@
 // expressly part of the conditional model.
 //
 // The trusted mechanism comprises debug/elf's structural reader, the pinned
-// x/arch/x86asm decoder, and this package's mapping, graph and abstract transfer
-// rules. The proposer supplies only an untrusted instruction/edge inventory. The
+// x/arch/x86asm decoder, and this package's operand interpretation, mapping, graph
+// and abstract transfer rules. Shared operand interpretation sign-extends disp32
+// for 64-bit addressing while retaining full-width absolute moffs addresses;
+// domain-specific encoding and form checks still govern admission.
+// The proposer supplies only an untrusted instruction/edge inventory. The
 // checker independently decodes reachable image bytes and computes transfers;
 // it never uses a proposed semantic summary. Known-bit/definedness propagation
 // is conservative, with no path-value exclusion or functional source relation.
