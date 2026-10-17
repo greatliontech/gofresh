@@ -3729,3 +3729,80 @@ bindings {
   shape_hash: "893076a0c09748b2ac4b900af2fa060684a7977db6409d0ade9c14efc428b359"
   clause_label: "conditional-composition"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionCutVectorContext"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1cc3ec759394ecf045943a5b5dea8214e65a919261d232ed73bb2a95e8df5f3e"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionCutInvalidPrefixMarker"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "412923bea4d0ddea245788a3eb14aef4382eae9f9b14e94a1dceda49b6582713"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionCutKnownForms"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ce71945d66bcd138e99cdf800a9f6625ac9824a50f871110a73bc8244a3d004"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionCutBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2871054c5c3da5bb87a18b50784315bc5c703bd6d5b352f15199afe1fc6025ad"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionCutSelfDelimitation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0e187ed7ab3dc355c9e2696951ac002cb750bc962c4c00c78c8e7dc4cf55b7ec"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionCutBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2871054c5c3da5bb87a18b50784315bc5c703bd6d5b352f15199afe1fc6025ad"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionCutBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2871054c5c3da5bb87a18b50784315bc5c703bd6d5b352f15199afe1fc6025ad"
+  clause_label: "state-and-effects"
+}

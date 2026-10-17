@@ -2,6 +2,7 @@ package nativeproof
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"slices"
 
@@ -250,12 +251,18 @@ func decodeBytes(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 	if err != nil || i.Op == 0 || i.Len <= 0 || i.Len > len(b) {
 		return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid or truncated instruction")
 	}
+	for _, p := range i.Prefix {
+		if p&x86asm.PrefixInvalid != 0 {
+			return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid instruction prefix")
+		}
+	}
 	b = b[:i.Len]
 	normalizeDisplacements(&i, b)
 	return i, b, nil
 }
 
-// decodeStructure repairs structural byte accounting in the pinned AVX decoder.
+// decodeStructure repairs structural byte accounting and context in the pinned
+// AVX decoder.
 // Intel's operand-free VEX.128/256.0F.WIG 77 ZO forms have no ModRM or immediate;
 // vvvv must be 1111b, pp is 00, and L selects the operation. R/X/B have no
 // operand to extend and W is ignored. The complete instruction is just the
@@ -293,7 +300,34 @@ func decodeStructure(b []byte) (x86asm.Inst, error) {
 		if len(b) <= prefix+1 {
 			return x86asm.Inst{}, x86asm.ErrTruncated
 		}
-		return x86asm.Decode(b, 64)
+		i, err := x86asm.Decode(b, 64)
+		if err != nil || i.Op == 0 {
+			return i, err
+		}
+		// The AVX early return bypasses the legacy decoder's context and
+		// opcode bookkeeping. These bare prefixes have no address override.
+		// DataSize already follows the decoder's 32/W=64 attribute, not the
+		// vector width. Opcode includes opcode, ModRM and (if present) SIB,
+		// left aligned, excluding displacements and immediates.
+		i.Mode, i.AddrSize = 64, 64
+		modrm := b[prefix+1]
+		i.Opcode = uint32(b[prefix])<<24 | uint32(modrm)<<16
+		if modrm&0xc0 != 0xc0 && modrm&7 == 4 {
+			i.Opcode |= uint32(b[prefix+2]) << 8
+		}
+		// In 64-bit addressing only non-SIB mod=00,r/m=101 is RIP-relative,
+		// regardless of the B extension. SIB base=101 instead means no base.
+		if modrm&0xc7 == 5 {
+			for j, arg := range i.Args {
+				if mem, ok := arg.(x86asm.Mem); ok {
+					mem.Base = x86asm.RIP
+					mem.Disp = int64(int32(binary.LittleEndian.Uint32(b[prefix+2:])))
+					i.Args[j] = mem
+					i.PCRel, i.PCRelOff = 4, prefix+2
+				}
+			}
+		}
+		return i, nil
 	}
 	control := b[prefix-1]
 	if control&0x7b != 0x78 { // vvvv=1111, pp=00; L and R/W are independent.

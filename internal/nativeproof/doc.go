@@ -25,6 +25,13 @@
 // opcode-map tables require ModRM; structural decoding checks its presence
 // before the decoder selects an operand form. The decoder checks subsequent
 // SIB, displacement, immediate and is4-selector availability itself.
+// Successful bare VEX/EVEX decoding retains 64-bit mode/address context and
+// left-aligned opcode/ModRM/SIB bits under x86asm's convention; DataSize remains
+// its scalar size attribute, not vector width. Non-SIB mod=00,r/m=101 memory
+// operands retain RIP and signed disp32 with PC-relative length/offset metadata;
+// SIB's no-base form remains distinct. Structural admission rejects explicit
+// invalid-prefix markers, not ignored prefixes or valid unsupported operations
+// (including UD2). These repairs confer no vector execution authority.
 // The proposer supplies only an untrusted instruction/edge inventory. The
 // checker independently decodes reachable image bytes and computes transfers;
 // it never uses a proposed semantic summary. Known-bit/definedness propagation
