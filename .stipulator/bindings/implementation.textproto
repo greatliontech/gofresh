@@ -3498,3 +3498,102 @@ bindings {
   shape_hash: "e8ef0479e30b8b7a81684bb30e40edc354feb5394e10d4fd355d216356c198f7"
   clause_label: "instruction-effects"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.decodeStructure"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "d2ecd0eadb94a4971c2bfc5087ebde1a9a31d69f349a417cb1bacd7dfb09d84e"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionVZEROUPPERCutBoundary"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "31abbbd6d94dd4e271f31a12bfdeb29faf600a291cf582a6f56ebed352ace458"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionVEXZeroCutMetadata"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb51b51a386b0ea7841209d9381d7644b6d29b4347a1cf11a5c707b0e0635eb7"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestVEXZeroDecodeIndependentOfFollowingBytes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "74267ec8f8551f1c5fbd077144f8414b4795ea79a163a5e1b59ac872dd11d828"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestVEXZeroCutRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4b61aed63594bdd6b7cc621029a06ea5357126925de0cdb6984f387ff5f48e55"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestVEXZeroRemainsUnexecuted"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f37025488a62761c3845d6f556cf3c346546c9cddfb4ab533c87a68de5e62305"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStructuralCutAdmission"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c7756947a8eeebadb1e2e6fe72978daf9b6683489bea06921248481aaf94b2d4"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionVectorCutRequiresModRM"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a035eefa09fcb9cbb676546fb8f1c883f58f6518030bea5b1e3b77c6059dbd65"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionVectorCutStructuralBytes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "32843b25428d2fcbba828808efcc3dcc6f0d18352a41848fb02a8200b9730f27"
+  clause_label: "complete-cut"
+}

@@ -17,6 +17,14 @@
 // and abstract transfer rules. Shared operand interpretation sign-extends disp32
 // for 64-bit addressing while retaining full-width absolute moffs addresses;
 // domain-specific encoding and form checks still govern admission.
+// Structural decoding recognizes operand-free VEX.128/256.0F.WIG 77 directly
+// from its prefix and opcode, retaining exactly the VZEROUPPER/VZEROALL bytes
+// without borrowing a following instruction as ModRM. This includes both VEX
+// prefix lengths, requires reserved vvvv=1111 and pp=00, and grants no VEX
+// execution semantics. Other VEX/EVEX entries in the pinned decoder's three
+// opcode-map tables require ModRM; structural decoding checks its presence
+// before the decoder selects an operand form. The decoder checks subsequent
+// SIB, displacement, immediate and is4-selector availability itself.
 // The proposer supplies only an untrusted instruction/edge inventory. The
 // checker independently decodes reachable image bytes and computes transfers;
 // it never uses a proposed semantic summary. Known-bit/definedness propagation

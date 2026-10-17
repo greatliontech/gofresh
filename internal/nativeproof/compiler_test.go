@@ -166,10 +166,16 @@ func TestDecoderBoundariesAgainstGNU(t *testing.T) {
 	}
 	// The connected memory/value domain adds the real legacy-SSE2 short-search
 	// forms. Check their boundaries beside the original integer population.
-	// Stop after both short return paths. The later VEX tail is not admitted:
-	// x86asm and GNU disagree on its VZEROUPPER length, and no VEX execution
-	// receives semantic authority from this domain.
-	raw = append(raw, hexBytes(t, searchBodyHex)[:0xb6]...)
+	// Include the VEX tail: structural boundary evidence also serves unexecuted
+	// cuts, independently of which forms receive execution semantics.
+	raw = append(raw, hexBytes(t, searchBodyHex)...)
+	// Canonical ZO forms, including both W values of the WIG three-byte prefix.
+	for _, code := range []string{"c5f877", "c5fc77", "c4e17877", "c4e17c77", "c4e1f877", "c4e1fc77"} {
+		raw = append(raw, hexBytes(t, code)...)
+	}
+	for _, tc := range vectorCutEncodings {
+		raw = append(raw, hexBytes(t, tc.code)...)
+	}
 	// Broad register-form sample with varying ModRM, REX extension and width.
 	for _, op := range []byte{0x89, 0x01, 0x31, 0x21, 0x39} {
 		for modrm := 0xc0; modrm <= 0xff; modrm++ {
@@ -203,13 +209,14 @@ func TestDecoderBoundariesAgainstGNU(t *testing.T) {
 		gnu[int(addr)] = len(encoded)
 	}
 	count := 0
+	im := image(t, raw)
 	for at := 0; at < len(raw); {
-		i, err := x86asm.Decode(raw[at:], 64)
+		i, _, err := decodeBytes(im, testEntry+uint64(at))
 		if err != nil || i.Len == 0 {
 			t.Fatalf("decode at %d: %v", at, err)
 		}
 		if gnu[at] != i.Len {
-			t.Fatalf("decoder disagreement at %#x: x86asm=%d GNU=%d", at, i.Len, gnu[at])
+			t.Fatalf("decoder disagreement at %#x: native=%d GNU=%d", at, i.Len, gnu[at])
 		}
 		count++
 		at += i.Len

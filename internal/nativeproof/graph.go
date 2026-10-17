@@ -246,13 +246,67 @@ func decodeBytes(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 	if err != nil {
 		return x86asm.Inst{}, nil, err
 	}
-	i, err := x86asm.Decode(b, 64)
+	i, err := decodeStructure(b)
 	if err != nil || i.Op == 0 || i.Len <= 0 || i.Len > len(b) {
 		return x86asm.Inst{}, nil, refuse(pc, "instruction-decode", "invalid or truncated instruction")
 	}
 	b = b[:i.Len]
 	normalizeDisplacements(&i, b)
 	return i, b, nil
+}
+
+// decodeStructure repairs structural byte accounting in the pinned AVX decoder.
+// Intel's operand-free VEX.128/256.0F.WIG 77 ZO forms have no ModRM or immediate;
+// vvvv must be 1111b, pp is 00, and L selects the operation. R/X/B have no
+// operand to extend and W is ignored. The complete instruction is just the
+// two- or three-byte VEX prefix and opcode, even at the end of a mapping.
+//
+// x86asm v0.32's AVX decoder instead treats any following byte as ModRM (and
+// can consume SIB/displacement bytes), and omits mode/address/opcode metadata.
+// Construct all fields from this encoding rather than adjusting that result's
+// length. Every other entry in its avxMap0F/0F38/0F3A tables (VEX and EVEX)
+// has a ModRM-dependent operand and a register/memory form constraint. The
+// decoder skips both that constraint and the ModRM read when the byte is
+// absent, so require it before delegating. Its SIB, displacement, immediate
+// and is4-selector reads already check availability. This table-specific rule
+// does not assert a layout for future vector encodings. Legacy-prefixed forms
+// keep the decoder's handling. Domain validators still refuse VEX/EVEX execution.
+func decodeStructure(b []byte) (x86asm.Inst, error) {
+	prefix := 0
+	switch {
+	case len(b) == 0:
+		return x86asm.Inst{}, x86asm.ErrTruncated
+	case b[0] == 0xc5:
+		prefix = 2
+	case b[0] == 0xc4:
+		prefix = 3
+	case b[0] == 0x62:
+		prefix = 4
+	default:
+		return x86asm.Decode(b, 64)
+	}
+	if len(b) <= prefix {
+		return x86asm.Inst{}, x86asm.ErrTruncated
+	}
+	zero := b[prefix] == 0x77 && (b[0] == 0xc5 || b[0] == 0xc4 && b[1]&0x1f == 1)
+	if !zero {
+		if len(b) <= prefix+1 {
+			return x86asm.Inst{}, x86asm.ErrTruncated
+		}
+		return x86asm.Decode(b, 64)
+	}
+	control := b[prefix-1]
+	if control&0x7b != 0x78 { // vvvv=1111, pp=00; L and R/W are independent.
+		return x86asm.Inst{}, x86asm.ErrUnrecognized
+	}
+	i := x86asm.Inst{Op: x86asm.VZEROUPPER, Opcode: 0x77000000, Mode: 64, AddrSize: 64, DataSize: 32, Len: prefix + 1}
+	if control&4 != 0 {
+		i.Op = x86asm.VZEROALL
+	}
+	for j, p := range b[:prefix] {
+		i.Prefix[j] = x86asm.Prefix(p)
+	}
+	return i, nil
 }
 
 // x86asm v0.32 represents ModRM/SIB disp32 as an unsigned value, but 64-bit
