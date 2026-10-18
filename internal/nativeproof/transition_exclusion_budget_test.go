@@ -196,7 +196,7 @@ func TestTransitionExclusionProofImportDepth(t *testing.T) {
 		if c, err := CheckTransitionContinuation(t.Context(), root, full); err != nil || c.checked == nil {
 			t.Fatal("same-depth native continuation refused", err)
 		}
-		m, err := newTransitionChecker(t.Context(), im, root.checked.limits, root.checked.work)
+		m, err := newTransitionChecker(t.Context(), im, transitionRoot{entry: im.entry}, root.checked.limits, root.checked.work)
 		if err != nil {
 			t.Fatal(err)
 		}

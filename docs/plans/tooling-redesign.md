@@ -359,7 +359,7 @@
                           projections supply no unproved successor adapter, actual executor
                           applicability, completed bootstrap, source association or public
                           runtime-reuse authority.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.8 Establish one conditional
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.8 Establish one conditional
                           typed-global and call-operand representation lemma over
                           the selected runtime testAtomic64 prefix before its first
                           Cas64 invocation and the actual optimized native prefix

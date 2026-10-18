@@ -29,13 +29,13 @@ func (m *transitionChecker) graphPrefix(cut uint64, prefix bool) (*graph, error)
 		}
 		p := programPoint{e.PC, e.Context}
 		if _, exists := choices[p]; exists {
-			return nil, refuse(e.PC, "transition-expansion", "duplicate call expansion")
+			return nil, refuse(e.PC, "transition-expansion", "duplicate transfer expansion")
 		}
 		choices[p] = false
 	}
-	activations := map[string]transitionActivation{"": {entry: m.im.entry}}
+	activations := map[string]transitionActivation{"": {entry: m.root.entry}}
 	var boundary *programPoint
-	g, err := decodeOccurrenceGraph(&relationContext{Context: m.ctx, meter: m.valueBuilder}, m.im.entry, m.limits.Instructions, func(p programPoint) (decodedInstruction, error) {
+	g, err := decodeOccurrenceGraph(&relationContext{Context: m.ctx, meter: m.valueBuilder}, m.root.entry, m.limits.Instructions, func(p programPoint) (decodedInstruction, error) {
 		m.pc = p.pc
 		// Charge occurrence storage and context strings before retaining them. The
 		// prefix reconstruction and suffix share this same aggregate allowance.
@@ -57,11 +57,14 @@ func (m *transitionChecker) graphPrefix(cut uint64, prefix bool) (*graph, error)
 			return decodedInstruction{boundary: boundaryCut, size: uint8(i.Len)}, nil
 		}
 		_, expand := choices[p]
-		if expand && i.Op != x86asm.CALL && i.Op != x86asm.SYSCALL {
-			return decodedInstruction{}, refuse(p.pc, "transition-expansion", "expansion is not a CALL or SYSCALL")
+		optional := i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL || i.Op == x86asm.XOR
+		if expand && !optional {
+			return decodedInstruction{}, refuse(p.pc, "transition-expansion", "expansion is not an optional transfer")
 		}
-		if (i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL) && !expand {
-			// This alternative admits no target or stack transfer. Only finish's
+		if optional && !expand {
+			// This alternative admits no execution or successor transfer. In
+			// particular, adding self-XOR semantics must not force discovery into
+			// a formerly excluded dead arm's cycle. Only finish's
 			// independently checked full incoming false guard can accept it.
 			return decodedInstruction{boundary: boundaryUnsupported, size: uint8(i.Len)}, nil
 		}
@@ -70,7 +73,7 @@ func (m *transitionChecker) graphPrefix(cut uint64, prefix bool) (*graph, error)
 			return decodedInstruction{}, err
 		}
 		if expand && d.boundary != boundaryNone {
-			return decodedInstruction{}, refuse(p.pc, "transition-expansion", "CALL encoding has no admitted transfer")
+			return decodedInstruction{}, refuse(p.pc, "transition-expansion", "selected encoding has no admitted transfer")
 		}
 		if expand {
 			choices[p] = true
@@ -124,7 +127,7 @@ func (m *transitionChecker) graphPrefix(cut uint64, prefix bool) (*graph, error)
 				return nil, m.err
 			}
 			if !choices[p] {
-				return nil, refuse(p.pc, "transition-expansion", "unused or unreachable call expansion")
+				return nil, refuse(p.pc, "transition-expansion", "unused or unreachable transfer expansion")
 			}
 		}
 	}

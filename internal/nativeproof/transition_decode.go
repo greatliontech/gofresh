@@ -206,6 +206,15 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		}
 		return nil
 	}
+	// A 32-bit self-XOR clears the complete register and its pointer provenance.
+	// Only register forms with identical actual operands are admitted here; other
+	// XOR shapes retain their own unsupported-transfer boundary.
+	if i.Op == x86asm.XOR {
+		if w != 32 || !reg(i.Args[1], 32) || i.Args[0] != i.Args[1] || op != 0x31 && op != 0x33 || len(b) != at+2 || b[at+1]&0xc0 != 0xc0 {
+			return bad()
+		}
+		return nil
+	}
 	if i.Op != x86asm.CMP && i.Op != x86asm.TEST && i.Op != x86asm.SUB && i.Op != x86asm.ADD && i.Op != x86asm.AND {
 		return bad()
 	}

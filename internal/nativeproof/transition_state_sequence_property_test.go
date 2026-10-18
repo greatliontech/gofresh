@@ -39,7 +39,7 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 		imm := binary.LittleEndian.Uint64(record[8:16])
 		disp := int64(int32(binary.LittleEndian.Uint32(record[24:28])))
 		var i to.Intent
-		switch record[0] % 11 {
+		switch record[0] % 12 {
 		case 0:
 			i = to.Intent{Operation: to.MoveRegister, Dst: dst, Src: src}
 		case 1:
@@ -62,6 +62,8 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 			i = to.Intent{Operation: to.LEARIP, Dst: dst, SignedDisp: disp}
 		case 10:
 			i = to.Intent{Operation: to.CPUID}
+		case 11:
+			i = to.Intent{Operation: to.Clear32, Dst: dst}
 		}
 		program = append(program, stateOp(i, record[4]))
 		if len(program) >= instructionLimit {
@@ -490,6 +492,13 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 }
 
 func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout, entry uint64, instructionLimit int, initialized bool, dataLoads ...interfaceMapping) sequenceOutcome {
+	return checkStateSequenceRootAt(t, face, program, raw, cutBits, layout, entry, instructionLimit, initialized, false, dataLoads...)
+}
+
+// The same independently generated transfers, oracle and continuation comparisons
+// exercise conditional roots too. Only this synthetic fixture's ELF header is
+// generated differently; actual artifact positives never rewrite their image.
+func checkStateSequenceRootAt(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout, entry uint64, instructionLimit int, initialized, region bool, dataLoads ...interfaceMapping) sequenceOutcome {
 	t.Helper()
 	loads := [][2]uint64{{entry, entry + uint64(sequenceMappingSize(len(program)))}}
 	mappings := append([]interfaceMapping{{start: loads[0][0], end: loads[0][1], file: 0x1000, filesz: loads[0][1] - loads[0][0], read: true, execute: true}}, dataLoads...)
@@ -499,6 +508,22 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 	// Layout supplies PCs, never reconstructed semantic operands. RIP uses the
 	// independently encoded instruction's full length and its original intent.
 	x := sequenceLayoutAt(t, program, layout, entry, dataLoads...)
+	if region {
+		data := append([]byte(nil), x.im.data...)
+		binary.LittleEndian.PutUint64(data[24:], x.pcs[len(program)])
+		var err error
+		x.im, err = NewImage(t.Context(), data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x.digest = sha256.Sum256(data)
+	}
+	checkRoot := func(p TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
+		if region {
+			return CheckRegionTransition(t.Context(), x.im, entry, face, p, limits)
+		}
+		return CheckTransition(t.Context(), x.im, face, p, limits)
+	}
 	if initialized {
 		var err error
 		face.Initialization, err = CheckImageInitialization(t.Context(), x.im, StaticELFInitialization)
@@ -511,7 +536,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 	// Invalid inventories are never materialized into reference byte maps.
 	if verdict.premise != "" {
 		limits, representable := sequenceLimits(face, len(program), 0, 0, instructionLimit)
-		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
+		c, err := checkRoot(x.proposal(0), limits)
 		if !representable {
 			sequenceRefused(t, c, err, "transition-budget", 0)
 			return sequenceOutcome{premise: "transition-budget", configuration: true}
@@ -526,7 +551,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 	}
 	cardinality := sequenceCardinality(face)
 	if limits, ok := sequenceLimits(face, len(program), cardinality, 0, instructionLimit); !ok {
-		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
+		c, err := checkRoot(x.proposal(0), limits)
 		sequenceRefused(t, c, err, "transition-budget", 0)
 		return sequenceOutcome{premise: "transition-budget", configuration: true}
 	}
@@ -564,7 +589,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 	}
 	limits, representable := sequenceLimits(face, len(program), len(initial.memory), len(cuts), instructionLimit)
 	if !representable {
-		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
+		c, err := checkRoot(x.proposal(0), limits)
 		sequenceRefused(t, c, err, "transition-budget", 0)
 		return sequenceOutcome{premise: "transition-budget", configuration: true}
 	}
@@ -580,16 +605,19 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 		stateAssert(t, c, x, at, initial, want, values)
 		profile.assertProjection(t, c)
 	}
-	direct, err := CheckTransition(t.Context(), x.im, face, x.proposal(cut), limits)
+	direct, err := checkRoot(x.proposal(cut), limits)
 	if err != nil {
 		t.Fatalf("independently admitted evolving prefix refused: %v", err)
 	}
 	check(direct, cut, stateBindings(t, direct, face, initial))
-	root, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
+	root, err := checkRoot(x.proposal(0), limits)
 	if err != nil {
 		t.Fatal(err)
 	}
 	original, _ := root.Bound()
+	if original.ConditionalRegion != region {
+		t.Fatal("root authority changed")
+	}
 	if original.Origin.View().Scope == direct.checked.bound.Origin.View().Scope {
 		t.Fatal("independent sequence roots reused a variable namespace")
 	}
@@ -602,6 +630,9 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 			t.Fatal("admitted evolving continuation refused", err)
 		}
 		stateInheritedInputs(t, original, root.checked.bound)
+		if root.checked.bound.ConditionalRegion != region || root.checked.bound.Entry != entry {
+			t.Fatal("continuation changed root authority")
+		}
 		stateInheritedInputs(t, prior, root.checked.bound)
 		check(root, next, values)
 	}
@@ -610,7 +641,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 		// Executing just the first unsupported instruction avoids confusing a
 		// later inventory overflow with its independently established cause.
 		proposal := x.proposal(cut + 1)
-		c, err := CheckTransition(t.Context(), x.im, face, proposal, limits)
+		c, err := checkRoot(proposal, limits)
 		if depthFault {
 			stateExpressionDepthRefused(t, c, err, x.pcs[cut])
 		} else {
@@ -627,7 +658,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 	}
 	if len(program) >= instructionLimit {
 		p := x.proposal(len(program))
-		c, err := CheckTransition(t.Context(), x.im, face, p, limits)
+		c, err := checkRoot(p, limits)
 		stateInventoryOverflow(t, c, err, len(p.Nodes), instructionLimit)
 		c, err = CheckTransitionContinuation(t.Context(), root, p)
 		stateInventoryOverflow(t, c, err, len(p.Nodes), instructionLimit)
@@ -640,7 +671,7 @@ func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program
 
 func sequenceRecord(i to.Intent, form byte) []byte {
 	r := make([]byte, 32)
-	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP, to.CPUID}
+	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP, to.CPUID, to.Clear32}
 	for j, operation := range operations {
 		if i.Operation == operation {
 			r[0] = byte(j)

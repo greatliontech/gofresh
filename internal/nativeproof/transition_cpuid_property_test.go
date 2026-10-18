@@ -301,7 +301,7 @@ func TestTransitionCPUIDRetainedBudgets(t *testing.T) {
 	im, cut = transitionFixture(t, strings.Repeat("488d4001", 20)+code)
 	root = continuationRoot(t, im, cut-2, face, TransitionLimits{})
 	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, im, cut))
-	m, err := newTransitionChecker(t.Context(), im, root.checked.limits, 0)
+	m, err := newTransitionChecker(t.Context(), im, transitionRoot{entry: im.entry}, root.checked.limits, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,6 +71,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d || op == 0x05 || op == 0x81 || op == 0x83
 			} else {
 				valid = valid || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
+				valid = valid || (op == 0x31 || op == 0x33) && rex&1 == (rex>>2)&1
 			}
 			_, err := Parse(b, 1<<32)
 			if (err == nil) != valid {
@@ -82,6 +83,12 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 
 func TestEncodeRefusesNormalization(t *testing.T) {
 	cases := []Descriptor{
+		{Intent{Operation: Clear32, Src: 1}, Encoding{Form: XOR31}},
+		{Intent{Operation: Clear32, Immediate: 1}, Encoding{Form: XOR31}},
+		{Intent{Operation: Clear32, Width: 32}, Encoding{Form: XOR31}},
+		{Intent{Operation: Clear32, Dst: 8}, Encoding{Form: XOR33}},
+		{Intent{Operation: Clear32}, Encoding{Form: XOR31, REX: 0x48}},
+		{Intent{Operation: Clear32}, Encoding{Form: MOV89}},
 		{Intent{Operation: CPUID, Dst: 1}, Encoding{Form: CPUID0FA2}},
 		{Intent{Operation: CPUID, Src: 1}, Encoding{Form: CPUID0FA2}},
 		{Intent{Operation: CPUID, Base: 1}, Encoding{Form: CPUID0FA2}},

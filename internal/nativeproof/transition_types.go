@@ -8,7 +8,7 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@7;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules
+const TransitionRules = "gofresh/native-transition@8;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules
 
 const archSetFSRules = "gofresh/native-linux-arch-set-fs@1"
 
@@ -56,7 +56,7 @@ type RelativeRegion struct {
 // entire longer scope, not as observed stability facts from its predecessor.
 // Machine uses MachineModel's baseline execution restrictions;
 // no return slot or normal-completion premise is imported. EntryState asserts
-// applicability of the declared symbolic state at the ELF entry. InstructionMapping
+// applicability of the declared symbolic state at the bound entry. InstructionMapping
 // has Conditions' static ELF/4KiB meaning. IsolatedExecution excludes asynchronous
 // behavior-changing interference, external termination and unmodeled thread or
 // context replacement before the cut. Identified primitive effects and
@@ -109,7 +109,8 @@ type TransitionLimits struct {
 }
 
 // TransitionProposal is an untrusted complete entry-to-cut instruction inventory.
-// The checker obtains Entry independently from the owned ELF header. The cut node
+// The checker obtains Entry independently from the owned ELF header or explicit
+// conditional-region entry argument; the proposal cannot select that authority. The cut node
 // has no executed successors; its actual instruction is retained separately.
 // Unsupported structural terminals also have no successors; only the checker
 // can establish their exclusions. A continuation supplies the complete inventory
@@ -118,19 +119,21 @@ type TransitionProposal struct {
 	ImageDigest [32]byte
 	Entry, Cut  uint64
 	Nodes       []Node
-	// Expansions selects candidate callee/primitive coverage. Every unselected CALL or SYSCALL is a
+	// Expansions selects candidate callee/primitive/self-XOR coverage. Every unselected CALL, SYSCALL or XOR is a
 	// structural terminal requiring a checked false full incoming guard.
 	Expansions []TransitionExpansion
 }
 
 // TransitionExpansion is an untrusted search choice, not a semantic premise. Context
-// is the activation path emitted by discovery (empty at the ELF root); PC names
-// an actual CALL or SYSCALL within it. Duplicate, unused or other choices refuse.
+// is the activation path emitted by discovery (empty at the bound root); PC names
+// an actual CALL, SYSCALL or XOR within it. Only admitted operand forms can
+// execute; selecting another XOR form grants no semantics. Duplicate, unused or
+// other choices refuse.
 // Each ancestor CALL appends '/' and its PC in exactly sixteen lowercase hex
 // digits, outermost first. This is a candidate coordinate, not an execution ID
 // or persisted evidence. A proposer can expose a child's context by stopping at
 // that child's first unexecuted boundary before proposing a longer scope.
-// Unselected calls/syscalls retain their structural-terminal interpretation,
+// Unselected calls/syscalls/XOR retain their structural-terminal interpretation,
 // including when no primitive applicability condition is available.
 type TransitionExpansion struct {
 	Context string
@@ -312,9 +315,12 @@ type ExcludedBoundary struct {
 // Instructions contains guarded fetch occurrences. Filtering their guards gives
 // the executed trace. Boundary and ExcludedBoundaries are unexecuted.
 type TransitionBound struct {
-	ImageDigest       [32]byte
-	Rules             string
-	Entry             uint64
+	ImageDigest [32]byte
+	Rules       string
+	Entry       uint64
+	// ConditionalRegion distinguishes a local entry premise from the ELF root.
+	// This projection cannot select or change the opaque certificate's authority.
+	ConditionalRegion bool
 	Interface         TransitionInterface
 	Origin            br.Term
 	ExcludedOrigins   []Span
@@ -373,6 +379,15 @@ func (c TransitionCertificate) Bound() (TransitionBound, bool) {
 		return TransitionBound{}, false
 	}
 	return cloneTransitionBound(c.checked.bound), true
+}
+
+// BoundFor projects only a theorem over this exact owned image. Equal bytes in a
+// separately constructed image cannot borrow its provenance or entry relation.
+func (c TransitionCertificate) BoundFor(im *Image) (TransitionBound, bool) {
+	if c.checked == nil || !sameImage(c.checked.image, im) {
+		return TransitionBound{}, false
+	}
+	return c.Bound()
 }
 
 func cloneTransitionBound(b TransitionBound) TransitionBound {

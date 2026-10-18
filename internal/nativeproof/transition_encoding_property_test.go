@@ -97,6 +97,10 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	}
 	op := x86asm.MOV
 	switch i.Operation {
+	case to.Clear32:
+		op = x86asm.XOR
+		reg(args[0], i.Dst, true)
+		reg(args[1], i.Dst, true)
 	case to.Syscall:
 		op = x86asm.SYSCALL
 		if args != ([2]x86asm.Arg{}) {
@@ -226,7 +230,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 54814 {
+	if count != 54894 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;

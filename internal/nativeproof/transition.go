@@ -13,6 +13,7 @@ import (
 type transitionChecker struct {
 	*valueBuilder
 	im                         *Image
+	root                       transitionRoot
 	face                       TransitionInterface
 	limits                     TransitionLimits
 	lo, hi                     uint64
@@ -53,18 +54,28 @@ func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
 	return l, nil
 }
 
-func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits, work int) (*transitionChecker, error) {
+// The root is selected independently of the untrusted graph inventory. Only the
+// ELF wrapper obtains it from the header; region roots retain conditional scope.
+type transitionRoot struct {
+	entry  uint64
+	region bool
+}
+
+func newTransitionChecker(ctx context.Context, im *Image, root transitionRoot, l TransitionLimits, work int) (*transitionChecker, error) {
 	if ctx == nil {
 		return nil, refuse(0, "transition-context", "missing context")
 	}
 	if im == nil || len(im.data) == 0 {
 		return nil, refuse(0, "image-binding", "missing constructed image")
 	}
-	m := &transitionChecker{im: im, limits: l, valueBuilder: &valueBuilder{ctx: ctx, limits: l.RelationLimits, work: work, pc: im.entry, depth: make(map[br.Term]int)}}
+	if !root.region && root.entry != im.entry {
+		return nil, refuse(root.entry, "transition-root", "ELF root differs from image entry")
+	}
+	m := &transitionChecker{im: im, root: root, limits: l, valueBuilder: &valueBuilder{ctx: ctx, limits: l.RelationLimits, work: work, pc: root.entry, depth: make(map[br.Term]int)}}
 	if !m.tick() {
 		return nil, m.err
 	}
-	if _, err := im.instructionBytes(im.entry); err != nil {
+	if _, err := im.instructionBytes(root.entry); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -74,10 +85,26 @@ func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits, wo
 // Its cut is only a proposed locator; no instruction count or symbol extent is
 // a successful endpoint. CheckTransition independently reconstructs all bytes.
 // Numeric cuts select the first hit and require a unique activation in the
-// stopped graph. Unselected calls remain structural terminals, with no target
-// inspection. Expansion choices select search only; their use is checked later.
+// stopped graph. Unselected calls, syscalls and XOR remain structural terminals,
+// with no execution or successor inspection. Expansion choices select search
+// only; their use and actual supported operand forms are checked later.
 func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
 	im = im.snapshot()
+	var entry uint64
+	if im != nil {
+		entry = im.entry
+	}
+	return proposeRootedTransition(ctx, im, transitionRoot{entry: entry}, cut, limits, expansions)
+}
+
+// ProposeRegionTransition discovers candidate coverage from an explicitly
+// selected conditional entry in the original image. It establishes no reachability
+// from the ELF entry. CheckRegionTransition independently binds entry and bytes.
+func ProposeRegionTransition(ctx context.Context, im *Image, entry, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
+	return proposeRootedTransition(ctx, im.snapshot(), transitionRoot{entry: entry, region: true}, cut, limits, expansions)
+}
+
+func proposeRootedTransition(ctx context.Context, im *Image, root transitionRoot, cut uint64, limits TransitionLimits, expansions []TransitionExpansion) (TransitionProposal, error) {
 	l, err := transitionLimits(limits)
 	if err != nil {
 		return TransitionProposal{}, refuse(0, "transition-budget", err.Error())
@@ -87,7 +114,7 @@ func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits Transi
 	if err != nil {
 		return TransitionProposal{}, err
 	}
-	m, err := newTransitionChecker(ctx, im, l, work)
+	m, err := newTransitionChecker(ctx, im, root, l, work)
 	if err != nil {
 		return TransitionProposal{}, err
 	}
@@ -96,7 +123,7 @@ func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits Transi
 	if err != nil {
 		return TransitionProposal{}, err
 	}
-	p.ImageDigest, p.Entry, p.Cut = im.digest, im.entry, cut
+	p.ImageDigest, p.Entry, p.Cut = im.digest, root.entry, cut
 	for _, ins := range g.nodes {
 		if !m.tick() {
 			return TransitionProposal{}, m.err
@@ -120,6 +147,22 @@ func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits Transi
 // or return/callee interface are inputs. Failure yields no partial certificate.
 func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, proposal TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
 	im = im.snapshot()
+	var entry uint64
+	if im != nil {
+		entry = im.entry
+	}
+	return checkRootedTransition(ctx, im, transitionRoot{entry: entry}, face, proposal, limits)
+}
+
+// CheckRegionTransition checks a conditional entry-to-cut relation in the original
+// owned image. Entry is selected independently of proposal.Entry. It supplies no
+// ELF-entry reachability, omitted-prefix or source association. Root-loading image
+// initialization is refused: memory starts arbitrary under the declared permissions.
+func CheckRegionTransition(ctx context.Context, im *Image, entry uint64, face TransitionInterface, proposal TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
+	return checkRootedTransition(ctx, im.snapshot(), transitionRoot{entry: entry, region: true}, face, proposal, limits)
+}
+
+func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, face TransitionInterface, proposal TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
 	l, err := transitionLimits(limits)
 	if err != nil {
 		return TransitionCertificate{}, refuse(0, "transition-budget", err.Error())
@@ -136,16 +179,16 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 		return TransitionCertificate{}, err
 	}
 	face = cloneTransitionInterface(face)
-	m, err := newTransitionChecker(ctx, im, l, work)
+	m, err := newTransitionChecker(ctx, im, root, l, work)
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
-	if proposal.Entry != im.entry || proposal.ImageDigest != im.digest {
-		return TransitionCertificate{}, refuse(im.entry, "transition-proposal", "image or ELF entry differs")
+	if proposal.Entry != root.entry || proposal.ImageDigest != im.digest {
+		return TransitionCertificate{}, refuse(root.entry, "transition-proposal", "image or independently selected entry differs")
 	}
 	m.face = face
 	m.expansions = proposal.Expansions
-	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: im.entry, Interface: face, Expansions: append([]TransitionExpansion(nil), proposal.Expansions...)}
+	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: root.entry, ConditionalRegion: root.region, Interface: face, Expansions: append([]TransitionExpansion(nil), proposal.Expansions...)}
 	if err := m.validate(); err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -164,7 +207,7 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 }
 
 // CheckTransitionContinuation extends opaque checked evidence to a new cut. The
-// proposal inventories the FULL original ELF-entry-to-new-cut graph. Only the
+// proposal inventories the FULL original entry-to-new-cut graph. Only the
 // suffix executes, starting with the predecessor's unexecuted boundary. Original
 // terms, permissions, origin domain and normalized limits are inherited exactly;
 // the result is conditional on the mapping and interference premises holding over
@@ -184,12 +227,12 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
-	m, err := newTransitionChecker(ctx, prior.image, prior.limits, work)
+	m, err := newTransitionChecker(ctx, prior.image, transitionRoot{entry: prior.bound.Entry, region: prior.bound.ConditionalRegion}, prior.limits, work)
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
 	if proposal.Entry != prior.bound.Entry || proposal.ImageDigest != prior.bound.ImageDigest {
-		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or ELF entry differs")
+		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or retained root entry differs")
 	}
 	m.expansions = proposal.Expansions
 	if proposal.Cut == prior.bound.Boundary.PC {
@@ -713,10 +756,16 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 			z.Value = m.truth
 		}
 		m.bound.Flags = TransitionFlags{CF: zero, OF: zero, SF: zero, ZF: z, PF: TransitionFlag{Defined: true}}
+	case x86asm.XOR:
+		// The decoder admitted only a 32-bit self-XOR. Its full-width result
+		// comes from the shared scalar transfer; AF is undefined, not preserved.
+		zero := TransitionFlag{Defined: true, Value: m.falsity}
+		one := TransitionFlag{Defined: true, Value: m.truth}
+		m.bound.Flags = TransitionFlags{CF: zero, OF: zero, SF: zero, ZF: one, PF: one}
 	}
 	// All operands, prefixes, widths and immediate extensions were validated by
 	// decodeTransition. The shared value interpreter now supplies MOV/LEA/SUB/AND
-	// scalar semantics. Origin rules above justify conditional value/provenance
+	// scalar semantics, including self-XOR. Origin rules above justify conditional value/provenance
 	// agreement separately; bitrelation.Check accepts no external hypotheses.
 	if err := m.valueBuilder.transfer(m.pc, i, &m.state); err != nil {
 		return err

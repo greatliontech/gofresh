@@ -118,6 +118,9 @@ func CheckImageInitialization(ctx context.Context, im *Image, model string) (Ima
 // its retained coverage on both root construction and continuation import.
 func (m *transitionChecker) admitInitialization() error {
 	if k := m.face.Initialization.checked; k != nil {
+		if m.root.region {
+			return refuse(m.pc, "image-initialization", "conditional region cannot replay root loading")
+		}
 		if k.rules != imageInitializationRules || !sameImage(k.image, m.im) {
 			return refuse(m.pc, "image-initialization", "initialization rules or owned image differ")
 		}

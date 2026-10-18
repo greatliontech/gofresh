@@ -76,6 +76,11 @@
 // old leaf Certificate nor FrameCertificate can express its initial-value facts.
 //
 // CheckTransition establishes a distinct ELF-entry-to-unexecuted-cut relation.
+// CheckRegionTransition uses the same kernel at an independently selected image
+// entry under explicit local premises. Its opaque certificate retains that
+// conditional-root authority through graph reconstruction and continuations;
+// it establishes no path from the ELF entry. Region roots cannot replay loading
+// initialization. Current bytes and unspecified scratch state start arbitrary.
 // One fresh stack origin is universally quantified over explicit bounds,
 // congruence and external/image-page disjointness; joint nonemptiness is checked
 // before deriving state. Relative address envelopes, memory permissions and
@@ -85,7 +90,8 @@
 // survive spills and reloads; numeric coincidence cannot create an origin.
 // The transition grammar admits byte/32/64-bit MOV (including base/displacement
 // and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
-// AND, nonwriting 32/64-bit CMP/TEST and the ten direct conditions over CF, ZF and
+// AND, 32-bit register self-XOR with zero extension and undefined AF,
+// nonwriting 32/64-bit CMP/TEST and the ten direct conditions over CF, ZF and
 // SF!=OF, alongside relative JMP/fallthrough, constant ADD, direct near CALL,
 // register PUSH/POP and near RET. Stack operations use the same current bytes;
 // CALL stores the actual decoded continuation and RET proves equality of its
@@ -122,9 +128,11 @@
 // runtime authority follows from this conditional state relation.
 //
 // ProposeTransition's optional occurrence-qualified expansion choices are
-// untrusted search input. By default CALL and SYSCALL remain structural terminals,
+// untrusted search input. By default CALL, SYSCALL and XOR remain structural terminals,
 // accepted only with an independent proof that the complete incoming guard is
-// false. An excluded CALL has no push, target inspection or invented continuation;
+// false. Self-XOR is expanded only when selected, preserving independently
+// excludable dead boundaries even when their undiscovered successors contain
+// cycles. An excluded CALL has no push, target inspection or invented continuation;
 // even an unmapped or cyclic target is outside that excluded scope. An expanded
 // callee may contain its own independently excluded boundaries. Unused, duplicate
 // or wrong-operation choices refuse. No budget/cancellation failure substitutes

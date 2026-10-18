@@ -137,6 +137,9 @@ func (x dagLayout) proposal(cut int) TransitionProposal {
 		seen[j] = true
 		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j != cut {
+			if j < len(x.intents) && x.intents[j].Operation == to.Clear32 {
+				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
+			}
 			for _, next := range x.edges[j] {
 				n.Successors = append(n.Successors, x.pcs[next])
 				queue = append(queue, next)
@@ -415,7 +418,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		if f.Preserved && r.writer != 0 {
 			t.Fatal("false flag preservation")
 		}
-		undefinedAF := (r.writer == to.And || r.writer == to.Test || r.writer == to.TestImmediate) && j == 4
+		undefinedAF := (r.writer == to.And || r.writer == to.Test || r.writer == to.TestImmediate || r.writer == to.Clear32) && j == 4
 		if f.Defined && undefinedAF || !f.Defined && f.Value.Valid() {
 			t.Fatal("false flag definedness")
 		}

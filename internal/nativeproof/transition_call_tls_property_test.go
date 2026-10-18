@@ -1,6 +1,8 @@
 package nativeproof
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"reflect"
 	"slices"
@@ -132,7 +134,7 @@ func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 				for _, k := range x.edges[j] {
 					next = append(next, referenceOccurrence{o.context, k})
 				}
-				if i.Operation == to.Syscall {
+				if i.Operation == to.Syscall || i.Operation == to.Clear32 {
 					p.Expansions = append(p.Expansions, TransitionExpansion{Context: o.context, PC: x.pcs[j]})
 				}
 			}
@@ -537,6 +539,10 @@ func callTLSOps() []dagOp {
 }
 
 func checkCallTLSPopulation(t testing.TB, seed uint64, raw []byte) {
+	checkCallTLSRootPopulation(t, seed, raw, false)
+}
+
+func checkCallTLSRootPopulation(t testing.TB, seed uint64, raw []byte, region bool) {
 	t.Helper()
 	ops := callTLSOps()
 	x := dagArrange(t, ops, seed)
@@ -544,15 +550,39 @@ func checkCallTLSPopulation(t testing.TB, seed uint64, raw []byte) {
 	initial := stateRawInitial(face, raw)
 	initial.outcomes = [][4]uint32{{1, 2, 3, 4}, {5, 6, 7, 8}}
 	end := len(ops) * 2
+	if region {
+		// Generate a distinct synthetic ELF entry, retaining the same independent
+		// intent/oracle and the conditional region's actual selected start.
+		data := append([]byte(nil), x.im.data...)
+		binary.LittleEndian.PutUint64(data[24:], x.pcs[end])
+		var err error
+		x.im, err = NewImage(t.Context(), data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x.digest = sha256.Sum256(data)
+	}
+	checkRoot := func(q TransitionProposal) (TransitionCertificate, error) {
+		if region {
+			return CheckRegionTransition(t.Context(), x.im, x.pcs[0], face, q, TransitionLimits{})
+		}
+		return CheckTransition(t.Context(), x.im, face, q, TransitionLimits{})
+	}
 	p := callInventory(t, x, end)
-	proposed, err := ProposeTransition(t.Context(), x.im, p.Cut, TransitionLimits{}, p.Expansions...)
+	var proposed TransitionProposal
+	var err error
+	if region {
+		proposed, err = ProposeRegionTransition(t.Context(), x.im, x.pcs[0], p.Cut, TransitionLimits{}, p.Expansions...)
+	} else {
+		proposed, err = ProposeTransition(t.Context(), x.im, p.Cut, TransitionLimits{}, p.Expansions...)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(proposed, p) { // Ordering is discovery-defined on both independently built inventories.
 		stateSameContextInventory(t, proposed, p)
 	}
-	flat, err := CheckTransition(t.Context(), x.im, face, p, TransitionLimits{})
+	flat, err := checkRoot(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +596,7 @@ func checkCallTLSPopulation(t testing.TB, seed uint64, raw []byte) {
 			before = c.checked.bound
 		}
 		if n == 0 {
-			c, err = CheckTransition(t.Context(), x.im, face, q, TransitionLimits{})
+			c, err = checkRoot(q)
 		} else {
 			c, err = CheckTransitionContinuation(t.Context(), c, q)
 		}
@@ -575,6 +605,9 @@ func checkCallTLSPopulation(t testing.TB, seed uint64, raw []byte) {
 		}
 		if n != 0 {
 			stateInheritedInputs(t, before, c.checked.bound)
+		}
+		if c.checked.bound.ConditionalRegion != region || c.checked.bound.Entry != x.pcs[0] {
+			t.Fatal("call/thread continuation changed root authority")
 		}
 		callTLSAssert(t, c, x, cut, face, initial)
 	}

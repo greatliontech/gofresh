@@ -86,7 +86,7 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 		descriptorState(t, d, 0xfedcba9876543280, -0x12345, raw)
 		count++
 	}
-	if count != 54814 {
+	if count != 54894 {
 		t.Fatal("incomplete semantic descriptor population", count)
 	}
 	for value := uint64(0); value < 256; value++ {
@@ -100,6 +100,11 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 
 func FuzzTransitionDescriptorState(f *testing.F) {
 	descriptors := slices.Collect(to.Descriptors)
+	for index, d := range descriptors {
+		if d.Intent.Operation == to.Clear32 {
+			f.Add(uint32(index), ^uint64(0), int32(0), []byte{255, 128, 1, 0})
+		}
+	}
 	for _, index := range []uint32{0, 17, 31, 255, 8192, 32768, 53418} {
 		f.Add(index, uint64(0x80000000ffffffff), int32(-128), []byte{1, 255, 128, 0})
 	}

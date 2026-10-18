@@ -140,7 +140,7 @@ func TestTransitionExclusionCumulativeResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := newTransitionChecker(t.Context(), im, lm, 0)
+	m, err := newTransitionChecker(t.Context(), im, transitionRoot{entry: im.entry}, lm, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

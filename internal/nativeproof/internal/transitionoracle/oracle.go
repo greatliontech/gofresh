@@ -16,7 +16,9 @@
 // admits byte, 32 and 64 bits; narrow register writes preserve other byte lanes
 // or zero-extend 32 bits. CMP/TEST admit register/immediate 32/64-bit forms;
 // conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
-// operand-free 0f a2, without prefixes. RIP-relative LEA and data accesses use
+// operand-free 0f a2, without prefixes. Register self-XOR admits 32-bit operands,
+// clearing the full register; other XOR shapes are outside this grammar.
+// RIP-relative LEA and data accesses use
 // next IP. Direct CALL uses signed rel32, near RET reads the actual return word,
 // PUSH/POP admit the canonical 64-bit register forms, and SYSCALL is exact 0f05.
 // FS-prefixed MOV admits displacement-only signed disp32 with no index. Other
@@ -56,6 +58,7 @@ const (
 	Pop
 	Return
 	Syscall
+	Clear32 // Self-XOR of a 32-bit register, zero-extending into its full GPR.
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -122,6 +125,8 @@ const (
 	POP58
 	RETC3
 	SYSCALL0F05
+	XOR31
+	XOR33
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

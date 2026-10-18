@@ -132,6 +132,7 @@ func literalInteger(little []byte, signed bool) *big.Int {
 
 func TestDescriptorPopulation(t *testing.T) {
 	want := map[Form]int{
+		XOR31: 40, XOR33: 40,
 		MOV89: 10856, MOV8B: 10856, MOVB8Imm64: 64, MOVB8Imm32: 16,
 		MOVC7: 1357, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
 		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1, CPUID0FA2: 1,
@@ -177,7 +178,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 54814 || len(counts) != len(want) {
+	if len(seen) != 54894 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {

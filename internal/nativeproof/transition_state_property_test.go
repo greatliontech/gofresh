@@ -258,6 +258,11 @@ func (r stateReference) clone() stateReference {
 
 func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
+	if i.Operation == to.Clear32 {
+		r.regs[i.Dst], r.ptrs[i.Dst], r.written[i.Dst] = 0, statePointer{}, true
+		r.flags, r.writer = [6]bool{false, true, false, false, false, true}, to.Clear32
+		return
+	}
 	if i.Operation == to.Jump || i.Operation == to.Branch {
 		return
 	}
@@ -740,6 +745,10 @@ func (d *stateDepthProfile) step(i to.Intent, before stateReference) int {
 		needed := max(d.regs[i.Dst]+1, 2)
 		d.regs[i.Dst] = 2
 		return needed
+	case to.Clear32:
+		h := d.regs[i.Dst] + 3 // Extract32, XOR, then ZExt or flag comparison.
+		d.regs[i.Dst], d.flags = h, [3]int{1, h, h}
+		return h
 	case to.LEA:
 		d.regs[i.Dst] = d.regs[i.Base] + 1
 	case to.Load:
@@ -809,6 +818,21 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 // Encoding choices are constrained only by their representable payload. No
 // semantic operand is reconstructed by parsing the resulting bytes.
 func stateEncoding(i to.Intent, choice uint8) to.Encoding {
+	if i.Operation == to.Clear32 {
+		e := to.Encoding{Form: to.XOR31}
+		if choice&1 != 0 {
+			e.Form = to.XOR33
+		}
+		if i.Dst >= 8 {
+			e.REX = 0x45
+		} else if choice&2 != 0 {
+			e.REX = 0x40
+		}
+		if choice&4 != 0 {
+			e.REX |= 0x42
+		}
+		return e
+	}
 	if i.Width != 0 || i.RIP || i.HighDst || i.HighSrc || i.Operation >= to.Compare {
 		return dagEncoding(i, choice)
 	}
@@ -895,6 +919,9 @@ func (x stateLayout) proposal(cut int) TransitionProposal {
 		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j < cut {
 			n.Successors = []uint64{x.pcs[j+1]}
+			if x.intents[j].Operation == to.Clear32 {
+				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
+			}
 		}
 		p.Nodes = append(p.Nodes, n)
 	}
@@ -1070,7 +1097,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
-		defined := want.writer != to.And || j != 4
+		defined := want.writer != to.And && want.writer != to.Clear32 || j != 4
 		if f.Preserved != (want.writer == 0) || f.Defined != defined || !defined && f.Value.Valid() {
 			t.Fatal("arithmetic flag defined/preserved/value status differs", j, f)
 		}

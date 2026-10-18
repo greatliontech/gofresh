@@ -110,6 +110,15 @@ func Descriptors(yield func(Descriptor) bool) {
 			width = 0
 		}
 		bh, rh := uint8(rex&1)*8, uint8(rex>>2&1)*8
+		if width == 32 && bh == rh {
+			for low := uint8(0); low < 8; low++ {
+				for _, form := range []Form{XOR31, XOR33} {
+					if !emit(Intent{Operation: Clear32, Dst: low + bh}, Encoding{Form: form, REX: rex}) {
+						return
+					}
+				}
+			}
+		}
 		// Physical byte selectors 4..7 without REX designate the high byte of
 		// the first four GPRs. Base registers never use that byte alias rule.
 		byteAliases := func(i Intent) Intent {

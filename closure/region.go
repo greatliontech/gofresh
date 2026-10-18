@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@5"
+const regionRules = "gofresh/source-region-transport@6"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -153,6 +153,9 @@ type checkedRegion struct {
 	// Only bodies actually checked under their actual input states appear here.
 	// Their selected-source and native bindings remain composition obligations.
 	calls []*regionCallProof
+	// Present only for the opt-in straight-line operand-prefix judgment. These
+	// are checked transfer events, never inferred from equal endpoint heaps.
+	prefix *regionPrefixEffects
 }
 
 // openObligations is deliberately not a single "closed" bit. The assembly must

@@ -301,7 +301,7 @@ func TestTransitionContinuationCumulativeBudgets(t *testing.T) {
 	// Find the actual retained union, then leave enough capacity for either the
 	// imported DAG or the new arena alone, but not for their union.
 	root := continuationRoot(t, im, oldCut, face, TransitionLimits{})
-	m, err := newTransitionChecker(t.Context(), root.checked.image, root.checked.limits, 0)
+	m, err := newTransitionChecker(t.Context(), root.checked.image, transitionRoot{entry: root.checked.bound.Entry}, root.checked.limits, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +462,7 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	for _, v := range []TransitionFlag{b.Flags.CF, b.Flags.OF, b.Flags.SF, b.Flags.ZF, b.Flags.AF, b.Flags.PF} {
 		visit(v.Value)
 	}
-	m, err := newTransitionChecker(t.Context(), root.checked.image, root.checked.limits, 0)
+	m, err := newTransitionChecker(t.Context(), root.checked.image, transitionRoot{entry: root.checked.bound.Entry}, root.checked.limits, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

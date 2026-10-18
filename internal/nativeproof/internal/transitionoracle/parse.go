@@ -28,7 +28,18 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		width = 64
 	}
 	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 12 && n <= 15 }
-	if !fs && rex == 0 && (op == 0xe8 || op == 0xc3) {
+	if !fs && (op == 0x31 || op == 0x33) {
+		m := r.unsigned(1)
+		reg, rm := uint8((m/8)%8)+8*((rex/4)%2), uint8(m%8)+8*(rex%2)
+		if width != 32 || m/64 != 3 || reg != rm {
+			return fail("not a 32-bit self-XOR")
+		}
+		d.Intent = Intent{Operation: Clear32, Dst: reg}
+		d.Encoding.Form = XOR31
+		if op == 0x33 {
+			d.Encoding.Form = XOR33
+		}
+	} else if !fs && rex == 0 && (op == 0xe8 || op == 0xc3) {
 		if op == 0xe8 {
 			d.Intent.Operation, d.Encoding.Form, d.Intent.SignedDisp = Call, CALLE8, r.signed(4)
 		} else {

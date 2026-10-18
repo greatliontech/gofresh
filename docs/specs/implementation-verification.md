@@ -422,8 +422,15 @@ entry-to-cut transition MUST satisfy these obligations:
 - **bound-scope** — The claim binds its immutable image, entry, cut, machine and
   inference rules, admissible entry states, memory conditions and interference
   exclusions. An executable-entry claim starts at the entry read from that image's
-  executable format, rather than a substituted symbol or proposed start. All
-  unspecified register bits, flags and memory remain arbitrary. Entry facts and
+  executable format, rather than a substituted symbol or proposed start.
+  Conditional-region claims instead bind an explicitly selected entry within the
+  same owned image, independently of a proposed instruction inventory. The claim
+  retains which entry authority it uses; a conditional-region entry establishes
+  no reachability from the executable entry or omitted prefix. Its initial state
+  includes every state admitted by its explicit entry and frame premises. It
+  cannot apply the executable's root-loading initialization relation: current
+  memory remains arbitrary unless separately established by checked composition.
+  All unspecified register bits, flags and memory remain arbitrary. Entry facts and
   their authority are retained separately from derived outputs; an expected output
   is not an input premise. Retained entry-flag predicates have explicit
   architectural meanings and unchanged identities across later overwrites.
@@ -454,6 +461,11 @@ entry-to-cut transition MUST satisfy these obligations:
   interpreting the target, pushing a return word or inventing an after-call
   state. Expansion choices are untrusted search choices, not premises; an
   expanded callee may itself contain independently excluded boundaries.
+  The same choice may leave register self-XOR as a structural boundary rather
+  than expand its admitted transfer. Its complete incoming guard must then be
+  proved false; admitting an instruction's semantics does not force discovery
+  into an independently excluded arm's successors. Selecting expansion still
+  requires the actual supported operand form and complete successor coverage.
   Invalid bytes at the selected boundary remain a refusal, and cancellation
   or budget exhaustion cannot select a successful fallback boundary.
   Truncation, unavailable bytes,
@@ -547,7 +559,13 @@ entry-to-cut transition MUST satisfy these obligations:
 - **conditional-composition** — A successor transition starts at the checked cut
   under the same bound image and compatible origin, state, memory, activation,
   thread and machine premises. The cut instruction belongs to that successor's
-  executed scope. A newly required primitive or context premise must follow from
+  executed scope. Composition retains the original entry authority and entry;
+  extending a conditional-region claim never upgrades it to executable-entry
+  reachability. Root inclusion, transfer closure, complete-cut coverage and the
+  preserved frame remain obligations over the entire composed scope. The cut's
+  retained actual instruction and incoming state must suffice for the successor's
+  claimed uses; a matching numeric boundary alone does not establish that relation.
+  A newly required primitive or context premise must follow from
   the predecessor's retained conditions or be established by a fresh root
   judgment; continuation cannot strengthen them silently.
   Composition preserves original entry variables, prior primitive-outcome
@@ -602,6 +620,13 @@ source/native relation MUST satisfy these obligations:
   explicitly maps source arguments to native inputs and source results to the
   projected native output bits, retaining all preconditions and preserved-context
   obligations. Matching names or digests cannot replace these bindings.
+  A bounded region relation may instead bind an actual source operation's
+  evaluated operands before its execution and a native transition's unexecuted
+  boundary, retaining the full selected source root and the exact covered prefix.
+  A proposed representation of typed source globals by disjoint owned image
+  extents is an untrusted scope witness. Its widths, byte interpretation, source
+  and image ownership, and pointer provenance must be checked against the actual
+  transfers and uses; names, addresses and equal initial bytes supply no association.
 - **all-input-relation** — The checked proposition relates typed scalar values,
   effects and exceptional outcomes for every admitted input and every admissible
   native entry state, including arbitrary unspecified scratch bits and flags.
@@ -614,6 +639,16 @@ source/native relation MUST satisfy these obligations:
   this relation. Two pure computations with the same interface qualify only if
   their typed values and the other claimed behaviors actually correspond; the
   proposition is semantic, not equality of declaration names.
+  For a region representation, the initial relation includes arbitrary prior
+  typed values and corresponding native bytes, rather than proposed final values.
+  Checked transfer closure establishes the represented current state and actual
+  operands at the cut for every such initial state and arbitrary native scratch
+  state. Every source observable effect, exceptional path and callback, every
+  actual native access, and preservation outside the permitted write footprint
+  must be accounted for. Equal endpoints cannot hide an extra effect or a read
+  before overwrite. This requires a checked effect relation, not necessarily
+  one-to-one source/native access traces: permitted elimination, combining and
+  administrative steps require their own checked justification.
 - **control-and-calls** — Coverage includes every source and native branch and
   terminal path within the bound scopes. A merged source value, including a phi,
   uses its actual predecessor and path condition; an omitted branch requires a
@@ -654,6 +689,14 @@ source/native relation MUST satisfy these obligations:
   Ordinary runtime reuse still requires the complete coverage of
   REQ-impl-build-selection and separately established producing, current and
   historical applicability evidence under the existing result model.
+  A region representation remains fixed throughout its claimed composition.
+  Each continuation must establish that representation against its actual uses
+  or consume a separately established interface carrying the required relation.
+  The witness supplies no unrestricted source-object-to-address fact, complete
+  function equivalence, or semantics for an unexecuted call or native operation.
+  Multiple representations are permitted when their complete claimed behavior
+  satisfies the relation; uniqueness is not a premise. Whole-source actual-use
+  coverage and reachability of a conditional native region remain separate proofs.
 
 ## Conditional descriptor and callback transfer
 
