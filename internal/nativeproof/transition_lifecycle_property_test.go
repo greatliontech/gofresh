@@ -18,6 +18,9 @@ func lifecycleProposal(p TransitionProposal) TransitionProposal {
 
 func lifecycleFace(extra uint8) TransitionInterface {
 	f := transitionFace()
+	if extra&128 != 0 {
+		f.ImageRegions = []Span{{testEntry, testEntry + 1}}
+	}
 	for j := int64(0); j < int64(extra%17); j++ {
 		off := 16 + 8*j
 		f.Regions = append(f.Regions, RelativeRegion{RelativeSpan{off, off + 8}, true, false})
@@ -33,6 +36,7 @@ func lifecycleFace(extra uint8) TransitionInterface {
 // independently copied here before a different projection is deliberately changed.
 func lifecycleSnapshot(b TransitionBound) TransitionBound {
 	b.Interface.Regions = slices.Clone(b.Interface.Regions)
+	b.Interface.ImageRegions = slices.Clone(b.Interface.ImageRegions)
 	b.Interface.Words = slices.Clone(b.Interface.Words)
 	b.ExcludedOrigins = slices.Clone(b.ExcludedOrigins)
 	b.InitialMemory = slices.Clone(b.InitialMemory)
@@ -48,7 +52,7 @@ func lifecycleSnapshot(b TransitionBound) TransitionBound {
 // Mutations touch caller-owned containers only, never private immutable arenas.
 // This is lifecycle evidence alongside the separate interface/transfer domains.
 func FuzzTransitionLifecycle(f *testing.F) {
-	for _, extra := range []uint8{0, 1, 16} {
+	for _, extra := range []uint8{0, 1, 16, 128, 129, 144} {
 		for _, checkpoint := range []uint32{0, 1, 0xffffffff} {
 			f.Add(extra, checkpoint)
 		}
@@ -94,6 +98,9 @@ func FuzzTransitionLifecycle(f *testing.F) {
 			supplied = Image{}
 			for i := range face.Regions {
 				face.Regions[i] = RelativeRegion{}
+			}
+			for i := range face.ImageRegions {
+				face.ImageRegions[i] = Span{}
 			}
 			for i := range face.Words {
 				face.Words[i]++
@@ -149,6 +156,9 @@ func FuzzTransitionLifecycle(f *testing.F) {
 			}
 			for i := range projection.Interface.Regions {
 				projection.Interface.Regions[i] = RelativeRegion{}
+			}
+			for i := range projection.Interface.ImageRegions {
+				projection.Interface.ImageRegions[i] = Span{}
 			}
 			for i := range projection.Memory {
 				projection.Memory[i] = TransitionByte{}

@@ -25,7 +25,17 @@ import (
 type statePointer struct {
 	valid bool
 	off   int64
+	image bool
+	load  int
 }
+
+type stateLocation struct {
+	image bool
+	off   int64
+}
+
+func (p stateLocation) add(n int64) stateLocation      { p.off += n; return p }
+func stateByteLocation(b TransitionByte) stateLocation { return stateLocation{b.Image, b.Offset} }
 
 type stateByte struct {
 	value byte
@@ -36,21 +46,22 @@ type stateByte struct {
 type stateAccess struct {
 	instruction int
 	write       bool
-	off         int64
+	off         stateLocation
 }
 
 type stateReference struct {
 	origin  uint64
 	regs    [16]uint64
 	ptrs    [16]statePointer
-	memory  map[int64]stateByte
+	memory  map[stateLocation]stateByte
 	words   map[int64]uint64
 	written [16]bool
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
 	flags    [6]bool
 	writer   to.Operation
 	accesses []stateAccess
-	frame    map[int64]bool
+	frame    map[stateLocation]bool
+	loads    []interfaceMapping
 }
 
 func stateFace(modulus, residue uint64) TransitionInterface {
@@ -70,7 +81,7 @@ func stateFace(modulus, residue uint64) TransitionInterface {
 
 func stateInitial(face TransitionInterface, seed uint64) stateReference {
 	rng := rand.New(rand.NewPCG(seed, 0x5154415445))
-	r := stateReference{memory: map[int64]stateByte{}, words: map[int64]uint64{}, frame: map[int64]bool{}}
+	r := stateReference{memory: map[stateLocation]stateByte{}, words: map[int64]uint64{}, frame: map[stateLocation]bool{}}
 	// This range is deliberately far from every synthetic image. It is selected
 	// from the interface, not from the checker's origin exclusions or outputs.
 	first := face.Origin.Min + (face.Origin.Residue+face.Origin.Modulus-face.Origin.Min%face.Origin.Modulus)%face.Origin.Modulus
@@ -78,14 +89,23 @@ func stateInitial(face TransitionInterface, seed uint64) stateReference {
 	for j := range r.regs {
 		r.regs[j] = rng.Uint64()
 	}
-	r.regs[4], r.ptrs[4] = r.origin, statePointer{true, 0}
+	r.regs[4], r.ptrs[4] = r.origin, statePointer{valid: true}
 	for j := range r.flags {
 		r.flags[j] = rng.Uint64()&1 != 0
 	}
 	for _, region := range face.Regions {
 		for off := region.Bytes.Start; off < region.Bytes.End; off++ {
-			if _, exists := r.memory[off]; !exists {
-				r.memory[off] = stateByte{value: byte(rng.Uint64())}
+			key := stateLocation{off: off}
+			if _, exists := r.memory[key]; !exists {
+				r.memory[key] = stateByte{value: byte(rng.Uint64())}
+			}
+		}
+	}
+	for _, region := range face.ImageRegions {
+		for addr := region.Start; addr < region.End; addr++ {
+			key := stateLocation{image: true, off: int64(addr)}
+			if _, exists := r.memory[key]; !exists {
+				r.memory[key] = stateByte{value: byte(rng.Uint64())}
 			}
 		}
 	}
@@ -93,7 +113,7 @@ func stateInitial(face TransitionInterface, seed uint64) stateReference {
 		v := rng.Uint64()
 		r.words[off] = v
 		for lane := 0; lane < 8; lane++ {
-			r.memory[off+int64(lane)] = stateByte{value: byte(v >> (8 * lane))}
+			r.memory[stateLocation{off: off + int64(lane)}] = stateByte{value: byte(v >> (8 * lane))}
 		}
 	}
 	return r
@@ -114,28 +134,47 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 		data = data[used:]
 		return out
 	}
-	r := stateReference{memory: map[int64]stateByte{}, words: map[int64]uint64{}, frame: map[int64]bool{}}
+	r := stateReference{memory: map[stateLocation]stateByte{}, words: map[int64]uint64{}, frame: map[stateLocation]bool{}}
 	index := binary.LittleEndian.Uint64(read(8))
 	first := face.Origin.Min + (face.Origin.Residue+face.Origin.Modulus-face.Origin.Min%face.Origin.Modulus)%face.Origin.Modulus
 	r.origin = first + index%((face.Origin.Max-first)/face.Origin.Modulus+1)*face.Origin.Modulus
 	for j := range r.regs {
 		r.regs[j] = binary.LittleEndian.Uint64(read(8))
 	}
-	r.regs[4], r.ptrs[4] = r.origin, statePointer{true, 0}
+	r.regs[4], r.ptrs[4] = r.origin, statePointer{valid: true}
 	flags := read(1)[0]
 	for j := range r.flags {
 		r.flags[j] = flags&(1<<j) != 0
 	}
 	for _, region := range face.Regions {
 		for off := region.Bytes.Start; off < region.Bytes.End; off++ {
-			r.memory[off] = stateByte{}
+			r.memory[stateLocation{off: off}] = stateByte{}
 		}
 	}
-	var offsets []int64
+	for _, region := range face.ImageRegions {
+		for addr := region.Start; addr < region.End; addr++ {
+			r.memory[stateLocation{true, int64(addr)}] = stateByte{}
+		}
+	}
+	var offsets []stateLocation
 	for off := range r.memory {
 		offsets = append(offsets, off)
 	}
-	slices.Sort(offsets)
+	slices.SortFunc(offsets, func(a, b stateLocation) int {
+		if a.image != b.image {
+			if a.image {
+				return 1
+			}
+			return -1
+		}
+		if a.off < b.off {
+			return -1
+		}
+		if a.off > b.off {
+			return 1
+		}
+		return 0
+	})
 	for _, off := range offsets {
 		var value byte
 		if len(data) != 0 {
@@ -146,7 +185,7 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 	for _, off := range face.Words {
 		var word uint64
 		for lane := 0; lane < 8; lane++ {
-			word |= uint64(r.memory[off+int64(lane)].value) << (8 * lane)
+			word |= uint64(r.memory[stateLocation{off: off + int64(lane)}].value) << (8 * lane)
 		}
 		r.words[off] = word
 	}
@@ -155,7 +194,7 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 
 func (r stateReference) clone() stateReference {
 	memory, frame := r.memory, r.frame
-	r.memory, r.frame = map[int64]stateByte{}, map[int64]bool{}
+	r.memory, r.frame = map[stateLocation]stateByte{}, map[stateLocation]bool{}
 	for off, v := range memory {
 		r.memory[off] = v
 	}
@@ -166,20 +205,25 @@ func (r stateReference) clone() stateReference {
 	return r
 }
 
-func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int) {
+func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
 	if i.Operation == to.Jump {
 		return
 	}
 	address := r.regs[i.Base] + uint64(i.SignedDisp)
-	access := func(write bool) int64 {
+	access := func(write bool) stateLocation {
 		t.Helper()
-		if !r.ptrs[i.Base].valid || address != r.origin+uint64(r.ptrs[i.Base].off+i.SignedDisp) {
+		p := r.ptrs[i.Base]
+		base := r.origin
+		if p.image {
+			base = 0
+		}
+		if !p.valid || address != base+uint64(p.off+i.SignedDisp) {
 			t.Fatal("invalid reference address construction")
 		}
-		off := int64(address - r.origin)
+		off := stateLocation{p.image, int64(address - base)}
 		for j := int64(0); j < 8; j++ {
-			if _, ok := r.memory[off+j]; !ok {
+			if _, ok := r.memory[off.add(j)]; !ok {
 				t.Fatal("reference access outside declared bytes", off)
 			}
 		}
@@ -197,8 +241,8 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int) {
 			if ptr.valid {
 				b.lane = lane
 			}
-			r.memory[off+int64(lane)] = b
-			r.frame[off+int64(lane)] = true
+			r.memory[off.add(int64(lane))] = b
+			r.frame[off.add(int64(lane))] = true
 		}
 		return
 	}
@@ -214,12 +258,27 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int) {
 			p.off += i.SignedDisp
 		}
 		r.regs[i.Dst], r.ptrs[i.Dst] = address, p
+	case to.LEARIP:
+		if len(nextPC) != 1 {
+			t.Fatal("RIP intent requires independently located next PC")
+		}
+		v := nextPC[0] + uint64(i.SignedDisp)
+		found := -1
+		for j, load := range r.loads {
+			if v >= load.start && v < load.end {
+				found = j
+			}
+		}
+		if found < 0 {
+			t.Fatal("reference RIP address has no mapping")
+		}
+		r.regs[i.Dst], r.ptrs[i.Dst] = v, statePointer{valid: true, image: true, off: int64(v), load: found}
 	case to.Load:
 		off := access(false)
 		var value uint64
 		p := r.memory[off].ptr
 		for lane := uint8(0); lane < 8; lane++ {
-			b := r.memory[off+int64(lane)]
+			b := r.memory[off.add(int64(lane))]
 			value |= uint64(b.value) << (8 * lane)
 			if b.ptr != r.memory[off].ptr || b.lane != lane {
 				p = statePointer{}
@@ -239,7 +298,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int) {
 		r.regs[i.Dst] &= i.Immediate
 		z := r.regs[i.Dst]
 		r.flags = [6]bool{false, z == 0, false, z>>63 != 0, false, bits.OnesCount8(byte(z))%2 == 0}
-		if !r.ptrs[i.Dst].valid {
+		if !r.ptrs[i.Dst].valid || r.ptrs[i.Dst].image {
 			t.Fatal("valid AND construction lost its pointer")
 		}
 		r.ptrs[i.Dst].off = int64(z - r.origin)
@@ -355,7 +414,7 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 	if len(b.InitialMemory) != len(initial.memory) {
 		t.Fatalf("initial byte keyset size %d, expected %d", len(b.InitialMemory), len(initial.memory))
 	}
-	byteSeen := map[int64]bool{}
+	byteSeen := map[stateLocation]bool{}
 	type wordLane struct {
 		word br.Term
 		bit  uint64
@@ -367,12 +426,13 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 		}
 	}
 	for _, b := range b.InitialMemory {
-		want, ok := initial.memory[b.Offset]
-		if !ok || byteSeen[b.Offset] || b.Pointer != (OriginPointer{}) || b.PointerLane != 0 {
+		key := stateByteLocation(b)
+		want, ok := initial.memory[key]
+		if !ok || byteSeen[key] || b.Pointer != nil || b.PointerLane != 0 {
 			t.Fatal("initial byte keyset/provenance differs", b.Offset)
 		}
-		byteSeen[b.Offset] = true
-		if lane, grouped := wordBytes[b.Offset]; grouped {
+		byteSeen[key] = true
+		if lane, grouped := wordBytes[b.Offset]; grouped && !b.Image {
 			v := b.Value.View()
 			if v.Op != br.Extract || v.Sort != br.Bits(8) || v.Immediate != lane.bit || len(v.Args) != 1 || v.Args[0] != lane.word {
 				t.Fatal("initial word byte has wrong independent slice", b.Offset)
@@ -391,7 +451,7 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 		}
 	}
 	for _, b := range b.InitialMemory {
-		if stateEval(t, b.Value, values) != uint64(initial.memory[b.Offset].value) {
+		if stateEval(t, b.Value, values) != uint64(initial.memory[stateByteLocation(b)].value) {
 			t.Fatal("initial byte value differs", b.Offset)
 		}
 	}
@@ -433,35 +493,46 @@ func stateExpressionDepthRefused(t testing.TB, c TransitionCertificate, err erro
 type stateDepthProfile struct {
 	regs   [16]int
 	flags  [3]int
-	memory map[int64]int
+	memory map[stateLocation]int
 }
 
 func stateInitialDepth(face TransitionInterface) stateDepthProfile {
-	d := stateDepthProfile{memory: map[int64]int{}, flags: [3]int{1, 1, 1}}
+	d := stateDepthProfile{memory: map[stateLocation]int{}, flags: [3]int{1, 1, 1}}
 	for j := range d.regs {
 		d.regs[j] = 1
 	}
 	for _, r := range face.Regions {
 		for off := r.Bytes.Start; off < r.Bytes.End; off++ {
-			d.memory[off] = 1
+			d.memory[stateLocation{off: off}] = 1
+		}
+	}
+	for _, r := range face.ImageRegions {
+		for addr := r.Start; addr < r.End; addr++ {
+			d.memory[stateLocation{true, int64(addr)}] = 1
 		}
 	}
 	for _, off := range face.Words {
 		for j := int64(0); j < 8; j++ {
-			d.memory[off+j] = 2
+			d.memory[stateLocation{off: off + j}] = 2
 		}
 	}
 	return d
 }
 
 func (d *stateDepthProfile) step(i to.Intent, before stateReference) int {
-	address := int64(before.regs[i.Base] + uint64(i.SignedDisp) - before.origin)
+	base := before.origin
+	if before.ptrs[i.Base].image {
+		base = 0
+	}
+	address := stateLocation{before.ptrs[i.Base].image, int64(before.regs[i.Base] + uint64(i.SignedDisp) - base)}
 	switch i.Operation {
 	case to.Jump:
 		return 1
 	case to.MoveRegister:
 		d.regs[i.Dst] = d.regs[i.Src]
 	case to.MoveImmediate:
+		d.regs[i.Dst] = 1
+	case to.LEARIP:
 		d.regs[i.Dst] = 1
 	case to.MoveImmediate32:
 		needed := max(d.regs[i.Dst]+1, 2)
@@ -472,7 +543,7 @@ func (d *stateDepthProfile) step(i to.Intent, before stateReference) int {
 	case to.Load:
 		h := d.memory[address]
 		for j := int64(1); j < 8; j++ {
-			h = 1 + max(h, d.memory[address+j])
+			h = 1 + max(h, d.memory[address.add(j)])
 		}
 		d.regs[i.Dst] = h
 	case to.Store, to.StoreImmediate:
@@ -481,7 +552,7 @@ func (d *stateDepthProfile) step(i to.Intent, before stateReference) int {
 			h = d.regs[i.Src] + 1
 		}
 		for j := int64(0); j < 8; j++ {
-			d.memory[address+j] = h
+			d.memory[address.add(j)] = h
 		}
 		return h
 	case to.Subtract:
@@ -522,7 +593,7 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 		}
 	}
 	for _, b := range c.checked.bound.Memory {
-		if stateTermHeight(b.Value, memo) != d.memory[b.Offset] {
+		if stateTermHeight(b.Value, memo) != d.memory[stateByteLocation(b)] {
 			t.Fatal("byte constructor-depth premise changed", b.Offset)
 		}
 	}
@@ -561,6 +632,9 @@ func stateEncoding(i to.Intent, choice uint8) to.Encoding {
 		if i.Operation == to.LEA {
 			e.Form = to.LEA8D
 		}
+	case to.LEARIP:
+		e.Form, e.REX, e.DispBytes = to.LEA8D, 0x48|i.Dst/8<<2|choice&3, 4
+		return e
 	case to.Store:
 		mem, e.Form, r, b = true, to.MOV89, i.Src, i.Base
 	case to.StoreImmediate:
@@ -599,11 +673,12 @@ func stateEncoding(i to.Intent, choice uint8) to.Encoding {
 }
 
 type stateLayout struct {
-	im      *Image
-	digest  [32]byte
-	pcs     []uint64 // logical order; includes the unexecuted endpoint
-	encoded [][]byte
-	intents []to.Intent // original intent, retained independently of emitted bytes
+	im       *Image
+	digest   [32]byte
+	pcs      []uint64 // logical order; includes the unexecuted endpoint
+	encoded  [][]byte
+	intents  []to.Intent // original intent, retained independently of emitted bytes
+	mappings []interfaceMapping
 }
 
 func (x stateLayout) proposal(cut int) TransitionProposal {
@@ -708,25 +783,37 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 	if len(b.Accesses) != len(want.accesses) {
 		t.Fatal("access count", len(b.Accesses), len(want.accesses))
 	}
-	frame := map[int64]bool{}
+	frame := map[stateLocation]bool{}
 	for j, a := range want.accesses {
 		kind := FrameRead
 		if a.write {
 			kind = FrameWrite
 			for k := int64(0); k < 8; k++ {
-				frame[a.off+k] = true
+				frame[a.off.add(k)] = true
 			}
 		}
-		if b.Accesses[j] != (TransitionAccess{x.pcs[a.instruction], kind, RelativeSpan{a.off, a.off + 8}}) {
+		if b.Accesses[j] != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + 8}, Image: a.off.image}) {
 			t.Fatal("ordered access differs", j, b.Accesses[j], a)
 		}
 	}
 	if !reflect.DeepEqual(frame, want.frame) {
 		t.Fatal("write frame differs")
 	}
-	pointer := func(got OriginPointer, p statePointer) {
+	pointer := func(got TransitionPointer, p statePointer) {
 		t.Helper()
-		expected := OriginPointer{}
+		var expected TransitionPointer
+		if p.valid && p.image {
+			actual, ok := got.(ImagePointer)
+			if !ok || actual.Address != uint64(p.off) || actual.owner != &x.im.data[0] {
+				t.Fatal("image provenance differs", got, p)
+			}
+			// The reference's fixture mapping, not the returned pointer, fixes
+			// ownership and logical extent. Address-to-load checks are separate.
+			if actual.load != p.load || p.load < 0 || p.load >= len(x.mappings) || actual.Address < x.mappings[p.load].start || actual.Address > x.mappings[p.load].end {
+				t.Fatal("image mapping provenance differs")
+			}
+			return
+		}
 		if p.valid {
 			expected = OriginPointer{Origin: b.Origin, Offset: p.off}
 		}
@@ -753,13 +840,14 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 	if len(b.Memory) != len(want.memory) {
 		t.Fatal("final byte keyset size", len(b.Memory), len(want.memory))
 	}
-	seen := map[int64]bool{}
+	seen := map[stateLocation]bool{}
 	for _, v := range b.Memory {
-		w, ok := want.memory[v.Offset]
-		if !ok || seen[v.Offset] {
+		key := stateByteLocation(v)
+		w, ok := want.memory[key]
+		if !ok || seen[key] {
 			t.Fatal("extra/duplicate final byte", v.Offset)
 		}
-		seen[v.Offset] = true
+		seen[key] = true
 		if v.Value.Sort() != br.Bits(8) || stateEval(t, v.Value, values) != uint64(w.value) {
 			t.Fatal("final byte differs", v.Offset)
 		}
@@ -767,7 +855,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		if v.PointerLane != w.lane {
 			t.Fatal("pointer lane differs", v.Offset)
 		}
-		if !frame[v.Offset] && w != initial.memory[v.Offset] {
+		if !frame[key] && w != initial.memory[key] {
 			t.Fatal("reference changed byte outside write frame")
 		}
 	}

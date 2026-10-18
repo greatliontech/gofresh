@@ -9,7 +9,7 @@ type Descriptor struct {
 	Encoding Encoding
 }
 
-// Descriptors visits each structural spelling once (14,642 descriptors). It can
+// Descriptors visits each structural spelling once (14,706 descriptors). It can
 // be used directly as a range-over-function iterator; false stops iteration.
 // The finite dimensions are all opcode forms, allowed REX bytes, ModRM register
 // selectors and modes, optional/required SIB bases and all four no-index scales.
@@ -43,6 +43,11 @@ func Descriptors(yield func(Descriptor) bool) {
 		}
 		if rex&4 != 0 {
 			rHigh = 8
+		}
+		for reg := uint8(0); reg < 8; reg++ {
+			if !yield(Descriptor{Intent: Intent{Operation: LEARIP, Dst: reg + rHigh}, Encoding: Encoding{Form: LEA8D, REX: rex, DispBytes: 4}}) {
+				return
+			}
 		}
 		for _, f := range []Form{SUB2D, AND25} {
 			op := Subtract

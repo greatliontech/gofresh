@@ -39,7 +39,7 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 		imm := binary.LittleEndian.Uint64(record[8:16])
 		disp := int64(int32(binary.LittleEndian.Uint32(record[24:28])))
 		var i to.Intent
-		switch record[0] % 9 {
+		switch record[0] % 10 {
 		case 0:
 			i = to.Intent{Operation: to.MoveRegister, Dst: dst, Src: src}
 		case 1:
@@ -58,6 +58,8 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 			i = to.Intent{Operation: to.Subtract, Dst: dst, Immediate: uint64(int64(int32(imm)))}
 		case 8:
 			i = to.Intent{Operation: to.And, Dst: dst, Immediate: uint64(int64(int32(imm)))}
+		case 9:
+			i = to.Intent{Operation: to.LEARIP, Dst: dst, SignedDisp: disp}
 		}
 		program = append(program, stateOp(i, record[4]))
 		if len(program) >= instructionLimit {
@@ -107,10 +109,16 @@ func sequenceLimits(face TransitionInterface, native, cardinality, continuations
 			declared.Add(declared, n)
 		}
 	}
+	for _, region := range face.ImageRegions {
+		n := new(big.Int).Sub(interfaceU(region.End), interfaceU(region.Start))
+		if n.Sign() > 0 {
+			declared.Add(declared, n)
+		}
+	}
 	if declared.Cmp(big.NewInt(1<<20+1)) > 0 {
 		declared.SetInt64(1<<20 + 1) // larger declarations refuse before initialization
 	}
-	r, w := len(face.Regions), len(face.Words)
+	r, w := len(face.Regions)+len(face.ImageRegions), len(face.Words)
 	levels := 1
 	for remaining := cardinality; remaining > 0; remaining /= 2 {
 		levels++
@@ -148,7 +156,7 @@ func sequenceLimits(face TransitionInterface, native, cardinality, continuations
 // Integer offset arithmetic is unbounded until its representability is proved.
 // The rounded domain endpoints are the pre-exclusion endpoints: removing image
 // collisions cannot repair an invalid envelope or pointer arithmetic premise.
-func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, r stateReference, i to.Intent) string {
+func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, r stateReference, i to.Intent, nextPC ...uint64) string {
 	offset := func(v *big.Int) string {
 		if !v.IsInt64() {
 			return "transition-origin"
@@ -167,9 +175,30 @@ func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, 
 	}
 	advance := func(p statePointer, delta int64) (*big.Int, string) {
 		v := new(big.Int).Add(big.NewInt(p.off), big.NewInt(delta))
+		if p.image {
+			load := r.loads[p.load]
+			if v.Cmp(interfaceU(load.start)) < 0 || v.Cmp(interfaceU(load.end)) > 0 || v.Cmp(new(big.Int).Lsh(big.NewInt(1), 47)) >= 0 {
+				return v, "transition-image"
+			}
+			return v, ""
+		}
 		return v, offset(v)
 	}
 	switch i.Operation {
+	case to.LEARIP:
+		if len(nextPC) != 1 {
+			panic("RIP reference needs located next PC")
+		}
+		v := new(big.Int).Add(interfaceU(nextPC[0]), big.NewInt(i.SignedDisp))
+		if v.Sign() < 0 || v.Cmp(new(big.Int).Lsh(big.NewInt(1), 47)) >= 0 {
+			return "transition-image"
+		}
+		for _, load := range r.loads {
+			if v.Cmp(interfaceU(load.start)) >= 0 && v.Cmp(interfaceU(load.end)) < 0 {
+				return ""
+			}
+		}
+		return "transition-image"
 	case to.Load, to.Store, to.StoreImmediate:
 		p := r.ptrs[i.Base]
 		if !p.valid {
@@ -180,6 +209,22 @@ func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, 
 			return fault
 		}
 		hi := new(big.Int).Add(lo, big.NewInt(8))
+		if p.image {
+			load := r.loads[p.load]
+			if hi.Cmp(interfaceU(load.end)) > 0 {
+				return "transition-image"
+			}
+			granted := load.write && !load.execute
+			if i.Operation == to.Load {
+				granted = load.read
+			}
+			for _, region := range face.ImageRegions {
+				if granted && lo.Cmp(interfaceU(region.Start)) >= 0 && hi.Cmp(interfaceU(region.End)) <= 0 {
+					return ""
+				}
+			}
+			return "transition-permission"
+		}
 		if fault = offset(hi); fault != "" {
 			return fault
 		}
@@ -206,7 +251,7 @@ func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, 
 	case to.And:
 		p := r.ptrs[i.Dst]
 		k := new(big.Int).Neg(big.NewInt(int64(i.Immediate)))
-		if !p.valid || k.Sign() <= 0 || !k.IsInt64() {
+		if !p.valid || p.image || k.Sign() <= 0 || !k.IsInt64() {
 			return "transition-alignment"
 		}
 		odd := new(big.Int).Set(k)
@@ -235,7 +280,12 @@ func sequenceMappingSize(count int) int {
 	return ((count+1)*64 + 4095) / 4096 * 4096
 }
 
-func sequenceLayout(t testing.TB, program []stateInstruction, seed uint64) stateLayout {
+func sequenceLayout(t testing.TB, program []stateInstruction, seed uint64, dataLoads ...interfaceMapping) stateLayout {
+	t.Helper()
+	return sequenceLayoutAt(t, program, seed, testEntry, dataLoads...)
+}
+
+func sequenceLayoutAt(t testing.TB, program []stateInstruction, seed, entry uint64, dataLoads ...interfaceMapping) stateLayout {
 	t.Helper()
 	type block struct {
 		start, end, capacity int
@@ -283,9 +333,9 @@ func sequenceLayout(t testing.TB, program []stateInstruction, seed uint64) state
 	for b, block := range blocks {
 		off := positions[b]
 		for j := block.start; j < block.end; j++ {
-			x.pcs[j] = testEntry + uint64(off)
+			x.pcs[j] = entry + uint64(off)
 			if program[j].intent.Operation == to.Jump {
-				target := testEntry + uint64(positions[b+1])
+				target := entry + uint64(positions[b+1])
 				disp := int64(target) - int64(x.pcs[j]+5)
 				choice := uint8(1)
 				short := int64(target) - int64(x.pcs[j]+2)
@@ -303,12 +353,15 @@ func sequenceLayout(t testing.TB, program []stateInstruction, seed uint64) state
 			off += len(x.encoded[j])
 		}
 		if b == len(blocks)-1 {
-			x.pcs[len(program)] = testEntry + uint64(off)
+			x.pcs[len(program)] = entry + uint64(off)
 			x.encoded[len(program)] = []byte{0x0f, 0x0b}
 			copy(code[off:], x.encoded[len(program)])
 		}
 	}
-	raw := elfBytes(code)
+	x.mappings = append([]interfaceMapping{{start: entry, end: entry + uint64(len(code)), file: 0x1000, filesz: uint64(len(code)), read: true, execute: true}}, dataLoads...)
+	raw := transitionImageELF(t, code, dataLoads)
+	binary.LittleEndian.PutUint64(raw[24:], entry)
+	binary.LittleEndian.PutUint64(raw[80:], entry)
 	x.digest = sha256.Sum256(raw)
 	var err error
 	x.im, err = NewImage(t.Context(), raw)
@@ -353,6 +406,14 @@ func sequenceRefused(t testing.TB, c TransitionCertificate, err error, premise s
 }
 
 func sequenceCardinality(face TransitionInterface) int {
+	image := TransitionInterface{}
+	for _, span := range face.ImageRegions {
+		image.Regions = append(image.Regions, RelativeRegion{Bytes: RelativeSpan{int64(span.Start), int64(span.End)}})
+	}
+	imageCount := 0
+	if len(image.Regions) != 0 {
+		imageCount = sequenceCardinality(image)
+	}
 	var spans []RelativeSpan
 	for _, region := range face.Regions {
 		spans = append(spans, region.Bytes)
@@ -374,7 +435,7 @@ func sequenceCardinality(face TransitionInterface) int {
 		}
 	}
 	// The independent admission oracle already bounded the declared sum by 1MiB.
-	return int(count)
+	return int(count) + imageCount
 }
 
 func sequenceExclusions(t testing.TB, b TransitionBound, verdict interfaceVerdict) {
@@ -397,41 +458,63 @@ func sequenceExclusions(t testing.TB, b TransitionBound, verdict interfaceVerdic
 }
 
 // The same whole-certificate oracle serves arbitrary interleavings and arbitrary
-// admitted geometry. The initial state is independently supplied; reference
-// execution runs before Encode. A semantic or depth failure stops the reference
-// before the unsupported operation, whose exact PC is checked after layout.
+// admitted geometry. Initial values and semantic operands are independently
+// supplied; layout fixes RIP's next PC without borrowing decoded operands or
+// checker state. A semantic or depth failure stops the reference before the
+// unsupported operation, whose exact PC is checked against that layout.
 // Every accepted root and continuation is checked in full. Re-running the small
 // reference to selected cuts avoids retaining a byte-map clone per instruction
 // for the large-geometry domain. Uninstantiated input tails carry no theorem.
-func checkStateSequence(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout uint64, instructionLimit int) {
+func checkStateSequence(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout uint64, instructionLimit int, dataLoads ...interfaceMapping) {
 	t.Helper()
-	loads := [][2]uint64{{testEntry, testEntry + uint64(sequenceMappingSize(len(program)))}}
+	checkStateSequenceAt(t, face, program, raw, cutBits, layout, testEntry, instructionLimit, dataLoads...)
+}
+
+type sequenceOutcome struct {
+	cut           int
+	premise       string
+	configuration bool
+}
+
+// Returning the independently predicted frontier lets geometry families require
+// successful complete controls beside each negative, rather than passing a
+// population consisting solely of correctly refused constructions.
+func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout, entry uint64, instructionLimit int, dataLoads ...interfaceMapping) sequenceOutcome {
+	t.Helper()
+	loads := [][2]uint64{{entry, entry + uint64(sequenceMappingSize(len(program)))}}
+	mappings := append([]interfaceMapping{{start: loads[0][0], end: loads[0][1], file: 0x1000, filesz: loads[0][1] - loads[0][0], read: true, execute: true}}, dataLoads...)
+	for _, m := range dataLoads {
+		loads = append(loads, [2]uint64{m.start, m.end})
+	}
+	// Layout supplies PCs, never reconstructed semantic operands. RIP uses the
+	// independently encoded instruction's full length and its original intent.
+	x := sequenceLayoutAt(t, program, layout, entry, dataLoads...)
 	preflight := TransitionLimits{RelationLimits: RelationLimits{Instructions: instructionLimit}, Regions: 256, Bytes: 1 << 20}
-	verdict := interfaceOracleLimits(t, face, loads, preflight)
+	verdict := interfaceOracleLimits(t, face, loads, preflight, mappings...)
 	// Invalid inventories are never materialized into reference byte maps.
 	if verdict.premise != "" {
 		limits, representable := sequenceLimits(face, len(program), 0, 0, instructionLimit)
-		x := sequenceLayout(t, program, layout)
 		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 		if !representable {
 			sequenceRefused(t, c, err, "transition-budget", 0)
+			return sequenceOutcome{premise: "transition-budget", configuration: true}
 		} else {
 			pc := x.pcs[0]
-			if len(face.Regions) > limits.Regions || len(face.Words) > limits.Bytes/8 {
+			if len(face.Regions)+len(face.ImageRegions) > limits.Regions || len(face.Words) > limits.Bytes/8 {
 				pc = 0
 			}
 			sequenceRefused(t, c, err, verdict.premise, pc)
 		}
-		return
+		return sequenceOutcome{premise: verdict.premise}
 	}
 	cardinality := sequenceCardinality(face)
 	if limits, ok := sequenceLimits(face, len(program), cardinality, 0, instructionLimit); !ok {
-		x := sequenceLayout(t, program, layout)
 		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 		sequenceRefused(t, c, err, "transition-budget", 0)
-		return
+		return sequenceOutcome{premise: "transition-budget", configuration: true}
 	}
 	initial := stateRawInitial(face, raw)
+	initial.loads = mappings
 	initial.origin = sequenceOrigin(face, verdict, raw)
 	initial.regs[4] = initial.origin
 	r := initial.clone()
@@ -440,7 +523,7 @@ func checkStateSequence(t testing.TB, face TransitionInterface, program []stateI
 	fault, depthFault := "", false
 	for j := 0; j < cut; j++ {
 		i := program[j].intent
-		if fault = sequenceOperationFault(face, verdict.base, r, i); fault != "" {
+		if fault = sequenceOperationFault(face, verdict.base, r, i, x.pcs[j]+uint64(len(x.encoded[j]))); fault != "" {
 			cut = j
 			break
 		}
@@ -448,7 +531,7 @@ func checkStateSequence(t testing.TB, face TransitionInterface, program []stateI
 			cut, depthFault = j, true
 			break
 		}
-		r.referenceExec(t, i, j)
+		r.referenceExec(t, i, j, x.pcs[j]+uint64(len(x.encoded[j])))
 	}
 	var cuts []int
 	for j := 1; j < cut; j++ {
@@ -460,11 +543,10 @@ func checkStateSequence(t testing.TB, face TransitionInterface, program []stateI
 		cuts = append(cuts, cut)
 	}
 	limits, representable := sequenceLimits(face, len(program), len(initial.memory), len(cuts), instructionLimit)
-	x := sequenceLayout(t, program, layout)
 	if !representable {
 		c, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 		sequenceRefused(t, c, err, "transition-budget", 0)
-		return
+		return sequenceOutcome{premise: "transition-budget", configuration: true}
 	}
 	check := func(c TransitionCertificate, at int, values map[br.Term]uint64) {
 		t.Helper()
@@ -473,7 +555,7 @@ func checkStateSequence(t testing.TB, face TransitionInterface, program []stateI
 		profile := stateInitialDepth(face)
 		for j := 0; j < at; j++ {
 			profile.step(program[j].intent, want)
-			want.referenceExec(t, program[j].intent, j)
+			want.referenceExec(t, program[j].intent, j, x.pcs[j]+uint64(len(x.encoded[j])))
 		}
 		stateAssert(t, c, x, at, initial, want, values)
 		profile.assertProjection(t, c)
@@ -528,11 +610,15 @@ func checkStateSequence(t testing.TB, face TransitionInterface, program []stateI
 		c, err = CheckTransitionContinuation(t.Context(), root, p)
 		stateInventoryOverflow(t, c, err, len(p.Nodes), instructionLimit)
 	}
+	if depthFault {
+		fault = "relation-budget"
+	}
+	return sequenceOutcome{cut: cut, premise: fault}
 }
 
 func sequenceRecord(i to.Intent, form byte) []byte {
 	r := make([]byte, 32)
-	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And}
+	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP}
 	for j, operation := range operations {
 		if i.Operation == operation {
 			r[0] = byte(j)

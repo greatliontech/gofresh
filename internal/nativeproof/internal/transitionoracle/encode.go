@@ -14,6 +14,12 @@ func Encode(i Intent, e Encoding) ([]byte, error) {
 	if i.Dst > 15 || i.Src > 15 || i.Base > 15 || e.Scale > 3 || (!e.SIB && e.Scale != 0) {
 		return bad()
 	}
+	if i.Operation == LEARIP {
+		if i.Src != 0 || i.Base != 0 || i.Immediate != 0 || e.Form != LEA8D || e.REX < 0x48 || e.REX > 0x4f || (e.REX>>2)&1 != i.Dst/8 || e.SIB || e.Scale != 0 || e.DispBytes != 4 || int64(int32(i.SignedDisp)) != i.SignedDisp {
+			return bad()
+		}
+		return binary.LittleEndian.AppendUint32([]byte{e.REX, 0x8d, (i.Dst%8)*8 + 5}, uint32(i.SignedDisp)), nil
+	}
 	mem := i.Operation == Load || i.Operation == Store || i.Operation == StoreImmediate || i.Operation == LEA
 	if !mem && (i.Base != 0 || e.DispBytes != 0 || e.SIB || e.Scale != 0) {
 		return bad()

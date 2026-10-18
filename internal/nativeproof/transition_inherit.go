@@ -41,7 +41,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	// Charge every element copied into the successor's proof, including the
 	// immutable root projections. Only expression nodes and image bytes share
 	// immutable ownership; no predecessor container or construction arena survives.
-	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.Boundary.Bytes), 16} {
+	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.Boundary.Bytes), 16} {
 		for range n {
 			if !m.tick() {
 				return m.err
@@ -60,7 +60,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	}
 	for r, v := range b.Registers {
 		m.state.regs[r], m.pointers[r] = v.Value, v.Pointer
-		for _, root := range []br.Term{b.InitialRegisters[r], v.Value, v.Pointer.Origin} {
+		for _, root := range []br.Term{b.InitialRegisters[r], v.Value} {
 			if err := importRoot(root); err != nil {
 				return err
 			}
@@ -76,13 +76,13 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			if !m.tick() {
 				return m.err
 			}
-			for _, root := range []br.Term{v.Value, v.Pointer.Origin} {
-				if err := importRoot(root); err != nil {
-					return err
-				}
+			if err := importRoot(v.Value); err != nil {
+				return err
 			}
 		}
 	}
+	// Every Stack arm retains this same root term by construction. Image arms
+	// contain only owned mapping coordinates and introduce no expression roots.
 	if err := importRoot(b.Origin); err != nil {
 		return err
 	}
@@ -101,12 +101,12 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	if !m.tick() {
 		return m.err
 	}
-	m.memory = make(map[int64]TransitionByte, len(b.Memory))
+	m.memory = make(map[TransitionLocation]TransitionByte, len(b.Memory))
 	for _, v := range b.Memory {
 		if !m.tick() {
 			return m.err
 		}
-		m.memory[v.Offset] = v
+		m.memory[v.TransitionLocation] = v
 	}
 	return m.err
 }

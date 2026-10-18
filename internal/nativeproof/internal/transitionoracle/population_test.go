@@ -119,7 +119,7 @@ func literalInteger(little []byte, signed bool) *big.Int {
 func TestDescriptorPopulation(t *testing.T) {
 	want := map[Form]int{
 		MOV89: 4736, MOV8B: 4736, MOVB8Imm64: 64, MOVB8Imm32: 16,
-		MOVC7: 592, LEA8D: 4224, SUB83: 64, SUB81: 64, SUB2D: 8,
+		MOVC7: 592, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
 		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
@@ -159,7 +159,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 14642 || len(counts) != len(want) {
+	if len(seen) != 14706 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {
@@ -216,7 +216,7 @@ func TestRawModRMPopulation(t *testing.T) {
 				for s := 0; s < sibCount; s++ {
 					trials++
 					valid := true
-					if mode == 0 && (rm == 5 || hasSIB && s%8 == 5) {
+					if mode == 0 && (rm == 5 && op != 0x8d || hasSIB && s%8 == 5) {
 						valid = false
 					}
 					if hasSIB && (rex/2%2 != 0 || s/8%8 != 4) {
@@ -253,7 +253,7 @@ func TestRawModRMPopulation(t *testing.T) {
 					if mode == 1 {
 						length++
 					}
-					if mode == 2 {
+					if mode == 2 || mode == 0 && rm == 5 && op == 0x8d {
 						length += 4
 					}
 					if op == 0x83 {
@@ -274,7 +274,7 @@ func TestRawModRMPopulation(t *testing.T) {
 			}
 		}
 	}
-	if trials != 306048 || len(accepted) != 14544 {
+	if trials != 306048 || len(accepted) != 14608 {
 		t.Fatalf("raw trials %d positives %d", trials, len(accepted))
 	}
 	for d := range Descriptors {

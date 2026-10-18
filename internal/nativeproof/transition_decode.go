@@ -20,8 +20,8 @@ func simpleBase(arg x86asm.Arg) bool {
 
 // validateTransitionForm admits exact full-width forms and MOV r32,imm32 before
 // the scalar builder sees them. Immediate extension is checked against encoding
-// bytes, not inferred from a mnemonic. All memory forms have one full register
-// base and displacement.
+// bytes, not inferred from a mnemonic. Data accesses have one full register
+// base and displacement. LEA additionally admits exact RIP-relative disp32.
 func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 	bad := func() error { return refuse(pc, "transition-form", "unsupported transition encoding or operand form") }
 	if i.Op == x86asm.JMP {
@@ -75,7 +75,9 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 			return bad()
 		}
 	case x86asm.LEA:
-		if op != 0x8d || !dst || !simpleBase(i.Args[1]) {
+		mem, memory := i.Args[1].(x86asm.Mem)
+		rip := memory && mem.Base == x86asm.RIP && mem.Index == 0 && mem.Segment == 0 && len(b) == 7 && b[2]&0xc7 == 5 && mem.Disp == int64(int32(binary.LittleEndian.Uint32(b[3:])))
+		if op != 0x8d || !dst || !(simpleBase(i.Args[1]) || rip) {
 			return bad()
 		}
 	case x86asm.SUB, x86asm.AND:

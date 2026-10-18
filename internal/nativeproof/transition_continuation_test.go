@@ -54,8 +54,11 @@ func TestTransitionContinuationState(t *testing.T) {
 			if b.Origin != before.Origin || b.InitialRegisters != before.InitialRegisters || !reflect.DeepEqual(b.InitialMemory, before.InitialMemory) || !reflect.DeepEqual(b.Words, before.Words) || !reflect.DeepEqual(b.Interface, before.Interface) {
 				t.Fatal("continuation changed root scope or premises")
 			}
-			if b.Registers[RCX].Pointer.Origin.Valid() != tt.pointer || b.Preserved[RAX] != 0 || len(b.Accesses) != len(before.Accesses)+len(hexBytes(t, tt.tail))/5 {
+			if (b.Registers[RCX].Pointer != nil) != tt.pointer || b.Preserved[RAX] != 0 || len(b.Accesses) != len(before.Accesses)+len(hexBytes(t, tt.tail))/5 {
 				t.Fatal("state/provenance/footprint was reset")
+			}
+			if tt.pointer {
+				requireStackPointer(t, b.Registers[RCX].Pointer)
 			}
 			assertTransitionOracle(t, im, b, 12)
 			after, _ := root.Bound()
@@ -86,7 +89,7 @@ func TestTransitionContinuationMOV32AndFlags(t *testing.T) {
 					t.Fatalf("%s %s: %v", prefix, code, err)
 				}
 				b, _ := c.Bound()
-				if got := evalRelationTerm(t, b.Registers[reg].Value, nil, ^uint64(0)); got != uint64(imm) || b.Registers[reg].Pointer.Origin.Valid() || b.Preserved[reg] != 0 {
+				if got := evalRelationTerm(t, b.Registers[reg].Value, nil, ^uint64(0)); got != uint64(imm) || b.Registers[reg].Pointer != nil || b.Preserved[reg] != 0 {
 					t.Fatalf("MOV32 reg%d imm%x: got %x", reg, imm, got)
 				}
 				if b.Flags != root.checked.bound.Flags || c.checked.flags != root.checked.flags || len(b.Accesses) != 0 {
@@ -156,7 +159,7 @@ func TestTransitionContinuationRefusals(t *testing.T) {
 	}
 	// A locally acyclic suffix that re-enters or overlaps the prefix is not a
 	// continuation. Full-graph occupancy and cycle checks must see both segments.
-	for _, code := range []string{"4889e0ebfb", "4889e0ebfc", "4889e0ebfd", "4889e00f05", "4889e0488d0500000000"} {
+	for _, code := range []string{"4889e0ebfb", "4889e0ebfc", "4889e0ebfd", "4889e00f05", "4889e0488d0440"} {
 		im, cut := transitionFixture(t, code)
 		root := continuationRoot(t, im, testEntry+3, transitionFace(), TransitionLimits{})
 		p := TransitionProposal{ImageDigest: im.digest, Entry: im.entry, Cut: cut}
@@ -241,7 +244,7 @@ func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 			t.Fatalf("capture callback %d: %v", at, err)
 		}
 		x, _ := got.Bound()
-		if x.Origin != before.Origin || x.Registers[RBP].Pointer.Origin.Valid() || got.checked.work != first.checked.work {
+		if x.Origin != before.Origin || x.Registers[RBP].Pointer != nil || got.checked.work != first.checked.work {
 			t.Fatal("sibling changed inherited state or budget")
 		}
 		stop, cancel := context.WithCancel(t.Context())
@@ -385,6 +388,13 @@ func TestTransitionContinuationRetainedExpressionUnion(t *testing.T) {
 	}
 	im, cut := transitionFixture(t, code+"bd01000000")
 	root := continuationRoot(t, im, cut-5, f, TransitionLimits{})
+	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, im, cut))
+}
+
+// Both stack-only and mixed image/stack populations use this complete union
+// check, including dead original byte inputs and each live constructor depth.
+func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertificate, proposal TransitionProposal) {
+	t.Helper()
 	b := root.checked.bound
 	depths := map[br.Term]int{}
 	var visit func(br.Term) int
@@ -408,12 +418,16 @@ func TestTransitionContinuationRetainedExpressionUnion(t *testing.T) {
 	}
 	for _, v := range b.Registers {
 		visit(v.Value)
-		visit(v.Pointer.Origin)
+		if p, ok := v.Pointer.(OriginPointer); ok {
+			visit(p.Origin)
+		}
 	}
 	for _, memory := range [][]TransitionByte{b.InitialMemory, b.Memory} {
 		for _, v := range memory {
 			visit(v.Value)
-			visit(v.Pointer.Origin)
+			if p, ok := v.Pointer.(OriginPointer); ok {
+				visit(p.Origin)
+			}
 		}
 	}
 	for _, w := range b.Words {
@@ -440,7 +454,7 @@ func TestTransitionContinuationRetainedExpressionUnion(t *testing.T) {
 	if len(m.depth) != len(depths)+2 {
 		t.Fatal("import did not contain exactly the retained union plus Boolean constants")
 	}
-	c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+	c, err := CheckTransitionContinuation(t.Context(), root, proposal)
 	if err != nil {
 		t.Fatal(err)
 	}

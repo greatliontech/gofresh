@@ -379,39 +379,7 @@ func (m *frameChecker) validateEntry(requireReturn bool) error {
 }
 
 func (m *frameChecker) mapping(r ByteRegion) error {
-	found := -1
-	for j, load := range m.im.loads {
-		if err := m.tick(1); err != nil {
-			return err
-		}
-		if !overlap(pages(r.Bytes), pages(Span{load.va, load.end})) {
-			continue
-		}
-		if !r.Image || r.Bytes.Start < load.va || r.Bytes.End > load.end || r.Readable && !load.readable || r.Writable && (!load.writable || load.executable) {
-			return refuse(m.pc, "frame-mapping", "region conflicts with actual image mapping or permissions")
-		}
-		found = j
-	}
-	if r.Image && found < 0 {
-		return refuse(m.pc, "frame-mapping", "image region has no loaded backing")
-	}
-	if found >= 0 {
-		load := m.im.loads[found]
-		// Conservatively reject aliases of the load's file pages, including a
-		// BSS load's partial-page prefix. No file contents are assumed constant.
-		if load.filesz != 0 || load.off%4096 != 0 {
-			file := pages(Span{load.off, load.off + load.filesz})
-			for j, alias := range m.im.loads {
-				if err := m.tick(1); err != nil {
-					return err
-				}
-				if j != found && (alias.filesz != 0 || alias.off%4096 != 0) && overlap(file, pages(Span{alias.off, alias.off + alias.filesz})) {
-					return refuse(m.pc, "frame-alias", "image data has another file-page mapping")
-				}
-			}
-		}
-	}
-	return nil
+	return m.im.validateMemoryMapping(m.pc, r, func() error { return m.tick(1) })
 }
 
 func (m *frameChecker) pointer(p RegionPointer) (framePointer, error) {

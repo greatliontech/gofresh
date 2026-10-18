@@ -90,7 +90,7 @@ func assertCutOnly(t testing.TB, b TransitionBound, code []byte, moved bool) {
 	}
 	for r, got := range b.Registers {
 		want := b.InitialRegisters[r]
-		pointer := OriginPointer{}
+		var pointer TransitionPointer
 		preserved := ^uint64(0)
 		if Register(r) == RSP {
 			pointer = OriginPointer{Origin: b.Origin}
@@ -293,11 +293,28 @@ func assertCutStateAlpha(t testing.TB, a, b TransitionBound) {
 	var walk func(reflect.Value, reflect.Value)
 	termType := reflect.TypeOf(br.Term{})
 	walk = func(x, y reflect.Value) {
+		if x.Type() != y.Type() {
+			t.Fatal("state field type changed")
+		}
 		if x.Type() == termType {
 			term(x.Interface().(br.Term), y.Interface().(br.Term))
 			return
 		}
+		if x.Type() == reflect.TypeOf(ImagePointer{}) {
+			if x.Interface().(ImagePointer) != y.Interface().(ImagePointer) {
+				t.Fatal("image pointer changed")
+			}
+			return
+		}
 		switch x.Kind() {
+		case reflect.Interface:
+			if x.IsNil() || y.IsNil() {
+				if x.IsNil() != y.IsNil() {
+					t.Fatal("pointer kind changed")
+				}
+				return
+			}
+			walk(x.Elem(), y.Elem())
 		case reflect.Struct:
 			for n := 0; n < x.NumField(); n++ {
 				walk(x.Field(n), y.Field(n))

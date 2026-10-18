@@ -84,13 +84,23 @@
 // pointer provenance under the retained conditions. Full ordered pointer lanes
 // survive spills and reloads; numeric coincidence cannot create an origin.
 // The transition grammar admits full-width MOV, canonical MOV r32,imm32,
-// base/displacement LEA, constant SUB, justified alignment AND and relative
-// JMP/fallthrough. Narrow register writes clear pointer provenance. Graph
+// base/displacement and RIP-relative LEA, constant SUB, justified alignment AND
+// and relative JMP/fallthrough. Narrow register writes clear pointer provenance. Graph
 // occupancy and acyclic closure establish that every path reaches the decoded
 // cut. Its instruction is not executed or relabeled RET. Arithmetic flag values
 // may be unprojected, never invented or mistaken for preservation. No normal
 // return, source storage, process-argument meaning, completed bootstrap or public
 // runtime authority follows from this conditional state relation.
+//
+// Root image footprints select absolute bytes in the owned PT_LOAD mappings;
+// permissions and backing-alias checks share the frame domain's mapping policy.
+// Their initial values are fresh arbitrary scalars, including readonly and BSS
+// bytes. No loader-zeroing or file-content premise is introduced. Stack and image
+// provenance have separate coordinates in one current byte state. Checked RIP
+// address formation can introduce image provenance; matching scalar bits cannot.
+// Ordered lanes preserve either pointer kind across mixed-memory spills and
+// reloads. Representable pointers alone grant no access, and pointer-kind tags do
+// not prove numerical inequality outside the declared disjoint footprints.
 //
 // CheckTransitionContinuation consumes only an immutable predecessor and a full
 // root-to-new-cut proposal. It rechecks the complete graph and predecessor prefix,

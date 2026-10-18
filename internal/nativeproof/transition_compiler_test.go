@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/gotool"
+	br "github.com/greatliontech/gofresh/internal/bitrelation"
+	to "github.com/greatliontech/gofresh/internal/nativeproof/internal/transitionoracle"
 	"golang.org/x/arch/x86/x86asm"
 )
 
@@ -90,7 +92,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			b, _ := c.Bound()
-			if b.Registers[RSP].Pointer.Offset != -48 || b.Registers[RSI].Pointer.Offset != 8 || b.Registers[RBX].Pointer.Offset != 8 || len(b.Accesses) != 3 {
+			if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != -48 || requireStackPointer(t, b.Registers[RSI].Pointer).Offset != 8 || requireStackPointer(t, b.Registers[RBX].Pointer).Offset != 8 || len(b.Accesses) != 3 {
 				t.Fatal("unexpected actual spill relation", b.Accesses)
 			}
 			assertTransitionOracle(t, im, b, 40)
@@ -116,7 +118,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 			}
 			for reg := RAX; reg <= R15; reg++ {
 				if reg == RBP {
-					if next.Registers[reg].Pointer.Origin.Valid() || next.Preserved[reg] != 0 {
+					if next.Registers[reg].Pointer != nil || next.Preserved[reg] != 0 {
 						t.Fatal("base-pointer initialization retained pointer or preservation authority")
 					}
 					for _, scratch := range []uint64{0, ^uint64(0)} {
@@ -139,22 +141,28 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 				t.Fatal("selected next boundary is not the expected RIP-relative address construction")
 			}
 			after := nextCut + uint64(len(next.Boundary.Bytes))
-			_, err = ProposeTransition(t.Context(), im, after, TransitionLimits{})
-			var refusal *Refusal
-			if !errors.As(err, &refusal) || refusal.PC != nextCut || refusal.Premise != "transition-form" {
-				t.Fatal("next operation did not retain its explicit form obligation", err)
+			// RIP LEA now has a checked rule and needs no data-access footprint.
+			// The following stack-relative LEA still exceeds this old root's
+			// envelope. Continuation cannot strengthen that quantified premise.
+			raw, err := im.instructionBytes(after)
+			if err != nil {
+				t.Fatal(err)
 			}
-			// Supply the otherwise complete candidate inventory ourselves as well:
-			// a proposer refusal cannot stand in for the checker's refusal.
+			stackLEA, err := x86asm.Decode(raw, 64)
+			stackIntent, parseErr := to.Parse(raw, after)
+			if err != nil || parseErr != nil || stackLEA.Op != x86asm.LEA || stackIntent.Intent.Operation != to.LEA || stackIntent.Intent.Base != 4 || stackIntent.Intent.SignedDisp != -65536 {
+				t.Fatal("following candidate is not the stack-relative LEA", err)
+			}
+			end := after + uint64(stackLEA.Len)
 			attempt := proposal
-			attempt.Cut, attempt.Nodes = after, slices.Clone(proposal.Nodes)
+			attempt.Cut, attempt.Nodes = end, slices.Clone(proposal.Nodes)
 			for i := range attempt.Nodes {
 				attempt.Nodes[i].Successors = slices.Clone(attempt.Nodes[i].Successors)
 				if attempt.Nodes[i].PC == nextCut {
 					attempt.Nodes[i].Successors = []uint64{after}
 				}
 			}
-			raw, err := im.instructionBytes(after)
+			raw, err = im.instructionBytes(end)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,16 +170,131 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 			if err != nil || boundary.Len <= 0 {
 				t.Fatal("following candidate boundary is unavailable", err)
 			}
-			attempt.Nodes = append(attempt.Nodes, Node{PC: after, Size: uint8(boundary.Len)})
+			attempt.Nodes = append(attempt.Nodes, Node{PC: after, Size: uint8(stackLEA.Len), Successors: []uint64{end}}, Node{PC: end, Size: uint8(boundary.Len)})
+			proposed, err := ProposeTransition(t.Context(), im, end, TransitionLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stateSameInventory(t, proposed, attempt)
 			unsupported, err := CheckTransitionContinuation(t.Context(), continued, attempt)
-			if _, valid := unsupported.Bound(); valid || !errors.As(err, &refusal) || refusal.PC != nextCut || refusal.Premise != "transition-form" {
-				t.Fatal("checker accepted the unsupported next operation or lost its refusal boundary", err)
+			var refusal *Refusal
+			if _, valid := unsupported.Bound(); valid || !errors.As(err, &refusal) || refusal.PC != after || refusal.Premise != "transition-envelope" {
+				t.Fatal("checker strengthened the inherited envelope or lost its refusal boundary", err)
 			}
 			still, _ := c.Bound()
 			if !reflect.DeepEqual(still, b) {
 				t.Fatal("actual continuation changed its retained predecessor")
 			}
 			t.Logf("actual continuation executes [%#x,%#x); next RIP-relative instruction remains unexecuted", b.Boundary.PC, nextCut)
+			checkOptimizedImagePrefix(t, im, nextCut)
 		})
 	}
+}
+
+// Decoded bytes locate the candidate image address and CPU-query cut. Neither
+// compiler names nor symbols supply a memory value, storage relation or theorem.
+func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
+	t.Helper()
+	pc, address, cut := ripPC, uint64(0), uint64(0)
+	for n := 0; n < 32; n++ {
+		raw, err := im.instructionBytes(pc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := x86asm.Decode(raw, 64)
+		if err != nil || i.Len <= 0 {
+			t.Fatal("candidate decode", err)
+		}
+		if pc == ripPC {
+			mem, ok := i.Args[1].(x86asm.Mem)
+			if i.Op != x86asm.LEA || !ok || mem.Base != x86asm.RIP {
+				t.Fatal("candidate lost RIP address")
+			}
+			intent, err := to.Parse(raw, pc)
+			if err != nil || intent.Intent.Operation != to.LEARIP {
+				t.Fatal("candidate RIP encoding", err)
+			}
+			var valid bool
+			address, valid = relative(pc+uint64(i.Len), intent.Intent.SignedDisp)
+			if !valid {
+				t.Fatal("candidate wraps")
+			}
+		}
+		if i.Op == x86asm.CPUID {
+			cut = pc
+			break
+		}
+		pc += uint64(i.Len)
+	}
+	if cut == 0 {
+		t.Fatal("no CPU-query candidate; discovery budget is not an endpoint")
+	}
+	face := transitionFace()
+	face.Envelope.Start = -65584
+	face.Origin.Min = 65584
+	face.ImageRegions = []Span{{address, address + 32}}
+	// Re-derive from the ELF entry under the broader ORIGINAL envelope/domain.
+	// The earlier narrow certificate cannot be extended into these assumptions.
+	root := continuationRoot(t, im, ripPC, face, TransitionLimits{})
+	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := CheckTransitionContinuation(t.Context(), root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.checked.bound
+	image, ok := b.Registers[RDI].Pointer.(ImagePointer)
+	if !ok || image.Address != address || image.owner != &im.data[0] {
+		t.Fatal("actual image address/provenance differs")
+	}
+	if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != -48 || requireStackPointer(t, b.Registers[RBX].Pointer).Offset != -65584 {
+		t.Fatal("actual stack-relative values differ")
+	}
+	for _, reg := range []Register{RBP, RAX} {
+		if b.Registers[reg].Pointer != nil || stateEval(t, b.Registers[reg].Value, nil) != 0 {
+			t.Fatal("actual zero result differs")
+		}
+	}
+	count := 0
+	for _, cell := range b.Memory {
+		if !cell.Image {
+			continue
+		}
+		count++
+		off := cell.Offset - int64(address)
+		want := int64(-65584)
+		if off >= 8 && off < 16 {
+			want = -48
+		}
+		if off < 0 || off >= 32 || cell.Pointer != (OriginPointer{b.Origin, want}) || cell.PointerLane != uint8(off%8) {
+			t.Fatalf("actual image word/lane differs at offset %d: pointer=%+v lane=%d, want stack offset %d", off, cell.Pointer, cell.PointerLane, want)
+		}
+		for _, s := range []uint64{1 << 32, 1 << 40, 1 << 46} {
+			if stateEval(t, cell.Value, map[br.Term]uint64{b.Origin: s}) != uint64(byte((s+uint64(want))>>(8*(off%8)))) {
+				t.Fatal("actual image byte relation differs")
+			}
+		}
+	}
+	if count != 32 || len(b.Accesses) != 7 {
+		t.Fatal("actual image footprint/access count differs")
+	}
+	for j, off := range []int64{16, 24, 0, 8} {
+		a := b.Accesses[j+3]
+		if !a.Image || a.Kind != FrameWrite || a.Bytes != (RelativeSpan{int64(address) + off, int64(address) + off + 8}) {
+			t.Fatal("actual image store order differs")
+		}
+	}
+	if b.Boundary.Instruction.Op != x86asm.CPUID || !bytes.Equal(b.Boundary.Bytes, []byte{0x0f, 0xa2}) {
+		t.Fatal("actual CPU-query boundary differs")
+	}
+	direct, err := CheckTransition(t.Context(), im, face, p, TransitionLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTransitionAlpha(t, direct, c)
+	assertCPUQueryExecutionRefused(t, im, face, p, c)
+	assertImagePrefixMissingPremises(t, im, face, p, ripPC)
+	t.Logf("conditional image prefix reaches unexecuted CPU query %#x; arbitrary image inputs, 32 overwritten bytes at %#x", cut, address)
 }

@@ -68,6 +68,7 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				operandRM += 8
 			}
 			memory := mode != 3
+			rip := memory && mode == 0 && low == 5 && op == 0x8d
 			if memory {
 				base := low
 				if low == 4 {
@@ -79,12 +80,16 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 					base = s & 7
 				}
 				// mod=00 base=101 is absent/RIP-relative regardless of REX.B.
-				if mode == 0 && base == 5 {
+				if mode == 0 && base == 5 && !rip {
 					return fail("address without GPR base")
 				}
-				d.Intent.Base = uint8(base)
-				if rex&1 != 0 {
-					d.Intent.Base += 8
+				if rip {
+					d.Encoding.DispBytes, d.Intent.SignedDisp = 4, r.signed(4)
+				} else {
+					d.Intent.Base = uint8(base)
+					if rex&1 != 0 {
+						d.Intent.Base += 8
+					}
 				}
 				if mode == 1 {
 					d.Encoding.DispBytes, d.Intent.SignedDisp = 1, r.signed(1)
@@ -111,6 +116,9 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 					return fail("register LEA")
 				}
 				d.Encoding.Form, d.Intent.Operation, d.Intent.Dst = LEA8D, LEA, operandReg
+				if rip {
+					d.Intent.Operation = LEARIP
+				}
 			case 0xc7:
 				if selector != 0 {
 					return fail("C7 opcode extension")

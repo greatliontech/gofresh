@@ -24,11 +24,18 @@ import (
 // checker's offset, rounding, page, permission, or normalization helpers. Image
 // extents below are fixture intent, not reconstructed from Image.loads or Bound.
 type interfaceImage struct {
-	im       *Image
-	proposal TransitionProposal
-	entry    uint64
-	digest   [32]byte
-	loads    [][2]uint64 // half-open logical mapped extents, including zero-fill
+	im        *Image
+	proposal  TransitionProposal
+	entry     uint64
+	digest    [32]byte
+	loads     [][2]uint64 // half-open logical mapped extents, including zero-fill
+	dataLoads []interfaceMapping
+}
+
+// Intent for the file-page and permission oracle; never recovered from Image.
+type interfaceMapping struct {
+	start, end, file, filesz uint64
+	read, write, execute     bool
 }
 
 func interfaceFixture(t testing.TB, choice uint8) interfaceImage {
@@ -153,14 +160,14 @@ func interfaceOracle(t testing.TB, f TransitionInterface, loads [][2]uint64) int
 	return interfaceOracleLimits(t, f, loads, interfacePropertyLimits())
 }
 
-func interfaceOracleLimits(t testing.TB, f TransitionInterface, loads [][2]uint64, l TransitionLimits) interfaceVerdict {
+func interfaceOracleLimits(t testing.TB, f TransitionInterface, loads [][2]uint64, l TransitionLimits, mappings ...interfaceMapping) interfaceVerdict {
 	t.Helper()
 	bad := func(p string) interfaceVerdict { return interfaceVerdict{premise: p} }
 	// These families supply explicit, non-default memory limits.
 	if l.Bytes < 1 || l.Bytes > 1<<20 || l.Regions < 1 || l.Regions > 256 {
 		return bad("transition-budget")
 	}
-	if len(f.Regions) > l.Regions || len(f.Words) > l.Bytes/8 {
+	if len(f.Regions)+len(f.ImageRegions) > l.Regions || len(f.Words) > l.Bytes/8 {
 		return bad("transition-budget")
 	}
 	if f.Conditions != interfaceConditions() {
@@ -228,6 +235,37 @@ func interfaceOracleLimits(t testing.TB, f TransitionInterface, loads [][2]uint6
 			intersectionHigh := min(p.Bytes.End, r.Bytes.End)
 			if intersectionLow < intersectionHigh && (p.Readable != r.Readable || p.Writable != r.Writable) {
 				return bad("transition-permission")
+			}
+		}
+	}
+	for _, span := range f.ImageRegions {
+		if span.Start >= span.End || interfaceU(span.End).Cmp(ceiling) > 0 {
+			return bad("transition-image")
+		}
+		total.Add(total, new(big.Int).Sub(interfaceU(span.End), interfaceU(span.Start)))
+		if total.Cmp(big.NewInt(int64(l.Bytes))) > 0 {
+			return bad("transition-budget")
+		}
+		found := -1
+		for j, m := range mappings {
+			if span.Start >= m.start && span.Start < m.end && span.End <= m.end {
+				found = j
+			}
+		}
+		if found < 0 {
+			return bad("transition-image")
+		}
+		m := mappings[found]
+		if m.filesz != 0 || m.file%4096 != 0 {
+			p := interfacePageExtent([2]uint64{m.file, m.file + m.filesz})
+			for j, other := range mappings {
+				if j == found || other.filesz == 0 && other.file%4096 == 0 {
+					continue
+				}
+				q := interfacePageExtent([2]uint64{other.file, other.file + other.filesz})
+				if p.lo.Cmp(q.hi) <= 0 && q.lo.Cmp(p.hi) <= 0 {
+					return bad("frame-alias")
+				}
 			}
 		}
 	}
@@ -317,7 +355,7 @@ func interfaceCheck(t testing.TB, image interfaceImage, face TransitionInterface
 
 func interfaceCheckLimits(t testing.TB, image interfaceImage, face TransitionInterface, limits TransitionLimits) (TransitionBound, bool) {
 	t.Helper()
-	want := interfaceOracleLimits(t, face, image.loads, limits)
+	want := interfaceOracleLimits(t, face, image.loads, limits, image.dataLoads...)
 	c, err := CheckTransition(t.Context(), image.im, face, image.proposal, limits)
 	b, accepted := c.Bound()
 	if want.premise != "" {
@@ -366,10 +404,15 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 	t.Helper()
 	// Build the exact byte-key set from the input union, not from either of
 	// the checker's memory projections. Only already-budgeted faces reach here.
-	want := map[int64]bool{}
+	want := map[stateLocation]bool{}
 	for _, region := range f.Regions {
 		for off := region.Bytes.Start; off < region.Bytes.End; off++ {
-			want[off] = true
+			want[stateLocation{off: off}] = true
+		}
+	}
+	for _, region := range f.ImageRegions {
+		for addr := region.Start; addr < region.End; addr++ {
+			want[stateLocation{true, int64(addr)}] = true
 		}
 	}
 	seen := map[interfaceVariable]bool{}
@@ -384,7 +427,7 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 	}
 	for r, term := range b.InitialRegisters {
 		variable(term, 64)
-		pointer := OriginPointer{}
+		var pointer TransitionPointer
 		if r == int(RSP) {
 			pointer = OriginPointer{Origin: term}
 			if b.Origin != term {
@@ -422,14 +465,15 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 		if b.Memory[i] != byteValue {
 			t.Fatal("empty prefix changed a declared byte")
 		}
-		if !want[byteValue.Offset] {
+		key := stateByteLocation(byteValue)
+		if !want[key] {
 			t.Fatal("extra or duplicate byte", byteValue.Offset)
 		}
-		delete(want, byteValue.Offset)
-		if byteValue.Pointer != (OriginPointer{}) || byteValue.PointerLane != 0 || byteValue.Value.Sort() != br.Bits(8) {
+		delete(want, key)
+		if byteValue.Pointer != nil || byteValue.PointerLane != 0 || byteValue.Value.Sort() != br.Bits(8) {
 			t.Fatal("initial byte acquired pointer meaning or wrong width")
 		}
-		if w, ok := lanes[byteValue.Offset]; ok {
+		if w, ok := lanes[byteValue.Offset]; ok && !byteValue.Image {
 			v := byteValue.Value.View()
 			if v.Op != br.Extract || v.Immediate != w.bit || len(v.Args) != 1 || v.Args[0] != w.word {
 				t.Fatal("grouped bytes do not alias the exact arbitrary word in little-endian order")

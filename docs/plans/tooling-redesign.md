@@ -295,7 +295,7 @@
                         - [x] 5.1w.2b.3b.2a.2.2.2.2.3 Consume the first-spill
                           certificate through the selected base-pointer initialization
                           and retain the following native operation as an unexecuted cut.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.4 Check mapped-image address
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.4 Check mapped-image address
                           provenance and mixed stack/image byte transport with arbitrary
                           initial image contents; derive the first image writes from a
                           rechecked root and stop before the CPU query.

@@ -102,6 +102,28 @@ func (m *transitionChecker) validate() error {
 			}
 		}
 	}
+	for _, span := range m.face.ImageRegions {
+		if !m.tick() {
+			return m.err
+		}
+		if span.Start >= span.End || span.End > 1<<47 {
+			return refuse(m.pc, "transition-image", "invalid absolute memory extent")
+		}
+		n := span.End - span.Start
+		if n > uint64(m.limits.Bytes)-total {
+			return refuse(m.pc, "transition-budget", "declared memory exceeds byte budget")
+		}
+		total += n
+		index, err := m.imageLoad(span, false)
+		if err != nil {
+			return err
+		}
+		load := m.im.loads[index]
+		r := ByteRegion{Bytes: span, Image: true, Readable: load.readable, Writable: load.writable}
+		if err := m.im.validateMemoryMapping(m.pc, r, func() error { m.tick(); return m.err }); err != nil {
+			return err
+		}
+	}
 	// The intersection of all predicates must be inhabited. Sweep the union of
 	// forbidden intervals, skipping entire intervals rather than sampling bases.
 	slices.SortFunc(m.bound.ExcludedOrigins, func(a, b Span) int {
@@ -163,6 +185,37 @@ func (m *transitionChecker) permission(s RelativeSpan, kind AccessKind) bool {
 		}
 		if s.Start >= r.Bytes.Start && s.End <= r.Bytes.End {
 			return kind == FrameWrite && r.Writable || kind == FrameRead && r.Readable
+		}
+	}
+	return false
+}
+
+// imageLoad establishes a logical mapping, not initial data values. A RIP LEA
+// must designate an actual byte; subsequent checked arithmetic may reach one-past.
+func (m *transitionChecker) imageLoad(span Span, pointer bool) (int, error) {
+	for j, load := range m.im.loads {
+		if !m.tick() {
+			return 0, m.err
+		}
+		if span.Start >= load.va && span.Start < load.end && span.End <= load.end && (pointer || span.Start < span.End) {
+			return j, nil
+		}
+	}
+	return 0, refuse(m.pc, "transition-image", "extent has no owned logical image mapping")
+}
+
+func (m *transitionChecker) imagePermission(span Span, kind AccessKind) bool {
+	for _, declared := range m.face.ImageRegions {
+		if !m.tick() {
+			return false
+		}
+		if span.Start >= declared.Start && span.End <= declared.End && span.Start < span.End {
+			index, err := m.imageLoad(span, false)
+			if err != nil {
+				return false
+			}
+			load := m.im.loads[index]
+			return kind == FrameRead && load.readable || kind == FrameWrite && load.writable && !load.executable
 		}
 	}
 	return false

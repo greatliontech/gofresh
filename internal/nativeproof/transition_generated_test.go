@@ -139,7 +139,7 @@ func (r *transitionReference) step(i transitionIntent, pc uint64) {
 	address := r.regs[i.base] + uint64(int64(i.disp))
 	access := func(kind AccessKind) {
 		off := int64(address - r.origin)
-		r.accesses = append(r.accesses, TransitionAccess{pc, kind, RelativeSpan{off, off + 8}})
+		r.accesses = append(r.accesses, TransitionAccess{PC: pc, Kind: kind, Bytes: RelativeSpan{off, off + 8}})
 	}
 	store := func(v uint64, p *int64) {
 		access(FrameWrite)
@@ -268,7 +268,11 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 		if got := evalRelationTerm(t, v.Value, values, 0); got != r.regs[j] {
 			t.Fatalf("register%d got%x want%x", j, got, r.regs[j])
 		}
-		if v.Pointer.Origin.Valid() != (r.pointers[j] != nil) || r.pointers[j] != nil && (v.Pointer.Origin != b.Origin || v.Pointer.Offset != *r.pointers[j]) {
+		var expected TransitionPointer
+		if r.pointers[j] != nil {
+			expected = OriginPointer{b.Origin, *r.pointers[j]}
+		}
+		if v.Pointer != expected {
 			t.Fatal("register provenance differs", j)
 		}
 		if (b.Preserved[j] == 0) != r.written[j] {
@@ -281,7 +285,11 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 			t.Fatal("memory value differs", v.Offset)
 		}
 		lane, found := r.lanes[address]
-		if v.Pointer.Origin.Valid() != found || found && (v.Pointer.Origin != b.Origin || v.Pointer.Offset != lane.offset || int(v.PointerLane) != lane.lane) {
+		var expected TransitionPointer
+		if found {
+			expected = OriginPointer{b.Origin, lane.offset}
+		}
+		if v.Image || v.Pointer != expected || found && int(v.PointerLane) != lane.lane {
 			t.Fatal("byte provenance differs", v.Offset)
 		}
 	}
@@ -338,12 +346,30 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	if a.Preserved != b.Preserved || !reflect.DeepEqual(a.Instructions, b.Instructions) || !reflect.DeepEqual(a.Accesses, b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
 		t.Fatal("direct/segmented scope differs")
 	}
+	pointer := func(x, y TransitionPointer) {
+		t.Helper()
+		switch p := x.(type) {
+		case nil:
+			if y != nil {
+				t.Fatal("pointer kind differs")
+			}
+		case OriginPointer:
+			q, ok := y.(OriginPointer)
+			if !ok || p.Offset != q.Offset {
+				t.Fatal("stack pointer differs")
+			}
+			equal(p.Origin, q.Origin)
+		case ImagePointer:
+			if p != y {
+				t.Fatal("image pointer owner/mapping/address differs")
+			}
+		default:
+			t.Fatal("unknown pointer arm")
+		}
+	}
 	for j := range a.Registers {
 		equal(a.Registers[j].Value, b.Registers[j].Value)
-		equal(a.Registers[j].Pointer.Origin, b.Registers[j].Pointer.Origin)
-		if a.Registers[j].Pointer.Offset != b.Registers[j].Pointer.Offset {
-			t.Fatal("pointer offset differs")
-		}
+		pointer(a.Registers[j].Pointer, b.Registers[j].Pointer)
 	}
 	if len(a.Memory) != len(b.Memory) {
 		t.Fatal("memory extent differs")
@@ -351,8 +377,8 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	for j, v := range a.Memory {
 		w := b.Memory[j]
 		equal(v.Value, w.Value)
-		equal(v.Pointer.Origin, w.Pointer.Origin)
-		if v.Offset != w.Offset || v.Pointer.Offset != w.Pointer.Offset || v.PointerLane != w.PointerLane {
+		pointer(v.Pointer, w.Pointer)
+		if v.TransitionLocation != w.TransitionLocation || v.PointerLane != w.PointerLane {
 			t.Fatal("memory relation differs")
 		}
 	}
@@ -372,7 +398,7 @@ func checkSyntheticContinuations(t testing.TB, program []transitionIntent, varia
 	}
 	cut := testEntry + uint64(len(code))
 	// The unexecuted endpoint is deliberately outside the transition grammar.
-	im := image(t, append(code, 0x48, 0x8d, 0x05, 0, 0, 0, 0))
+	im := image(t, append(code, 0x0f, 0x0b))
 	face := transitionFace()
 	face.Origin = OriginDomain{0x10000, 1 << 46, 16 << uint(variant%2), variant % 16}
 	face.Envelope = RelativeSpan{-128, 128}

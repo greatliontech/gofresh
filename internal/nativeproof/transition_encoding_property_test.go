@@ -52,7 +52,11 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	mem := func(arg x86asm.Arg) {
 		t.Helper()
 		m, ok := arg.(x86asm.Mem)
-		if !ok || m.Base != oracleRegisters64[i.Base] || m.Index != 0 || m.Segment != 0 || m.Disp != i.SignedDisp {
+		base := oracleRegisters64[i.Base]
+		if i.Operation == to.LEARIP {
+			base = x86asm.RIP
+		}
+		if !ok || m.Base != base || m.Index != 0 || m.Segment != 0 || m.Disp != i.SignedDisp {
 			t.Fatalf("address for %x: %+v, expected base=%d displacement=%d", code, arg, i.Base, i.SignedDisp)
 		}
 		// A no-index SIB's scale bits have no address effect; their spelling is
@@ -86,7 +90,7 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	case to.StoreImmediate:
 		mem(args[0])
 		imm(args[1], false)
-	case to.LEA:
+	case to.LEA, to.LEARIP:
 		op = x86asm.LEA
 		reg(args[0], i.Dst, false)
 		mem(args[1])
@@ -146,7 +150,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 14642 {
+	if count != 14706 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;
@@ -183,7 +187,7 @@ func FuzzTransitionExecutedEncoding(f *testing.F) {
 }
 
 func FuzzTransitionExecutedRawAdmission(f *testing.F) {
-	for _, code := range [][]byte{{0x48, 0x89, 0xe0}, {0x48, 0x8d, 0x80, 0xf8, 0xff, 0xff, 0xff}, {0x48, 0x8b, 0x04, 0xe0}, {0x48, 0x83, 0xec, 0x28}, {0x41, 0xbd, 0, 0, 0, 0}, {0xc5, 0xf8, 0x77}, {0x48, 0x48, 0x89, 0xe0}} {
+	for _, code := range [][]byte{{0x48, 0x89, 0xe0}, {0x48, 0x8d, 0x80, 0xf8, 0xff, 0xff, 0xff}, {0x48, 0x8b, 0x04, 0xe0}, {0x48, 0x83, 0xec, 0x28}, {0x41, 0xbd, 0, 0, 0, 0}, {0xc5, 0xf8, 0x77}, {0x48, 0x48, 0x89, 0xe0}, {0x4f, 0x8d, 0x3d, 0x80, 0xff, 0xff, 0xff}} {
 		f.Add(code)
 	}
 	f.Fuzz(func(t *testing.T, code []byte) {

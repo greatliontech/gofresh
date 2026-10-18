@@ -7,7 +7,7 @@ import (
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including their decoder, expression and ordered pointer-lane dependencies.
-const TransitionRules = "gofresh/native-transition@2;" + ValueRules + ";" + FrameRules
+const TransitionRules = "gofresh/native-transition@3;" + ValueRules + ";" + FrameRules
 
 // RelativeSpan is a half-open byte extent relative to the single stack origin.
 // An envelope permits its End as a pointer, but grants no memory permission.
@@ -51,11 +51,15 @@ type TransitionConditions struct {
 // undeclared memory remains arbitrary and inaccessible. Expected outputs and
 // caller-supplied symbolic values are deliberately absent.
 type TransitionInterface struct {
-	Origin     OriginDomain
-	Envelope   RelativeSpan
-	Regions    []RelativeRegion
-	Words      []int64
-	Conditions TransitionConditions
+	Origin   OriginDomain
+	Envelope RelativeSpan
+	Regions  []RelativeRegion
+	// ImageRegions grants access only within these absolute extents. Permissions
+	// come from the owned PT_LOAD mappings; every initial data byte is arbitrary,
+	// including readonly and zero-fill bytes. Instruction fetch is separate.
+	ImageRegions []Span
+	Words        []int64
+	Conditions   TransitionConditions
 }
 
 // TransitionLimits bounds graph/expression work and finite declared memory.
@@ -77,26 +81,52 @@ type TransitionProposal struct {
 	Nodes       []Node
 }
 
+// TransitionPointer is a closed provenance sum. Nil means no provenance. Its
+// arms identify a symbolic stack origin or an owned image mapping; equality of
+// scalar values never creates either. Distinct arms do not prove numerical
+// inequality outside the declared, disjoint memory footprints.
+type TransitionPointer interface{ transitionPointer() }
+
 // OriginPointer associates an exact signed offset with the fresh scalar origin.
-// A zero Origin means no provenance. Equality of scalar values never creates it.
 type OriginPointer struct {
 	Origin br.Term
+	Offset int64
+}
+
+func (OriginPointer) transitionPointer() {}
+
+// ImagePointer identifies an address within one owned logical load (including
+// its canonical one-past address). The private backing owner survives Image's
+// container snapshots, but not independent construction from equal bytes.
+type ImagePointer struct {
+	Address uint64
+	owner   *byte
+	load    int
+}
+
+func (ImagePointer) transitionPointer() {}
+
+// TransitionLocation is a byte coordinate in the single current memory map.
+// Image selects an absolute low-canonical address; otherwise Offset is relative
+// to S. The namespaces are disjoint only for declared accessible memory.
+type TransitionLocation struct {
+	Image  bool
 	Offset int64
 }
 
 // TransitionValue is a scalar relation with separately justified provenance.
 type TransitionValue struct {
 	Value   br.Term
-	Pointer OriginPointer
+	Pointer TransitionPointer
 }
 
-// TransitionByte is a byte relation at an origin-relative address. PointerLane
-// is meaningful only with a nonzero Pointer and reconstructs provenance only
+// TransitionByte is a byte relation at a tagged stack/image location. PointerLane
+// is meaningful only with a non-nil Pointer and reconstructs provenance only
 // when all eight ordered lanes of the same pointer are loaded together.
 type TransitionByte struct {
-	Offset      int64
+	TransitionLocation
 	Value       br.Term
-	Pointer     OriginPointer
+	Pointer     TransitionPointer
 	PointerLane uint8
 }
 
@@ -111,6 +141,8 @@ type TransitionAccess struct {
 	PC    uint64
 	Kind  AccessKind
 	Bytes RelativeSpan
+	// Image selects absolute low-canonical coordinates in Bytes.
+	Image bool
 }
 
 // TransitionFlag describes an architectural status independently of projection.
@@ -173,6 +205,7 @@ type checkedTransition struct {
 
 func cloneTransitionInterface(f TransitionInterface) TransitionInterface {
 	f.Regions = append([]RelativeRegion(nil), f.Regions...)
+	f.ImageRegions = append([]Span(nil), f.ImageRegions...)
 	f.Words = append([]int64(nil), f.Words...)
 	return f
 }

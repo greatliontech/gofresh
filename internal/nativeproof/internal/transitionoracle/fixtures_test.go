@@ -31,6 +31,8 @@ func TestLiteralEncodings(t *testing.T) {
 		{"c7-sign", "4fc7c000000080", Intent{Operation: MoveImmediate, Dst: 8, Immediate: 0xffffffff80000000}, Encoding{Form: MOVC7, REX: 0x4f}},
 		{"c7-store", "4cc784a5ffffffffffffffff", Intent{Operation: StoreImmediate, Base: 5, SignedDisp: -1, Immediate: math.MaxUint64}, Encoding{Form: MOVC7, REX: 0x4c, DispBytes: 4, SIB: true, Scale: 2}},
 		{"lea", "4e8d8a78563412", Intent{Operation: LEA, Dst: 9, Base: 2, SignedDisp: 305419896}, Encoding{Form: LEA8D, REX: 0x4e, DispBytes: 4}},
+		{"lea-rip-negative", "4f8d3d00000080", Intent{Operation: LEARIP, Dst: 15, SignedDisp: -2147483648}, Encoding{Form: LEA8D, REX: 0x4f, DispBytes: 4}},
+		{"lea-rip-positive", "488d3dffffff7f", Intent{Operation: LEARIP, Dst: 7, SignedDisp: 2147483647}, Encoding{Form: LEA8D, REX: 0x48, DispBytes: 4}},
 		{"sub8", "4f83ef80", Intent{Operation: Subtract, Dst: 15, Immediate: 0xffffffffffffff80}, Encoding{Form: SUB83, REX: 0x4f}},
 		{"sub32", "4881e9ffffff7f", Intent{Operation: Subtract, Dst: 1, Immediate: 0x7fffffff}, Encoding{Form: SUB81, REX: 0x48}},
 		{"sub-rax-ignored", "4f2d00000080", Intent{Operation: Subtract, Immediate: 0xffffffff80000000}, Encoding{Form: SUB2D, REX: 0x4f}},

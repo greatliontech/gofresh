@@ -194,7 +194,7 @@ func FuzzTransitionStateOverlap(f *testing.F) {
 		// assignment is made in the reference entry state, before certificate data.
 		initial.words[0] = initial.origin + 8
 		for j := int64(0); j < 8; j++ {
-			initial.memory[j] = stateByte{value: byte((initial.origin + 8) >> (8 * j))}
+			initial.memory[stateLocation{off: j}] = stateByte{value: byte((initial.origin + 8) >> (8 * j))}
 		}
 		var ops []stateInstruction
 		add := func(i to.Intent) { ops = append(ops, stateOp(i, form)) }
@@ -276,7 +276,7 @@ func FuzzTransitionStateRawEqualAddress(f *testing.F) {
 		initial.regs[dst] = initial.origin
 		initial.words[0] = initial.origin
 		for j := int64(0); j < 8; j++ {
-			initial.memory[j] = stateByte{value: byte(initial.origin >> (8 * j))}
+			initial.memory[stateLocation{off: j}] = stateByte{value: byte(initial.origin >> (8 * j))}
 		}
 		ops := []stateInstruction{stateOp(to.Intent{Operation: to.MoveRegister, Dst: 12, Src: 4}, form)}
 		add := func(i to.Intent, choice uint8) { ops = append(ops, stateOp(i, choice)) }
@@ -543,7 +543,7 @@ func stateTranslatedMemory(t testing.TB, baseDelta, subtract, displacement, remo
 	}
 	small := initial.clone()
 	for off := range small.memory {
-		if extra(off) {
+		if !off.image && extra(off.off) {
 			delete(small.memory, off)
 		}
 	}
