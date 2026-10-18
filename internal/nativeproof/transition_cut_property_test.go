@@ -306,6 +306,12 @@ func assertCutStateAlpha(t testing.TB, a, b TransitionBound) {
 			}
 			return
 		}
+		if x.Type() == reflect.TypeOf(ImageInitialization{}) {
+			if x.Interface().(ImageInitialization) != y.Interface().(ImageInitialization) {
+				t.Fatal("initialization capability changed")
+			}
+			return
+		}
 		switch x.Kind() {
 		case reflect.Interface:
 			if x.IsNil() || y.IsNil() {

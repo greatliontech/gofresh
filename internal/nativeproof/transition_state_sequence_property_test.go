@@ -486,6 +486,10 @@ type sequenceOutcome struct {
 // successful complete controls beside each negative, rather than passing a
 // population consisting solely of correctly refused constructions.
 func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout, entry uint64, instructionLimit int, dataLoads ...interfaceMapping) sequenceOutcome {
+	return checkStateSequenceProfileAt(t, face, program, raw, cutBits, layout, entry, instructionLimit, false, dataLoads...)
+}
+
+func checkStateSequenceProfileAt(t testing.TB, face TransitionInterface, program []stateInstruction, raw, cutBits []byte, layout, entry uint64, instructionLimit int, initialized bool, dataLoads ...interfaceMapping) sequenceOutcome {
 	t.Helper()
 	loads := [][2]uint64{{entry, entry + uint64(sequenceMappingSize(len(program)))}}
 	mappings := append([]interfaceMapping{{start: loads[0][0], end: loads[0][1], file: 0x1000, filesz: loads[0][1] - loads[0][0], read: true, execute: true}}, dataLoads...)
@@ -495,6 +499,13 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 	// Layout supplies PCs, never reconstructed semantic operands. RIP uses the
 	// independently encoded instruction's full length and its original intent.
 	x := sequenceLayoutAt(t, program, layout, entry, dataLoads...)
+	if initialized {
+		var err error
+		face.Initialization, err = CheckImageInitialization(t.Context(), x.im, StaticELFInitialization)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	preflight := TransitionLimits{RelationLimits: RelationLimits{Instructions: instructionLimit}, Regions: 256, Bytes: 1 << 20}
 	verdict := interfaceOracleLimits(t, face, loads, preflight, mappings...)
 	// Invalid inventories are never materialized into reference byte maps.
@@ -520,6 +531,9 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 		return sequenceOutcome{premise: "transition-budget", configuration: true}
 	}
 	initial := stateRawInitial(face, raw)
+	if initialized {
+		initial = initializedReference(face, x.im.data, mappings, raw)
+	}
 	initial.loads = mappings
 	initial.origin = sequenceOrigin(face, verdict, raw)
 	initial.regs[4] = initial.origin

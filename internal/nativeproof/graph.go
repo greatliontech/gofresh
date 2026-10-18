@@ -55,6 +55,7 @@ const (
 	boundaryNone boundaryKind = iota
 	boundaryReturn
 	boundaryCut
+	boundaryUnsupported
 )
 
 func (g *graph) failure(pc uint64, err error) error {

@@ -102,9 +102,14 @@
 // the merged state. Registers, private predicates and every declared byte merge
 // by guarded ITE; provenance survives only identical facts on all contributing
 // arms. Entry predicates retain explicit immutable architectural identities even
-// after flag overwrites. Graph occupancy and acyclic closure establish that every
-// path reaches the decoded cut, while its actual symbolic reach term is retained
-// independently of closure. Its instruction is not executed or relabeled RET. Arithmetic flag values
+// after flag overwrites. Structurally valid unsupported transfers can terminate
+// discovery only with independently proposed and checked BOOL-false proofs for
+// their complete incoming guards. Their bytes/extents remain structural coverage,
+// without fetch, call, return or other execution effects. Structural decoding
+// failure and discovered cycles always refuse. Complete-cut induction combines
+// exact edge partitions, complete incoming unions and checked false terminals;
+// its actual symbolic reach term remains unchanged, never replaced by closure.
+// The cut instruction is not executed or relabeled RET. Arithmetic flag values
 // may be unprojected, never invented or mistaken for preservation. No normal
 // return, source storage, process-argument meaning, completed bootstrap or public
 // runtime authority follows from this conditional state relation.
@@ -112,7 +117,14 @@
 // Root image footprints select absolute bytes in the owned PT_LOAD mappings;
 // permissions and backing-alias checks share the frame domain's mapping policy.
 // Their initial values are fresh arbitrary scalars, including readonly and BSS
-// bytes. No loader-zeroing or file-content premise is introduced. Stack and image
+// bytes, unless the root explicitly selects CheckImageInitialization's opaque
+// partial relation. Under StaticELFInitialization, checked logical file bytes
+// acquire owned file values and independent readable/writable/non-executable BSS
+// acquires zeros. Readonly BSS remains unknown, including partial clears on ignored
+// failure. Page/backing aliases and aggregate loading-operation footprints govern
+// coverage; padding adds no storage. The relation shares immutable image backing,
+// refuses equal-byte foreign owners and retains actual-loader applicability.
+// It never allocates BSS or creates pointers from initialized scalars. Stack and image
 // provenance have separate coordinates in one current byte state. Checked RIP
 // address formation can introduce image provenance; matching scalar bits cannot.
 // Ordered lanes preserve either pointer kind across mixed-memory spills and
@@ -121,17 +133,21 @@
 //
 // CheckTransitionContinuation consumes only an immutable predecessor and a full
 // root-to-new-cut proposal. It reconstructs the prefix stopping at the old cut,
-// checks exact membership/edges and that the old cut separates every full path,
+// checks exact membership/edges, including excluded terminals and their private
+// proof roots, and that the old cut separates every feasible full path,
 // inherits the same symbolic inputs and derived state, and executes only the
 // suffix. Normalized root limits and cumulative work also govern inherited terms,
-// copies and the combined graph, including primitive-only roots; a new segment
+// copies, nested exclusion search/checking and the combined graph, including
+// primitive-only roots; a new segment
 // cannot reset those bounds. Aggregate live node-state bytes are bounded before
 // allocation; consumed states are released rather than enumerating whole paths.
 // Original entry, initial predicates, guards and prior outcome identities survive,
 // while new occurrences and sibling queries have distinct scopes. Mapping
 // and interference conditions remain premises over the longer scope, rather than
 // actual stability facts inferred from the predecessor. No replacement image,
-// interface, heap, expected result or per-segment limits can be supplied.
+// interface, heap, expected result or per-segment limits can be supplied. Initial
+// image facts are applied only at the root; continuation restores current bytes,
+// including conditional writes, without reinitializing them.
 //
 // NewImage binds a copied byte image, not a filesystem or execution observation.
 // Its consumer must supply the existing inspected-artifact ownership and span

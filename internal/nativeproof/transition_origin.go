@@ -48,6 +48,9 @@ func (m *transitionChecker) offset(d int64) error {
 }
 
 func (m *transitionChecker) validate() error {
+	if err := m.admitInitialization(); err != nil {
+		return err
+	}
 	c := m.face.Conditions
 	if c.CPUID != "" && c.CPUID != CPUIDModel {
 		return refuse(m.pc, "transition-primitive-model", "unsupported CPUID model")

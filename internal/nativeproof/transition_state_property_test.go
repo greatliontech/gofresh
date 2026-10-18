@@ -57,12 +57,14 @@ type stateQuery struct {
 }
 
 type stateReference struct {
-	origin  uint64
-	regs    [16]uint64
-	ptrs    [16]statePointer
-	memory  map[stateLocation]stateByte
-	words   map[int64]uint64
-	written [16]bool
+	origin uint64
+	regs   [16]uint64
+	ptrs   [16]statePointer
+	memory map[stateLocation]stateByte
+	// Input-owned fixture coverage, never read from a checker certificate.
+	initialized map[stateLocation]bool
+	words       map[int64]uint64
+	written     [16]bool
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
 	flags    [6]bool
 	writer   to.Operation
@@ -535,6 +537,11 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 			v := b.Value.View()
 			if v.Op != br.Extract || v.Sort != br.Bits(8) || v.Immediate != lane.bit || len(v.Args) != 1 || v.Args[0] != lane.word {
 				t.Fatal("initial word byte has wrong independent slice", b.Offset)
+			}
+		} else if b.Image && initial.initialized[key] {
+			v := b.Value.View()
+			if v.Op != br.Constant || v.Sort != br.Bits(8) || v.Immediate != uint64(want.value) {
+				t.Fatal("initialized byte differs from fixture", b.Offset)
 			}
 		} else {
 			variable(b.Value, br.Bits(8), uint64(want.value))

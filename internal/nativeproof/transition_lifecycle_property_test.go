@@ -49,6 +49,10 @@ func lifecycleSnapshot(b TransitionBound) TransitionBound {
 	b.Accesses = slices.Clone(b.Accesses)
 	b.PrimitiveEffects = slices.Clone(b.PrimitiveEffects)
 	b.Boundary.Bytes = slices.Clone(b.Boundary.Bytes)
+	b.ExcludedBoundaries = slices.Clone(b.ExcludedBoundaries)
+	for j := range b.ExcludedBoundaries {
+		b.ExcludedBoundaries[j].Bytes = slices.Clone(b.ExcludedBoundaries[j].Bytes)
+	}
 	return b
 }
 

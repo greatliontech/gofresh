@@ -270,6 +270,7 @@ func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 	// no certificate, checker, symbolicState snapshot, builder, or context remains.
 	typ := reflect.TypeFor[checkedTransition]()
 	want := map[string]reflect.Type{"image": reflect.TypeFor[*Image](), "bound": reflect.TypeFor[TransitionBound](), "limits": reflect.TypeFor[TransitionLimits](), "work": reflect.TypeFor[int](), "flags": reflect.TypeFor[[flagCount]br.Term]()}
+	want["exclusions"], want["coverageGuard"] = reflect.TypeFor[[]br.Witness](), reflect.TypeFor[br.Term]()
 	for j := 0; j < typ.NumField(); j++ {
 		f := typ.Field(j)
 		if want[f.Name] != f.Type {
@@ -415,6 +416,13 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	}
 	visit(b.Origin)
 	visit(b.CutGuard)
+	visit(root.checked.coverageGuard)
+	for j, e := range root.checked.exclusions {
+		left, right := e.Roots()
+		visit(left)
+		visit(right)
+		visit(b.ExcludedBoundaries[j].Guard)
+	}
 	visit(b.InitialPredicates.CF)
 	visit(b.InitialPredicates.ZF)
 	visit(b.InitialPredicates.SFXorOF)

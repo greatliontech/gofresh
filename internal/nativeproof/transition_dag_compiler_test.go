@@ -253,6 +253,7 @@ func checkOptimizedGuarded(t testing.TB, im *Image, oldFace TransitionInterface,
 		check(v.first, v.second, v.raw[:], v.inactive[:])
 	}
 	t.Logf("conditional guarded DAG: first query=%#x common unexecuted load=%#x byte=%#x dword=%#x; five control populations, arbitrary initial bytes, independent second tuples; no execution/source/loader-initialization claim", firstQuery, x.pcs[cut], flag, version)
+	checkOptimizedInitialized(t, im, face, x.pcs[cut])
 }
 
 // Each map is surjective onto its control class: already-satisfying words are

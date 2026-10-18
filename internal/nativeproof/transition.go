@@ -21,6 +21,7 @@ type transitionChecker struct {
 	pointers                   [16]TransitionPointer
 	memory                     map[TransitionLocation]TransitionByte
 	liveStateBytes, stateBytes int
+	exclusions                 []br.Witness
 }
 
 func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
@@ -67,7 +68,7 @@ func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits, wo
 func (m *transitionChecker) graph(cut uint64) (*graph, error) {
 	g, err := decodeGraphUsing(&relationContext{Context: m.ctx, meter: m.valueBuilder}, m.im.entry, m.limits.Instructions, func(pc uint64) (decodedInstruction, error) {
 		m.pc = pc
-		return decodeTransition(m.im, pc, cut)
+		return decodeTransitionBoundary(m.im, pc, cut)
 	})
 	if err != nil {
 		return nil, err
@@ -75,13 +76,13 @@ func (m *transitionChecker) graph(cut uint64) (*graph, error) {
 	if idx, ok := g.byPC[cut]; !ok || g.nodes[idx].boundary != boundaryCut {
 		return nil, refuse(cut, "transition-cut", "cut is not a reachable decoded boundary")
 	}
-	// Full syntactic closure has one terminal. Neither this check nor topological
-	// scheduling simplifies a symbolic reach condition or excludes an edge.
+	// Syntactic closure permits the declared cut and candidate unsupported
+	// terminals. Neither discovery nor scheduling supplies their false proofs.
 	for _, n := range g.nodes {
 		if !m.tick() {
 			return nil, m.err
 		}
-		if n.boundary != boundaryCut && n.count == 0 {
+		if n.boundary != boundaryCut && n.boundary != boundaryUnsupported && n.count == 0 {
 			return nil, refuse(n.pc, "transition-cut", "unclosed prefix path")
 		}
 	}
@@ -236,6 +237,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	m.liveStateBytes += 8 * len(g.nodes)
 	states := make([]*transitionNodeState, len(g.nodes))
 	states[g.order[start]] = m.takeState()
+	var cutState *transitionNodeState
 	for _, idx := range g.order[start:] {
 		ins := g.nodes[idx]
 		m.pc = ins.pc
@@ -255,6 +257,26 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 			}
 			m.bound.Boundary = CutBoundary{PC: ins.pc, Instruction: i, Bytes: append([]byte(nil), bytes...)}
 			m.bound.CutGuard = m.state.path
+			cutState = m.takeState()
+			continue
+		}
+		if ins.boundary == boundaryUnsupported {
+			w, err := m.proveFalseGuard(m.state.path)
+			if err != nil {
+				return TransitionCertificate{}, g.failure(ins.pc, err)
+			}
+			i, raw, err := decodeBytes(m.im, ins.pc)
+			if err != nil {
+				return TransitionCertificate{}, g.failure(ins.pc, err)
+			}
+			if err := m.reserveExclusion(); err != nil {
+				return TransitionCertificate{}, err
+			}
+			b := ExcludedBoundary{CutBoundary{PC: ins.pc, Instruction: i, Bytes: append([]byte(nil), raw...)}, m.state.path}
+			m.bound.ExcludedBoundaries = append(m.bound.ExcludedBoundaries, b)
+			m.exclusions = append(m.exclusions, w)
+			m.memory = nil
+			m.liveStateBytes -= m.stateBytes
 			continue
 		}
 		guard := m.state.path
@@ -292,6 +314,10 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 			return TransitionCertificate{}, g.failure(ins.pc, m.err)
 		}
 	}
+	if cutState == nil {
+		return TransitionCertificate{}, refuse(m.pc, "transition-cut", "missing cut state")
+	}
+	m.installState(cutState)
 	for r := range m.state.regs {
 		if !m.tick() {
 			return TransitionCertificate{}, m.err
@@ -302,7 +328,14 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	if !m.tick() {
 		return TransitionCertificate{}, g.failure(m.pc, m.err)
 	}
-	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags}}, nil
+	// Complete-cut induction, rather than propositional normalization: the root
+	// condition is true (or the predecessor's exact proved-total cut condition).
+	// Each fork above produces G&!P and G&P, each join consumes their complete
+	// incoming union, and the acyclic schedule processes every such edge exactly
+	// once. All terminals other than this cut have checked false incoming guards.
+	// Thus every admitted valuation contributes to this exact CutGuard. No graph
+	// closure assertion substitutes a literal true or discards a transfer.
+	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags, exclusions: m.exclusions, coverageGuard: m.bound.CutGuard}}, nil
 }
 
 func (m *transitionChecker) projectMemory() []TransitionByte {
@@ -389,7 +422,13 @@ func (m *transitionChecker) initial() error {
 			}
 			key := TransitionLocation{Image: true, Offset: int64(addr)}
 			if _, exists := m.memory[key]; !exists {
-				m.memory[key] = TransitionByte{TransitionLocation: key, Value: m.scratch(br.Bits(8))}
+				var value br.Term
+				if v, known := m.initialImageByte(addr); known {
+					value = m.con(br.Bits(8), uint64(v))
+				} else {
+					value = m.scratch(br.Bits(8))
+				}
+				m.memory[key] = TransitionByte{TransitionLocation: key, Value: value}
 			}
 		}
 	}

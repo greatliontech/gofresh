@@ -38,6 +38,22 @@ func captureTransitionProposal(p TransitionProposal, l TransitionLimits, work *i
 
 func (m *transitionChecker) inherit(prior checkedTransition) error {
 	b := prior.bound
+	if len(prior.exclusions) != len(b.ExcludedBoundaries) {
+		return refuse(m.pc, "transition-predecessor", "incomplete exclusions")
+	}
+	for _, e := range b.ExcludedBoundaries {
+		if err := m.reserveExclusion(); err != nil {
+			return err
+		}
+		if !m.tick() {
+			return m.err
+		}
+		for range e.Bytes {
+			if !m.tick() {
+				return m.err
+			}
+		}
+	}
 	// Charge every element copied into the successor's proof, including the
 	// immutable root projections. Only expression nodes and image bytes share
 	// immutable ownership; no predecessor container or construction arena survives.
@@ -57,6 +73,24 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			return nil // absent provenance or an intentionally unprojected flag
 		}
 		return m.importTerm(t)
+	}
+	for j, e := range prior.exclusions {
+		if !m.tick() {
+			return m.err
+		}
+		left, right := e.Roots()
+		for _, root := range []br.Term{b.ExcludedBoundaries[j].Guard, left, right} {
+			if err := importRoot(root); err != nil {
+				return err
+			}
+		}
+		m.exclusions = append(m.exclusions, e)
+	}
+	if !prior.coverageGuard.Valid() || prior.coverageGuard != b.CutGuard || b.CutGuard.Sort() != br.Bool() {
+		return refuse(m.pc, "transition-predecessor", "missing exact cut reach proof")
+	}
+	if err := m.admitInitialization(); err != nil {
+		return err
 	}
 	for _, root := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF, b.CutGuard} {
 		if err := importRoot(root); err != nil {

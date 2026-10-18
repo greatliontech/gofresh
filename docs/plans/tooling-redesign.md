@@ -309,9 +309,18 @@
                           - [x] 5.1w.2b.3b.2a.2.2.2.2.5.2 Check predicate and
                             branching transport over query outcomes, preserving conditional
                             effect occurrences and complete feasible-path coverage.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.6 Establish checked root image
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.6 Establish checked root image
                           initialization for read-dependent startup decisions, preserving
                           intervening writes and keeping loader applicability explicit.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.6.1 Derive partial file-byte
+                            and writable zero-fill coverage under an identified loading
+                            relation; preserve arbitrary bytes outside justified coverage.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.6.2 Retain unsupported
+                            structural boundaries with independently checked false incoming
+                            guards; preserve coverage and current state across continuations.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.6.3 Recheck initialized
+                            image reads and the selected decision from the root, excluding
+                            only the proved-dead call arm and stopping before the live TLS call.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses

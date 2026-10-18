@@ -19,6 +19,8 @@ type dagOp struct {
 	e           to.Encoding
 	next, taken int
 	address     uint64
+	// Structural-only terminal intent. No reference execution rule exists for it.
+	boundary []byte
 }
 type dagLayout struct {
 	stateLayout
@@ -64,6 +66,11 @@ func dagArrangePermutation(t testing.TB, ops []dagOp, permutation []int) dagLayo
 	}
 	for j, op := range ops {
 		pc := testEntry + uint64(position[j])
+		if op.boundary != nil {
+			x.pcs[2*j], x.encoded[2*j] = pc, slices.Clone(op.boundary)
+			copy(code[position[j]:], op.boundary)
+			continue
+		}
 		i := op.i
 		b, err := to.Encode(i, op.e)
 		if err != nil {
@@ -222,9 +229,17 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		t.Fatal("DAG scope binding differs")
 	}
 	values := stateBindings(t, c, face, initial)
+	inventory := x.proposal(cut)
+	if len(inventory.Nodes) != len(b.Instructions)+len(b.ExcludedBoundaries)+1 {
+		t.Fatal("structural coverage differs")
+	}
+	structural := map[uint64]Node{}
+	for _, n := range inventory.Nodes {
+		structural[n.PC] = n
+	}
 	guards := map[uint64]br.Term{}
 	for _, v := range b.Instructions {
-		if guards[v.Start].Valid() || v.Guard.Sort() != br.Bool() {
+		if guards[v.Start].Valid() || v.Guard.Sort() != br.Bool() || structural[v.Start].Size != uint8(v.End-v.Start) {
 			t.Fatal("duplicate occurrence")
 		}
 		guards[v.Start] = v.Guard
@@ -326,6 +341,15 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("filtered ordered trace differs\ngot %v\nwant %v", got, want)
+	}
+	for j, e := range b.ExcludedBoundaries {
+		if guards[e.PC].Valid() || structural[e.PC].Size != uint8(len(e.Bytes)) || len(structural[e.PC].Successors) != 0 || stateEval(t, e.Guard, values) != 0 {
+			t.Fatal("excluded terminal is executed or structurally unbound")
+		}
+		left, right := c.checked.exclusions[j].Roots()
+		if left != e.Guard || right.Sort() != br.Bool() || !literalBool(right, 0) {
+			t.Fatal("excluded terminal proof differs")
+		}
 	}
 	if b.CutGuard.Sort() != br.Bool() || stateEval(t, b.CutGuard, values) != 1 || b.Boundary.PC != x.pcs[cut] || !slices.Equal(b.Boundary.Bytes, x.encoded[cut]) {
 		t.Fatal("cut relation differs")

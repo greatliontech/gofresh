@@ -187,3 +187,18 @@ func decodeTransition(im *Image, pc, cut uint64) (decodedInstruction, error) {
 	}
 	return decodedInstruction{inst: operation{Op: i.Op, Args: [2]x86asm.Arg{i.Args[0], i.Args[1]}, MemBytes: i.MemBytes}, size: uint8(i.Len), count: 1, targets: [2]uint64{next}}, nil
 }
+
+// Structural failure is always fatal, even on an impossible path. Only after
+// exact decoding may a missing transfer rule become a candidate false boundary.
+// Neither candidate discovery nor a caller's node inventory proves it unreachable.
+func decodeTransitionBoundary(im *Image, pc, cut uint64) (decodedInstruction, error) {
+	i, _, err := decodeBytes(im, pc)
+	if err != nil {
+		return decodedInstruction{}, err
+	}
+	n, err := decodeTransition(im, pc, cut)
+	if err == nil {
+		return n, nil
+	}
+	return decodedInstruction{boundary: boundaryUnsupported, size: uint8(i.Len)}, nil
+}

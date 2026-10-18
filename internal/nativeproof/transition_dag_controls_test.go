@@ -13,8 +13,8 @@ import (
 func TestTransitionGuardedCoverageControls(t *testing.T) {
 	face := cpuidFace()
 	// Literal bytes supply coincident successors, a backward physical DAG,
-	// overlapping instructions, dead-but-unsupported forms and cycles. The cut
-	// itself may be unsupported, but no prior unsupported node is a stopping rule.
+	// overlapping instructions, dead-but-unsupported forms and cycles. A prior
+	// unsupported node now requires a checked exclusion, never mere discovery.
 	for _, code := range []string{"7400", "74054889e0ebf84889c3", "b80000000083f80074020f054889c3", "74014889c3", "7402ebfc4889c3", "7402c3904889c3"} {
 		im, cut := transitionFixture(t, code)
 		c, err := proveTransition(t, im, cut, face)
@@ -28,6 +28,14 @@ func TestTransitionGuardedCoverageControls(t *testing.T) {
 				if stateEval(t, b.CutGuard, values) != 1 {
 					t.Fatal("coincident edge union lost")
 				}
+			}
+		} else if code == "b80000000083f80074020f054889c3" {
+			if err != nil || len(c.checked.exclusions) != 1 {
+				t.Fatal("checked dead syscall was not retained", err)
+			}
+			left, right := c.checked.exclusions[0].Roots()
+			if left != c.checked.bound.ExcludedBoundaries[0].Guard || !literalBool(right, 0) {
+				t.Fatal("wrong exclusion root")
 			}
 		} else {
 			transitionRefused(t, c, err)

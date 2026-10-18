@@ -113,8 +113,8 @@ func (m *transitionChecker) mergeState(slot **transitionNodeState, src *transiti
 }
 
 // Recover the prefix from the owned bytes, stopping at C, then check its exact
-// membership and edges in root->D. Every path must hit C: reaching D in the
-// stopped walk is a bypass. Full-graph occupancy/cycle checks exclude overlaps
+// membership and edges in root->D, including every proved-false terminal.
+// Reaching D in the stopped walk is a bypass. Full-graph occupancy/cycle checks exclude overlaps
 // and suffix re-entry. No second authoritative graph survives the call.
 func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition) (int, error) {
 	old := prior.bound.Boundary
@@ -122,7 +122,7 @@ func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition)
 	if err != nil {
 		return 0, err
 	}
-	if len(prefix.nodes) != len(prior.bound.Instructions)+1 {
+	if len(prior.exclusions) != len(prior.bound.ExcludedBoundaries) || len(prefix.nodes) != len(prior.bound.Instructions)+len(prior.exclusions)+1 {
 		return 0, refuse(old.PC, "transition-continuation", "predecessor coverage differs")
 	}
 	coverage := make(map[uint64]Span, len(prior.bound.Instructions))
@@ -134,6 +134,22 @@ func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition)
 			return 0, refuse(old.PC, "transition-continuation", "duplicate predecessor occurrence")
 		}
 		coverage[occurrence.Start] = occurrence.Span
+	}
+	excluded := make(map[uint64]ExcludedBoundary, len(prior.exclusions))
+	for j, e := range prior.exclusions {
+		if !m.tick() {
+			return 0, m.err
+		}
+		b := prior.bound.ExcludedBoundaries[j]
+		left, right := e.Roots()
+		if !e.Valid() || left != b.Guard || !literalBool(right, 0) || right.Sort() != br.Bool() {
+			return 0, refuse(b.PC, "transition-continuation", "invalid retained exclusion")
+		}
+		if _, exists := coverage[b.PC]; exists {
+			return 0, refuse(b.PC, "transition-continuation", "duplicate excluded boundary")
+		}
+		coverage[b.PC] = Span{b.PC, b.PC + uint64(len(b.Bytes))}
+		excluded[b.PC] = b
 	}
 	for _, n := range prefix.nodes {
 		if !m.tick() {
@@ -150,7 +166,18 @@ func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition)
 		if n.pc == old.PC {
 			continue
 		}
-		if coverage[n.pc] != (Span{n.pc, n.pc + uint64(n.size)}) || full.boundary != boundaryNone || n.count != full.count {
+		wantBoundary := boundaryNone
+		if b, exists := excluded[n.pc]; exists {
+			wantBoundary = boundaryUnsupported
+			i, raw, err := decodeBytes(m.im, n.pc)
+			if err != nil {
+				return 0, err
+			}
+			if i != b.Instruction || !bytes.Equal(raw, b.Bytes) {
+				return 0, refuse(n.pc, "transition-continuation", "excluded bytes differ")
+			}
+		}
+		if coverage[n.pc] != (Span{n.pc, n.pc + uint64(n.size)}) || full.boundary != wantBoundary || n.boundary != wantBoundary || n.count != full.count {
 			return 0, refuse(n.pc, "transition-continuation", "predecessor membership or terminal differs")
 		}
 		for edge, next := range n.next[:n.count] {
@@ -166,26 +193,37 @@ func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition)
 	if i != old.Instruction || !bytes.Equal(encoded, old.Bytes) {
 		return 0, refuse(old.PC, "transition-continuation", "predecessor boundary differs")
 	}
-	// With C dominating the sole terminal, every prefix node precedes C and all
-	// suffix nodes follow it in any topological order. Check this consequence,
-	// rather than using a prefix-list comparison as the dominance argument.
-	start := -1
-	for j, idx := range g.order {
+	// Dead terminals may sort after C without executing there. Partition the
+	// topological order by the reconstructed complete prefix, while refusing every
+	// suffix edge back into it. This preserves all incoming control dependencies.
+	order := make([]int, 0, len(g.order))
+	for _, idx := range g.order {
 		if !m.tick() {
 			return 0, m.err
 		}
 		pc := g.nodes[idx].pc
-		if pc == old.PC {
-			start = j
+		if _, before := coverage[pc]; before {
+			order = append(order, idx)
 			continue
 		}
-		_, before := coverage[pc]
-		if before != (start < 0) {
-			return 0, refuse(pc, "transition-continuation", "cut does not separate prefix and suffix")
+		for _, next := range g.nodes[idx].next[:g.nodes[idx].count] {
+			if _, before := coverage[g.nodes[next].pc]; before {
+				return 0, refuse(pc, "transition-continuation", "suffix re-enters prefix")
+			}
 		}
 	}
-	if start < 0 {
-		return 0, refuse(old.PC, "transition-continuation", "missing predecessor cut")
+	start := len(order)
+	for _, idx := range g.order {
+		if !m.tick() {
+			return 0, m.err
+		}
+		if _, before := coverage[g.nodes[idx].pc]; !before {
+			order = append(order, idx)
+		}
 	}
+	if start >= len(order) || g.nodes[order[start]].pc != old.PC {
+		return 0, refuse(old.PC, "transition-continuation", "cut does not separate prefix and suffix")
+	}
+	g.order = order
 	return start, nil
 }

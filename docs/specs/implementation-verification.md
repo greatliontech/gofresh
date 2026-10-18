@@ -313,6 +313,35 @@ their names or versions confer no authority. A layer-visible exception handler o
 additional ordinary-memory effect needs its own checked composition. The model does
 not establish actual process applicability or observe any CPU response.
 
+A restricted static-ELF root-loading relation may refine declared image storage.
+It is a partial relation over the same owned ELF64 little-endian x86-64 image,
+with static addresses, zero load bias and the identified 4-KiB mapping semantics.
+For checked file-backed logical bytes it supplies the corresponding owned file
+bytes. For checked readable, writable, non-executable zero-fill ranges it supplies
+zeros. Unsupported initialization ranges remain arbitrary; an unrelated readonly
+zero-fill tail does not invalidate justified facts for an independent range.
+The relation does not use section names, symbol names, kernel-version labels or
+content approval as initialization authority.
+
+Known-value coverage requires checked logical extents, file bounds, permissions,
+mapping operations and backing independence. Page prefixes, padding and gaps
+provide no additional usable storage or generic zero facts. Every other loading
+operation must either preserve the claimed bytes, mappings and relevant backing,
+or preclude entry. Ignored failures may have partial effects and cannot be assumed
+effect-free. Unsupported global reservations, remappings or accumulated zero-fill
+operations defeat affected coverage unless their noninterference is established.
+The model retains loading-failure outcomes and actual-loader applicability; it
+does not establish that a process reached the image's entry.
+
+The checked relation determines coverage, while the root's existing image footprint
+determines which bytes are represented. Covered bytes receive derived scalar facts;
+uncovered bytes remain fresh arbitrary inputs, including mixed known and unknown
+words. Selecting the relation requires a fresh root judgment. Continuations retain
+current bytes after all intervening writes and never reapply initial values.
+Equal-byte independent images cannot borrow the relation. Initialized numeric bytes
+acquire no pointer or source-storage provenance, and the arbitrary-image model
+remains available without this refinement.
+
 **REQ-impl-native-transition** (invariant): An accepted conditional native
 entry-to-cut transition MUST satisfy these obligations:
 
@@ -326,15 +355,24 @@ entry-to-cut transition MUST satisfy these obligations:
   architectural meanings and unchanged identities across later overwrites.
   The image, instruction and machine applicability
   obligations of REQ-impl-native-entry remain required.
-- **complete-cut** — The checker reconstructs every reachable instruction and
-  successor before the cut from bound image bytes. It establishes the cut as a
-  reachable instruction boundary and retains its decoded instruction separately
-  as unexecuted boundary evidence. Every maximal path in the claimed scope reaches
-  that cut; cycles require a checked finite-progress argument or refusal. A fault
+- **complete-cut** — The checker reconstructs bound instruction bytes and every
+  successor required by the admitted transfers before the cut. It establishes the
+  cut as a reachable instruction boundary and retains its decoded instruction
+  separately as unexecuted boundary evidence. Every execution from an admissible
+  entry state reaches that cut; cycles require a checked finite-progress argument
+  or refusal. A structurally decoded boundary without an admitted transfer may
+  terminate discovery only when an independently checked proof establishes that
+  its complete incoming execution condition is false for every admissible state.
+  Evidence retains that boundary's bytes, extent, incoming control dependencies
+  and exclusion proof. This grants no execution, effect, target, return or
+  continuation semantics for the excluded operation. Without that proof,
+  unsupported or unresolved transfers refuse. Truncation, unavailable bytes,
+  incompatible decoding, cancellation and exhausted exploration never establish
+  an endpoint. A fault
   or unsupported transfer before the cut cannot be hidden by assuming normal
   completion. Applicable synchronous faults must be excluded by established
   premises. Proposed extents, symbol sizes, instruction counts and exhausted
-  budgets never establish an endpoint. Calls, returns, indirect transfers and
+  budgets never establish an endpoint. Executed calls, returns, indirect transfers and
   external effects require their actual rules and obligations or refusal, not a
   fabricated return or silently truncated successor inventory. Reach conditions
   derive from the actual bound predicate state; taken and fallthrough edges
@@ -362,7 +400,10 @@ entry-to-cut transition MUST satisfy these obligations:
   Undefined flags stay undefined; omitting a flag value from a projection does not
   establish that the flag was preserved.
   Image zero-fill or source-language zero initialization supplies no initial
-  native-memory value without its applicable initialization relation. Raw input
+  native-memory value without its applicable initialization relation. Such facts
+  derive from owned file/zero-fill coverage under the identified loading relation
+  and apply only at the original root. Uncovered bytes remain arbitrary, and
+  subsequent writes supersede initial facts. Raw input
   words and pointer bytes acquire no argument, environment or Go-object meaning
   from a familiar address or symbol. Every non-entry outcome variable has an
   independently checked primitive-occurrence origin with explicit selector,
@@ -394,7 +435,9 @@ entry-to-cut transition MUST satisfy these obligations:
   decoding and re-entry into an executed prefix. Initial predicate identities,
   occurrence guards and the final reach expression remain retained dependencies;
   continuation does not restart reachability at an invented true condition or
-  reset resource allowances per path.
+  reset resource allowances per path. Checked exclusions retain their original
+  boundary and guard dependencies; continuation neither reapplies initial image
+  values nor turns an excluded operation into a fictional executed continuation.
   Origin names, matching output bytes or digests cannot replace this relation.
   The transition remains distinct from normal-return, complete-function,
   source-startup and completed-bootstrap evidence. Applying it to an ordinary

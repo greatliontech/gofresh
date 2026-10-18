@@ -6,8 +6,9 @@ import (
 )
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
-// including guarded DAG transport, decoder, expression, pointer-lane and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@5;" + ValueRules + ";" + FrameRules + ";" + cpuidRules
+// including initialized image roots, guarded exclusions, decoder, expression,
+// pointer-lane and CPUID dependencies.
+const TransitionRules = "gofresh/native-transition@6;" + ValueRules + ";" + cpuidRules + ";" + imageInitializationRules
 
 const cpuidRules = "gofresh/native-cpuid@1"
 
@@ -69,11 +70,14 @@ type TransitionInterface struct {
 	Envelope RelativeSpan
 	Regions  []RelativeRegion
 	// ImageRegions grants access only within these absolute extents. Permissions
-	// come from the owned PT_LOAD mappings; every initial data byte is arbitrary,
-	// including readonly and zero-fill bytes. Instruction fetch is separate.
+	// come from the owned PT_LOAD mappings. Initial bytes are arbitrary unless
+	// covered by Initialization. Instruction fetch is separate.
 	ImageRegions []Span
-	Words        []int64
-	Conditions   TransitionConditions
+	// Initialization optionally refines root image bytes under its retained loading
+	// applicability condition. Only a fresh root check may select this relation.
+	Initialization ImageInitialization
+	Words          []int64
+	Conditions     TransitionConditions
 }
 
 // TransitionLimits bounds graph/expression work and finite declared memory.
@@ -90,7 +94,9 @@ type TransitionLimits struct {
 // TransitionProposal is an untrusted complete entry-to-cut instruction inventory.
 // The checker obtains Entry independently from the owned ELF header. The cut node
 // has no executed successors; its actual instruction is retained separately.
-// A continuation still supplies this complete inventory from the original entry.
+// Unsupported structural terminals also have no successors; only the checker
+// can establish their exclusions. A continuation supplies the complete inventory
+// from the original entry, including those terminals.
 type TransitionProposal struct {
 	ImageDigest [32]byte
 	Entry, Cut  uint64
@@ -203,7 +209,7 @@ type GuardedInstruction struct {
 	Guard br.Term
 }
 
-// CutBoundary records a decoded, reachable but unexecuted instruction. Its bytes
+// CutBoundary records a decoded but unexecuted instruction. Its bytes
 // establish the boundary, not that its effects have been modeled.
 type CutBoundary struct {
 	PC          uint64
@@ -211,12 +217,19 @@ type CutBoundary struct {
 	Bytes       []byte
 }
 
+// ExcludedBoundary is diagnostic structural coverage, not an executed fetch or
+// transfer. The opaque certificate separately owns the exact checked false proof.
+type ExcludedBoundary struct {
+	CutBoundary
+	Guard br.Term
+}
+
 // TransitionBound is a cloned, non-authorizing projection. Origin exclusions are
 // half-open scalar-S intervals induced by external/image-page disjointness, not
 // chosen runtime bases. Registers and Memory are derived cut relations; memory
 // outside FrameWrite footprints, preserved GPRs and remaining context are unchanged.
 // Instructions contains guarded fetch occurrences. Filtering their guards gives
-// the executed trace. Boundary is unexecuted.
+// the executed trace. Boundary and ExcludedBoundaries are unexecuted.
 type TransitionBound struct {
 	ImageDigest       [32]byte
 	Rules             string
@@ -234,10 +247,11 @@ type TransitionBound struct {
 	Flags             TransitionFlags
 	Instructions      []GuardedInstruction
 	// CutGuard is the derived reach expression, never inferred from graph closure.
-	CutGuard         br.Term
-	Accesses         []TransitionAccess
-	PrimitiveEffects []PrimitiveEffect
-	Boundary         CutBoundary
+	CutGuard           br.Term
+	Accesses           []TransitionAccess
+	PrimitiveEffects   []PrimitiveEffect
+	Boundary           CutBoundary
+	ExcludedBoundaries []ExcludedBoundary
 }
 
 // TransitionCertificate owns a conditional entry-to-cut theorem. It cannot be
@@ -249,9 +263,14 @@ type checkedTransition struct {
 	bound  TransitionBound
 	limits TransitionLimits
 	work   int
-	// Only private condition predicates supplement the bound's sole register
-	// and byte-state snapshot. No builder or predecessor certificate is retained.
-	flags [flagCount]br.Term
+	// Private predicates and checked exclusion witnesses supplement the bound's
+	// sole state/structural snapshot. No builder or predecessor is retained.
+	flags      [flagCount]br.Term
+	exclusions []br.Witness
+	// coverageGuard binds the exact root of the complete-cut induction: incoming
+	// guards are edge partitions and complete unions, and all other terminals
+	// have independently checked false witnesses. The expression is not rewritten.
+	coverageGuard br.Term
 }
 
 func cloneTransitionInterface(f TransitionInterface) TransitionInterface {
@@ -279,5 +298,9 @@ func cloneTransitionBound(b TransitionBound) TransitionBound {
 	b.Accesses = append([]TransitionAccess(nil), b.Accesses...)
 	b.PrimitiveEffects = append([]PrimitiveEffect(nil), b.PrimitiveEffects...)
 	b.Boundary.Bytes = append([]byte(nil), b.Boundary.Bytes...)
+	b.ExcludedBoundaries = append([]ExcludedBoundary(nil), b.ExcludedBoundaries...)
+	for j := range b.ExcludedBoundaries {
+		b.ExcludedBoundaries[j].Bytes = append([]byte(nil), b.ExcludedBoundaries[j].Bytes...)
+	}
 	return b
 }

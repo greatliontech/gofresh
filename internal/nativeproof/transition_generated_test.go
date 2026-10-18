@@ -383,6 +383,20 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		equal(occurrence.Guard, b.Instructions[j].Guard)
 	}
 	equal(a.CutGuard, b.CutGuard)
+	if len(a.ExcludedBoundaries) != len(b.ExcludedBoundaries) {
+		t.Fatal("excluded coverage differs")
+	}
+	excluded := map[uint64]ExcludedBoundary{}
+	for _, e := range b.ExcludedBoundaries {
+		excluded[e.PC] = e
+	}
+	for _, e := range a.ExcludedBoundaries {
+		other, ok := excluded[e.PC]
+		if !ok || !reflect.DeepEqual(e.CutBoundary, other.CutBoundary) {
+			t.Fatal("excluded bytes differ")
+		}
+		equal(e.Guard, other.Guard)
+	}
 	for j, p := range []br.Term{a.InitialPredicates.CF, a.InitialPredicates.ZF, a.InitialPredicates.SFXorOF} {
 		equal(p, []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF}[j])
 	}
