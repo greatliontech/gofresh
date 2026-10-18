@@ -179,8 +179,9 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: finish the call/TLS chunk at
-    5.1w.2b.3b.2a.2.2.2.2.7; complete required bootstrap and compiler
+    Follow this remaining execution order: finish paired-CAS at
+    5.1w.2b.3b.2a.2.2.2.2.9; integrate the Cerebro handoffs at its .9a and .9b
+    successors; resume .10 and complete required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
@@ -456,6 +457,30 @@
                           not compiler-internal recognition or out-of-line link
                           inclusion; retain omitted prologue, higher-root coverage,
                           source-state handoff and runtime applicability obligations.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9a Integrate Cerebro's
+                          Gofresh exact-file eligibility handoff 098fe979 onto the
+                          current producer/classifier contract. Preserve effective
+                          environment and directory ownership, cache exceptions,
+                          exclusions, projections and refusal of unavailable inputs;
+                          classification grants no observation or outcome evidence.
+                          Converge review, deciding controls and applicable checks
+                          before landing the main-line API. Retain its normal release
+                          at 5.1w.7; the v0.116.3 handoff base is not a compatibility
+                          release target.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9b Integrate Cerebro's
+                          Stipulator linker/input-file handoff 00759e43 into the
+                          pending clean-break migration. Carry typed resolved linker
+                          assignments through selection, retained builds, execution,
+                          every retry and reports; admit exact manifest files through
+                          the native producer's actual classification and observation
+                          boundaries. Reconcile the three seeded-record fixtures in
+                          gofresh-corpus-pin-lag with package production and structured
+                          judgments, preserving their original assertions. Converge
+                          integration review and applicable verification, then resume
+                          .10. Keep real released-dependency adoption, normal release
+                          CI, installation and reader restart at 5.2d/5.2e; development
+                          qualification is not released-consumer acceptance. Separate
+                          repository-analyzer work remains in its existing fleet slot.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.10 Complete conditional
                           testAtomic64 correspondence through remaining Load64,
                           Store64, Xadd64 and Xchg64 operations and its actual
