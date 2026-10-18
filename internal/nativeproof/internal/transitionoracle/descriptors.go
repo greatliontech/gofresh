@@ -9,7 +9,7 @@ type Descriptor struct {
 	Encoding Encoding
 }
 
-// Descriptors visits each structural spelling once (14,706 descriptors). It can
+// Descriptors visits each structural spelling once (14,707 descriptors). It can
 // be used directly as a range-over-function iterator; false stops iteration.
 // The finite dimensions are all opcode forms, allowed REX bytes, ModRM register
 // selectors and modes, optional/required SIB bases and all four no-index scales.
@@ -22,6 +22,9 @@ type Descriptor struct {
 // selectors have no semantic REX.R extension; their ignored bit still produces
 // distinct descriptors. The iterator calls neither Encode nor Parse.
 func Descriptors(yield func(Descriptor) bool) {
+	if !yield(Descriptor{Intent: Intent{Operation: CPUID}, Encoding: Encoding{Form: CPUID0FA2}}) {
+		return
+	}
 	for _, f := range []Form{JMPEB, JMPE9} {
 		if !yield(Descriptor{Intent: Intent{Operation: Jump}, Encoding: Encoding{Form: f}}) {
 			return

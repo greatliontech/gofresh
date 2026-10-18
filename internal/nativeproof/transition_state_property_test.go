@@ -49,6 +49,12 @@ type stateAccess struct {
 	off         stateLocation
 }
 
+type stateQuery struct {
+	instruction   int
+	leaf, subleaf uint32
+	results       [4]uint32 // EAX, EBX, ECX, EDX, chosen before checking
+}
+
 type stateReference struct {
 	origin  uint64
 	regs    [16]uint64
@@ -62,6 +68,8 @@ type stateReference struct {
 	accesses []stateAccess
 	frame    map[stateLocation]bool
 	loads    []interfaceMapping
+	outcomes [][4]uint32
+	queries  []stateQuery
 }
 
 func stateFace(modulus, residue uint64) TransitionInterface {
@@ -126,7 +134,8 @@ func stateInitial(face TransitionInterface, seed uint64) stateReference {
 // its eight input bytes are consumed but cannot weaken that interface premise.
 // Words alias the same eight byte values rather than introducing inconsistent
 // duplicate assignments. Sufficiently long arrays express every joint valuation
-// of this interface; unused tail bytes impose no extra constraints.
+// of this interface. Subsequent 16-byte records supply independent per-query
+// BV32 tuples; they constrain only test evaluation, never the checking interface.
 func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 	read := func(n int) []byte {
 		out := make([]byte, n)
@@ -189,6 +198,15 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 		}
 		r.words[off] = word
 	}
+	// Each remaining 16-byte record independently supplies the full product of
+	// four uint32 outcomes. An absent tail selects zero, never checker output.
+	for len(data) != 0 {
+		var tuple [4]uint32
+		for j := range tuple {
+			tuple[j] = binary.LittleEndian.Uint32(read(4))
+		}
+		r.outcomes = append(r.outcomes, tuple)
+	}
 	return r
 }
 
@@ -202,12 +220,25 @@ func (r stateReference) clone() stateReference {
 		r.frame[off] = v
 	}
 	r.accesses = slices.Clone(r.accesses)
+	r.queries = slices.Clone(r.queries)
+	r.outcomes = slices.Clone(r.outcomes)
 	return r
 }
 
 func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
 	if i.Operation == to.Jump {
+		return
+	}
+	if i.Operation == to.CPUID {
+		q := stateQuery{instruction: index, leaf: uint32(r.regs[0]), subleaf: uint32(r.regs[1])}
+		if len(r.queries) < len(r.outcomes) {
+			q.results = r.outcomes[len(r.queries)]
+		}
+		r.queries = append(r.queries, q)
+		for slot, reg := range []int{0, 3, 1, 2} {
+			r.regs[reg], r.ptrs[reg], r.written[reg] = uint64(q.results[slot]), statePointer{}, true
+		}
 		return
 	}
 	address := r.regs[i.Base] + uint64(i.SignedDisp)
@@ -528,6 +559,12 @@ func (d *stateDepthProfile) step(i to.Intent, before stateReference) int {
 	switch i.Operation {
 	case to.Jump:
 		return 1
+	case to.CPUID:
+		needed := max(d.regs[0]+1, d.regs[1]+1, 2)
+		for _, reg := range []int{0, 3, 1, 2} {
+			d.regs[reg] = 2
+		}
+		return needed
 	case to.MoveRegister:
 		d.regs[i.Dst] = d.regs[i.Src]
 	case to.MoveImmediate:
@@ -607,6 +644,9 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 // Encoding choices are constrained only by their representable payload. No
 // semantic operand is reconstructed by parsing the resulting bytes.
 func stateEncoding(i to.Intent, choice uint8) to.Encoding {
+	if i.Operation == to.CPUID {
+		return to.Encoding{Form: to.CPUID0FA2}
+	}
 	e := to.Encoding{REX: 0x48}
 	r, b := uint8(0), i.Dst
 	mem := false
@@ -766,6 +806,7 @@ func stateArrange(t testing.TB, program []stateInstruction, seed uint64) stateLa
 func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, initial, want stateReference, values map[br.Term]uint64) {
 	t.Helper()
 	b := c.checked.bound
+	stateQueryBindings(t, b, x, want, values)
 	if b.ImageDigest != x.digest || b.Entry != x.pcs[0] || b.Rules != TransitionRules {
 		t.Fatal("state lost image/entry/rule binding")
 	}
@@ -885,6 +926,9 @@ func stateExpanded(ops []stateInstruction) []stateInstruction {
 
 func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	t.Helper()
+	if len(current.PrimitiveEffects) < len(original.PrimitiveEffects) || !slices.Equal(current.PrimitiveEffects[:len(original.PrimitiveEffects)], original.PrimitiveEffects) {
+		t.Fatal("continuation replaced prior primitive outcomes or selectors")
+	}
 	if current.Origin != original.Origin || current.InitialRegisters != original.InitialRegisters ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||
 		!slices.Equal(current.ExcludedOrigins, original.ExcludedOrigins) || !reflect.DeepEqual(current.Interface, original.Interface) {
@@ -993,11 +1037,13 @@ func stateCheckLocated(t testing.TB, x stateLayout, face TransitionInterface, in
 		boundaries = slices.Compact(boundaries)
 	}
 	for _, cut := range boundaries {
+		prior := root.checked.bound
 		root, err = CheckTransitionContinuation(t.Context(), root, x.proposal(cut))
 		if err != nil {
 			t.Fatalf("valid continuation to logical boundary %d refused: %v", cut, err)
 		}
 		stateInheritedInputs(t, original, root.checked.bound)
+		stateInheritedInputs(t, prior, root.checked.bound)
 		stateAssert(t, root, x, cut, initial, wants[cut], values)
 	}
 	// Secondary only: both roots and every selected prefix have already been

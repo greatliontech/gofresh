@@ -120,7 +120,7 @@ func TestDescriptorPopulation(t *testing.T) {
 	want := map[Form]int{
 		MOV89: 4736, MOV8B: 4736, MOVB8Imm64: 64, MOVB8Imm32: 16,
 		MOVC7: 592, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
-		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1,
+		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1, CPUID0FA2: 1,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
 	// bases have 7+8+8 modes times four scales, with X=0 only.
@@ -159,7 +159,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 14706 || len(counts) != len(want) {
+	if len(seen) != 14707 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {

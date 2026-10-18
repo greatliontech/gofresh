@@ -296,5 +296,8 @@ func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
 	assertTransitionAlpha(t, direct, c)
 	assertCPUQueryExecutionRefused(t, im, face, p, c)
 	assertImagePrefixMissingPremises(t, im, face, p, ripPC)
+	// The selected bytes use CMP EAX,0, not TEST. Neither form is executed by
+	// this query-only continuation; the image determines the boundary evidence.
+	assertCPUQueryConditionalStep(t, im, face, p, x86asm.CMP)
 	t.Logf("conditional image prefix reaches unexecuted CPU query %#x; arbitrary image inputs, 32 overwritten bytes at %#x", cut, address)
 }

@@ -19,7 +19,12 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		op = r.unsigned(1)
 	}
 	rex := d.Encoding.REX
-	if rex == 0 && (op == 0xeb || op == 0xe9) {
+	if rex == 0 && op == 0x0f {
+		if r.unsigned(1) != 0xa2 {
+			return fail("unsupported two-byte opcode")
+		}
+		d.Intent.Operation, d.Encoding.Form = CPUID, CPUID0FA2
+	} else if rex == 0 && (op == 0xeb || op == 0xe9) {
 		d.Intent.Operation = Jump
 		d.Encoding.Form = JMPEB
 		width := 1

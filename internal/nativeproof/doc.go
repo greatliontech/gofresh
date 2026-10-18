@@ -85,7 +85,15 @@
 // survive spills and reloads; numeric coincidence cannot create an origin.
 // The transition grammar admits full-width MOV, canonical MOV r32,imm32,
 // base/displacement and RIP-relative LEA, constant SUB, justified alignment AND
-// and relative JMP/fallthrough. Narrow register writes clear pointer provenance. Graph
+// and relative JMP/fallthrough. Exact unprefixed CPUID requires the optional
+// CPUIDModel architectural-step condition. Each checked occurrence introduces
+// four independent BV32 outcomes in a fresh private scope, zero-extends their
+// register writes and destroys destination provenance. An ordered value-form
+// primitive record retains old selectors and outcomes even after overwrite;
+// free-variable analysis of final state alone cannot establish purity. The event
+// retains ISA serialization, not timing or host-state claims. These quantified
+// outcomes are not hardware observations or caller-provided expected values.
+// Narrow register writes clear pointer provenance. Graph
 // occupancy and acyclic closure establish that every path reaches the decoded
 // cut. Its instruction is not executed or relabeled RET. Arithmetic flag values
 // may be unprojected, never invented or mistaken for preservation. No normal
@@ -106,7 +114,9 @@
 // root-to-new-cut proposal. It rechecks the complete graph and predecessor prefix,
 // inherits the same symbolic inputs and derived state, and executes only the
 // suffix. Normalized root limits and cumulative work also govern inherited terms,
-// copies and the combined graph; a new segment cannot reset those bounds. Mapping
+// copies and the combined graph, including primitive-only roots; a new segment
+// cannot reset those bounds. Original entry and prior outcome identities survive,
+// while new occurrences and sibling queries have distinct scopes. Mapping
 // and interference conditions remain premises over the longer scope, rather than
 // actual stability facts inferred from the predecessor. No replacement image,
 // interface, heap, expected result or per-segment limits can be supplied.

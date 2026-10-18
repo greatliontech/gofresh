@@ -17,6 +17,7 @@ func TestLiteralEncodings(t *testing.T) {
 		i         Intent
 		e         Encoding
 	}{
+		{"cpuid", "0fa2", Intent{Operation: CPUID}, Encoding{Form: CPUID0FA2}},
 		{"mov89", "4889d8", Intent{Operation: MoveRegister, Dst: 0, Src: 3}, Encoding{Form: MOV89, REX: 0x48}},
 		{"mov8b", "4f8bc1", Intent{Operation: MoveRegister, Dst: 8, Src: 9}, Encoding{Form: MOV8B, REX: 0x4f}},
 		{"store", "4c895a80", Intent{Operation: Store, Src: 11, Base: 2, SignedDisp: -128}, Encoding{Form: MOV89, REX: 0x4c, DispBytes: 1}},

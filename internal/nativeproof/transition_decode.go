@@ -24,6 +24,12 @@ func simpleBase(arg x86asm.Arg) bool {
 // base and displacement. LEA additionally admits exact RIP-relative disp32.
 func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 	bad := func() error { return refuse(pc, "transition-form", "unsupported transition encoding or operand form") }
+	if i.Op == x86asm.CPUID {
+		if i.Len != 2 || len(b) != 2 || b[0] != 0x0f || b[1] != 0xa2 || i.Args != (x86asm.Args{}) {
+			return bad()
+		}
+		return nil
+	}
 	if i.Op == x86asm.JMP {
 		if _, ok := i.Args[0].(x86asm.Rel); !ok || i.Args[1] != nil || !(len(b) == 2 && b[0] == 0xeb || len(b) == 5 && b[0] == 0xe9) {
 			return bad()

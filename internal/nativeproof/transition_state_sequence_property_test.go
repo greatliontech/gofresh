@@ -39,7 +39,7 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 		imm := binary.LittleEndian.Uint64(record[8:16])
 		disp := int64(int32(binary.LittleEndian.Uint32(record[24:28])))
 		var i to.Intent
-		switch record[0] % 10 {
+		switch record[0] % 11 {
 		case 0:
 			i = to.Intent{Operation: to.MoveRegister, Dst: dst, Src: src}
 		case 1:
@@ -60,6 +60,8 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 			i = to.Intent{Operation: to.And, Dst: dst, Immediate: uint64(int64(int32(imm)))}
 		case 9:
 			i = to.Intent{Operation: to.LEARIP, Dst: dst, SignedDisp: disp}
+		case 10:
+			i = to.Intent{Operation: to.CPUID}
 		}
 		program = append(program, stateOp(i, record[4]))
 		if len(program) >= instructionLimit {
@@ -185,6 +187,10 @@ func sequenceOperationFault(face TransitionInterface, domain interfaceInterval, 
 		return v, offset(v)
 	}
 	switch i.Operation {
+	case to.CPUID:
+		if face.Conditions.CPUID == "" {
+			return "transition-primitive-premise"
+		}
 	case to.LEARIP:
 		if len(nextPC) != 1 {
 			panic("RIP reference needs located next PC")
@@ -576,11 +582,13 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 	values := stateBindings(t, root, face, initial, true)
 	check(root, 0, values)
 	for _, next := range cuts {
+		prior := root.checked.bound
 		root, err = CheckTransitionContinuation(t.Context(), root, x.proposal(next))
 		if err != nil {
 			t.Fatal("admitted evolving continuation refused", err)
 		}
 		stateInheritedInputs(t, original, root.checked.bound)
+		stateInheritedInputs(t, prior, root.checked.bound)
 		check(root, next, values)
 	}
 	assertTransitionAlpha(t, direct, root)
@@ -618,7 +626,7 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 
 func sequenceRecord(i to.Intent, form byte) []byte {
 	r := make([]byte, 32)
-	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP}
+	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP, to.CPUID}
 	for j, operation := range operations {
 		if i.Operation == operation {
 			r[0] = byte(j)

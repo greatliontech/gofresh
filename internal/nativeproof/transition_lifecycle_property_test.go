@@ -18,6 +18,9 @@ func lifecycleProposal(p TransitionProposal) TransitionProposal {
 
 func lifecycleFace(extra uint8) TransitionInterface {
 	f := transitionFace()
+	if extra&64 != 0 {
+		f.Conditions.CPUID = CPUIDModel
+	}
 	if extra&128 != 0 {
 		f.ImageRegions = []Span{{testEntry, testEntry + 1}}
 	}
@@ -44,6 +47,7 @@ func lifecycleSnapshot(b TransitionBound) TransitionBound {
 	b.Memory = slices.Clone(b.Memory)
 	b.Instructions = slices.Clone(b.Instructions)
 	b.Accesses = slices.Clone(b.Accesses)
+	b.PrimitiveEffects = slices.Clone(b.PrimitiveEffects)
 	b.Boundary.Bytes = slices.Clone(b.Boundary.Bytes)
 	return b
 }
@@ -52,14 +56,19 @@ func lifecycleSnapshot(b TransitionBound) TransitionBound {
 // Mutations touch caller-owned containers only, never private immutable arenas.
 // This is lifecycle evidence alongside the separate interface/transfer domains.
 func FuzzTransitionLifecycle(f *testing.F) {
-	for _, extra := range []uint8{0, 1, 16, 128, 129, 144} {
+	for _, extra := range []uint8{0, 1, 16, 64, 65, 80, 128, 129, 144, 192} {
 		for _, checkpoint := range []uint32{0, 1, 0xffffffff} {
 			f.Add(extra, checkpoint)
 		}
 	}
 	f.Fuzz(func(t *testing.T, extra uint8, checkpoint uint32) {
 		prefix := hexBytes(t, entryPrefix)
-		im := image(t, append(prefix, hexBytes(t, "bd00000000c3")...))
+		suffix := hexBytes(t, "bd00000000")
+		if extra&64 != 0 {
+			prefix = append(prefix, 0x0f, 0xa2)
+			suffix = append(suffix, 0x0f, 0xa2)
+		}
+		im := image(t, append(append(slices.Clone(prefix), suffix...), 0xc3))
 		bound := func(c TransitionCertificate) TransitionBound {
 			t.Helper()
 			b, ok := c.Bound()
@@ -131,7 +140,7 @@ func FuzzTransitionLifecycle(f *testing.F) {
 			t.Fatal("cancelled root published evidence", err)
 		}
 
-		next, err := ProposeTransition(t.Context(), im, cut+5, TransitionLimits{})
+		next, err := ProposeTransition(t.Context(), im, cut+uint64(len(suffix)), TransitionLimits{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,6 +174,9 @@ func FuzzTransitionLifecycle(f *testing.F) {
 			}
 			for i := range projection.InitialMemory {
 				projection.InitialMemory[i] = TransitionByte{}
+			}
+			for i := range projection.PrimitiveEffects {
+				projection.PrimitiveEffects[i] = CPUIDEffect{}
 			}
 			for i := range proposal.Nodes {
 				proposal.Nodes[i].Size++

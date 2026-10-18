@@ -314,6 +314,30 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate) {
 	t.Helper()
 	a, b := direct.checked.bound, segmented.checked.bound
+	scopes := map[br.Scope]br.Scope{a.Origin.View().Scope: b.Origin.View().Scope}
+	if len(a.PrimitiveEffects) != len(b.PrimitiveEffects) {
+		t.Fatal("primitive occurrence count differs")
+	}
+	for j, effect := range a.PrimitiveEffects {
+		p, ok := effect.(CPUIDEffect)
+		q, valid := b.PrimitiveEffects[j].(CPUIDEffect)
+		if !ok || !valid || p.PC != q.PC {
+			t.Fatal("primitive occurrence kind/PC differs")
+		}
+		ps, qs := p.ResultsEAX.View().Scope, q.ResultsEAX.View().Scope
+		if ps == qs {
+			t.Fatal("independent roots reused a query scope")
+		}
+		if _, exists := scopes[ps]; exists {
+			t.Fatal("query reused an origin scope")
+		}
+		for _, mapped := range scopes {
+			if mapped == qs {
+				t.Fatal("non-bijective query scope map")
+			}
+		}
+		scopes[ps] = qs
+	}
 	seen := map[[2]br.Term]bool{}
 	var equal func(br.Term, br.Term)
 	equal = func(x, y br.Term) {
@@ -333,7 +357,7 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		if p.Op != q.Op || p.Sort != q.Sort || p.Immediate != q.Immediate || p.Scratch != q.Scratch || len(p.Args) != len(q.Args) {
 			t.Fatal("direct/segmented expression shape differs", p, q)
 		}
-		if p.Op == br.Variable && (p.Scope != a.Origin.View().Scope || q.Scope != b.Origin.View().Scope) {
+		if p.Op == br.Variable && (scopes[p.Scope] != q.Scope || q.Scope == (br.Scope{})) {
 			t.Fatal("foreign symbolic namespace")
 		}
 		for j := range p.Args {
@@ -342,6 +366,12 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	}
 	if a.Origin == b.Origin {
 		t.Fatal("independent roots unexpectedly share namespace")
+	}
+	for j, effect := range a.PrimitiveEffects {
+		p, q := effect.(CPUIDEffect), b.PrimitiveEffects[j].(CPUIDEffect)
+		for k, root := range []br.Term{p.Leaf, p.Subleaf, p.ResultsEAX, p.ResultsEBX, p.ResultsECX, p.ResultsEDX} {
+			equal(root, []br.Term{q.Leaf, q.Subleaf, q.ResultsEAX, q.ResultsEBX, q.ResultsECX, q.ResultsEDX}[k])
+		}
 	}
 	if a.Preserved != b.Preserved || !reflect.DeepEqual(a.Instructions, b.Instructions) || !reflect.DeepEqual(a.Accesses, b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
 		t.Fatal("direct/segmented scope differs")

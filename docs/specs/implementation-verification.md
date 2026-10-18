@@ -270,6 +270,35 @@ segments, not a return theorem, completed bootstrap or public invocation model.
 An executable's declared entry identifies an input to this judgment; it does not
 establish that a process actually entered there.
 
+Transition expressions can also range over outcomes introduced by independently
+checked primitive effects. Such outcomes are quantified possibilities, not
+observations or replacement entry inputs. Their executed occurrences, selector
+relations, identified semantics and applicability conditions remain explicit.
+
+The ordinary x86-64 CPU-query model interprets the exact CPUID instruction at the
+architectural machine layer identified by the transition. CPUID must be available
+and enabled at the executing privilege level, with applicable faulting controls
+disabled. Transactional or enclave contexts that substitute an abort or exception,
+and layer-visible interception requiring an unproved handler, are outside this
+model. Instruction mapping, isolation, debug and failure conditions remain
+separate prerequisites. These are configuration predicates establishing the
+ordinary successor, not an assumption that a particular query completed normally.
+
+The query captures the low 32 bits of RAX and RCX before writing its results. Its
+four independently unconstrained 32-bit outcomes replace EAX, EBX, ECX and EDX,
+zero-extending into their full registers. Other general-purpose registers,
+architectural flags and ordinary memory are unchanged. The ordered primitive event
+retains architectural serialization; it supplies no latency, cache, TLB or host-state
+claim. Independent outcomes over-approximate responses and establish no repeatability,
+vendor identity, reserved-bit constraint or feature consistency across queries.
+Even an overwritten result leaves its query and selector dependencies present.
+
+This model admits native and ISA-conforming virtual processors. Implementation
+mechanisms below the identified layer may include microcode or transparent VM exits;
+their names or versions confer no authority. A layer-visible exception handler or
+additional ordinary-memory effect needs its own checked composition. The model does
+not establish actual process applicability or observe any CPU response.
+
 **REQ-impl-native-transition** (invariant): An accepted conditional native
 entry-to-cut transition MUST satisfy these obligations:
 
@@ -314,7 +343,11 @@ entry-to-cut transition MUST satisfy these obligations:
   Image zero-fill or source-language zero initialization supplies no initial
   native-memory value without its applicable initialization relation. Raw input
   words and pointer bytes acquire no argument, environment or Go-object meaning
-  from a familiar address or symbol.
+  from a familiar address or symbol. Every non-entry outcome variable has an
+  independently checked primitive-occurrence origin with explicit selector,
+  semantics and applicability bindings; proposals cannot supply its value or
+  authorize its introduction. Primitive effects remain distinct from ordinary
+  data accesses and from observations, including when their results are overwritten.
 - **independent-evidence** — Candidate endpoints, instruction inventories and
   state relations are proposals. The checker validates their coverage, transfers,
   origin side conditions and dependencies independently of proposed conclusions.
@@ -325,6 +358,10 @@ entry-to-cut transition MUST satisfy these obligations:
 - **conditional-composition** — A successor transition starts at the checked cut
   under the same bound image and compatible origin, state, memory and machine
   premises. The cut instruction belongs to that successor's executed scope.
+  Composition preserves original entry variables, prior primitive-outcome
+  identities and the complete ordered effect dependencies. New occurrences have
+  distinct outcome identities; neither a replacement entry state nor an unbound
+  additional input can stand in for a checked primitive effect.
   Origin names, matching output bytes or digests cannot replace this relation.
   The transition remains distinct from normal-return, complete-function,
   source-startup and completed-bootstrap evidence. Applying it to an ordinary

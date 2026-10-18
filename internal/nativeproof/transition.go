@@ -458,6 +458,9 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue) {
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if i.Op == x86asm.CPUID {
+		return m.cpuid()
+	}
 	if i.Op == x86asm.JMP {
 		return nil
 	}

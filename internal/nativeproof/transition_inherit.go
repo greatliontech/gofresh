@@ -41,7 +41,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	// Charge every element copied into the successor's proof, including the
 	// immutable root projections. Only expression nodes and image bytes share
 	// immutable ownership; no predecessor container or construction arena survives.
-	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.Boundary.Bytes), 16} {
+	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Boundary.Bytes), 16} {
 		for range n {
 			if !m.tick() {
 				return m.err
@@ -69,6 +69,16 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	for _, w := range b.Words {
 		if err := importRoot(w.Value); err != nil {
 			return err
+		}
+	}
+	for _, effect := range b.PrimitiveEffects {
+		// The opaque predecessor was constructed under this complete rule identity.
+		// Import every dependency, including results absent from current state.
+		e := effect.(CPUIDEffect)
+		for _, root := range []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX} {
+			if err := importRoot(root); err != nil {
+				return err
+			}
 		}
 	}
 	for _, memory := range [][]TransitionByte{b.InitialMemory, b.Memory} {

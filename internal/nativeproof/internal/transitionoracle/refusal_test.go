@@ -35,7 +35,7 @@ func TestExecutedOnlyRefusals(t *testing.T) {
 	for p := byte(0x40); p <= 0x4f; p++ {
 		prefixes = append(prefixes, p)
 	}
-	for _, text := range []string{"4889c0", "488b0424", "eb00", "e900000000", "41b800000000"} {
+	for _, text := range []string{"4889c0", "488b0424", "eb00", "e900000000", "41b800000000", "0fa2"} {
 		b, _ := hex.DecodeString(text)
 		for _, prefix := range prefixes {
 			input := append([]byte{prefix}, b...)
@@ -80,6 +80,12 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 
 func TestEncodeRefusesNormalization(t *testing.T) {
 	cases := []Descriptor{
+		{Intent{Operation: CPUID, Dst: 1}, Encoding{Form: CPUID0FA2}},
+		{Intent{Operation: CPUID, Src: 1}, Encoding{Form: CPUID0FA2}},
+		{Intent{Operation: CPUID, Base: 1}, Encoding{Form: CPUID0FA2}},
+		{Intent{Operation: CPUID, Immediate: 1}, Encoding{Form: CPUID0FA2}},
+		{Intent{Operation: CPUID, SignedDisp: 1}, Encoding{Form: CPUID0FA2}},
+		{Intent{Operation: CPUID}, Encoding{Form: CPUID0FA2, REX: 0x48}},
 		{Intent{Operation: MoveRegister, Dst: 16}, Encoding{Form: MOV89, REX: 0x48}},
 		{Intent{Operation: MoveRegister, Src: 255}, Encoding{Form: MOV89, REX: 0x48}},
 		{Intent{Operation: Load, Base: 16}, Encoding{Form: MOV8B, REX: 0x48}},

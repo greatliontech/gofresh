@@ -302,6 +302,13 @@
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.5 Check CPU-query semantics
                           and required control flow up to read-dependent image decisions,
                           retaining actual machine applicability and primitive effects.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.5.1 Check one CPU-query
+                            architectural step with explicit enablement, independently
+                            originated outcome variables and retained primitive effects;
+                            stop at the following unexecuted predicate instruction.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.5.2 Check predicate and
+                            branching transport over query outcomes, preserving conditional
+                            effect occurrences and complete feasible-path coverage.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.6 Establish checked root image
                           initialization for read-dependent startup decisions, preserving
                           intervening writes and keeping loader applicability explicit.

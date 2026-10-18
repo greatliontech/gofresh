@@ -11,6 +11,7 @@ import (
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	to "github.com/greatliontech/gofresh/internal/nativeproof/internal/transitionoracle"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 // The synthetic mapping intent is input to both the ELF writer and independent
@@ -470,7 +471,7 @@ func TestTransitionImageFourWordPrefix(t *testing.T) {
 	code = binary.LittleEndian.AppendUint32(code, uint32(int64(imageStateAddress)-int64(leaPC+7)))
 	code = append(code, hexBytes(t, "488d9c240000ffff48895f1048895f1848891f48896708b800000000")...)
 	cut := testEntry + uint64(len(code))
-	code = append(code, 0x0f, 0xa2, 0xc3)
+	code = append(code, 0x0f, 0xa2, 0x85, 0xc0, 0xc3)
 	raw := transitionImageELF(t, code, imageStateLoads())
 	im, err := NewImage(t.Context(), raw)
 	if err != nil {
@@ -535,6 +536,7 @@ func TestTransitionImageFourWordPrefix(t *testing.T) {
 	assertTransitionAlpha(t, direct, c)
 	assertCPUQueryExecutionRefused(t, im, face, p, c)
 	assertImagePrefixMissingPremises(t, im, face, p, leaPC)
+	assertCPUQueryConditionalStep(t, im, face, p, x86asm.TEST)
 }
 
 // Full signed disp32 values participate in positive address constructions as

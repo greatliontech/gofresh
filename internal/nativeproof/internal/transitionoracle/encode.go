@@ -11,6 +11,12 @@ import (
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
 	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid intent/encoding: %+v / %+v", i, e) }
+	if i.Operation == CPUID {
+		if i != (Intent{Operation: CPUID}) || e != (Encoding{Form: CPUID0FA2}) {
+			return bad()
+		}
+		return []byte{0x0f, 0xa2}, nil
+	}
 	if i.Dst > 15 || i.Src > 15 || i.Base > 15 || e.Scale > 3 || (!e.SIB && e.Scale != 0) {
 		return bad()
 	}

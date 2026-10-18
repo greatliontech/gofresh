@@ -170,7 +170,12 @@ func interfaceOracleLimits(t testing.TB, f TransitionInterface, loads [][2]uint6
 	if len(f.Regions)+len(f.ImageRegions) > l.Regions || len(f.Words) > l.Bytes/8 {
 		return bad("transition-budget")
 	}
-	if f.Conditions != interfaceConditions() {
+	conditions := f.Conditions
+	if conditions.CPUID != "" && conditions.CPUID != CPUIDModel {
+		return bad("transition-primitive-model")
+	}
+	conditions.CPUID = ""
+	if conditions != interfaceConditions() {
 		return bad("transition-premises")
 	}
 	d := f.Origin

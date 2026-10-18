@@ -46,7 +46,7 @@ func FuzzIntentEncoding(f *testing.F) {
 
 func FuzzRawParse(f *testing.F) {
 	for _, text := range []string{
-		"", "48", "4889c0", "4f8b5f80", "4dc784e588776655123456f8",
+		"", "0f", "0fa2", "660fa2", "48", "4889c0", "4f8b5f80", "4dc784e588776655123456f8",
 		"4fbf1032547698badcfe", "b8ffffffff", "41bf00000080", "4f83e480",
 		"4f2d00000080", "4f25ffffffff", "eb80", "e9ffffff7f", "4b8b0424",
 		"498b042500000000", "67488b00", "664889c0", "c5f877", "488b04",

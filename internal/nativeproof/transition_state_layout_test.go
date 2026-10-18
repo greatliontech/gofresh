@@ -39,11 +39,13 @@ func FuzzTransitionStateInventory(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, layout uint64, selector, fault, permutation uint8) {
 		face := stateFace(16, layout%16)
+		face.Conditions.CPUID = CPUIDModel
 		ops := []stateInstruction{
 			stateOp(to.Intent{Operation: to.MoveRegister, Dst: 12, Src: 4}, permutation),
 			stateOp(to.Intent{Operation: to.Store, Base: 12, Src: 12, SignedDisp: -8}, permutation),
 			stateOp(to.Intent{Operation: to.Load, Base: 12, Dst: 2, SignedDisp: -8}, permutation),
 			stateOp(to.Intent{Operation: to.Subtract, Dst: 2, Immediate: 7}, permutation),
+			stateOp(to.Intent{Operation: to.CPUID}, 0),
 		}
 		program := stateExpanded(ops)
 		initial := stateInitial(face, layout)

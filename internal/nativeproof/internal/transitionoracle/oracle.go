@@ -13,8 +13,9 @@
 // The machine conventions are Intel 64 long mode: little-endian payloads, GPR
 // numbers RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8 through R15; one REX.W for
 // 64-bit data, and default 64-bit addressing with one base and no index. The only
-// 32-bit operation is B8+rd imm32 (no prefix for low registers, 41 for high ones),
-// whose write zero-extends to 64 bits. Full-width RIP-relative LEA uses next IP.
+// explicit 32-bit operation is B8+rd imm32 (no prefix for low registers, 41 for
+// high ones), whose write zero-extends to 64 bits. CPUID is exact operand-free
+// 0f a2, without prefixes. Full-width RIP-relative LEA uses next IP.
 // Prefixes, indexed/absent bases and RIP-relative data accesses,
 // other widths and other opcode forms are outside this executed grammar.
 //
@@ -39,6 +40,7 @@ const (
 	And                                  // Dst <- Dst & Immediate, 64 bits.
 	Jump                                 // next IP + SignedDisp.
 	LEARIP                               // Dst <- next IP + SignedDisp, no memory access.
+	CPUID                                // Operand-free architectural CPU query.
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -76,6 +78,7 @@ const (
 	AND25
 	JMPEB
 	JMPE9
+	CPUID0FA2
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

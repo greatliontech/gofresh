@@ -6,8 +6,19 @@ import (
 )
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
-// including their decoder, expression and ordered pointer-lane dependencies.
-const TransitionRules = "gofresh/native-transition@3;" + ValueRules + ";" + FrameRules
+// including decoder, expression, ordered pointer-lane and CPUID dependencies.
+const TransitionRules = "gofresh/native-transition@4;" + ValueRules + ";" + FrameRules + ";" + cpuidRules
+
+const cpuidRules = "gofresh/native-cpuid@1"
+
+// CPUIDModel identifies the ordinary x86-64 architectural CPUID step: available
+// and enabled at the executing privilege level, with applicable faulting controls
+// disabled, outside transactional/enclave abort or exception contexts and without
+// a guest-visible exception or unproved handler path. ISA-conforming virtual CPUs,
+// microcode and transparent host VM exits below this layer are admitted. This is
+// a configuration predicate, not an assumption of normal completion or an observed
+// response. Fetch, isolation, debug and other machine premises remain required.
+const CPUIDModel = "x86-64/cpuid-enabled-architectural-step@1"
 
 // RelativeSpan is a half-open byte extent relative to the single stack origin.
 // An envelope permits its End as a pointer, but grants no memory permission.
@@ -39,7 +50,10 @@ type RelativeRegion struct {
 // MemoryMapping, NoHiddenAliases and UnalignedAccess have FrameConditions' ordinary
 // RAM, stable permissions, distinct-byte and alignment-exception meanings.
 type TransitionConditions struct {
-	Machine                                           string
+	Machine string
+	// CPUID is optional for scopes that do not execute a query. Executing CPUID
+	// requires CPUIDModel; an unknown nonempty model is unsupported in any scope.
+	CPUID                                             string
 	InstructionMapping, EntryState, IsolatedExecution bool
 	MemoryMapping, NoHiddenAliases, UnalignedAccess   bool
 }
@@ -145,6 +159,23 @@ type TransitionAccess struct {
 	Image bool
 }
 
+// PrimitiveEffect is a closed sum of checked architectural primitive occurrences.
+// Slice order supplies occurrence order; the instruction inventory locates their
+// interleaving with other transfers. These are dependencies, not observations.
+type PrimitiveEffect interface{ primitiveEffect() }
+
+// CPUIDEffect retains a serializing architectural query even when all results
+// are overwritten. Leaf/Subleaf are the old low RAX/RCX bits; each result is an
+// independent arbitrary BV32 in this occurrence's private scope. It claims no
+// repeatability, feature consistency, latency, cache, TLB or host-state behavior.
+type CPUIDEffect struct {
+	PC                                             uint64
+	Leaf, Subleaf                                  br.Term
+	ResultsEAX, ResultsEBX, ResultsECX, ResultsEDX br.Term
+}
+
+func (CPUIDEffect) primitiveEffect() {}
+
 // TransitionFlag describes an architectural status independently of projection.
 // Preserved flags retain their arbitrary entry value; Defined flags may have no
 // projected value. Undefined flags have no invented symbolic value.
@@ -186,6 +217,7 @@ type TransitionBound struct {
 	Flags            TransitionFlags
 	Instructions     []Span
 	Accesses         []TransitionAccess
+	PrimitiveEffects []PrimitiveEffect
 	Boundary         CutBoundary
 }
 
@@ -226,6 +258,7 @@ func cloneTransitionBound(b TransitionBound) TransitionBound {
 	b.Memory = append([]TransitionByte(nil), b.Memory...)
 	b.Instructions = append([]Span(nil), b.Instructions...)
 	b.Accesses = append([]TransitionAccess(nil), b.Accesses...)
+	b.PrimitiveEffects = append([]PrimitiveEffect(nil), b.PrimitiveEffects...)
 	b.Boundary.Bytes = append([]byte(nil), b.Boundary.Bytes...)
 	return b
 }

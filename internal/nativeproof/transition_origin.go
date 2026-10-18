@@ -49,6 +49,9 @@ func (m *transitionChecker) offset(d int64) error {
 
 func (m *transitionChecker) validate() error {
 	c := m.face.Conditions
+	if c.CPUID != "" && c.CPUID != CPUIDModel {
+		return refuse(m.pc, "transition-primitive-model", "unsupported CPUID model")
+	}
 	if c.Machine != MachineModel || !c.InstructionMapping || !c.EntryState || !c.IsolatedExecution || !c.MemoryMapping || !c.NoHiddenAliases || !c.UnalignedAccess {
 		return refuse(m.pc, "transition-premises", "machine, entry, mapping, alias, alignment and interference premises are required")
 	}

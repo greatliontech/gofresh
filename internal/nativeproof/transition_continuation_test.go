@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -433,6 +434,12 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	for _, w := range b.Words {
 		visit(w.Value)
 	}
+	for _, effect := range b.PrimitiveEffects {
+		e := effect.(CPUIDEffect)
+		for _, term := range []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX} {
+			visit(term)
+		}
+	}
 	for _, v := range root.checked.flags {
 		visit(v)
 	}
@@ -458,7 +465,7 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.checked.bound.InitialRegisters != b.InitialRegisters || !reflect.DeepEqual(c.checked.bound.InitialMemory, b.InitialMemory) {
+	if c.checked.bound.InitialRegisters != b.InitialRegisters || !slices.Equal(c.checked.bound.InitialMemory, b.InitialMemory) {
 		t.Fatal("dead root inputs dropped or reconstructed")
 	}
 }

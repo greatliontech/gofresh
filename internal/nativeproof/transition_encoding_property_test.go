@@ -75,6 +75,11 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	}
 	op := x86asm.MOV
 	switch i.Operation {
+	case to.CPUID:
+		op = x86asm.CPUID
+		if args != ([2]x86asm.Arg{}) {
+			t.Fatal("CPUID acquired explicit operands")
+		}
 	case to.MoveRegister:
 		reg(args[0], i.Dst, false)
 		reg(args[1], i.Src, false)
@@ -150,7 +155,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 14706 {
+	if count != 14707 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;
@@ -187,6 +192,8 @@ func FuzzTransitionExecutedEncoding(f *testing.F) {
 }
 
 func FuzzTransitionExecutedRawAdmission(f *testing.F) {
+	f.Add([]byte{0x0f, 0xa2})
+	f.Add([]byte{0x66, 0x0f, 0xa2})
 	for _, code := range [][]byte{{0x48, 0x89, 0xe0}, {0x48, 0x8d, 0x80, 0xf8, 0xff, 0xff, 0xff}, {0x48, 0x8b, 0x04, 0xe0}, {0x48, 0x83, 0xec, 0x28}, {0x41, 0xbd, 0, 0, 0, 0}, {0xc5, 0xf8, 0x77}, {0x48, 0x48, 0x89, 0xe0}, {0x4f, 0x8d, 0x3d, 0x80, 0xff, 0xff, 0xff}} {
 		f.Add(code)
 	}
