@@ -457,9 +457,24 @@
                           not compiler-internal recognition or out-of-line link
                           inclusion; retain omitted prologue, higher-root coverage,
                           source-state handoff and runtime applicability obligations.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9a Integrate Cerebro's
-                          Gofresh exact-file eligibility handoff 098fe979 onto the
-                          current producer/classifier contract. Preserve effective
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9a Derive Cerebro's
+                          cross-tool requirements from its actual native-test and
+                          manifest consumers and the canonical native-producing,
+                          implementation-verification and structured-judgment
+                          contracts before selecting an API. Trace production of the
+                          implementation identity and manifest through actual linked
+                          execution, file consumption, closing, storage, reuse and
+                          retries. Establish each authority channel and its owner;
+                          derive explicit and entailed invariants with concrete
+                          violating states. Distinguish declared linker inputs from
+                          established actual implementation use, eligibility from
+                          observation, and manifest assertions from checked evidence.
+                          Treat handoffs 098fe979 and 00759e43 as candidate mechanisms
+                          and regression evidence, preserving their required
+                          capabilities without inheriting legacy producer wiring or
+                          assuming their API boundaries. Settle the joint design and
+                          independently review it, then implement the minimal shared
+                          Gofresh capability on the current contract. Preserve effective
                           environment and directory ownership, cache exceptions,
                           exclusions, projections and refusal of unavailable inputs;
                           classification grants no observation or outcome evidence.
@@ -467,9 +482,10 @@
                           before landing the main-line API. Retain its normal release
                           at 5.1w.7; the v0.116.3 handoff base is not a compatibility
                           release target.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9b Integrate Cerebro's
-                          Stipulator linker/input-file handoff 00759e43 into the
-                          pending clean-break migration. Carry typed resolved linker
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9b Implement the derived
+                          Cerebro consumer contract in Stipulator's pending clean-break
+                          migration, adapting the reviewed handoff where it satisfies
+                          that design. Carry typed resolved linker
                           assignments through selection, retained builds, execution,
                           every retry and reports; admit exact manifest files through
                           the native producer's actual classification and observation
