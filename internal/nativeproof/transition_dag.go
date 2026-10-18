@@ -1,0 +1,191 @@
+package nativeproof
+
+import (
+	"bytes"
+	"unsafe"
+
+	br "github.com/greatliontech/gofresh/internal/bitrelation"
+)
+
+type transitionNodeState struct {
+	scalar    symbolicState
+	pointers  [16]TransitionPointer
+	memory    map[TransitionLocation]TransitionByte
+	preserved Masks
+	flags     TransitionFlags
+}
+
+// The allowance includes conservative map bucket/slack and per-entry storage,
+// not just symbolic byte payload. Arithmetic is checked before allocation.
+func (m *transitionChecker) reserveState(n int) error {
+	base := int(unsafe.Sizeof(transitionNodeState{})) + 1024
+	entry := 2*int(unsafe.Sizeof(TransitionLocation{})+unsafe.Sizeof(TransitionByte{})) + 64
+	room := m.limits.LiveStateBytes - m.liveStateBytes
+	if n < 0 || room < base || n > (room-base)/entry {
+		return refuse(m.pc, "transition-budget", "aggregate live-state bytes")
+	}
+	m.stateBytes = base + n*entry
+	m.liveStateBytes += m.stateBytes
+	return nil
+}
+
+func (m *transitionChecker) takeState() *transitionNodeState {
+	s := &transitionNodeState{m.state, m.pointers, m.memory, m.bound.Preserved, m.bound.Flags}
+	m.memory = nil
+	return s
+}
+
+func (m *transitionChecker) installState(s *transitionNodeState) {
+	m.state, m.pointers, m.memory = s.scalar, s.pointers, s.memory
+	m.bound.Preserved, m.bound.Flags = s.preserved, s.flags
+}
+
+func (m *transitionChecker) copyState(s *transitionNodeState) *transitionNodeState {
+	if m.stateBytes > m.limits.LiveStateBytes-m.liveStateBytes {
+		m.err = refuse(m.pc, "transition-budget", "aggregate live-state bytes")
+		return nil
+	}
+	m.liveStateBytes += m.stateBytes
+	r := *s
+	r.memory = make(map[TransitionLocation]TransitionByte, len(s.memory))
+	for k, v := range s.memory {
+		if !m.tick() {
+			return nil
+		}
+		r.memory[k] = v
+	}
+	return &r
+}
+
+func (m *transitionChecker) mergeState(slot **transitionNodeState, src *transitionNodeState) {
+	if *slot == nil {
+		*slot = src
+		return
+	}
+	dst := *slot
+	defer func() { m.liveStateBytes -= m.stateBytes }()
+	if literalBool(src.scalar.path, 0) {
+		return
+	}
+	if literalBool(dst.scalar.path, 0) {
+		*slot = src
+		return
+	}
+	for r := range dst.pointers {
+		if !m.tick() {
+			return
+		}
+		if dst.pointers[r] != src.pointers[r] {
+			dst.pointers[r] = nil
+		}
+		dst.preserved[r] &= src.preserved[r]
+	}
+	// Iterate the immutable root inventory, not randomized map order, so term
+	// construction and resource consumption are deterministic across partitions.
+	for _, root := range m.bound.InitialMemory {
+		if !m.tick() {
+			return
+		}
+		k := root.TransitionLocation
+		a, b := dst.memory[k], src.memory[k]
+		a.Value = m.ite(src.scalar.path, b.Value, a.Value)
+		if a.Pointer != b.Pointer || a.PointerLane != b.PointerLane {
+			a.Pointer, a.PointerLane = nil, 0
+		}
+		dst.memory[k] = a
+	}
+	d := []*TransitionFlag{&dst.flags.CF, &dst.flags.OF, &dst.flags.SF, &dst.flags.ZF, &dst.flags.AF, &dst.flags.PF}
+	s := []TransitionFlag{src.flags.CF, src.flags.OF, src.flags.SF, src.flags.ZF, src.flags.AF, src.flags.PF}
+	for j, a := range d {
+		if !m.tick() {
+			return
+		}
+		b := s[j]
+		a.Preserved = a.Preserved && b.Preserved
+		a.Defined = a.Defined && b.Defined
+		if a.Defined && a.Value.Valid() && b.Value.Valid() {
+			a.Value = m.ite(src.scalar.path, b.Value, a.Value)
+		} else {
+			a.Value = br.Term{}
+		}
+	}
+	m.merge(&dst.scalar, src.scalar)
+}
+
+// Recover the prefix from the owned bytes, stopping at C, then check its exact
+// membership and edges in root->D. Every path must hit C: reaching D in the
+// stopped walk is a bypass. Full-graph occupancy/cycle checks exclude overlaps
+// and suffix re-entry. No second authoritative graph survives the call.
+func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition) (int, error) {
+	old := prior.bound.Boundary
+	prefix, err := m.graph(old.PC)
+	if err != nil {
+		return 0, err
+	}
+	if len(prefix.nodes) != len(prior.bound.Instructions)+1 {
+		return 0, refuse(old.PC, "transition-continuation", "predecessor coverage differs")
+	}
+	coverage := make(map[uint64]Span, len(prior.bound.Instructions))
+	for _, occurrence := range prior.bound.Instructions {
+		if !m.tick() {
+			return 0, m.err
+		}
+		if _, exists := coverage[occurrence.Start]; exists {
+			return 0, refuse(old.PC, "transition-continuation", "duplicate predecessor occurrence")
+		}
+		coverage[occurrence.Start] = occurrence.Span
+	}
+	for _, n := range prefix.nodes {
+		if !m.tick() {
+			return 0, m.err
+		}
+		idx, exists := g.byPC[n.pc]
+		if !exists {
+			return 0, refuse(n.pc, "transition-continuation", "predecessor absent from full graph")
+		}
+		full := g.nodes[idx]
+		if full.size != n.size {
+			return 0, refuse(n.pc, "transition-continuation", "predecessor extent differs")
+		}
+		if n.pc == old.PC {
+			continue
+		}
+		if coverage[n.pc] != (Span{n.pc, n.pc + uint64(n.size)}) || full.boundary != boundaryNone || n.count != full.count {
+			return 0, refuse(n.pc, "transition-continuation", "predecessor membership or terminal differs")
+		}
+		for edge, next := range n.next[:n.count] {
+			if prefix.nodes[next].pc != g.nodes[full.next[edge]].pc {
+				return 0, refuse(n.pc, "transition-continuation", "predecessor edge differs")
+			}
+		}
+	}
+	i, encoded, err := decodeBytes(m.im, old.PC)
+	if err != nil {
+		return 0, err
+	}
+	if i != old.Instruction || !bytes.Equal(encoded, old.Bytes) {
+		return 0, refuse(old.PC, "transition-continuation", "predecessor boundary differs")
+	}
+	// With C dominating the sole terminal, every prefix node precedes C and all
+	// suffix nodes follow it in any topological order. Check this consequence,
+	// rather than using a prefix-list comparison as the dominance argument.
+	start := -1
+	for j, idx := range g.order {
+		if !m.tick() {
+			return 0, m.err
+		}
+		pc := g.nodes[idx].pc
+		if pc == old.PC {
+			start = j
+			continue
+		}
+		_, before := coverage[pc]
+		if before != (start < 0) {
+			return 0, refuse(pc, "transition-continuation", "cut does not separate prefix and suffix")
+		}
+	}
+	if start < 0 {
+		return 0, refuse(old.PC, "transition-continuation", "missing predecessor cut")
+	}
+	return start, nil
+}

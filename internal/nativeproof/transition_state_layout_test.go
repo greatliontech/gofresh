@@ -62,7 +62,7 @@ func FuzzTransitionStateInventory(f *testing.F) {
 		if err != nil || c.checked == nil {
 			t.Fatal("independently valid inventory refused", err)
 		}
-		stateAssert(t, c, x, cut, initial, wants[cut], stateBindings(t, c, face, initial, wants[cut].writer == 0))
+		stateAssert(t, c, x, cut, initial, wants[cut], stateBindings(t, c, face, initial))
 		proposed, err := ProposeTransition(t.Context(), x.im, p.Cut, TransitionLimits{})
 		if err != nil {
 			t.Fatal(err)
@@ -75,12 +75,12 @@ func FuzzTransitionStateInventory(f *testing.F) {
 		if err != nil || c.checked == nil {
 			t.Fatal("permuted valid inventory refused", err)
 		}
-		stateAssert(t, c, x, cut, initial, wants[cut], stateBindings(t, c, face, initial, wants[cut].writer == 0))
+		stateAssert(t, c, x, cut, initial, wants[cut], stateBindings(t, c, face, initial))
 		root, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), TransitionLimits{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		values := stateBindings(t, root, face, initial, true)
+		values := stateBindings(t, root, face, initial)
 		stateAssert(t, root, x, 0, initial, initial, values)
 		prior, _ := root.Bound()
 		continued, err := CheckTransitionContinuation(t.Context(), root, p)
@@ -329,12 +329,12 @@ func FuzzTransitionStateLongFrontier(f *testing.F) {
 		if err != nil || c.checked == nil || len(c.checked.bound.Instructions) != len(program) {
 			t.Fatal("exact graph frontier did not accept entire chain", err)
 		}
-		stateAssert(t, c, x, len(program), initial, wants[len(program)], stateBindings(t, c, face, initial, true))
+		stateAssert(t, c, x, len(program), initial, wants[len(program)], stateBindings(t, c, face, initial))
 		root, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 		if err != nil {
 			t.Fatal(err)
 		}
-		values := stateBindings(t, root, face, initial, true)
+		values := stateBindings(t, root, face, initial)
 		stateAssert(t, root, x, 0, initial, initial, values)
 		original, _ := root.Bound()
 		cut := 1 + int(split)%len(program)
@@ -362,7 +362,7 @@ func FuzzTransitionStateLongFrontier(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		stateAssert(t, root, x, 0, initial, initial, stateBindings(t, root, face, initial, true))
+		stateAssert(t, root, x, 0, initial, initial, stateBindings(t, root, face, initial))
 		c, err = CheckTransitionContinuation(t.Context(), root, p)
 		stateInventoryOverflow(t, c, err, len(p.Nodes), limits.Instructions)
 	})
@@ -513,7 +513,7 @@ func FuzzTransitionStateDependentDepth(f *testing.F) {
 		if err != nil {
 			t.Fatal("dependent prefix below the counted depth frontier refused", err)
 		}
-		values := stateBindings(t, direct, face, initial, wants[cut].writer == 0)
+		values := stateBindings(t, direct, face, initial)
 		stateAssert(t, direct, x, cut, initial, wants[cut], values)
 		if got, want := stateTermHeight(direct.checked.bound.Registers[register].Value, nil), 1+cut/2-copyCount; got != want {
 			t.Fatalf("constructor-depth premise changed: got %d want %d", got, want)
@@ -523,7 +523,7 @@ func FuzzTransitionStateDependentDepth(f *testing.F) {
 			t.Fatal(err)
 		}
 		original, _ := root.Bound()
-		values = stateBindings(t, root, face, initial, true)
+		values = stateBindings(t, root, face, initial)
 		stateAssert(t, root, x, 0, initial, initial, values)
 		if cut > 0 {
 			for _, next := range slices.Compact([]int{max(1, cut/2), cut}) {

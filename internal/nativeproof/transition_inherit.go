@@ -22,7 +22,7 @@ func captureTransitionProposal(p TransitionProposal, l TransitionLimits, work *i
 		return TransitionProposal{}, err
 	}
 	for _, n := range p.Nodes {
-		if len(n.Successors) > 1 {
+		if len(n.Successors) > 2 {
 			return TransitionProposal{}, refuse(n.PC, "transition-proposal", "unsupported successor count")
 		}
 		if err := transitionCopyWork(work, l.Work, len(n.Successors)); err != nil {
@@ -58,6 +58,17 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 		}
 		return m.importTerm(t)
 	}
+	for _, root := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF, b.CutGuard} {
+		if err := importRoot(root); err != nil {
+			return err
+		}
+	}
+	for _, occurrence := range b.Instructions {
+		if err := importRoot(occurrence.Guard); err != nil {
+			return err
+		}
+	}
+	m.state.path, m.state.present = b.CutGuard, true
 	for r, v := range b.Registers {
 		m.state.regs[r], m.pointers[r] = v.Value, v.Pointer
 		for _, root := range []br.Term{b.InitialRegisters[r], v.Value} {
@@ -110,6 +121,9 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	m.truth, m.falsity = m.con(br.Bool(), 1), m.con(br.Bool(), 0)
 	if !m.tick() {
 		return m.err
+	}
+	if err := m.reserveState(len(b.Memory)); err != nil {
+		return err
 	}
 	m.memory = make(map[TransitionLocation]TransitionByte, len(b.Memory))
 	for _, v := range b.Memory {

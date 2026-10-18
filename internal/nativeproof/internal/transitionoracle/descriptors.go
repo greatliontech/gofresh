@@ -1,33 +1,31 @@
 package transitionoracle
 
-// Descriptor is one member of the finite executed-encoding population, before
-// choosing payloads. Intent has zero immediate/displacement; callers replace
-// those independently with values representable by Encoding. No payload is
-// derived from an opcode, register, descriptor index or another payload byte.
+// Descriptor factors a structural spelling from independent immediate and
+// displacement payloads. Zero payloads here confer no machine-state premise.
 type Descriptor struct {
 	Intent   Intent
 	Encoding Encoding
 }
 
-// Descriptors visits each structural spelling once (14,707 descriptors). It can
-// be used directly as a range-over-function iterator; false stops iteration.
-// The finite dimensions are all opcode forms, allowed REX bytes, ModRM register
-// selectors and modes, optional/required SIB bases and all four no-index scales.
-// Default 64-bit addressing is the only admitted address size; address/operand
-// override prefixes belong to the refusal population, not this iterator.
-//
-// Payload dimensions are intentionally factored OUT: exhaustive descriptor
-// enumeration does not exhaust imm64, imm32, imm8 or displacement values. Tests
-// and consumers must exercise independent full-word payloads as well. Group
-// selectors have no semantic REX.R extension; their ignored bit still produces
-// distinct descriptors. The iterator calls neither Encode nor Parse.
+// Descriptors enumerates the complete admitted structural grammar: all supported
+// widths/opcodes, allowed prefix bytes (including ignored REX bits), register
+// selectors, address modes, RIP, and all no-index SIB scales. Payloads are factored
+// out. This semantic enumerator calls neither the encoder nor the byte parser.
 func Descriptors(yield func(Descriptor) bool) {
-	if !yield(Descriptor{Intent: Intent{Operation: CPUID}, Encoding: Encoding{Form: CPUID0FA2}}) {
+	emit := func(i Intent, e Encoding) bool { return yield(Descriptor{i, e}) }
+	if !emit(Intent{Operation: CPUID}, Encoding{Form: CPUID0FA2}) {
 		return
 	}
 	for _, f := range []Form{JMPEB, JMPE9} {
-		if !yield(Descriptor{Intent: Intent{Operation: Jump}, Encoding: Encoding{Form: f}}) {
+		if !emit(Intent{Operation: Jump}, Encoding{Form: f}) {
 			return
+		}
+	}
+	for _, cc := range []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15} {
+		for _, f := range []Form{JccShort, JccNear} {
+			if !emit(Intent{Operation: Branch, Condition: cc}, Encoding{Form: f}) {
+				return
+			}
 		}
 	}
 	for reg := uint8(0); reg < 16; reg++ {
@@ -35,89 +33,151 @@ func Descriptors(yield func(Descriptor) bool) {
 		if reg >= 8 {
 			rex = 0x41
 		}
-		if !yield(Descriptor{Intent: Intent{Operation: MoveImmediate32, Dst: reg}, Encoding: Encoding{Form: MOVB8Imm32, REX: rex}}) {
+		if !emit(Intent{Operation: MoveImmediate32, Dst: reg}, Encoding{Form: MOVB8Imm32, REX: rex}) {
 			return
 		}
 	}
-	for rex := byte(0x48); rex <= 0x4f; rex++ {
-		bHigh, rHigh := uint8(0), uint8(0)
-		if rex&1 != 0 {
-			bHigh = 8
+	prefixes := []byte{0}
+	for rex := byte(0x40); rex <= 0x4f; rex++ {
+		prefixes = append(prefixes, rex)
+	}
+	for _, rex := range prefixes {
+		width := uint8(32)
+		if rex&8 != 0 {
+			width = 0
 		}
-		if rex&4 != 0 {
-			rHigh = 8
-		}
-		for reg := uint8(0); reg < 8; reg++ {
-			if !yield(Descriptor{Intent: Intent{Operation: LEARIP, Dst: reg + rHigh}, Encoding: Encoding{Form: LEA8D, REX: rex, DispBytes: 4}}) {
-				return
+		bh, rh := uint8(rex&1)*8, uint8(rex>>2&1)*8
+		// Physical byte selectors 4..7 without REX designate the high byte of
+		// the first four GPRs. Base registers never use that byte alias rule.
+		byteAliases := func(i Intent) Intent {
+			if i.Width == 8 && rex == 0 {
+				if (i.Operation == MoveRegister || i.Operation == MoveImmediate || i.Operation == Load) && i.Dst >= 4 {
+					i.Dst -= 4
+					i.HighDst = true
+				}
+				if (i.Operation == MoveRegister || i.Operation == Store) && i.Src >= 4 {
+					i.Src -= 4
+					i.HighSrc = true
+				}
 			}
+			return i
 		}
-		for _, f := range []Form{SUB2D, AND25} {
-			op := Subtract
-			if f == AND25 {
-				op = And
+		for _, f := range []Form{CMP3D, TESTA9, SUB2D, AND25} {
+			op := CompareImmediate
+			if f == TESTA9 {
+				op = TestImmediate
 			}
-			if !yield(Descriptor{Intent: Intent{Operation: op}, Encoding: Encoding{Form: f, REX: rex}}) {
+			if f == SUB2D || f == AND25 {
+				if width != 0 {
+					continue
+				}
+				op = Subtract
+				if f == AND25 {
+					op = And
+				}
+			}
+			if !emit(Intent{Operation: op, Width: width}, Encoding{Form: f, REX: rex}) {
 				return
 			}
 		}
 		for low := uint8(0); low < 8; low++ {
-			for _, f := range []Form{MOVB8Imm64, MOVC7, SUB83, SUB81, AND83, AND81} {
-				op := MoveImmediate
-				if f == SUB83 || f == SUB81 {
-					op = Subtract
+			for _, f := range []Form{MOVB0, MOVB8Imm64, MOVC6, MOVC7, CMP83, CMP81, TESTF7, SUB83, SUB81, AND83, AND81} {
+				i := Intent{Operation: MoveImmediate, Dst: low + bh, Width: width}
+				switch f {
+				case MOVB0, MOVC6:
+					i.Width = 8
+				case MOVB8Imm64:
+					if width != 0 {
+						continue
+					}
+				case CMP83, CMP81:
+					i.Operation = CompareImmediate
+				case TESTF7:
+					i.Operation = TestImmediate
+				case SUB83, SUB81:
+					if width != 0 {
+						continue
+					}
+					i.Operation = Subtract
+				case AND83, AND81:
+					if width != 0 {
+						continue
+					}
+					i.Operation = And
 				}
-				if f == AND83 || f == AND81 {
-					op = And
-				}
-				if !yield(Descriptor{Intent: Intent{Operation: op, Dst: low + bHigh}, Encoding: Encoding{Form: f, REX: rex}}) {
+				if !emit(byteAliases(i), Encoding{Form: f, REX: rex}) {
 					return
 				}
 			}
 			for reg := uint8(0); reg < 8; reg++ {
-				for _, f := range []Form{MOV89, MOV8B} {
-					dst, src := low+bHigh, reg+rHigh
-					if f == MOV8B {
-						dst, src = src, dst
+				for _, f := range []Form{MOV89, MOV8B, MOV88, MOV8A, CMP39, CMP3B, TEST85} {
+					i := Intent{Operation: MoveRegister, Dst: low + bh, Src: reg + rh, Width: width}
+					if f == MOV88 || f == MOV8A {
+						i.Width = 8
 					}
-					if !yield(Descriptor{Intent: Intent{Operation: MoveRegister, Dst: dst, Src: src}, Encoding: Encoding{Form: f, REX: rex}}) {
+					if f == CMP39 || f == CMP3B {
+						i.Operation = Compare
+					}
+					if f == TEST85 {
+						i.Operation = Test
+					}
+					if f == MOV8B || f == MOV8A || f == CMP3B {
+						i.Dst, i.Src = i.Src, i.Dst
+					}
+					if !emit(byteAliases(i), Encoding{Form: f, REX: rex}) {
 						return
 					}
 				}
 			}
 		}
-		for _, f := range []Form{MOV89, MOV8B, MOVC7, LEA8D} {
-			registers := uint8(8)
-			if f == MOVC7 {
-				registers = 1
+		for _, f := range []Form{MOV89, MOV8B, MOV88, MOV8A, MOVC7, MOVC6, LEA8D} {
+			if f == LEA8D && width != 0 {
+				continue
 			}
-			for reg := uint8(0); reg < registers; reg++ {
+			regs := uint8(8)
+			if f == MOVC7 || f == MOVC6 {
+				regs = 1
+			}
+			for reg := uint8(0); reg < regs; reg++ {
+				i := Intent{Width: width}
+				switch f {
+				case MOV89, MOV88:
+					i.Operation, i.Src = Store, reg+rh
+				case MOV8B, MOV8A:
+					i.Operation, i.Dst = Load, reg+rh
+				case MOVC7, MOVC6:
+					i.Operation = StoreImmediate
+				case LEA8D:
+					i.Operation, i.Dst = LEA, reg+rh
+				}
+				if f == MOV88 || f == MOV8A || f == MOVC6 {
+					i.Width = 8
+				}
+				i = byteAliases(i)
+				rip := i
+				rip.RIP = true
+				if f == LEA8D {
+					rip.Operation, rip.RIP = LEARIP, false
+				}
+				if !emit(rip, Encoding{Form: f, REX: rex, DispBytes: 4}) {
+					return
+				}
 				for base := uint8(0); base < 8; base++ {
-					for _, width := range []uint8{0, 1, 4} {
-						if width == 0 && base == 5 {
+					for _, disp := range []uint8{0, 1, 4} {
+						if disp == 0 && base == 5 {
 							continue
 						}
-						// variant 0 is non-SIB; 1..4 carry scale bits 0..3.
 						for variant := 0; variant < 5; variant++ {
 							if variant == 0 && base == 4 || variant != 0 && rex&2 != 0 {
 								continue
 							}
-							i := Intent{Base: base + bHigh}
-							switch f {
-							case MOV89:
-								i.Operation, i.Src = Store, reg+rHigh
-							case MOV8B:
-								i.Operation, i.Dst = Load, reg+rHigh
-							case MOVC7:
-								i.Operation = StoreImmediate
-							case LEA8D:
-								i.Operation, i.Dst = LEA, reg+rHigh
-							}
-							e := Encoding{Form: f, REX: rex, DispBytes: width, SIB: variant != 0}
+							m := i
+							m.Base = base + bh
+							e := Encoding{Form: f, REX: rex, DispBytes: disp, SIB: variant != 0}
 							if variant != 0 {
 								e.Scale = uint8(variant - 1)
 							}
-							if !yield(Descriptor{Intent: i, Encoding: e}) {
+							if !emit(m, e) {
 								return
 							}
 						}

@@ -34,16 +34,27 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	if err != nil {
 		return
 	}
-	if int(got.size) != want.Length || got.count != 1 || got.boundary != boundaryNone {
+	count := uint8(1)
+	if want.Intent.Operation == to.Branch {
+		count = 2
+	}
+	if int(got.size) != want.Length || got.count != count || got.boundary != boundaryNone {
 		t.Fatalf("wrong instruction extent/successors for %x: %+v, expected %+v", code, got, want)
 	}
 	i := want.Intent
 	args := got.inst.Args
-	reg := func(arg x86asm.Arg, n uint8, narrow bool) {
+	reg := func(arg x86asm.Arg, n uint8, narrow bool, high ...bool) {
 		t.Helper()
 		expected := oracleRegisters64[n]
-		if narrow {
+		if narrow || i.Width == 32 {
 			expected = oracleRegisters32[n]
+		}
+		if i.Width == 8 {
+			regs := []x86asm.Reg{x86asm.AL, x86asm.CL, x86asm.DL, x86asm.BL, x86asm.SPB, x86asm.BPB, x86asm.SIB, x86asm.DIB, x86asm.R8B, x86asm.R9B, x86asm.R10B, x86asm.R11B, x86asm.R12B, x86asm.R13B, x86asm.R14B, x86asm.R15B}
+			expected = regs[n]
+			if len(high) != 0 && high[0] {
+				expected = []x86asm.Reg{x86asm.AH, x86asm.CH, x86asm.DH, x86asm.BH}[n]
+			}
 		}
 		if arg != expected {
 			t.Fatalf("register for %x: %v, expected %v", code, arg, expected)
@@ -53,7 +64,7 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		t.Helper()
 		m, ok := arg.(x86asm.Mem)
 		base := oracleRegisters64[i.Base]
-		if i.Operation == to.LEARIP {
+		if i.Operation == to.LEARIP || i.RIP {
 			base = x86asm.RIP
 		}
 		if !ok || m.Base != base || m.Index != 0 || m.Segment != 0 || m.Disp != i.SignedDisp {
@@ -66,8 +77,11 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		t.Helper()
 		v, ok := arg.(x86asm.Imm)
 		value := uint64(v)
-		if narrow {
+		if narrow || i.Width == 32 {
 			value &= 0xffffffff
+		}
+		if i.Width == 8 {
+			value &= 255
 		}
 		if !ok || value != i.Immediate {
 			t.Fatalf("immediate for %x: %v, expected %#x", code, arg, i.Immediate)
@@ -81,16 +95,16 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 			t.Fatal("CPUID acquired explicit operands")
 		}
 	case to.MoveRegister:
-		reg(args[0], i.Dst, false)
-		reg(args[1], i.Src, false)
+		reg(args[0], i.Dst, false, i.HighDst)
+		reg(args[1], i.Src, false, i.HighSrc)
 	case to.Load:
-		reg(args[0], i.Dst, false)
+		reg(args[0], i.Dst, false, i.HighDst)
 		mem(args[1])
 	case to.Store:
 		mem(args[0])
-		reg(args[1], i.Src, false)
+		reg(args[1], i.Src, false, i.HighSrc)
 	case to.MoveImmediate, to.MoveImmediate32:
-		reg(args[0], i.Dst, i.Operation == to.MoveImmediate32)
+		reg(args[0], i.Dst, i.Operation == to.MoveImmediate32, i.HighDst)
 		imm(args[1], i.Operation == to.MoveImmediate32)
 	case to.StoreImmediate:
 		mem(args[0])
@@ -111,6 +125,22 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		if args[0] != x86asm.Rel(i.SignedDisp) || args[1] != nil || got.targets[0] != want.Target {
 			t.Fatalf("relative transfer for %x: %+v, expected %+v", code, got, want)
 		}
+	case to.Compare, to.CompareImmediate, to.Test, to.TestImmediate:
+		op = x86asm.CMP
+		if i.Operation == to.Test || i.Operation == to.TestImmediate {
+			op = x86asm.TEST
+		}
+		reg(args[0], i.Dst, false)
+		if i.Operation == to.Compare || i.Operation == to.Test {
+			reg(args[1], i.Src, false)
+		} else {
+			imm(args[1], false)
+		}
+	case to.Branch:
+		op = map[uint8]x86asm.Op{2: x86asm.JB, 3: x86asm.JAE, 4: x86asm.JE, 5: x86asm.JNE, 6: x86asm.JBE, 7: x86asm.JA, 12: x86asm.JL, 13: x86asm.JGE, 14: x86asm.JLE, 15: x86asm.JG}[i.Condition]
+		if args[0] != x86asm.Rel(i.SignedDisp) || args[1] != nil || got.targets[1] != want.Target {
+			t.Fatal("conditional successor differs", code)
+		}
 	default:
 		t.Fatal("unhandled independent operation", i.Operation)
 	}
@@ -126,14 +156,19 @@ func descriptorPayload(d to.Descriptor, immediate uint64, displacement int32) to
 		i.Immediate = immediate
 	case to.MOVB8Imm32:
 		i.Immediate = uint64(uint32(immediate))
-	case to.MOVC7, to.SUB81, to.SUB2D, to.AND81, to.AND25:
+	case to.MOVC7, to.SUB81, to.SUB2D, to.AND81, to.AND25, to.CMP81, to.CMP3D, to.TESTF7, to.TESTA9:
 		i.Immediate = uint64(int64(int32(immediate)))
-	case to.SUB83, to.AND83:
+	case to.SUB83, to.AND83, to.CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
+	case to.MOVC6, to.MOVB0:
+		i.Immediate = uint64(uint8(immediate))
 	}
-	if d.Encoding.DispBytes == 1 || d.Encoding.Form == to.JMPEB {
+	if i.Width == 32 {
+		i.Immediate &= 0xffffffff
+	}
+	if d.Encoding.DispBytes == 1 || d.Encoding.Form == to.JMPEB || d.Encoding.Form == to.JccShort {
 		i.SignedDisp = int64(int8(displacement))
-	} else if d.Encoding.DispBytes == 4 || d.Encoding.Form == to.JMPE9 {
+	} else if d.Encoding.DispBytes == 4 || d.Encoding.Form == to.JMPE9 || d.Encoding.Form == to.JccNear {
 		i.SignedDisp = int64(displacement)
 	}
 	return i
@@ -155,7 +190,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 14707 {
+	if count != 53419 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;

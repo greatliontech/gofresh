@@ -82,7 +82,7 @@ func assertCutOnly(t testing.TB, b TransitionBound, code []byte, moved bool) {
 		cut += 3
 		fetches = []Span{{testEntry, cut}}
 	}
-	if b.Entry != testEntry || b.Boundary.PC != cut || b.Boundary.Instruction.Len != len(code) || !bytes.Equal(b.Boundary.Bytes, code) || !reflect.DeepEqual(b.Instructions, fetches) || len(b.Accesses) != 0 {
+	if b.Entry != testEntry || b.Boundary.PC != cut || b.Boundary.Instruction.Len != len(code) || !bytes.Equal(b.Boundary.Bytes, code) || !reflect.DeepEqual(straightFetches(t, b), fetches) || len(b.Accesses) != 0 {
 		t.Fatalf("cut/fetch binding: %+v", b)
 	}
 	if !reflect.DeepEqual(b.Memory, b.InitialMemory) {

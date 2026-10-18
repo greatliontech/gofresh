@@ -90,7 +90,8 @@ func assertCPUQueryConditionalStep(t testing.TB, im *Image, face TransitionInter
 	}
 	b := c.checked.bound
 	stateInheritedInputs(t, before, b)
-	if len(b.PrimitiveEffects) != 1 || b.Boundary.PC != nextPC || b.Boundary.Instruction != next || !bytes.Equal(b.Boundary.Bytes, raw[:next.Len]) || len(b.Instructions) != len(before.Instructions)+1 || b.Instructions[len(before.Instructions)] != (Span{prefix.Cut, nextPC}) || !slices.Equal(b.Instructions[:len(before.Instructions)], before.Instructions) {
+	fetches := straightFetches(t, b)
+	if len(b.PrimitiveEffects) != 1 || b.Boundary.PC != nextPC || b.Boundary.Instruction != next || !bytes.Equal(b.Boundary.Bytes, raw[:next.Len]) || len(b.Instructions) != len(before.Instructions)+1 || fetches[len(before.Instructions)] != (Span{prefix.Cut, nextPC}) || !slices.Equal(b.Instructions[:len(before.Instructions)], before.Instructions) {
 		t.Fatal("query occurrence or following unexecuted boundary differs")
 	}
 	e := b.PrimitiveEffects[0].(CPUIDEffect)

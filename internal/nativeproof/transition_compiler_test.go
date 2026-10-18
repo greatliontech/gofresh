@@ -130,7 +130,8 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 					t.Fatal("base-pointer initialization changed another register", reg)
 				}
 			}
-			if !reflect.DeepEqual(next.Memory, b.Memory) || !reflect.DeepEqual(next.Accesses, b.Accesses) || next.Flags != b.Flags || len(next.Instructions) != len(b.Instructions)+1 || !slices.Equal(next.Instructions[:len(b.Instructions)], b.Instructions) || next.Instructions[len(b.Instructions)] != (Span{b.Boundary.PC, nextCut}) {
+			fetches := straightFetches(t, next)
+			if !reflect.DeepEqual(next.Memory, b.Memory) || !reflect.DeepEqual(next.Accesses, b.Accesses) || next.Flags != b.Flags || len(next.Instructions) != len(b.Instructions)+1 || !slices.Equal(next.Instructions[:len(b.Instructions)], b.Instructions) || fetches[len(b.Instructions)] != (Span{b.Boundary.PC, nextCut}) {
 				t.Fatal("actual continuation changed the frame or failed to execute the former cut exactly once")
 			}
 			assertTransitionOracle(t, im, next, 40)
@@ -299,5 +300,6 @@ func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
 	// The selected bytes use CMP EAX,0, not TEST. Neither form is executed by
 	// this query-only continuation; the image determines the boundary evidence.
 	assertCPUQueryConditionalStep(t, im, face, p, x86asm.CMP)
+	checkOptimizedGuarded(t, im, face, cut)
 	t.Logf("conditional image prefix reaches unexecuted CPU query %#x; arbitrary image inputs, 32 overwritten bytes at %#x", cut, address)
 }

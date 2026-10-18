@@ -336,7 +336,7 @@ func TestTransitionControlAndEncodingRefusals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, code := range []string{"89e4", "4883ec284883e4e0", "64488b0424", "67488b0424", "f048892424", "664889e4", "484889e4", "488d044c", "488b0500000000", "488b04c4", "7400", "e800000000", "c3", "0f05", "0fa2", "ffe0", "ebfe", "48c7c001000000488b00"} {
+	for _, code := range []string{"6689e4", "4883ec284883e4e0", "64488b0424", "67488b0424", "f048892424", "664889e4", "484889e4", "488d044c", "488b0500000000", "488b04c4", "7800", "e800000000", "c3", "0f05", "0fa2", "ffe0", "ebfe", "48c7c001000000488b00"} {
 		t.Run(code, func(t *testing.T) {
 			im, cut := transitionFixture(t, code)
 			c, err := proveTransition(t, im, cut, transitionFace())

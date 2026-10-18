@@ -384,44 +384,51 @@ func (m *valueBuilder) expressionError(err error) {
 func (m *valueBuilder) con(s br.Sort, v uint64) br.Term        { return m.make(br.Constant, s, v) }
 func (m *valueBuilder) binary(op br.Op, a, b br.Term) br.Term  { return m.make(op, a.Sort(), 0, a, b) }
 func (m *valueBuilder) compare(op br.Op, a, b br.Term) br.Term { return m.make(op, br.Bool(), 0, a, b) }
+
+// Imported immutable constants need not have the local builder's identity.
+// Literal inspection is an exact Boolean rule, not a path satisfiability guess.
+func literalBool(t br.Term, value uint64) bool {
+	v := t.View()
+	return v.Op == br.Constant && v.Sort == br.Bool() && v.Immediate == value
+}
 func (m *valueBuilder) not(t br.Term) br.Term {
-	if t == m.truth {
+	if literalBool(t, 1) {
 		return m.falsity
 	}
-	if t == m.falsity {
+	if literalBool(t, 0) {
 		return m.truth
 	}
 	return m.make(br.Not, br.Bool(), 0, t)
 }
 func (m *valueBuilder) and(a, b br.Term) br.Term {
-	if a == m.falsity || b == m.falsity {
+	if literalBool(a, 0) || literalBool(b, 0) {
 		return m.falsity
 	}
-	if a == m.truth {
+	if literalBool(a, 1) {
 		return b
 	}
-	if b == m.truth || a == b {
+	if literalBool(b, 1) || a == b {
 		return a
 	}
 	return m.make(br.And, br.Bool(), 0, a, b)
 }
 func (m *valueBuilder) or(a, b br.Term) br.Term {
-	if a == m.truth || b == m.truth {
+	if literalBool(a, 1) || literalBool(b, 1) {
 		return m.truth
 	}
-	if a == m.falsity {
+	if literalBool(a, 0) {
 		return b
 	}
-	if b == m.falsity || a == b {
+	if literalBool(b, 0) || a == b {
 		return a
 	}
 	return m.make(br.Or, br.Bool(), 0, a, b)
 }
 func (m *valueBuilder) ite(p, a, b br.Term) br.Term {
-	if a == b || p == m.truth {
+	if a == b || literalBool(p, 1) {
 		return a
 	}
-	if p == m.falsity {
+	if literalBool(p, 0) {
 		return b
 	}
 	return m.make(br.ITE, a.Sort(), 0, p, a, b)
@@ -477,9 +484,15 @@ func (m *valueBuilder) merge(dst *symbolicState, src symbolicState) {
 		return
 	}
 	for i := range dst.regs {
+		if !m.tick() {
+			return
+		}
 		dst.regs[i] = m.ite(src.path, src.regs[i], dst.regs[i])
 	}
 	for i := range dst.flags {
+		if !m.tick() {
+			return
+		}
 		dst.flags[i] = m.ite(src.path, src.flags[i], dst.flags[i])
 	}
 	dst.path = m.or(dst.path, src.path)
@@ -603,7 +616,7 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 		s.flags[flagZero] = m.compare(br.Equal, left, right)
 		s.flags[flagLess] = m.compare(br.SLT, left, right)
 		return m.err
-	case x86asm.AND:
+	case x86asm.AND, x86asm.TEST:
 		v = m.binary(br.BitAnd, left, right)
 	case x86asm.XOR:
 		v = m.binary(br.BitXor, left, right)
@@ -624,6 +637,8 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 		s.flags[flagCarry] = m.falsity
 		s.flags[flagLess] = m.sign(v) // Logical operations clear OF.
 	}
-	m.write(s, a, v)
+	if i.Op != x86asm.TEST {
+		m.write(s, a, v)
+	}
 	return m.err
 }

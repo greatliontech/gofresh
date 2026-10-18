@@ -47,6 +47,7 @@ type stateAccess struct {
 	instruction int
 	write       bool
 	off         stateLocation
+	width       int
 }
 
 type stateQuery struct {
@@ -227,7 +228,54 @@ func (r stateReference) clone() stateReference {
 
 func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
-	if i.Operation == to.Jump {
+	if i.Operation == to.Jump || i.Operation == to.Branch {
+		return
+	}
+	width := 64
+	if i.Width != 0 {
+		width = int(i.Width)
+	}
+	read := func(reg uint8, high bool) uint64 {
+		v := r.regs[reg]
+		if high {
+			v >>= 8
+		}
+		if width < 64 {
+			v &= (uint64(1) << width) - 1
+		}
+		return v
+	}
+	write := func(reg uint8, high bool, value uint64) {
+		r.written[reg], r.ptrs[reg] = true, statePointer{}
+		switch width {
+		case 8:
+			shift := 0
+			if high {
+				shift = 8
+			}
+			r.regs[reg] = r.regs[reg]&^(uint64(255)<<shift) | (value&255)<<shift
+		case 32:
+			r.regs[reg] = uint64(uint32(value))
+		default:
+			r.regs[reg] = value
+		}
+	}
+	if i.Operation == to.Compare || i.Operation == to.CompareImmediate || i.Operation == to.Test || i.Operation == to.TestImmediate {
+		x, y := read(i.Dst, false), i.Immediate
+		if i.Operation == to.Compare || i.Operation == to.Test {
+			y = read(i.Src, false)
+		}
+		z := x - y
+		if width == 32 {
+			z = uint64(uint32(z))
+		}
+		sign := uint64(1) << (width - 1)
+		r.flags = [6]bool{x < y, z == 0, (x^y)&(x^z)&sign != 0, z&sign != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
+		if i.Operation == to.Test || i.Operation == to.TestImmediate {
+			z = x & y
+			r.flags = [6]bool{false, z == 0, false, z&sign != 0, false, bits.OnesCount8(byte(z))%2 == 0}
+		}
+		r.writer = i.Operation
 		return
 	}
 	if i.Operation == to.CPUID {
@@ -242,9 +290,18 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		return
 	}
 	address := r.regs[i.Base] + uint64(i.SignedDisp)
+	if i.RIP {
+		if len(nextPC) != 1 {
+			t.Fatal("RIP memory needs independently encoded end")
+		}
+		address = nextPC[0] + uint64(i.SignedDisp)
+	}
 	access := func(write bool) stateLocation {
 		t.Helper()
 		p := r.ptrs[i.Base]
+		if i.RIP {
+			p = statePointer{valid: true, image: true, off: int64(nextPC[0])}
+		}
 		base := r.origin
 		if p.image {
 			base = 0
@@ -253,21 +310,24 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 			t.Fatal("invalid reference address construction")
 		}
 		off := stateLocation{p.image, int64(address - base)}
-		for j := int64(0); j < 8; j++ {
+		for j := int64(0); j < int64(width/8); j++ {
 			if _, ok := r.memory[off.add(j)]; !ok {
 				t.Fatal("reference access outside declared bytes", off)
 			}
 		}
-		r.accesses = append(r.accesses, stateAccess{index, write, off})
+		r.accesses = append(r.accesses, stateAccess{index, write, off, width / 8})
 		return off
 	}
 	if i.Operation == to.Store || i.Operation == to.StoreImmediate {
 		off := access(true)
 		value, ptr := i.Immediate, statePointer{}
 		if i.Operation == to.Store {
-			value, ptr = r.regs[i.Src], r.ptrs[i.Src]
+			value, ptr = read(i.Src, i.HighSrc), r.ptrs[i.Src]
 		}
-		for lane := uint8(0); lane < 8; lane++ {
+		if width != 64 {
+			ptr = statePointer{}
+		}
+		for lane := uint8(0); lane < uint8(width/8); lane++ {
 			b := stateByte{value: byte(value >> (8 * lane)), ptr: ptr}
 			if ptr.valid {
 				b.lane = lane
@@ -280,9 +340,13 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 	r.written[i.Dst] = true
 	switch i.Operation {
 	case to.MoveRegister:
-		r.regs[i.Dst], r.ptrs[i.Dst] = r.regs[i.Src], r.ptrs[i.Src]
+		if width == 64 {
+			r.regs[i.Dst], r.ptrs[i.Dst] = r.regs[i.Src], r.ptrs[i.Src]
+		} else {
+			write(i.Dst, i.HighDst, read(i.Src, i.HighSrc))
+		}
 	case to.MoveImmediate, to.MoveImmediate32:
-		r.regs[i.Dst], r.ptrs[i.Dst] = i.Immediate, statePointer{}
+		write(i.Dst, i.HighDst, i.Immediate)
 	case to.LEA:
 		p := r.ptrs[i.Base]
 		if p.valid {
@@ -308,14 +372,18 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		off := access(false)
 		var value uint64
 		p := r.memory[off].ptr
-		for lane := uint8(0); lane < 8; lane++ {
+		for lane := uint8(0); lane < uint8(width/8); lane++ {
 			b := r.memory[off.add(int64(lane))]
 			value |= uint64(b.value) << (8 * lane)
 			if b.ptr != r.memory[off].ptr || b.lane != lane {
 				p = statePointer{}
 			}
 		}
-		r.regs[i.Dst], r.ptrs[i.Dst] = value, p
+		if width == 64 {
+			r.regs[i.Dst], r.ptrs[i.Dst] = value, p
+		} else {
+			write(i.Dst, i.HighDst, value)
+		}
 	case to.Subtract:
 		x, y := r.regs[i.Dst], i.Immediate
 		z := x - y
@@ -409,7 +477,7 @@ func stateEvaluationLimits(nodes, edges, assignments int) (br.Limits, bool) {
 // Handles are used only after the entire independently prescribed input shape
 // has been checked: distinct variables, exact byte union and exact word slices.
 // In particular a reported constant or omitted byte cannot seed the reference.
-func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterface, initial stateReference, preservedFlags bool) map[br.Term]uint64 {
+func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterface, initial stateReference) map[br.Term]uint64 {
 	t.Helper()
 	b := c.checked.bound
 	if !reflect.DeepEqual(b.Interface, face) || b.Origin != b.InitialRegisters[4] {
@@ -472,13 +540,14 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 			variable(b.Value, br.Bits(8), uint64(want.value))
 		}
 	}
-	if preservedFlags {
+	{
+		predicates := []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF}
 		for j, value := range []bool{initial.flags[0], initial.flags[1], initial.flags[3] != initial.flags[2]} {
 			v := uint64(0)
 			if value {
 				v = 1
 			}
-			variable(c.checked.flags[j], br.Bool(), v)
+			variable(predicates[j], br.Bool(), v)
 		}
 	}
 	for _, b := range b.InitialMemory {
@@ -644,6 +713,9 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 // Encoding choices are constrained only by their representable payload. No
 // semantic operand is reconstructed by parsing the resulting bytes.
 func stateEncoding(i to.Intent, choice uint8) to.Encoding {
+	if i.Width != 0 || i.RIP || i.HighDst || i.HighSrc || i.Operation >= to.Compare {
+		return dagEncoding(i, choice)
+	}
 	if i.Operation == to.CPUID {
 		return to.Encoding{Form: to.CPUID0FA2}
 	}
@@ -807,6 +879,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 	t.Helper()
 	b := c.checked.bound
 	stateQueryBindings(t, b, x, want, values)
+	straightFetches(t, b)
 	if b.ImageDigest != x.digest || b.Entry != x.pcs[0] || b.Rules != TransitionRules {
 		t.Fatal("state lost image/entry/rule binding")
 	}
@@ -814,7 +887,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		t.Fatal("executed fetch count", len(b.Instructions), cut)
 	}
 	for j, span := range b.Instructions {
-		if span != (Span{x.pcs[j], x.pcs[j] + uint64(len(x.encoded[j]))}) {
+		if span.Span != (Span{x.pcs[j], x.pcs[j] + uint64(len(x.encoded[j]))}) || stateEval(t, span.Guard, values) != 1 {
 			t.Fatal("fetch ordering/extent", j, span)
 		}
 	}
@@ -829,11 +902,11 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		kind := FrameRead
 		if a.write {
 			kind = FrameWrite
-			for k := int64(0); k < 8; k++ {
+			for k := int64(0); k < int64(a.width); k++ {
 				frame[a.off.add(k)] = true
 			}
 		}
-		if b.Accesses[j] != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + 8}, Image: a.off.image}) {
+		if b.Accesses[j] != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) {
 			t.Fatal("ordered access differs", j, b.Accesses[j], a)
 		}
 	}
@@ -929,7 +1002,7 @@ func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	if len(current.PrimitiveEffects) < len(original.PrimitiveEffects) || !slices.Equal(current.PrimitiveEffects[:len(original.PrimitiveEffects)], original.PrimitiveEffects) {
 		t.Fatal("continuation replaced prior primitive outcomes or selectors")
 	}
-	if current.Origin != original.Origin || current.InitialRegisters != original.InitialRegisters ||
+	if current.Origin != original.Origin || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||
 		!slices.Equal(current.ExcludedOrigins, original.ExcludedOrigins) || !reflect.DeepEqual(current.Interface, original.Interface) {
 		t.Fatal("continuation replaced original terms, memory, or origin/interface premises")
@@ -1002,14 +1075,14 @@ func stateCheckLocated(t testing.TB, x stateLayout, face TransitionInterface, in
 	if err != nil {
 		t.Fatalf("independently valid full construction refused: %v", err)
 	}
-	directValues := stateBindings(t, direct, face, initial, r.writer == 0)
+	directValues := stateBindings(t, direct, face, initial)
 	stateAssert(t, direct, x, length, initial, r, directValues)
 	depth.assertProjection(t, direct)
 	root, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	values := stateBindings(t, root, face, initial, true)
+	values := stateBindings(t, root, face, initial)
 	stateAssert(t, root, x, 0, initial, wants[0], values)
 	original, _ := root.Bound()
 	if original.Origin.View().Scope == direct.checked.bound.Origin.View().Scope {

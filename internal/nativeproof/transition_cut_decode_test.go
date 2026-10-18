@@ -23,7 +23,7 @@ func TestTransitionVZEROUPPERCutBoundary(t *testing.T) {
 	if b.Boundary.PC != cut || b.Boundary.Instruction.Op != x86asm.VZEROUPPER || b.Boundary.Instruction.Len != 3 || !bytes.Equal(b.Boundary.Bytes, hexBytes(t, "c5f877")) {
 		t.Fatalf("published cut: PC=%#x instruction=%#v bytes=%x; want VZEROUPPER length=3 bytes=c5f877", b.Boundary.PC, b.Boundary.Instruction, b.Boundary.Bytes)
 	}
-	if len(b.Instructions) != 1 || b.Instructions[0] != (Span{testEntry, cut}) || len(b.Accesses) != 0 {
+	if !reflect.DeepEqual(straightFetches(t, b), []Span{{testEntry, cut}}) || len(b.Accesses) != 0 {
 		t.Fatalf("cut or successor executed: instructions=%v accesses=%v", b.Instructions, b.Accesses)
 	}
 }
@@ -67,7 +67,7 @@ func TestTransitionVEXZeroCutMetadata(t *testing.T) {
 					t.Fatalf("tail=%s: boundary=%+v", tail, b.Boundary)
 				}
 				assertVEXZeroMetadata(t, code, b.Boundary.Instruction)
-				if !reflect.DeepEqual(b.Instructions, []Span{{testEntry, cut}}) || len(b.Accesses) != 0 || b.Registers[RAX].Value != b.InitialRegisters[RSP] || !reflect.DeepEqual(b.Memory, b.InitialMemory) {
+				if !reflect.DeepEqual(straightFetches(t, b), []Span{{testEntry, cut}}) || len(b.Accesses) != 0 || b.Registers[RAX].Value != b.InitialRegisters[RSP] || !reflect.DeepEqual(b.Memory, b.InitialMemory) {
 					t.Fatalf("tail=%s: boundary/successor altered prefix state: %+v", tail, b)
 				}
 				for r, v := range b.Registers {
@@ -180,7 +180,7 @@ func TestTransitionStructuralCutAdmission(t *testing.T) {
 			t.Fatalf("cut=%s: %v", tc.code, err)
 		}
 		b, ok := c.Bound()
-		if !ok || b.Boundary.Instruction.Op != tc.op || b.Boundary.Instruction.Len != len(code) || !bytes.Equal(b.Boundary.Bytes, code) || !reflect.DeepEqual(b.Instructions, []Span{{testEntry, cut}}) || len(b.Accesses) != 0 {
+		if !ok || b.Boundary.Instruction.Op != tc.op || b.Boundary.Instruction.Len != len(code) || !bytes.Equal(b.Boundary.Bytes, code) || !reflect.DeepEqual(straightFetches(t, b), []Span{{testEntry, cut}}) || len(b.Accesses) != 0 {
 			t.Fatalf("cut=%s: boundary=%+v instructions=%v accesses=%v", tc.code, b.Boundary, b.Instructions, b.Accesses)
 		}
 		if tc.op == x86asm.VADDPS && b.Boundary.Instruction.Args[2] != x86asm.X1 {
@@ -272,7 +272,7 @@ func TestTransitionVectorCutStructuralBytes(t *testing.T) {
 				} else if !reflect.DeepEqual(b.Boundary.Instruction, expected) {
 					t.Fatalf("following=%d changed retained metadata: %#v != %#v", following, b.Boundary.Instruction, expected)
 				}
-				if !reflect.DeepEqual(b.Instructions, []Span{{testEntry, cut}}) || len(b.Accesses) != 0 || !reflect.DeepEqual(b.Memory, b.InitialMemory) {
+				if !reflect.DeepEqual(straightFetches(t, b), []Span{{testEntry, cut}}) || len(b.Accesses) != 0 || !reflect.DeepEqual(b.Memory, b.InitialMemory) {
 					t.Fatalf("following=%d: cut executed: %+v", following, b)
 				}
 			}

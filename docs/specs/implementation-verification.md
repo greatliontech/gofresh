@@ -275,6 +275,20 @@ checked primitive effects. Such outcomes are quantified possibilities, not
 observations or replacement entry inputs. Their executed occurrences, selector
 relations, identified semantics and applicability conditions remain explicit.
 
+In an acyclic branching scope, instruction occurrences carry derived reach
+conditions. Accesses and primitive effects inherit their instruction's condition;
+filtering the retained order by those conditions gives the executed trace.
+Listing a conditional occurrence does not assert that every execution performs it.
+An optional primitive outcome has meaning only under that occurrence's condition.
+Names reserved for inactive outcomes are mathematical totalizations, not produced
+responses: varying them cannot change an active trace or final result.
+
+Entry carry, zero and sign-XOR-overflow predicates may be retained as explicitly
+bound arbitrary Boolean inputs for the supported conditional instructions. Their
+architectural meanings and identities survive later flag overwrites; generated
+slot numbers supply no substitute for that binding. These predicates imply no
+separately observed sign, overflow, auxiliary-carry or parity value.
+
 The ordinary x86-64 CPU-query model interprets the exact CPUID instruction at the
 architectural machine layer identified by the transition. CPUID must be available
 and enabled at the executing privilege level, with applicable faulting controls
@@ -308,7 +322,9 @@ entry-to-cut transition MUST satisfy these obligations:
   executable format, rather than a substituted symbol or proposed start. All
   unspecified register bits, flags and memory remain arbitrary. Entry facts and
   their authority are retained separately from derived outputs; an expected output
-  is not an input premise. The image, instruction and machine applicability
+  is not an input premise. Retained entry-flag predicates have explicit
+  architectural meanings and unchanged identities across later overwrites.
+  The image, instruction and machine applicability
   obligations of REQ-impl-native-entry remain required.
 - **complete-cut** — The checker reconstructs every reachable instruction and
   successor before the cut from bound image bytes. It establishes the cut as a
@@ -320,7 +336,12 @@ entry-to-cut transition MUST satisfy these obligations:
   premises. Proposed extents, symbol sizes, instruction counts and exhausted
   budgets never establish an endpoint. Calls, returns, indirect transfers and
   external effects require their actual rules and obligations or refusal, not a
-  fabricated return or silently truncated successor inventory.
+  fabricated return or silently truncated successor inventory. Reach conditions
+  derive from the actual bound predicate state; taken and fallthrough edges
+  partition their incoming condition, and joins preserve their complete union.
+  Graph closure alone cannot justify replacing a derived reach expression with
+  true or excluding an arm. An excluded transfer requires independently checked
+  impossibility under the retained premises; unresolved paths remain required.
 - **symbolic-origins** — An address origin is universally quantified over its
   declared bounds, congruence and memory predicates, not a sampled runtime address.
   Pointer provenance identifies the origin and checked byte offset and agrees with
@@ -348,6 +369,12 @@ entry-to-cut transition MUST satisfy these obligations:
   semantics and applicability bindings; proposals cannot supply its value or
   authorize its introduction. Primitive effects remain distinct from ordinary
   data accesses and from observations, including when their results are overwritten.
+  Conditional occurrences retain their derived instruction guards and execution
+  order. Their guard and selectors precede their outcomes and depend on no outcome
+  from that occurrence or a later one. Merged scalar and byte states preserve
+  guard/value correlations; pointer, preservation and definedness claims must hold
+  on every contributing path. Inactive outcome names cannot affect the filtered
+  executed trace or the final state.
 - **independent-evidence** — Candidate endpoints, instruction inventories and
   state relations are proposals. The checker validates their coverage, transfers,
   origin side conditions and dependencies independently of proposed conclusions.
@@ -362,6 +389,12 @@ entry-to-cut transition MUST satisfy these obligations:
   identities and the complete ordered effect dependencies. New occurrences have
   distinct outcome identities; neither a replacement entry state nor an unbound
   additional input can stand in for a checked primitive effect.
+  The predecessor's cut must be a common boundary of every path being extended.
+  Reconstructed prefix and suffix coverage exclude bypass, overlapping instruction
+  decoding and re-entry into an executed prefix. Initial predicate identities,
+  occurrence guards and the final reach expression remain retained dependencies;
+  continuation does not restart reachability at an invented true condition or
+  reset resource allowances per path.
   Origin names, matching output bytes or digests cannot replace this relation.
   The transition remains distinct from normal-return, complete-function,
   source-startup and completed-bootstrap evidence. Applying it to an ordinary

@@ -10,6 +10,9 @@ import (
 // Branch displacements are already relative to the eventual instruction end;
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
+	if i.Width != 0 || i.RIP || i.HighDst || i.HighSrc || i.Condition != 0 || i.Operation >= Compare {
+		return encodeExtended(i, e)
+	}
 	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid intent/encoding: %+v / %+v", i, e) }
 	if i.Operation == CPUID {
 		if i != (Intent{Operation: CPUID}) || e != (Encoding{Form: CPUID0FA2}) {

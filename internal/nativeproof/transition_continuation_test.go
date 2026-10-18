@@ -118,7 +118,7 @@ func TestTransitionContinuationMOV32AndFlags(t *testing.T) {
 			}
 		}
 	}
-	for _, code := range []string{"40bd00000000", "42bd00000000", "44bd00000000", "66bd0000", "c7c500000000", "89ed", "41bd000000"} {
+	for _, code := range []string{"40bd00000000", "42bd00000000", "44bd00000000", "66bd0000", "41bd000000"} {
 		im, cut := transitionFixture(t, code)
 		c, err := proveTransition(t, im, cut, transitionFace())
 		transitionRefused(t, c, err)
@@ -414,6 +414,13 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 		return d
 	}
 	visit(b.Origin)
+	visit(b.CutGuard)
+	visit(b.InitialPredicates.CF)
+	visit(b.InitialPredicates.ZF)
+	visit(b.InitialPredicates.SFXorOF)
+	for _, occurrence := range b.Instructions {
+		visit(occurrence.Guard)
+	}
 	for _, v := range b.InitialRegisters {
 		visit(v)
 	}
@@ -458,7 +465,9 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 			t.Fatalf("retained node depth %d != %d", got, want)
 		}
 	}
-	if len(m.depth) != len(depths)+2 {
+	visit(m.truth)
+	visit(m.falsity)
+	if len(m.depth) != len(depths) {
 		t.Fatal("import did not contain exactly the retained union plus Boolean constants")
 	}
 	c, err := CheckTransitionContinuation(t.Context(), root, proposal)

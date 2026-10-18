@@ -21,7 +21,7 @@ func FuzzIntentEncoding(f *testing.F) {
 		next := new(big.Int).SetUint64(pc)
 		next.Add(next, big.NewInt(int64(len(b))))
 		target := new(big.Int).Set(next)
-		if i.Operation == Jump {
+		if i.Operation == Jump || i.Operation == Branch {
 			target.Add(target, big.NewInt(i.SignedDisp))
 		}
 		valid := next.IsUint64() && target.IsUint64()
@@ -38,7 +38,7 @@ func FuzzIntentEncoding(f *testing.F) {
 		if d.Intent != i || d.Encoding != desc.Encoding || d.Length != len(b) || d.Next != next.Uint64() {
 			t.Fatalf("parse: %+v", d)
 		}
-		if i.Operation == Jump && d.Target != target.Uint64() {
+		if (i.Operation == Jump || i.Operation == Branch) && d.Target != target.Uint64() {
 			t.Fatalf("target: %+v; want %s", d, target)
 		}
 	})
@@ -74,7 +74,7 @@ func FuzzRawParse(f *testing.F) {
 			t.Fatalf("tail affected parse: %+v / %+v %v", d, short, err)
 		}
 		assertIntegerPayloads(t, code, d)
-		if d.Intent.Operation == Jump {
+		if d.Intent.Operation == Jump || d.Intent.Operation == Branch {
 			assertTarget(t, d, pc)
 		}
 		for n := 0; n < d.Length; n++ {

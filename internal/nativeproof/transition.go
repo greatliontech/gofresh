@@ -1,7 +1,6 @@
 package nativeproof
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/bits"
@@ -13,14 +12,15 @@ import (
 
 type transitionChecker struct {
 	*valueBuilder
-	im       *Image
-	face     TransitionInterface
-	limits   TransitionLimits
-	lo, hi   uint64
-	bound    TransitionBound
-	state    symbolicState
-	pointers [16]TransitionPointer
-	memory   map[TransitionLocation]TransitionByte
+	im                         *Image
+	face                       TransitionInterface
+	limits                     TransitionLimits
+	lo, hi                     uint64
+	bound                      TransitionBound
+	state                      symbolicState
+	pointers                   [16]TransitionPointer
+	memory                     map[TransitionLocation]TransitionByte
+	liveStateBytes, stateBytes int
 }
 
 func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
@@ -34,6 +34,12 @@ func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
 	}
 	if l.Bytes == 0 {
 		l.Bytes = 65536
+	}
+	if l.LiveStateBytes == 0 {
+		l.LiveStateBytes = 256 << 20
+	}
+	if l.LiveStateBytes < 1 || l.LiveStateBytes > 1<<30 {
+		return l, fmt.Errorf("invalid transition live-state limit")
 	}
 	if l.Regions < 1 || l.Regions > 256 || l.Bytes < 1 || l.Bytes > 1<<20 {
 		return l, fmt.Errorf("invalid transition memory limits")
@@ -69,14 +75,13 @@ func (m *transitionChecker) graph(cut uint64) (*graph, error) {
 	if idx, ok := g.byPC[cut]; !ok || g.nodes[idx].boundary != boundaryCut {
 		return nil, refuse(cut, "transition-cut", "cut is not a reachable decoded boundary")
 	}
-	// This grammar has exactly one successor per executed instruction and the
-	// only terminal is the cut. Shared cycle/occupancy checks therefore establish
-	// that every maximal path reaches it, without a normal-completion premise.
+	// Full syntactic closure has one terminal. Neither this check nor topological
+	// scheduling simplifies a symbolic reach condition or excludes an edge.
 	for _, n := range g.nodes {
 		if !m.tick() {
 			return nil, m.err
 		}
-		if n.boundary != boundaryCut && n.count != 1 {
+		if n.boundary != boundaryCut && n.count == 0 {
 			return nil, refuse(n.pc, "transition-cut", "unclosed prefix path")
 		}
 	}
@@ -212,27 +217,9 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if err := checkInventory(&relationContext{Context: ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal"); err != nil {
 		return TransitionCertificate{}, err
 	}
-	start := len(prior.bound.Instructions)
-	if len(g.order) <= start+1 {
-		return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "missing predecessor or suffix")
-	}
-	for j, span := range prior.bound.Instructions {
-		if !m.tick() {
-			return TransitionCertificate{}, m.err
-		}
-		i := g.nodes[g.order[j]]
-		if span != (Span{i.pc, i.pc + uint64(i.size)}) || i.boundary != boundaryNone {
-			return TransitionCertificate{}, refuse(i.pc, "transition-continuation", "executed predecessor is not exact ordered prefix")
-		}
-	}
-	old := prior.bound.Boundary
-	next := g.nodes[g.order[start]]
-	_, encoded, err := decodeBytes(prior.image, next.pc)
+	start, err := m.continuationStart(g, prior)
 	if err != nil {
 		return TransitionCertificate{}, err
-	}
-	if next.pc != old.PC || int(next.size) != old.Instruction.Len || !bytes.Equal(encoded, old.Bytes) {
-		return TransitionCertificate{}, refuse(next.pc, "transition-continuation", "predecessor boundary differs")
 	}
 	if err := m.inherit(prior); err != nil {
 		return TransitionCertificate{}, err
@@ -241,24 +228,69 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 }
 
 func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, error) {
+	// A state is owned by exactly one pending node or the current transfer. Forks
+	// copy, joins consume, and single-successor edges move ownership.
+	if len(g.nodes) > (m.limits.LiveStateBytes-m.liveStateBytes)/8 {
+		return TransitionCertificate{}, refuse(m.pc, "transition-budget", "live node-state inventory")
+	}
+	m.liveStateBytes += 8 * len(g.nodes)
+	states := make([]*transitionNodeState, len(g.nodes))
+	states[g.order[start]] = m.takeState()
 	for _, idx := range g.order[start:] {
 		ins := g.nodes[idx]
 		m.pc = ins.pc
 		if !m.tick() {
 			return TransitionCertificate{}, g.failure(ins.pc, m.err)
 		}
+		s := states[idx]
+		states[idx] = nil
+		if s == nil {
+			return TransitionCertificate{}, refuse(ins.pc, "transition-cut", "missing incoming state")
+		}
+		m.installState(s)
 		if ins.boundary == boundaryCut {
 			i, bytes, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
 				return TransitionCertificate{}, g.failure(ins.pc, err)
 			}
 			m.bound.Boundary = CutBoundary{PC: ins.pc, Instruction: i, Bytes: append([]byte(nil), bytes...)}
+			m.bound.CutGuard = m.state.path
 			continue
 		}
-		if err := m.step(ins.inst, ins.size); err != nil {
-			return TransitionCertificate{}, g.failure(ins.pc, err)
+		guard := m.state.path
+		// Literal false is independently evident. Other guards retain their
+		// transfers even if a stronger solver might prove them impossible.
+		if !literalBool(guard, 0) {
+			if err := m.step(ins.inst, ins.size); err != nil {
+				return TransitionCertificate{}, g.failure(ins.pc, err)
+			}
 		}
-		m.bound.Instructions = append(m.bound.Instructions, Span{ins.pc, ins.pc + uint64(ins.size)})
+		m.bound.Instructions = append(m.bound.Instructions, GuardedInstruction{Span{ins.pc, ins.pc + uint64(ins.size)}, guard})
+		s = m.takeState()
+		var predicate br.Term
+		if ins.count == 2 {
+			predicate = m.predicate(ins.inst.Op, s.scalar)
+		}
+		for edge, next := range ins.next[:ins.count] {
+			incoming := s
+			if edge+1 < int(ins.count) {
+				incoming = m.copyState(s)
+				if m.err != nil {
+					return TransitionCertificate{}, m.err
+				}
+			}
+			if ins.count == 2 {
+				p := predicate
+				if edge == 0 {
+					p = m.not(p)
+				}
+				incoming.scalar.path = m.and(guard, p)
+			}
+			m.mergeState(&states[next], incoming)
+		}
+		if m.err != nil {
+			return TransitionCertificate{}, g.failure(ins.pc, m.err)
+		}
 	}
 	for r := range m.state.regs {
 		if !m.tick() {
@@ -314,6 +346,7 @@ func (m *transitionChecker) projectMemory() []TransitionByte {
 func (m *transitionChecker) initial() error {
 	m.builder, m.scope = br.NewBuilder(m.limits.Nodes), br.NewScope()
 	m.truth, m.falsity = m.con(br.Bool(), 1), m.con(br.Bool(), 0)
+	m.state.path, m.state.present = m.truth, true
 	for r := range m.state.regs {
 		m.state.regs[r] = m.scratch(br.Bits(64))
 		m.bound.Preserved[r] = ^uint64(0)
@@ -321,11 +354,22 @@ func (m *transitionChecker) initial() error {
 	for f := range m.state.flags {
 		m.state.flags[f] = m.scratch(br.Bool())
 	}
+	m.bound.InitialPredicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
 	m.bound.Origin = m.state.regs[RSP]
 	m.bound.InitialRegisters = m.state.regs
 	m.pointers[RSP] = OriginPointer{Origin: m.bound.Origin}
 	f := TransitionFlag{Preserved: true, Defined: true}
 	m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
+	total := 0
+	for _, r := range m.face.Regions {
+		total += int(r.Bytes.End - r.Bytes.Start)
+	}
+	for _, r := range m.face.ImageRegions {
+		total += int(r.End - r.Start)
+	}
+	if err := m.reserveState(total); err != nil {
+		return err
+	}
 	m.memory = make(map[TransitionLocation]TransitionByte)
 	for _, r := range m.face.Regions {
 		for off := r.Bytes.Start; off < r.Bytes.End; off++ {
@@ -389,14 +433,33 @@ func (m *transitionChecker) advance(pointer TransitionPointer, delta int64) (Tra
 	return p, nil
 }
 
-func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind) (TransitionLocation, error) {
-	base, _ := fullRegister(mem.Base) // validateTransitionForm established this form.
-	p, err := m.advance(m.pointers[base.reg], mem.Disp)
+func (m *transitionChecker) ripPointer(disp int64, size uint8) (TransitionPointer, error) {
+	next, ok := plus(m.pc, uint64(size))
+	address, valid := relative(next, disp)
+	if !ok || next >= 1<<47 || !valid || address >= 1<<47 {
+		return nil, refuse(m.pc, "transition-image", "RIP-relative address wraps or is noncanonical")
+	}
+	load, err := m.imageLoad(Span{address, address}, true)
+	if err != nil {
+		return nil, err
+	}
+	return ImagePointer{Address: address, owner: &m.im.data[0], load: load}, nil
+}
+
+func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, size uint8) (TransitionLocation, error) {
+	var p TransitionPointer
+	var err error
+	if mem.Base == x86asm.RIP {
+		p, err = m.ripPointer(mem.Disp, size)
+	} else {
+		base, _ := fullRegister(mem.Base)
+		p, err = m.advance(m.pointers[base.reg], mem.Disp)
+	}
 	if err != nil {
 		return TransitionLocation{}, err
 	}
 	if image, ok := p.(ImagePointer); ok {
-		end, valid := plus(image.Address, 8)
+		end, valid := plus(image.Address, uint64(width))
 		if !valid || end > m.im.loads[image.load].end || end > 1<<47 {
 			return TransitionLocation{}, refuse(m.pc, "transition-image", "full access escapes logical mapping")
 		}
@@ -411,7 +474,7 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind) (Transition
 		return TransitionLocation{Image: true, Offset: int64(image.Address)}, nil
 	}
 	stack := p.(OriginPointer)
-	end, ok := signedPlus(stack.Offset, 8)
+	end, ok := signedPlus(stack.Offset, int64(width))
 	if !ok {
 		return TransitionLocation{}, refuse(m.pc, "transition-origin", "access offset overflow")
 	}
@@ -429,10 +492,10 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind) (Transition
 	return TransitionLocation{Offset: stack.Offset}, nil
 }
 
-func (m *transitionChecker) load(off TransitionLocation) TransitionValue {
+func (m *transitionChecker) load(off TransitionLocation, width int) TransitionValue {
 	var lanes [8]pointerLane[TransitionPointer]
 	var v br.Term
-	for j := 0; j < 8; j++ {
+	for j := 0; j < width; j++ {
 		key := TransitionLocation{off.Image, off.Offset + int64(j)}
 		b := m.memory[key]
 		lanes[j] = pointerLane[TransitionPointer]{b.Pointer, b.PointerLane}
@@ -442,11 +505,18 @@ func (m *transitionChecker) load(off TransitionLocation) TransitionValue {
 			v = m.make(br.Concat, br.Bits((j+1)*8), 0, v, b.Value)
 		}
 	}
-	return TransitionValue{v, orderedPointer(lanes[:])}
+	var pointer TransitionPointer
+	if width == 8 {
+		pointer = orderedPointer(lanes[:])
+	}
+	return TransitionValue{v, pointer}
 }
 
-func (m *transitionChecker) store(off TransitionLocation, v TransitionValue) {
-	for j := 0; j < 8; j++ {
+func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, width int) {
+	if width != 8 {
+		v.Pointer = nil
+	}
+	for j := 0; j < width; j++ {
 		b := TransitionByte{TransitionLocation: TransitionLocation{off.Image, off.Offset + int64(j)}, Value: m.extract(v.Value, j*8, 8), Pointer: v.Pointer}
 		if v.Pointer != nil {
 			b.PointerLane = uint8(j)
@@ -461,37 +531,60 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 	if i.Op == x86asm.CPUID {
 		return m.cpuid()
 	}
-	if i.Op == x86asm.JMP {
+	if i.Op == x86asm.JMP || condition(i.Op) != 0 {
 		return nil
+	}
+	if i.Op == x86asm.CMP || i.Op == x86asm.TEST {
+		if err := m.valueBuilder.transfer(m.pc, i, &m.state); err != nil {
+			return err
+		}
+		f := TransitionFlag{Defined: true}
+		m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
+		m.bound.Flags.CF.Value, m.bound.Flags.ZF.Value = m.state.flags[flagCarry], m.state.flags[flagZero]
+		if i.Op == x86asm.TEST {
+			m.bound.Flags.OF.Value = m.falsity
+			m.bound.Flags.SF.Value = m.state.flags[flagLess]
+			m.bound.Flags.AF = TransitionFlag{}
+		}
+		return m.err
 	}
 	if i.Op == x86asm.MOV {
 		if mem, ok := i.Args[0].(x86asm.Mem); ok {
-			off, err := m.address(mem, FrameWrite)
+			off, err := m.address(mem, FrameWrite, i.MemBytes, size)
 			if err != nil {
 				return err
 			}
 			v := TransitionValue{}
-			if a, ok := fullRegister(i.Args[1]); ok {
-				v = TransitionValue{m.state.regs[a.reg], m.pointers[a.reg]}
+			if r, ok := i.Args[1].(x86asm.Reg); ok {
+				a, _ := register(r)
+				v.Value = m.read(&m.state, a)
+				if a.width == 64 {
+					v.Pointer = m.pointers[a.reg]
+				}
 			} else {
-				v.Value = m.con(br.Bits(64), uint64(i.Args[1].(x86asm.Imm)))
+				v.Value = m.con(br.Bits(i.MemBytes*8), uint64(i.Args[1].(x86asm.Imm))&mask(i.MemBytes*8))
 			}
-			m.store(off, v)
+			m.store(off, v, i.MemBytes)
 			return m.err
 		}
 	}
 	a, _ := register(i.Args[0].(x86asm.Reg))
-	m.bound.Preserved[a.reg] = 0
+	if a.width == 32 {
+		m.bound.Preserved[a.reg] = 0
+	} else {
+		m.bound.Preserved[a.reg] &^= mask(a.width) << a.shift
+	}
 	var p TransitionPointer
 	switch i.Op {
 	case x86asm.MOV:
 		if mem, ok := i.Args[1].(x86asm.Mem); ok {
-			off, err := m.address(mem, FrameRead)
+			off, err := m.address(mem, FrameRead, i.MemBytes, size)
 			if err != nil {
 				return err
 			}
-			v := m.load(off)
-			m.state.regs[a.reg], m.pointers[a.reg] = v.Value, v.Pointer
+			v := m.load(off, i.MemBytes)
+			m.write(&m.state, a, v.Value)
+			m.pointers[a.reg] = v.Pointer
 			return m.err
 		}
 		if src, ok := fullRegister(i.Args[1]); ok {
@@ -500,19 +593,14 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 	case x86asm.LEA:
 		mem := i.Args[1].(x86asm.Mem)
 		if mem.Base == x86asm.RIP {
-			next, ok := plus(m.pc, uint64(size))
-			address, valid := relative(next, mem.Disp)
-			if !ok || next >= 1<<47 || !valid || address >= 1<<47 {
-				return refuse(m.pc, "transition-image", "RIP-relative address wraps or is noncanonical")
-			}
-			load, err := m.imageLoad(Span{address, address}, true)
+			var err error
+			p, err = m.ripPointer(mem.Disp, size)
 			if err != nil {
 				return err
 			}
-			p = ImagePointer{Address: address, owner: &m.im.data[0], load: load}
 			// RIP is not a GPR. Its exact decoded next PC supplies this scalar,
 			// separately from the shared base-register LEA interpreter.
-			m.state.regs[a.reg] = m.con(br.Bits(64), address)
+			m.state.regs[a.reg] = m.con(br.Bits(64), p.(ImagePointer).Address)
 			m.pointers[a.reg] = p
 			return m.err
 		}

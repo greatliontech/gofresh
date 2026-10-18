@@ -6,8 +6,8 @@ import (
 )
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
-// including decoder, expression, ordered pointer-lane and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@4;" + ValueRules + ";" + FrameRules + ";" + cpuidRules
+// including guarded DAG transport, decoder, expression, pointer-lane and CPUID dependencies.
+const TransitionRules = "gofresh/native-transition@5;" + ValueRules + ";" + FrameRules + ";" + cpuidRules
 
 const cpuidRules = "gofresh/native-cpuid@1"
 
@@ -83,6 +83,8 @@ type TransitionInterface struct {
 type TransitionLimits struct {
 	RelationLimits
 	Regions, Bytes int
+	// LiveStateBytes bounds aggregate live node states, including byte maps.
+	LiveStateBytes int
 }
 
 // TransitionProposal is an untrusted complete entry-to-cut instruction inventory.
@@ -150,7 +152,8 @@ type TransitionWord struct {
 	Value  br.Term
 }
 
-// TransitionAccess retains an actual full-width access in execution order.
+// TransitionAccess retains a conditional full-operand access. Its PC identifies
+// the owning instruction guard; filtering those guards yields execution order.
 type TransitionAccess struct {
 	PC    uint64
 	Kind  AccessKind
@@ -160,8 +163,9 @@ type TransitionAccess struct {
 }
 
 // PrimitiveEffect is a closed sum of checked architectural primitive occurrences.
-// Slice order supplies occurrence order; the instruction inventory locates their
-// interleaving with other transfers. These are dependencies, not observations.
+// Each PC inherits its instruction's guard. Filtering those guards supplies the
+// occurrence order and interleaving with other transfers. These are dependencies,
+// not observations or claims that every listed occurrence executes.
 type PrimitiveEffect interface{ primitiveEffect() }
 
 // CPUIDEffect retains a serializing architectural query even when all results
@@ -188,6 +192,17 @@ type TransitionFlag struct {
 // is untouched by the admitted instructions under the machine premises.
 type TransitionFlags struct{ CF, OF, SF, ZF, AF, PF TransitionFlag }
 
+// TransitionPredicates binds the three independent architectural entry predicates.
+// SFXorOF means SF != OF, not either architectural flag separately.
+type TransitionPredicates struct{ CF, ZF, SFXorOF br.Term }
+
+// GuardedInstruction is the sole occurrence guard. Accesses and primitive effects
+// inherit it by PC. Filtering this topological inventory gives the executed order.
+type GuardedInstruction struct {
+	Span
+	Guard br.Term
+}
+
 // CutBoundary records a decoded, reachable but unexecuted instruction. Its bytes
 // establish the boundary, not that its effects have been modeled.
 type CutBoundary struct {
@@ -200,22 +215,26 @@ type CutBoundary struct {
 // half-open scalar-S intervals induced by external/image-page disjointness, not
 // chosen runtime bases. Registers and Memory are derived cut relations; memory
 // outside FrameWrite footprints, preserved GPRs and remaining context are unchanged.
-// Instructions contains executed fetches only. Boundary is unexecuted.
+// Instructions contains guarded fetch occurrences. Filtering their guards gives
+// the executed trace. Boundary is unexecuted.
 type TransitionBound struct {
-	ImageDigest      [32]byte
-	Rules            string
-	Entry            uint64
-	Interface        TransitionInterface
-	Origin           br.Term
-	ExcludedOrigins  []Span
-	InitialRegisters [16]br.Term
-	InitialMemory    []TransitionByte
-	Words            []TransitionWord
-	Registers        [16]TransitionValue
-	Memory           []TransitionByte
-	Preserved        Masks
-	Flags            TransitionFlags
-	Instructions     []Span
+	ImageDigest       [32]byte
+	Rules             string
+	Entry             uint64
+	Interface         TransitionInterface
+	Origin            br.Term
+	ExcludedOrigins   []Span
+	InitialRegisters  [16]br.Term
+	InitialPredicates TransitionPredicates
+	InitialMemory     []TransitionByte
+	Words             []TransitionWord
+	Registers         [16]TransitionValue
+	Memory            []TransitionByte
+	Preserved         Masks
+	Flags             TransitionFlags
+	Instructions      []GuardedInstruction
+	// CutGuard is the derived reach expression, never inferred from graph closure.
+	CutGuard         br.Term
 	Accesses         []TransitionAccess
 	PrimitiveEffects []PrimitiveEffect
 	Boundary         CutBoundary
@@ -256,7 +275,7 @@ func cloneTransitionBound(b TransitionBound) TransitionBound {
 	b.InitialMemory = append([]TransitionByte(nil), b.InitialMemory...)
 	b.Words = append([]TransitionWord(nil), b.Words...)
 	b.Memory = append([]TransitionByte(nil), b.Memory...)
-	b.Instructions = append([]Span(nil), b.Instructions...)
+	b.Instructions = append([]GuardedInstruction(nil), b.Instructions...)
 	b.Accesses = append([]TransitionAccess(nil), b.Accesses...)
 	b.PrimitiveEffects = append([]PrimitiveEffect(nil), b.PrimitiveEffects...)
 	b.Boundary.Bytes = append([]byte(nil), b.Boundary.Bytes...)

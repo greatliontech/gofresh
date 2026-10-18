@@ -83,9 +83,10 @@
 // share the value calculus, while origin arithmetic and alignment justify their
 // pointer provenance under the retained conditions. Full ordered pointer lanes
 // survive spills and reloads; numeric coincidence cannot create an origin.
-// The transition grammar admits full-width MOV, canonical MOV r32,imm32,
-// base/displacement and RIP-relative LEA, constant SUB, justified alignment AND
-// and relative JMP/fallthrough. Exact unprefixed CPUID requires the optional
+// The transition grammar admits byte/32/64-bit MOV (including base/displacement
+// and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
+// AND, nonwriting 32/64-bit CMP/TEST and the ten direct conditions over CF, ZF and
+// SF!=OF, alongside relative JMP/fallthrough. Exact unprefixed CPUID requires the optional
 // CPUIDModel architectural-step condition. Each checked occurrence introduces
 // four independent BV32 outcomes in a fresh private scope, zero-extends their
 // register writes and destroys destination provenance. An ordered value-form
@@ -93,9 +94,17 @@
 // free-variable analysis of final state alone cannot establish purity. The event
 // retains ISA serialization, not timing or host-state claims. These quantified
 // outcomes are not hardware observations or caller-provided expected values.
-// Narrow register writes clear pointer provenance. Graph
-// occupancy and acyclic closure establish that every path reaches the decoded
-// cut. Its instruction is not executed or relabeled RET. Arithmetic flag values
+// Narrow register writes clear pointer provenance; partial memory overwrites
+// clear affected pointer lanes even when the scalar bytes agree. One instruction
+// occurrence owns each reach guard; accesses and primitive effects inherit it by
+// PC. Filtering the deterministic topological order gives the actual trace. An
+// inactive query's arbitrary outcome totalizations cannot affect that trace or
+// the merged state. Registers, private predicates and every declared byte merge
+// by guarded ITE; provenance survives only identical facts on all contributing
+// arms. Entry predicates retain explicit immutable architectural identities even
+// after flag overwrites. Graph occupancy and acyclic closure establish that every
+// path reaches the decoded cut, while its actual symbolic reach term is retained
+// independently of closure. Its instruction is not executed or relabeled RET. Arithmetic flag values
 // may be unprojected, never invented or mistaken for preservation. No normal
 // return, source storage, process-argument meaning, completed bootstrap or public
 // runtime authority follows from this conditional state relation.
@@ -111,11 +120,14 @@
 // not prove numerical inequality outside the declared disjoint footprints.
 //
 // CheckTransitionContinuation consumes only an immutable predecessor and a full
-// root-to-new-cut proposal. It rechecks the complete graph and predecessor prefix,
+// root-to-new-cut proposal. It reconstructs the prefix stopping at the old cut,
+// checks exact membership/edges and that the old cut separates every full path,
 // inherits the same symbolic inputs and derived state, and executes only the
 // suffix. Normalized root limits and cumulative work also govern inherited terms,
 // copies and the combined graph, including primitive-only roots; a new segment
-// cannot reset those bounds. Original entry and prior outcome identities survive,
+// cannot reset those bounds. Aggregate live node-state bytes are bounded before
+// allocation; consumed states are released rather than enumerating whole paths.
+// Original entry, initial predicates, guards and prior outcome identities survive,
 // while new occurrences and sibling queries have distinct scopes. Mapping
 // and interference conditions remain premises over the longer scope, rather than
 // actual stability facts inferred from the predecessor. No replacement image,

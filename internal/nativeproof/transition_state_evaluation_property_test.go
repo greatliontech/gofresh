@@ -116,7 +116,7 @@ func checkEvaluationTree(t testing.TB, levels, leafDepth int, literal uint64, ra
 			t.Fatal("wide/shallow regression no longer reaches the intended evaluator boundary")
 		}
 	}
-	values := stateBindings(t, c, face, initial, true)
+	values := stateBindings(t, c, face, initial)
 	stateAssert(t, c, x, cut, initial, want, values)
 	original, _ := c.Bound()
 	next, err := CheckTransitionContinuation(t.Context(), c, x.proposal(len(program)))

@@ -5,19 +5,20 @@
 // transition consumer can establish its pointer or mask side conditions.
 //
 // This is an executed-only grammar, NOT the grammar of an unexecuted cut. NOP,
-// CALL, RET, conditional branches and vector instructions can be legitimate cut
+// CALL, RET, unsupported conditional branches and vector instructions can be legitimate cut
 // evidence even though Parse refuses them. Never use this package to narrow cut
 // admission. Its tests alone establish none of the transition theorem's coverage,
 // state-transfer, provenance or composition obligations.
 //
 // The machine conventions are Intel 64 long mode: little-endian payloads, GPR
 // numbers RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8 through R15; one REX.W for
-// 64-bit data, and default 64-bit addressing with one base and no index. The only
-// explicit 32-bit operation is B8+rd imm32 (no prefix for low registers, 41 for
-// high ones), whose write zero-extends to 64 bits. CPUID is exact operand-free
-// 0f a2, without prefixes. Full-width RIP-relative LEA uses next IP.
-// Prefixes, indexed/absent bases and RIP-relative data accesses,
-// other widths and other opcode forms are outside this executed grammar.
+// 64-bit data, and default 64-bit addressing with one base and no index. MOV
+// admits byte, 32 and 64 bits; narrow register writes preserve other byte lanes
+// or zero-extend 32 bits. CMP/TEST admit register/immediate 32/64-bit forms;
+// conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
+// operand-free 0f a2, without prefixes. RIP-relative LEA and data accesses use
+// next IP. Legacy prefixes, indexed/absent bases and other widths remain outside
+// this executed grammar. REX.W has no width effect on explicitly byte opcodes.
 //
 // Intent exists before encoding. Encode and Parse deliberately use different
 // integer and byte-field algorithms, with no shared conversion, extraction or
@@ -41,6 +42,11 @@ const (
 	Jump                                 // next IP + SignedDisp.
 	LEARIP                               // Dst <- next IP + SignedDisp, no memory access.
 	CPUID                                // Operand-free architectural CPU query.
+	Compare
+	CompareImmediate
+	Test
+	TestImmediate
+	Branch
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -57,6 +63,11 @@ type Intent struct {
 	Base       uint8
 	SignedDisp int64
 	Immediate  uint64
+	// Width zero retains the full-width vocabulary; 8/32 select narrow operands.
+	Width            uint8
+	RIP              bool
+	HighDst, HighSrc bool  // AH/CH/DH/BH, with Dst/Src in 0..3.
+	Condition        uint8 // Intel condition field, only 2..7 and 12..15.
 }
 
 // Form selects an opcode spelling. Memory/register direction is determined by
@@ -79,6 +90,20 @@ const (
 	JMPEB
 	JMPE9
 	CPUID0FA2
+	CMP39
+	CMP3B
+	CMP83
+	CMP81
+	CMP3D
+	TEST85
+	TESTF7
+	TESTA9
+	JccShort
+	JccNear
+	MOV88
+	MOV8A
+	MOVC6
+	MOVB0
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

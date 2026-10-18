@@ -232,7 +232,7 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 		r.flags[j] = rng.Uint64()&1 != 0
 	}
 	initialPredicates := [3]bool{r.flags[0], r.flags[1], r.flags[3] != r.flags[2]}
-	for j, predicate := range c.checked.flags {
+	for j, predicate := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF} {
 		if predicate.View().Op == br.Variable {
 			var value uint64
 			if initialPredicates[j] {
@@ -373,8 +373,18 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 			equal(root, []br.Term{q.Leaf, q.Subleaf, q.ResultsEAX, q.ResultsEBX, q.ResultsECX, q.ResultsEDX}[k])
 		}
 	}
-	if a.Preserved != b.Preserved || !reflect.DeepEqual(a.Instructions, b.Instructions) || !reflect.DeepEqual(a.Accesses, b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
+	if a.Preserved != b.Preserved || len(a.Instructions) != len(b.Instructions) || !reflect.DeepEqual(a.Accesses, b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
 		t.Fatal("direct/segmented scope differs")
+	}
+	for j, occurrence := range a.Instructions {
+		if occurrence.Span != b.Instructions[j].Span {
+			t.Fatal("occurrence extent differs")
+		}
+		equal(occurrence.Guard, b.Instructions[j].Guard)
+	}
+	equal(a.CutGuard, b.CutGuard)
+	for j, p := range []br.Term{a.InitialPredicates.CF, a.InitialPredicates.ZF, a.InitialPredicates.SFXorOF} {
+		equal(p, []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF}[j])
 	}
 	pointer := func(x, y TransitionPointer) {
 		t.Helper()
@@ -564,7 +574,7 @@ func TestTransitionContinuationBackwardAcyclic(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Span{{testEntry, testEntry + 2}, {testEntry + 8, testEntry + 11}, {testEntry + 11, testEntry + 13}, {testEntry + 2, testEntry + 5}}
-	if !reflect.DeepEqual(c.checked.bound.Instructions, want) {
+	if !reflect.DeepEqual(straightFetches(t, c.checked.bound), want) {
 		t.Fatal("numeric ordering substituted for execution ordering")
 	}
 }

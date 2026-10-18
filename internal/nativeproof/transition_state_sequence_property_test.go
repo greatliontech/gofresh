@@ -570,7 +570,7 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 	if err != nil {
 		t.Fatalf("independently admitted evolving prefix refused: %v", err)
 	}
-	check(direct, cut, stateBindings(t, direct, face, initial, r.writer == 0))
+	check(direct, cut, stateBindings(t, direct, face, initial))
 	root, err := CheckTransition(t.Context(), x.im, face, x.proposal(0), limits)
 	if err != nil {
 		t.Fatal(err)
@@ -579,7 +579,7 @@ func checkStateSequenceAt(t testing.TB, face TransitionInterface, program []stat
 	if original.Origin.View().Scope == direct.checked.bound.Origin.View().Scope {
 		t.Fatal("independent sequence roots reused a variable namespace")
 	}
-	values := stateBindings(t, root, face, initial, true)
+	values := stateBindings(t, root, face, initial)
 	check(root, 0, values)
 	for _, next := range cuts {
 		prior := root.checked.bound

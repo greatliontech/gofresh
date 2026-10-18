@@ -26,6 +26,8 @@ type instruction struct {
 type operation struct {
 	Op   x86asm.Op
 	Args [2]x86asm.Arg
+	// MemBytes is retained only by domains admitting checked data-memory forms.
+	MemBytes int
 }
 
 // Decoding produces target addresses; discovery resolves them to node indices.
