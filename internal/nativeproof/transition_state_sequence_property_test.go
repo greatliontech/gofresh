@@ -716,6 +716,7 @@ func FuzzTransitionStateEvolvingSequence(f *testing.F) {
 }
 
 func TestTransitionStateEvolvingSequenceProperty(t *testing.T) {
+	t.Parallel()
 	if err := quick.Check(func(a, b, displacement int32, rotation uint8, values [28]uint64, partition, layout, requestedLimit uint64, residue uint32) bool {
 		var raw []byte
 		for _, value := range values {

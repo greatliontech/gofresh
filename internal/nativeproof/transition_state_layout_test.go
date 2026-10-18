@@ -402,6 +402,7 @@ func FuzzTransitionStatePartitions(f *testing.F) {
 // Fixed bounded random populations ensure full programs and dense partitions are
 // actually exercised even in a seed-only run, without a long fuzzing requirement.
 func TestTransitionStateWholeProgramProperty(t *testing.T) {
+	t.Parallel()
 	if err := quick.Check(func(programSeed, valuation, layout, cuts uint64, length uint8) bool {
 		rng := rand.New(rand.NewPCG(programSeed, 0x50524f4752414d))
 		data := make([]byte, 32*(1+int(length)))
@@ -417,6 +418,7 @@ func TestTransitionStateWholeProgramProperty(t *testing.T) {
 }
 
 func TestTransitionStatePartitionProperty(t *testing.T) {
+	t.Parallel()
 	if err := quick.Check(func(programSeed, valuation, layout, cutLow, cutHigh uint64, length uint8) bool {
 		rng := rand.New(rand.NewPCG(programSeed, 0x4355545354415445))
 		data := make([]byte, 32*(1+int(length)))

@@ -129,6 +129,7 @@ func checkEvaluationTree(t testing.TB, levels, leafDepth int, literal uint64, ra
 }
 
 func TestTransitionStateWideDAGEvaluation(t *testing.T) {
+	t.Parallel()
 	checkEvaluationTree(t, 7, 256, 0x73bd, []byte{1, 2, 3, 4, 5, 6, 7, 8}, true)
 }
 

@@ -267,6 +267,7 @@ func checkGuardedRecords(t testing.TB, records, edges, placement, cuts, raw, ina
 }
 
 func TestTransitionGuardedEvolvingSequence(t *testing.T) {
+	t.Parallel()
 	for seed := 0; seed < 24; seed++ {
 		records, edges, layout := make([]byte, 40*32), make([]byte, 40*8), make([]byte, 81*4)
 		for j := range records {
@@ -291,6 +292,7 @@ func TestTransitionGuardedEvolvingSequence(t *testing.T) {
 }
 
 func TestTransitionGuardedActualResourceFrontiers(t *testing.T) {
+	t.Parallel()
 	// Full reachable graphs on both sides of the actual native-inventory bound.
 	// These inputs also exercise depth refusal before that bound with no refresh.
 	for _, n := range []int{1, 33, 128, 256, 2047, 2048, 2049} {

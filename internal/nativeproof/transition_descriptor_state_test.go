@@ -72,6 +72,7 @@ func descriptorState(t testing.TB, d to.Descriptor, immediate uint64, disp int32
 }
 
 func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
+	t.Parallel()
 	raw := make([]byte, 512)
 	for j := range raw {
 		raw[j] = byte(j*31 + 17)

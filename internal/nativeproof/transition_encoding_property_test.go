@@ -175,6 +175,7 @@ func descriptorPayload(d to.Descriptor, immediate uint64, displacement int32) to
 }
 
 func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
+	t.Parallel()
 	count := 0
 	for d := range to.Descriptors {
 		count++
