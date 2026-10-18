@@ -179,6 +179,13 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
+    Follow this remaining execution order: finish the call/TLS chunk at
+    5.1w.2b.3b.2a.2.2.2.2.7; complete required bootstrap and compiler
+    correspondence; integrate useful stock/custom production reuse; remove the
+    approval registry and release Gofresh at 5.1w.7; finish Stipulator's
+    clean-break migration and delivery at 5.2; complete remaining fleet work;
+    then run the deferred full performance pass. Bring other work ahead of the
+    active chunk only for a demonstrated blocker to completing it.
     Preserve the existing compiler/language and executor premises, with explicit
     foundational machine and primitive-effect semantics. No implementation-name
     assertion or relabeled primitive replaces a property that needs proof.
@@ -321,6 +328,37 @@
                           - [x] 5.1w.2b.3b.2a.2.2.2.2.6.3 Recheck initialized
                             image reads and the selected decision from the root, excluding
                             only the proved-dead call arm and stopping before the live TLS call.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.7 Compose generic checked
+                          direct-call/frame/return transitions with per-thread syscall
+                          effects and segment-relative byte-memory access. Retain actual
+                          return words, activation/thread context, complete state/effect
+                          relations, compatible joins, distinct dynamic occurrence origins
+                          or explicit refusal, and cumulative bounds across continuations.
+                          Recheck the selected root with the precise return slot
+                          [S-56,S-48), saved-base-pointer slot [S-64,S-56) and stack
+                          adjustment to S-96; derive every access permission without
+                          strengthening inherited certificates or assuming ample stack.
+                          From the unexecuted CALL at 0x4a3813, check target 0x4a6fe0,
+                          actual return to 0x4a3818 and the native Linux ARCH_SET_FS
+                          argument/outcome relation at 0x4a6ff9. Derive success for base
+                          0x1d09c88 under explicit dispatch, address-ceiling, user-return
+                          and uninterposed per-thread applicability; preserve invalid-base
+                          raw-EPERM/unchanged-FS controls and exact architectural/context
+                          effects. Transport only the actual argument's provenance into
+                          effective FS state, then check the FS:[-8] write and ordinary
+                          reload at 0x1d09c80 through the same owned image bytes. Exclude
+                          the error and mismatch arms only by checked false guards and
+                          stop at the common unexecuted LEA at 0x4a3839. Cover changed
+                          targets/return bytes, overlapping stack writes, insufficient
+                          permissions, changed selectors/ABI/context, invalid bases,
+                          clobbered flags/registers, forged TLS provenance, overwritten
+                          results with retained effects, repeated calls and incompatible
+                          joins through independent synthetic controls and targeted
+                          mutation sensitivity. Converge review of the complete capability
+                          and its contract/bindings before acceptance; scalar-call/frame
+                          projections supply no unproved successor adapter, actual executor
+                          applicability, completed bootstrap, source association or public
+                          runtime-reuse authority.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
@@ -511,6 +549,10 @@
           complete runnable rosters and independent native attempts, preserving
           execution flags, output/accounting and publication semantics; remove
           replaced producer/checker orchestration and close the PGO adoption gate.
+          Close scope-aware CPU allocation, frozen compilation widths and
+          scope-preserving retry waves within this migration. Use its complete
+          compilation-environment guard and finish one clean replacement;
+          an older-baseline runner release is not a separate deliverable.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Complete and verify the preparation sharing designed before 5.2d.2's
@@ -528,6 +570,10 @@
       timeout names/dumps, selection-envelope isolation and serving round-trip.
       Require a settled passing backend/workspace gate and current records before
       commit, installation, reader restart or conditional issue retirement.
+      Integrate the field agent's upstream package-scoped explicit bind/named-pin
+      authoring fix here. Its independent review, push, installation and Cerebro
+      qualification may proceed on the field machine without waiting for this
+      migration; local reconciliation must preserve the in-flight native design.
   - [ ] 5.3 Preserve Stipulator argument identity and clause-scoped supersede;
     retain per-group witness tiers and package-completion persistence during
     drift retries. Publish operation accounts even when a later step fails.
@@ -625,7 +671,8 @@
     metrics and hygiene authority explicit, and label authorized partial
     scope. Derive displayed confidence from significance unless an actual
     independent workflow justifies retaining the separate control.
-  - [ ] 7.7 Measure cold/warm analysis, first durable result, interruption loss,
+  - [ ] 7.7 After the remaining functional implementation and refactoring across
+    the fleet, measure cold/warm analysis, first durable result, interruption loss,
     served fraction and peak/retained memory on representative workloads.
     Explain each cost before changing ownership or admission. Do not rebuild
     existing per-package SSA release, equate GC targets with physical room,
