@@ -1950,3 +1950,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "9575a1726769d02082811c05934b86515159ddfaf4012aedbf1707f252b4f0ef"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-file-eligibility"
+  content_hash: "1dcccc80f4776eab47f0e7cc01b4fc2e87ce8b37caf2bfd01368f8d9f6732f4a"
+  source_hash: "a93c3579104165bb53e946b37852900de3598377719cbfa1fb141a421c84e472"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFileInputEligibilityMatchesProducer"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e7ef59628d66a78b9d8210e1d6bb9e0a67e8b25d4b88932ca50127b9b86f03a7"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-file-eligibility"
+  content_hash: "1dcccc80f4776eab47f0e7cc01b4fc2e87ce8b37caf2bfd01368f8d9f6732f4a"
+  source_hash: "a93c3579104165bb53e946b37852900de3598377719cbfa1fb141a421c84e472"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFileInputEligibilityEffectiveRootsAndExceptions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "33b6625e6dabe884b60f7bc6f146b2c911b966bf3984476529c692b3d23f9830"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-file-eligibility"
+  content_hash: "1dcccc80f4776eab47f0e7cc01b4fc2e87ce8b37caf2bfd01368f8d9f6732f4a"
+  source_hash: "a93c3579104165bb53e946b37852900de3598377719cbfa1fb141a421c84e472"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFileInputEligibilityRefusesProjectedAndUnsupported"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f7190ca03e829532029ffb7112f9454702ef997ecd29c62834dd173325e35d67"
+}

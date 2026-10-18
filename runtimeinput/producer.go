@@ -304,14 +304,8 @@ func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in Producer
 	if err != nil {
 		return Observation{}, "", err
 	}
-	pwd, _ := gotool.LookupEnv(normalized, "PWD")
-	if pwd == "" {
-		return incomplete("process environment carries no PWD; cwd-anchored reads cannot classify under the frame")
-	}
-	if pwd != f.PkgDir {
-		if resolved, err := filepath.EvalSymlinks(pwd); err != nil || resolved != f.PkgDir {
-			return incomplete(fmt.Sprintf("process environment PWD %q does not name the package directory %s the frame was captured for", pwd, f.PkgDir))
-		}
+	if reason := producerPWDProblem(f.PkgDir, normalized); reason != "" {
+		return incomplete(reason)
 	}
 	if producerTestHooks.beforeRoots != nil {
 		producerTestHooks.beforeRoots()
@@ -328,9 +322,23 @@ func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in Producer
 	opts := []TestLogOption{
 		WithCompletedProcess(in.Identity),
 		WithBracket(*f.bracket),
-		WithExcludedPaths(append([]string{".", ".git"}, in.ExcludedPaths...)...),
 		func(cfg *testLogConfig) { cfg.outcomeSubjects = in.Outcome.Subjects() },
 	}
+	opts = append(opts, producerClassificationOptions(roots, f.Root, in.ScratchRoot, in.ExcludedPaths, in.ScratchNamespaces)...)
+	observation, err := fromTestLog(ctx, log, f.Root, f.PkgDir, in.Env, opts...)
+	if err := ctx.Err(); err != nil {
+		return Observation{}, "", err
+	}
+	if err != nil {
+		return incomplete(fmt.Sprintf("testlog ingestion failed: %v", err))
+	}
+	return observation, "", nil
+}
+
+// producerClassificationOptions is the single assembly of the facade's implicit
+// roots and caller declarations. Preflight and ingest read the same policy.
+func producerClassificationOptions(roots resolvedRoots, treeRoot, scratchRoot string, excluded []string, namespaces []ScratchNamespace) []TestLogOption {
+	opts := []TestLogOption{WithExcludedPaths(append([]string{".", ".git"}, excluded...)...)}
 	if roots.toolchain != "" {
 		opts = append(opts, withToolchainRoot(roots.toolchain))
 	}
@@ -340,18 +348,24 @@ func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in Producer
 	if roots.buildCache != "" {
 		opts = append(opts, withBuildCacheRoot(roots.buildCache))
 	}
-	for _, root := range roots.ephemeralRoots(in.ScratchRoot, f.Root) {
+	for _, root := range roots.ephemeralRoots(scratchRoot, treeRoot) {
 		opts = append(opts, withEphemeralTempRoot(root))
 	}
-	for _, namespace := range in.ScratchNamespaces {
+	for _, namespace := range namespaces {
 		opts = append(opts, WithScratchNamespace(namespace.Dir, namespace.Pattern))
 	}
-	observation, err := fromTestLog(ctx, log, f.Root, f.PkgDir, in.Env, opts...)
-	if err := ctx.Err(); err != nil {
-		return Observation{}, "", err
+	return opts
+}
+
+func producerPWDProblem(pkgDir string, env []string) string {
+	pwd, _ := gotool.LookupEnv(env, "PWD")
+	if pwd == "" {
+		return "process environment carries no PWD; cwd-anchored reads cannot classify under the frame"
 	}
-	if err != nil {
-		return incomplete(fmt.Sprintf("testlog ingestion failed: %v", err))
+	if pwd != pkgDir {
+		if resolved, err := filepath.EvalSymlinks(pwd); err != nil || resolved != pkgDir {
+			return fmt.Sprintf("process environment PWD %q does not name the package directory %s the frame was captured for", pwd, pkgDir)
+		}
 	}
-	return observation, "", nil
+	return ""
 }

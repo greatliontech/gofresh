@@ -804,6 +804,30 @@ prove a read's target freshly created, that proof remains the
 declaration-free instrument; the namespace is the enforced fallback for
 scratch disciplines no sound flow analysis can follow.
 
+**REQ-inputs-file-eligibility** (behavior): A producer-side preflight for an
+explicit existing regular file MUST judge its eligibility for raw-byte observation
+through the producer facade's own effective-root resolution, exclusions and path
+value classifications. It distinguishes raw-byte-eligible, recordless, projected
+and unverifiable paths with a named reason for refusal; the zero result grants
+nothing. The caller supplies the same absolute tree and package directories,
+complete process environment with its matching PWD,
+runner, run-scoped roots memo, exclusions and minted scratch root as the producer.
+The query preserves cache-subtree exceptions, overlapping-root precedence and
+tree-overlap degradation, including settings resolved through the Go environment
+configuration. It accepts only clean absolute existing regular files without
+symlink components, refuses volatile paths without probing their contents and
+distinguishes stable-machine projections from raw bytes. Existing regular temp
+descendants are not rejected merely for residing under a temp root; freshly minted
+scratch-namespace admission cannot apply to a file held present before capture.
+Inputs and classification-root topology obey the existing hold-still obligation
+through producing and ingest, and changed contexts require a new judgment. No
+caller-supplied root table or copied consumer cache classification substitutes
+for the facade. The query reads no selected-file contents, produces no observation,
+completion or outcome evidence, and forces no read to bypass classification;
+eligibility does not promise a successful read, hash, bracket or later serving.
+Missing inputs, unresolved roots and cancellation fail closed. Actual observations
+and their normal closing checks remain required.
+
 **REQ-inputs-producer-facade** (behavior): The library MUST expose one
 producer facade owning the completed-observation conjunction every
 external producer previously hand-assembled: frame capture resolves the
