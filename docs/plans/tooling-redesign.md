@@ -384,6 +384,102 @@
                           layout, ownership, cancellation, resource and continuation
                           controls. Keep whole-source actual-use and later source-state
                           handoff obligations open pending checked composition.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9 Establish one end-to-end
+                          paired compare/exchange phase by consuming the preceding
+                          operand correspondence through both selected source calls,
+                          Boolean/global guards and the first unexecuted Load64 use.
+                          Settle and independently review the selected-assembly
+                          reference contract and mechanism before executable work.
+                          Capture actual assembly bytes, transitive includes and
+                          search precedence, preprocessor/build state, package
+                          qualification, directives, ABI and complete definition
+                          boundaries under the same immutable source owner. Retain
+                          an internal immutable selection binding at typed loading;
+                          acquire reference inputs through a fresh current root
+                          compilation with a private transparent tool-execution
+                          boundary, preserving effective per-package options and
+                          optimization. Force actual actions rather than infer them
+                          from cached builds or diagnostic listings. Capture every
+                          selected provider's final assembler invocation and complete
+                          preprocessor read/lookup set while its actual namespace
+                          exists; validate before tool exit permits cleanup. Account
+                          for generated-header precedence, earlier failed lookups,
+                          source/package-variant agreement, response files and
+                          namespace mutation detection without assuming a generated
+                          directory's contents. Cover shadow headers and nested
+                          lookup order, preliminary versus final generated headers,
+                          membership/options/owner drift, absent or cached actions,
+                          transparent forwarding, cancellation and capture bounds.
+                          Keep the acquired build output separate from the actual
+                          stock/custom image. Resolve
+                          the exact bodyless declaration to its unique source
+                          reference by the checked operational interface, including
+                          the actual one-argument go:linknamestd directive; refuse
+                          unsupported redirects, ambiguous providers, competing opaque
+                          inputs and unavailable include-selection antecedents.
+                          Derive the complete assembly body and ABI0 result/frame
+                          relation independently: three argument loads, locked
+                          64-bit compare/exchange, condition-code byte store and
+                          return, with the lock prefix belonging to its instruction.
+                          Prove private reference-frame disjointness, permissions,
+                          nonescape, return integrity and complete result-byte
+                          interpretation; do not identify that frame with an inline
+                          native frame or fabricate observed executable bytes.
+                          Add generic exact-call substitution to the source-region
+                          kernel and shared checked instruction semantics, with no
+                          callee-name rule or preapproved body. Continue the opaque
+                          native predecessor with its actual current state, fixed
+                          global representation, ownership and cumulative meter;
+                          any newly required machine premise needs a fresh root
+                          judgment, never strengthened continuation inputs.
+                          Retain locked ordering and failed-CAS writeback, exact
+                          SETcc/TEST byte-register effects, readonly global uses and
+                          independently excluded throwing arms. Check the custom
+                          atomic boundaries 0x4723d6/0x472407 through cut 0x472434
+                          and stock 0x470b56/0x470b87 through cut 0x470bb4; locators
+                          are proposals and the first Load64 remains unexecuted.
+                          Require ordinary optimized stock/custom useful positives,
+                          universal arbitrary-current/old/new controls for both
+                          outcomes, and changed source constants with different
+                          control outcomes. Cover edited assembly comparison,
+                          result, return, extra writes, include selection, directives,
+                          ABI, provider and owner; changed native target, width,
+                          replacement, Boolean and branch; failed-CAS permissions
+                          and retained writeback; partial registers, frame aliases,
+                          fixed-map swaps/remaps and consistent permutations;
+                          unrelated-byte preservation, cancellation, bounds and
+                          cumulative universal-proof resources. Preserve existing
+                          dead-boundary positives with optional expansion of new
+                          RMW/SETcc transfers. Complete independent review, applicable
+                          contract checks and invariant/mutation sensitivity before
+                          acceptance. Establish extensional source/inline equality,
+                          not compiler-internal recognition or out-of-line link
+                          inclusion; retain omitted prologue, higher-root coverage,
+                          source-state handoff and runtime applicability obligations.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.10 Complete conditional
+                          testAtomic64 correspondence through remaining Load64,
+                          Store64, Xadd64 and Xchg64 operations and its actual
+                          prologue/epilogue. Settle the required reference, native
+                          and frame mechanisms before implementation; preserve the
+                          selected build and complete exceptional-path coverage.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.11 Check the conditional
+                          runtime.check prefix through its actual testAtomic64 call
+                          and return, composing the completed callee and its entry
+                          premises. Candidate custom CALL 0x472762 targets 0x4723a0
+                          and returns to 0x472767; derive these from owned bytes.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.12 Complete conditional
+                          runtime.check, including its finite round2 loop and actual
+                          return (candidate custom 0x47278f), with checked progress,
+                          complete state/effect coverage and source correspondence.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.13 Compose the ELF-root
+                          continuation through the native g0/m0-addressed writes,
+                          CLD/XMM wrapper and completed runtime.check: candidate
+                          custom 0x4a3858 to 0x4a7a20 to 0x4725a0 and return to
+                          0x4a385d. Derive all stack, context and frame premises from
+                          the root before use; numeric storage creates no typed
+                          g0/m0 association. Settle new mechanisms before executable
+                          work and retain the parent's remaining arguments,
+                          environment, auxiliary-vector and secure-descriptor queue.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
