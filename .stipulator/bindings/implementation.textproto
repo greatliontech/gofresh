@@ -4455,3 +4455,25 @@ bindings {
   shape_hash: "8555b2cb92a3ec208c0c42a2d4a0a324fc3577423c0e3dd9fe151a7698e119a6"
   clause_label: "independent-evidence"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionOptimizedArtifacts"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ee72a7632fe674418047825116ab862df8af998738001fa109f8e61be0f35b64"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionOracleNarrowImmediate"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "890d068d5ddb58e1ba750c06e5634ac3ec99ba2416c3c0f36212f876b8ec051b"
+  clause_label: "state-and-effects"
+}

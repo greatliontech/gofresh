@@ -109,6 +109,8 @@ func TestTransitionEntryPrefix(t *testing.T) {
 // The reference machine uses ordinary ISA uint64 arithmetic and actual bytes,
 // without symbolic offsets, permission helpers, scalar transfer or provenance
 // rules. Sampled S values exercise this oracle only; the proof quantifies S.
+// Fixtures include the entry spill prefix: its third access writes the pointer
+// word whose bytes must change when the quantified stack origin is rebased.
 func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples int) {
 	t.Helper()
 	rng := rand.New(rand.NewPCG(0x91ac, 0x73bd))
@@ -206,7 +208,16 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 					}
 					accesses = append(accesses, TransitionAccess{pc, FrameWrite, RelativeSpan{int64(p - s), int64(p-s) + 8}})
 				} else {
-					regs[int(i.Args[0].(x86asm.Reg)-x86asm.RAX)] = v
+					r := i.Args[0].(x86asm.Reg)
+					if r >= x86asm.EAX && r <= x86asm.R15L {
+						// A 32-bit destination writes the whole architectural GPR:
+						// its upper half is zero, not the preceding scratch value.
+						regs[int(r-x86asm.EAX)] = uint64(uint32(v))
+					} else if r >= x86asm.RAX && r <= x86asm.R15 {
+						regs[int(r-x86asm.RAX)] = v
+					} else {
+						t.Fatalf("oracle MOV destination %v", r)
+					}
 				}
 			case x86asm.LEA:
 				regs[int(i.Args[0].(x86asm.Reg)-x86asm.RAX)] = address(i.Args[1].(x86asm.Mem))
@@ -400,6 +411,35 @@ func TestTransitionPointerRoundTrips(t *testing.T) {
 	im, cut = transitionFixture(t, entryPrefix+"488b0e")
 	c, err = proveTransition(t, im, cut, f)
 	transitionRefused(t, c, err)
+}
+
+func TestTransitionOracleNarrowImmediate(t *testing.T) {
+	for reg := byte(0); reg < 16; reg++ {
+		for _, value := range []uint32{0, 0x80000000, 0xffffffff} {
+			// This oracle also checks the entry pointer spill's covariance, so
+			// retain that construction before each narrow-register write.
+			code := hexBytes(t, entryPrefix)
+			if reg >= 8 {
+				code = append(code, 0x41)
+			}
+			code = append(code, 0xb8+reg%8)
+			code = binary.LittleEndian.AppendUint32(code, value)
+			cut := testEntry + uint64(len(code))
+			im := image(t, append(code, 0xc3))
+			certificate, err := proveTransition(t, im, cut, transitionFace())
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, ok := certificate.Bound()
+			if !ok {
+				t.Fatal("missing narrow-register relation")
+			}
+			assertTransitionOracle(t, im, bound, 3)
+			if got := evalRelationTerm(t, bound.Registers[reg].Value, nil, math.MaxUint64); got != uint64(value) {
+				t.Fatalf("register %d retained upper bits: %#x, want %#x", reg, got, value)
+			}
+		}
+	}
 }
 
 func TestTransitionAlignmentRule(t *testing.T) {

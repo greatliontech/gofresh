@@ -292,9 +292,19 @@
                           supported-transition invariant evidence and sensitivity across
                           the complete admitted encoding and interface populations;
                           disposition every remaining uncovered population before use.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.3 Consume the first-spill
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.3 Consume the first-spill
                           certificate through the selected base-pointer initialization
                           and retain the following native operation as an unexecuted cut.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.4 Check mapped-image address
+                          provenance and mixed stack/image byte transport with arbitrary
+                          initial image contents; derive the first image writes from a
+                          rechecked root and stop before the CPU query.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.5 Check CPU-query semantics
+                          and required control flow up to read-dependent image decisions,
+                          retaining actual machine applicability and primitive effects.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.6 Establish checked root image
+                          initialization for read-dependent startup decisions, preserving
+                          intervening writes and keeping loader applicability explicit.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
