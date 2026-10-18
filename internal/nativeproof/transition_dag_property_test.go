@@ -137,7 +137,7 @@ func (x dagLayout) proposal(cut int) TransitionProposal {
 		seen[j] = true
 		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j != cut {
-			if j < len(x.intents) && x.intents[j].Operation == to.Clear32 {
+			if j < len(x.intents) && to.RequiresExpansion(x.intents[j]) {
 				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
 			}
 			for _, next := range x.edges[j] {
@@ -215,7 +215,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		}
 		i := x.intents[j]
 		want = append(want, dagEvent{pc: x.pcs[j], kind: "fetch", start: int64(x.pcs[j]), width: len(x.encoded[j])})
-		a, q := len(r.accesses), len(r.queries)
+		a, q := len(r.accesses), len(r.primitives)
 		r.referenceExec(t, i, j, x.pcs[j]+uint64(len(x.encoded[j])))
 		if len(r.accesses) > a {
 			v := r.accesses[a]
@@ -225,7 +225,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 			}
 			want = append(want, dagEvent{x.pcs[j], kind, v.off.off, v.width, v.off.image})
 		}
-		if len(r.queries) > q {
+		if len(r.primitives) > q {
 			want = append(want, dagEvent{pc: x.pcs[j], kind: "query"})
 		}
 		edge := 0
@@ -255,7 +255,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		guards[v.Start] = v.Guard
 	}
 	queries := map[uint64]stateQuery{}
-	for _, q := range r.queries {
+	for q := range statePrimitivesOf[stateQuery](r) {
 		queries[x.pcs[q.instruction]] = q
 	}
 	scopes := map[br.Scope]bool{b.Origin.View().Scope: true}

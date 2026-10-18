@@ -8,7 +8,16 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@8;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules
+const TransitionRules = "gofresh/native-transition@10;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+
+// Locked64Model requires cacheable write-back coherent RAM, power-of-two cache
+// lines of at least eight bytes aligned to their size, and enabled architectural
+// locked memory operations outside transactional/enclave contexts, with no
+// applicable bus/split-lock, debug or virtualization fault/interposition. The
+// checker establishes eight-byte alignment, preventing page/cache-line splitting.
+// Mapping, alias and interference
+// conditions remain required. This is configuration, not a normal-return premise.
+const Locked64Model = "x86-64/aligned-locked64-ordinary-ram@1"
 
 const archSetFSRules = "gofresh/native-linux-arch-set-fs@1"
 
@@ -68,6 +77,9 @@ type TransitionConditions struct {
 	// CPUID is optional for scopes that do not execute a query. Executing CPUID
 	// requires CPUIDModel; an unknown nonempty model is unsupported in any scope.
 	CPUID string
+	// Locked64 is optional; executing a locked CMPXCHG64 requires Locked64Model.
+	// Continuations inherit it unchanged; selecting it requires a fresh root.
+	Locked64 string
 	// Syscall is optional; nonempty selects LinuxAMD64SyscallModel. Address bits
 	// must then be 48 or 57, identifying TASK_SIZE_MAX, not a kernel approval label.
 	Syscall                                           string
@@ -119,21 +131,22 @@ type TransitionProposal struct {
 	ImageDigest [32]byte
 	Entry, Cut  uint64
 	Nodes       []Node
-	// Expansions selects candidate callee/primitive/self-XOR coverage. Every unselected CALL, SYSCALL or XOR is a
-	// structural terminal requiring a checked false full incoming guard.
+	// Expansions selects candidate coverage for TransitionExpansionRequired's
+	// operation/operand families. An unselected occurrence is a structural
+	// terminal requiring a checked false full incoming guard.
 	Expansions []TransitionExpansion
 }
 
 // TransitionExpansion is an untrusted search choice, not a semantic premise. Context
 // is the activation path emitted by discovery (empty at the bound root); PC names
-// an actual CALL, SYSCALL or XOR within it. Only admitted operand forms can
-// execute; selecting another XOR form grants no semantics. Duplicate, unused or
+// an actual optional operation/form within it (TransitionExpansionRequired). Only admitted operand forms can
+// execute; selecting an unsupported form grants no semantics. Duplicate, unused or
 // other choices refuse.
 // Each ancestor CALL appends '/' and its PC in exactly sixteen lowercase hex
 // digits, outermost first. This is a candidate coordinate, not an execution ID
 // or persisted evidence. A proposer can expose a child's context by stopping at
 // that child's first unexecuted boundary before proposing a longer scope.
-// Unselected calls/syscalls/XOR retain their structural-terminal interpretation,
+// Unselected optional operations retain their structural-terminal interpretation,
 // including when no primitive applicability condition is available.
 type TransitionExpansion struct {
 	Context string
@@ -204,6 +217,9 @@ type TransitionAccess struct {
 	Bytes   RelativeSpan
 	// Image selects absolute low-canonical coordinates in Bytes.
 	Image bool
+	// Value is the read value or supplied write value at this exact occurrence,
+	// at the full access width. Later writes cannot replace this dependency.
+	Value br.Term
 }
 
 // PrimitiveEffect is a closed sum of checked machine/OS primitive occurrences.
@@ -237,6 +253,22 @@ type ArchSetFSEffect struct {
 }
 
 func (ArchSetFSEffect) primitiveEffect() {}
+
+// LockedCompareExchange64Effect groups two adjacent accesses into one indivisible
+// locked RMW occurrence, with architectural locked ordering relative to memory
+// operations. ReadAccess and WriteAccess index the complete cumulative Accesses.
+// The write always occurs, including failed writeback. Before, Compare and
+// Replacement are captured before any write; After and Accumulator are the
+// derived memory and RAX outputs, and Success is their equality predicate. This
+// event survives result overwrites and supplies no concurrent-history theorem.
+type LockedCompareExchange64Effect struct {
+	PC                                                        uint64
+	Context                                                   string
+	ReadAccess, WriteAccess                                   int
+	Before, Compare, Replacement, After, Accumulator, Success br.Term
+}
+
+func (LockedCompareExchange64Effect) primitiveEffect() {}
 
 // TransitionAbstraction records deliberate loss of precision, not machine
 // nondeterminism. Value universally over-approximates the saved architectural

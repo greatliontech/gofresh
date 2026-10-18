@@ -12,6 +12,14 @@ type Descriptor struct {
 // selectors, address modes, RIP, and all no-index SIB scales. Payloads are factored
 // out. This semantic enumerator calls neither the encoder nor the byte parser.
 func Descriptors(yield func(Descriptor) bool) {
+	more := true
+	baseDescriptors(func(d Descriptor) bool { more = yield(d); return more })
+	if more {
+		atomicDescriptors(yield)
+	}
+}
+
+func baseDescriptors(yield func(Descriptor) bool) {
 	emit := func(i Intent, e Encoding) bool { return yield(Descriptor{i, e}) }
 	for _, d := range []Descriptor{{Intent{Operation: Call}, Encoding{Form: CALLE8}}, {Intent{Operation: Return}, Encoding{Form: RETC3}}, {Intent{Operation: Syscall}, Encoding{Form: SYSCALL0F05}}} {
 		if !yield(d) {

@@ -4,8 +4,8 @@
 // In particular, every immediate bit pattern is admitted regardless of whether a
 // transition consumer can establish its pointer or mask side conditions.
 //
-// This is an executed-only grammar, NOT the grammar of an unexecuted cut. NOP,
-// unsupported conditional branches and vector instructions can be legitimate cut
+// This is an executed-only grammar, NOT the grammar of an unexecuted cut.
+// Unsupported conditional branches and vector instructions can be legitimate cut
 // evidence even though Parse refuses them. Never use this package to narrow cut
 // admission. Its tests alone establish none of the transition theorem's coverage,
 // state-transfer, provenance or composition obligations.
@@ -14,7 +14,12 @@
 // numbers RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8 through R15; one REX.W for
 // 64-bit data, and default 64-bit addressing with one base and no index. MOV
 // admits byte, 32 and 64 bits; narrow register writes preserve other byte lanes
-// or zero-extend 32 bits. CMP/TEST admit register/immediate 32/64-bit forms;
+// or zero-extend 32 bits. CMP admits register/immediate/memory 32/64-bit forms;
+// TEST admits register/immediate 8/32/64-bit forms. Locked CMPXCHG admits memory64
+// under exactly LOCK then REX.W; SETcc admits one byte register or memory operand,
+// with the canonical /0 field. Both use ordinary base/displacement or RIP forms.
+// Exact 90 and 6690 NOP preserve state. These are structural grammars; permission,
+// alignment and primitive applicability remain the machine consumer's obligations.
 // conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
 // operand-free 0f a2, without prefixes. Register self-XOR admits 32-bit operands,
 // clearing the full register; other XOR shapes are outside this grammar.
@@ -58,7 +63,14 @@ const (
 	Pop
 	Return
 	Syscall
-	Clear32 // Self-XOR of a 32-bit register, zero-extending into its full GPR.
+	Clear32               // Self-XOR of a 32-bit register, zero-extending into its full GPR.
+	LockedCompareExchange // Locked memory <- Src on RAX equality, failed writeback otherwise.
+	SetRegister
+	SetMemory
+	CompareMemory     // memory - Src; no write.
+	CompareFromMemory // Dst - memory; no write.
+	CompareMemoryImmediate
+	NoOp
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -81,6 +93,20 @@ type Intent struct {
 	HighDst, HighSrc bool  // AH/CH/DH/BH, with Dst/Src in 0..3.
 	Condition        uint8 // Intel condition field, only 2..7 and 12..15.
 	FS               bool  // Displacement-only FS memory; Base, RIP and index are absent.
+}
+
+// RequiresExpansion is the intent-side search grammar for transition test
+// proposals. It is independent of native decoding and never admits execution.
+// Byte TEST and memory CMP remain distinct from their older register families.
+func RequiresExpansion(i Intent) bool {
+	switch i.Operation {
+	case Call, Syscall, Clear32, LockedCompareExchange, SetRegister, SetMemory,
+		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp:
+		return true
+	case Test, TestImmediate:
+		return i.Width == 8
+	}
+	return false
 }
 
 // Form selects an opcode spelling. Memory/register direction is determined by
@@ -127,6 +153,13 @@ const (
 	SYSCALL0F05
 	XOR31
 	XOR33
+	LOCKCMPXCHG0FB1
+	SETcc0F90
+	TEST84
+	TESTF6
+	TESTA8
+	NOP90
+	NOP6690
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

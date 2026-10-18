@@ -23,6 +23,7 @@ type regionKernel struct {
 	preexisting map[regionObject]bool
 	constants   map[*ssa.Const]regionValue
 	prefix      *regionPrefixEffects
+	trace       *regionEffectTrace
 }
 
 // newRegionKernel checks typed ownership and the actual graph, not proposal
@@ -503,7 +504,16 @@ func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, erro
 	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used, prefix: k.prefix}, nil
+	contexts := make(map[regionInvocation]regionContextFacts, len(k.session.contexts))
+	for id, facts := range k.session.contexts {
+		if err := k.meter.tick(); err != nil {
+			return nil, err
+		}
+		contexts[id] = facts
+	}
+	usage := *k.meter
+	usage.ctx = nil
+	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used, prefix: k.prefix, trace: k.trace, usage: usage, contexts: contexts}, nil
 }
 
 func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) ([]regionObservation, error) {
@@ -720,6 +730,11 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				continue
 			}
 			instruction := block.Instrs[index]
+			if k.trace != nil {
+				if err := k.effectTransfer(s, instruction); err != nil {
+					return nil, nil, &regionOperationFailure{instruction, err}
+				}
+			}
 			if k.prefix != nil {
 				if err := k.prefixTransfer(s, instruction); err != nil {
 					return nil, nil, &regionOperationFailure{instruction, err}

@@ -91,12 +91,22 @@
 // The transition grammar admits byte/32/64-bit MOV (including base/displacement
 // and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
 // AND, 32-bit register self-XOR with zero extension and undefined AF,
-// nonwriting 32/64-bit CMP/TEST and the ten direct conditions over CF, ZF and
+// nonwriting 32/64-bit CMP (including ordinary memory reads), byte/32/64-bit
+// register TEST and the ten direct conditions over CF, ZF and
 // SF!=OF, alongside relative JMP/fallthrough, constant ADD, direct near CALL,
 // register PUSH/POP and near RET. Stack operations use the same current bytes;
 // CALL stores the actual decoded continuation and RET proves equality of its
 // current readable return word to that active context. PUSH/POP of RSP retain
 // architectural ordering. Restored RSP does not roll back writes or effects.
+// Every access retains the actual read or supplied write term at its occurrence,
+// independently of final memory. Locked64Model optionally admits aligned memory
+// LOCK CMPXCHG64 with both permissions, an unconditional failed writeback cycle,
+// exact RAX-minus-destination flags, and one retained indivisible locked-ordering
+// event grouping its adjacent read/write indices. SETcc writes exactly one byte
+// and preserves flags; other register bits and unrelated bytes are unchanged.
+// The scalar TransferKernel is shared with separately normalized source assembly.
+// It supplies value relations, never source selection, image ownership, memory
+// applicability or a frame. Its consumers independently establish those facts.
 // Exact unprefixed CPUID requires the optional
 // CPUIDModel architectural-step condition. Each checked occurrence introduces
 // four independent BV32 outcomes in a fresh private scope, zero-extends their
@@ -128,9 +138,12 @@
 // runtime authority follows from this conditional state relation.
 //
 // ProposeTransition's optional occurrence-qualified expansion choices are
-// untrusted search input. By default CALL, SYSCALL and XOR remain structural terminals,
+// untrusted search input. TransitionExpansionRequired classifies CALL, SYSCALL,
+// XOR, CMPXCHG, SETcc, byte TEST, memory CMP and NOP as optional expansions.
+// Other register CMP/TEST forms retain their ordinary discovery behavior.
+// Unselected optional forms remain structural terminals,
 // accepted only with an independent proof that the complete incoming guard is
-// false. Self-XOR is expanded only when selected, preserving independently
+// false. These transfers expand only when selected, preserving independently
 // excludable dead boundaries even when their undiscovered successors contain
 // cycles. An excluded CALL has no push, target inspection or invented continuation;
 // even an unmapped or cyclic target is outside that excluded scope. An expanded

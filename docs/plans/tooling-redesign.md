@@ -179,9 +179,9 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: finish paired-CAS at
-    5.1w.2b.3b.2a.2.2.2.2.9; integrate the Cerebro handoffs at its .9a and .9b
-    successors; resume .10 and complete required bootstrap and compiler
+    Follow this remaining execution order: derive and integrate the Cerebro
+    capabilities at 5.1w.2b.3b.2a.2.2.2.2.9a and .9b; resume .10 and complete
+    required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
@@ -385,7 +385,7 @@
                           layout, ownership, cancellation, resource and continuation
                           controls. Keep whole-source actual-use and later source-state
                           handoff obligations open pending checked composition.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9 Establish one end-to-end
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.9 Establish one end-to-end
                           paired compare/exchange phase by consuming the preceding
                           operand correspondence through both selected source calls,
                           Boolean/global guards and the first unexecuted Load64 use.

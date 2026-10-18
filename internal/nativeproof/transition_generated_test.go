@@ -10,6 +10,29 @@ import (
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 )
 
+func concreteAccessValue(v uint64, width int) br.Term {
+	t, err := br.NewBuilder(1).Const(br.Bits(width), v)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func assertConcreteAccesses(t testing.TB, got, want []TransitionAccess, values map[br.Term]uint64) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatal("access count differs")
+	}
+	for j, g := range got {
+		w := want[j]
+		gv, wv := g.Value, w.Value
+		g.Value, w.Value = br.Term{}, br.Term{}
+		if g != w || gv.Sort() != wv.Sort() || stateEval(t, gv, values) != stateEval(t, wv, nil) {
+			t.Fatal("independent access/value sequence differs", j, g, w)
+		}
+	}
+}
+
 // Synthetic intent exists before encoding. The reference machine below consumes
 // this intent, not a production decoder, address helper, transfer, or disassembly.
 // Encoding alternatives deliberately cover the admitted immediate and ModRM/SIB
@@ -143,6 +166,7 @@ func (r *transitionReference) step(i transitionIntent, pc uint64) {
 	}
 	store := func(v uint64, p *int64) {
 		access(FrameWrite)
+		r.accesses[len(r.accesses)-1].Value = concreteAccessValue(v, 64)
 		for j := 0; j < 8; j++ {
 			r.memory[address+uint64(j)] = byte(v >> (8 * j))
 			delete(r.lanes, address+uint64(j))
@@ -188,6 +212,7 @@ func (r *transitionReference) step(i transitionIntent, pc uint64) {
 		for j := 0; j < 8; j++ {
 			v |= uint64(r.memory[address+uint64(j)]) << uint(8*j)
 		}
+		r.accesses[len(r.accesses)-1].Value = concreteAccessValue(v, 64)
 		r.regs[i.dst] = v
 		r.pointers[i.dst] = nil
 		first, ok := r.lanes[address]
@@ -261,9 +286,7 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 	for j, i := range program {
 		r.step(i, pcs[j])
 	}
-	if !reflect.DeepEqual(r.accesses, b.Accesses) {
-		t.Fatalf("independent access sequence differs: %v / %v", r.accesses, b.Accesses)
-	}
+	assertConcreteAccesses(t, b.Accesses, r.accesses, values)
 	for j, v := range b.Registers {
 		if got := evalRelationTerm(t, v.Value, values, 0); got != r.regs[j] {
 			t.Fatalf("register%d got%x want%x", j, got, r.regs[j])
@@ -319,6 +342,13 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		t.Fatal("primitive occurrence count differs")
 	}
 	for j, effect := range a.PrimitiveEffects {
+		if p, ok := effect.(LockedCompareExchange64Effect); ok {
+			q, valid := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+			if !valid || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
+				t.Fatal("locked occurrence differs")
+			}
+			continue
+		}
 		p, ok := effect.(CPUIDEffect)
 		q, valid := b.PrimitiveEffects[j].(CPUIDEffect)
 		if !ok || !valid || p.PC != q.PC {
@@ -368,13 +398,28 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		t.Fatal("independent roots unexpectedly share namespace")
 	}
 	for j, effect := range a.PrimitiveEffects {
+		if p, ok := effect.(LockedCompareExchange64Effect); ok {
+			q := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+			for k, root := range []br.Term{p.Before, p.Compare, p.Replacement, p.After, p.Accumulator, p.Success} {
+				equal(root, []br.Term{q.Before, q.Compare, q.Replacement, q.After, q.Accumulator, q.Success}[k])
+			}
+			continue
+		}
 		p, q := effect.(CPUIDEffect), b.PrimitiveEffects[j].(CPUIDEffect)
 		for k, root := range []br.Term{p.Leaf, p.Subleaf, p.ResultsEAX, p.ResultsEBX, p.ResultsECX, p.ResultsEDX} {
 			equal(root, []br.Term{q.Leaf, q.Subleaf, q.ResultsEAX, q.ResultsEBX, q.ResultsECX, q.ResultsEDX}[k])
 		}
 	}
-	if a.Preserved != b.Preserved || len(a.Instructions) != len(b.Instructions) || !reflect.DeepEqual(a.Accesses, b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
+	if a.Preserved != b.Preserved || len(a.Instructions) != len(b.Instructions) || len(a.Accesses) != len(b.Accesses) || !reflect.DeepEqual(a.Interface, b.Interface) || !reflect.DeepEqual(a.ExcludedOrigins, b.ExcludedOrigins) || !reflect.DeepEqual(a.Boundary, b.Boundary) {
 		t.Fatal("direct/segmented scope differs")
+	}
+	for j, access := range a.Accesses {
+		other := b.Accesses[j]
+		equal(access.Value, other.Value)
+		access.Value, other.Value = br.Term{}, br.Term{}
+		if access != other {
+			t.Fatal("direct/segmented access differs")
+		}
 	}
 	for j, occurrence := range a.Instructions {
 		if occurrence.Span != b.Instructions[j].Span {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -19,8 +20,19 @@ import (
 // Selectors are evaluated before this occurrence's outputs become bound.
 func stateQueryBindings(t testing.TB, b TransitionBound, x stateLayout, want stateReference, values map[br.Term]uint64) {
 	t.Helper()
-	if len(b.PrimitiveEffects) != len(want.queries) {
-		t.Fatal("ordered primitive inventory differs")
+	if err := statePrimitiveBindings(t, b, x, want, values); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Compare the single concrete execution stream position by position, binding
+// each query's outcomes only after its earlier dependencies have been checked.
+// Returning shape/order failures lets adversarial evidence controls exercise
+// the same oracle without invoking a second, weaker order-only predicate.
+func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want stateReference, values map[br.Term]uint64) error {
+	t.Helper()
+	if len(b.PrimitiveEffects) != len(want.primitives) {
+		return fmt.Errorf("ordered primitive inventory differs")
 	}
 	entry := b.Origin.View().Scope
 	known := map[br.Term]uint64{}
@@ -30,28 +42,55 @@ func stateQueryBindings(t testing.TB, b TransitionBound, x stateLayout, want sta
 		}
 	}
 	scopes := map[br.Scope]bool{entry: true}
-	for j, reference := range want.queries {
-		e, ok := b.PrimitiveEffects[j].(CPUIDEffect)
-		if !ok || b.Interface.Conditions.CPUID != CPUIDModel || e.PC != x.pcs[reference.instruction] || e.Leaf.Sort() != br.Bits(32) || e.Subleaf.Sort() != br.Bits(32) {
-			t.Fatal("primitive kind/PC/model/selector width differs")
-		}
-		if stateEval(t, e.Leaf, known) != uint64(reference.leaf) || stateEval(t, e.Subleaf, known) != uint64(reference.subleaf) {
-			t.Fatal("query did not capture both old selectors")
-		}
-		scope := e.ResultsEAX.View().Scope
-		if scope == (br.Scope{}) || scopes[scope] {
-			t.Fatal("query scope not fresh per occurrence")
-		}
-		scopes[scope] = true
-		for slot, term := range []br.Term{e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX} {
-			v := term.View()
-			if v.Op != br.Variable || v.Sort != br.Bits(32) || v.Scratch || v.Scope != scope || v.Immediate != uint64(slot) || len(v.Args) != 0 {
-				t.Fatal("query outcomes not independent BV32 inputs", v)
+	for j, reference := range want.primitives {
+		switch q := reference.(type) {
+		case stateQuery:
+			e, ok := b.PrimitiveEffects[j].(CPUIDEffect)
+			if !ok || b.Interface.Conditions.CPUID != CPUIDModel || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.Leaf.Sort() != br.Bits(32) || e.Subleaf.Sort() != br.Bits(32) {
+				return fmt.Errorf("primitive %d kind/PC/context/model/selector width differs", j)
 			}
-			known[term] = uint64(reference.results[slot])
-			values[term] = uint64(reference.results[slot])
+			if stateEval(t, e.Leaf, known) != uint64(q.leaf) || stateEval(t, e.Subleaf, known) != uint64(q.subleaf) {
+				return fmt.Errorf("query did not capture both old selectors")
+			}
+			scope := e.ResultsEAX.View().Scope
+			if scope == (br.Scope{}) || scopes[scope] {
+				return fmt.Errorf("query scope not fresh per occurrence")
+			}
+			scopes[scope] = true
+			for slot, term := range []br.Term{e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX} {
+				v := term.View()
+				if v.Op != br.Variable || v.Sort != br.Bits(32) || v.Scratch || v.Scope != scope || v.Immediate != uint64(slot) || len(v.Args) != 0 {
+					return fmt.Errorf("query outcomes not independent BV32 inputs")
+				}
+				known[term], values[term] = uint64(q.results[slot]), uint64(q.results[slot])
+			}
+		case stateRMW:
+			e, ok := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+			if !ok || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.Locked64 != Locked64Model {
+				return fmt.Errorf("primitive %d locked occurrence/group differs", j)
+			}
+			success := uint64(0)
+			if q.success {
+				success = 1
+			}
+			for k, term := range []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success} {
+				width := br.Bits(64)
+				if k == 5 {
+					width = br.Bool()
+				}
+				if term.Sort() != width || stateEval(t, term, known) != []uint64{q.before, q.compare, q.replacement, q.after, q.accumulator, success}[k] {
+					return fmt.Errorf("locked scalar relation %d differs", k)
+				}
+			}
+			read, write := b.Accesses[e.ReadAccess], b.Accesses[e.WriteAccess]
+			if read.Kind != FrameRead || write.Kind != FrameWrite || read.PC != e.PC || write.PC != e.PC || read.Context != e.Context || write.Context != e.Context || read.Bytes != write.Bytes || read.Image != write.Image || read.Value != e.Before || write.Value != e.After {
+				return fmt.Errorf("locked read/write lost grouping")
+			}
+		default:
+			return fmt.Errorf("unsupported reference primitive %T", reference)
 		}
 	}
+	return nil
 }
 
 func cpuidFace() TransitionInterface {

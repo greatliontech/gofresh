@@ -9,6 +9,9 @@ import "fmt"
 // are consumer premises. The byte cursor and integer rules below are independent
 // of Encode: no encoder validation, truncating signed casts or binary helpers.
 func Parse(code []byte, pc uint64) (Decoded, error) {
+	if d, handled, err := parseAtomic(code, pc); handled {
+		return d, err
+	}
 	r := byteReader{code: code}
 	d := Decoded{}
 	fail := func(why string) (Decoded, error) { return Decoded{}, fmt.Errorf("executed instruction: %s", why) }
@@ -97,7 +100,7 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 			return fail("immediate MOV prefix")
 		}
 	} else {
-		if op == 0x05 || op == 0x2d || op == 0x25 || op == 0x3d || op == 0xa9 {
+		if op == 0x05 || op == 0x2d || op == 0x25 || op == 0x3d || op == 0xa9 || op == 0xa8 {
 			d.Intent.Operation, d.Encoding.Form = Subtract, SUB2D
 			if op == 0x05 {
 				d.Intent.Operation, d.Encoding.Form = Add, ADD05
@@ -111,23 +114,30 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 			if op == 0xa9 {
 				d.Intent.Operation, d.Encoding.Form = TestImmediate, TESTA9
 			}
+			if op == 0xa8 {
+				d.Intent.Operation, d.Encoding.Form, width = TestImmediate, TESTA8, 8
+			}
 			if width != 64 {
 				if op == 0x05 || op == 0x2d || op == 0x25 {
 					return fail("narrow arithmetic outside grammar")
 				}
 				d.Intent.Width = width
 			}
-			d.Intent.Immediate = uint64(r.signed(4))
+			if width == 8 {
+				d.Intent.Immediate = r.unsigned(1)
+			} else {
+				d.Intent.Immediate = uint64(r.signed(4))
+			}
 			if width == 32 {
 				d.Intent.Immediate &= 0xffffffff
 			}
 		} else {
 			switch op {
-			case 0x88, 0x8a, 0xc6, 0x89, 0x8b, 0x8d, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7:
+			case 0x88, 0x8a, 0xc6, 0x89, 0x8b, 0x8d, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7, 0x84, 0xf6:
 			default:
 				return fail("opcode outside executed grammar")
 			}
-			if op == 0x88 || op == 0x8a || op == 0xc6 {
+			if op == 0x88 || op == 0x8a || op == 0xc6 || op == 0x84 || op == 0xf6 {
 				width = 8
 			}
 			if width != 64 {
@@ -225,8 +235,8 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 						d.Intent.Immediate &= 0xffffffff
 					}
 				}
-			case 0x39, 0x3b, 0x85:
-				if memory {
+			case 0x39, 0x3b, 0x85, 0x84:
+				if memory && (op == 0x85 || op == 0x84) {
 					return fail("memory predicate operand")
 				}
 				d.Intent.Operation, d.Encoding.Form, d.Intent.Dst, d.Intent.Src = Compare, CMP39, operandRM, operandReg
@@ -236,17 +246,31 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				if op == 0x85 {
 					d.Intent.Operation, d.Encoding.Form = Test, TEST85
 				}
-			case 0xf7:
+				if op == 0x84 {
+					d.Intent.Operation, d.Encoding.Form = Test, TEST84
+				}
+				if memory {
+					if op == 0x39 {
+						d.Intent.Operation, d.Intent.Dst = CompareMemory, 0
+					} else {
+						d.Intent.Operation, d.Intent.Src = CompareFromMemory, 0
+					}
+				}
+			case 0xf7, 0xf6:
 				if memory || selector != 0 {
 					return fail("TEST operand or extension")
 				}
 				d.Intent.Operation, d.Encoding.Form, d.Intent.Dst = TestImmediate, TESTF7, operandRM
-				d.Intent.Immediate = uint64(r.signed(4))
+				if op == 0xf6 {
+					d.Encoding.Form, d.Intent.Immediate = TESTF6, r.unsigned(1)
+				} else {
+					d.Intent.Immediate = uint64(r.signed(4))
+				}
 				if width == 32 {
 					d.Intent.Immediate &= 0xffffffff
 				}
 			case 0x83, 0x81:
-				if memory || (selector != 0 && selector != 4 && selector != 5 && selector != 7) || selector != 7 && width != 64 {
+				if memory && selector != 7 || (selector != 0 && selector != 4 && selector != 5 && selector != 7) || selector != 7 && width != 64 {
 					return fail("arithmetic operand or opcode extension")
 				}
 				d.Intent.Dst = operandRM
@@ -260,6 +284,9 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				}
 				if selector == 7 {
 					d.Intent.Operation, d.Encoding.Form = CompareImmediate, CMP81
+					if memory {
+						d.Intent.Operation, d.Intent.Dst = CompareMemoryImmediate, 0
+					}
 				}
 				if op == 0x83 {
 					immWidth = 1
@@ -280,11 +307,11 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				}
 			}
 			if width == 8 && rex == 0 {
-				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Load || d.Intent.Operation == MoveImmediate) && d.Intent.Dst >= 4 {
+				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Load || d.Intent.Operation == MoveImmediate || d.Intent.Operation == Test || d.Intent.Operation == TestImmediate) && d.Intent.Dst >= 4 {
 					d.Intent.Dst -= 4
 					d.Intent.HighDst = true
 				}
-				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Store) && d.Intent.Src >= 4 {
+				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Store || d.Intent.Operation == Test) && d.Intent.Src >= 4 {
 					d.Intent.Src -= 4
 					d.Intent.HighSrc = true
 				}

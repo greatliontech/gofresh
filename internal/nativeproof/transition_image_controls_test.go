@@ -123,7 +123,7 @@ func assertCPUQueryConditionalStep(t testing.TB, im *Image, face TransitionInter
 	for _, tuple := range tuples {
 		for _, selector := range []uint64{0, 0x1234567887654321, ^uint64(0)} {
 			values := map[br.Term]uint64{b.InitialRegisters[RCX]: selector}
-			want := stateReference{queries: []stateQuery{{instruction: 0, leaf: 0, subleaf: uint32(selector), results: tuple}}}
+			want := stateReference{primitives: []statePrimitive{stateQuery{instruction: 0, leaf: 0, subleaf: uint32(selector), results: tuple}}}
 			stateQueryBindings(t, b, stateLayout{pcs: []uint64{prefix.Cut}}, want, values)
 			for slot, reg := range []Register{RAX, RBX, RCX, RDX} {
 				if stateEval(t, b.Registers[reg].Value, values) != uint64(tuple[slot]) {

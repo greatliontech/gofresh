@@ -35,6 +35,10 @@ type regionCallProof struct {
 	invocation regionInvocation
 	initial    regionState
 	entries    map[*ssa.BasicBlock][]regionState
+	// A checked assembly reference is a distinct closed evidence arm. It carries
+	// no proposed successor heap or result and is applied again by the checker.
+	reference *assemblyReference
+	arguments []regionValue
 }
 
 type regionCallSession struct {
@@ -47,6 +51,8 @@ type regionCallSession struct {
 	proofs      []*regionCallProof
 	results     map[*regionCallProof][]regionObservation
 	used        []*regionCallProof
+	references  map[*ssa.Function]*assemblyReference
+	source      computationSource
 	// Only the startup composer supplies completed roots, after checking every
 	// outcome of that phase. Their allocations cannot execute again in this
 	// invocation: the new root has a distinct call-string namespace. The ordinary
@@ -128,6 +134,12 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 	}
 	for _, operand := range call.Call.Args {
 		actual = append(actual, k.value(caller, operand))
+	}
+	if callable.kind == regionCallable && k.session.references[callable.target] != nil {
+		return k.callReference(call, caller, callable, actual)
+	}
+	if k.trace != nil {
+		return nil, regionError("effect-covered call lacks an exact checked reference")
 	}
 	if callable.kind != regionCallable || !regionSourceCallBody(callable.target) {
 		return nil, regionError("call target has no supported ordinary source body")

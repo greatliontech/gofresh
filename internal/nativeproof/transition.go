@@ -85,7 +85,7 @@ func newTransitionChecker(ctx context.Context, im *Image, root transitionRoot, l
 // Its cut is only a proposed locator; no instruction count or symbol extent is
 // a successful endpoint. CheckTransition independently reconstructs all bytes.
 // Numeric cuts select the first hit and require a unique activation in the
-// stopped graph. Unselected calls, syscalls and XOR remain structural terminals,
+// stopped graph. Unselected TransitionExpansionRequired forms remain structural terminals,
 // with no execution or successor inspection. Expansion choices select search
 // only; their use and actual supported operand forms are checked later.
 func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
@@ -563,8 +563,6 @@ func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, 
 			}
 			return TransitionLocation{}, refuse(m.pc, "transition-permission", "full image access lacks declared permission")
 		}
-		span := RelativeSpan{int64(image.Address), int64(end)}
-		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: span, Image: true})
 		return TransitionLocation{Image: true, Offset: int64(image.Address)}, nil
 	}
 	stack, valid := p.(OriginPointer)
@@ -585,11 +583,17 @@ func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, 
 		}
 		return TransitionLocation{}, refuse(m.pc, "transition-permission", "full access lacks declared permission")
 	}
-	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: span})
 	return TransitionLocation{Offset: stack.Offset}, nil
 }
 
-func (m *transitionChecker) load(off TransitionLocation, width int) TransitionValue {
+func (m *transitionChecker) recordAccess(off TransitionLocation, width int, kind AccessKind, value br.Term) {
+	if !m.tick() {
+		return
+	}
+	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: RelativeSpan{off.Offset, off.Offset + int64(width)}, Image: off.Image, Value: value})
+}
+
+func (m *transitionChecker) load(off TransitionLocation, width int, kind AccessKind) TransitionValue {
 	var lanes [8]pointerLane[TransitionPointer]
 	var v br.Term
 	for j := 0; j < width; j++ {
@@ -606,10 +610,12 @@ func (m *transitionChecker) load(off TransitionLocation, width int) TransitionVa
 	if width == 8 {
 		pointer = orderedPointer(lanes[:])
 	}
+	m.recordAccess(off, width, kind, v)
 	return TransitionValue{v, pointer}
 }
 
 func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, width int) {
+	m.recordAccess(off, width, FrameWrite, v.Value)
 	if width != 8 {
 		v.Pointer = nil
 	}
@@ -625,6 +631,12 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if i.Op == x86asm.CMPXCHG {
+		return m.lockedCompareExchange(i, size)
+	}
+	if isTransitionSet(i.Op) {
+		return m.setConditionByte(i, size)
+	}
 	if i.Op == x86asm.CALL || i.Op == x86asm.PUSH || i.Op == x86asm.POP || i.Op == x86asm.RET {
 		return m.stackStep(i, size)
 	}
@@ -634,22 +646,31 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 	if i.Op == x86asm.CPUID {
 		return m.cpuid()
 	}
-	if i.Op == x86asm.JMP || condition(i.Op) != 0 {
+	if i.Op == x86asm.JMP || i.Op == x86asm.NOP || condition(i.Op) != 0 {
 		return nil
 	}
 	if i.Op == x86asm.CMP || i.Op == x86asm.TEST {
-		if err := m.valueBuilder.transfer(m.pc, i, &m.state); err != nil {
-			return err
+		// The established register-only domain retains only the predicates its
+		// conditions consume. Full flag projections are needed for the new byte
+		// and memory transfers; deriving unused flags here would change its
+		// existing expression-resource frontier.
+		if reg, ok := i.Args[0].(x86asm.Reg); ok && i.MemBytes == 0 {
+			a, _ := register(reg)
+			if a.width != 8 {
+				if err := m.valueBuilder.transfer(m.pc, i, &m.state); err != nil {
+					return err
+				}
+				f := TransitionFlag{Defined: true}
+				m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
+				m.bound.Flags.CF.Value, m.bound.Flags.ZF.Value = m.state.flags[flagCarry], m.state.flags[flagZero]
+				if i.Op == x86asm.TEST {
+					m.bound.Flags.OF.Value, m.bound.Flags.SF.Value = m.falsity, m.state.flags[flagLess]
+					m.bound.Flags.AF = TransitionFlag{}
+				}
+				return m.err
+			}
 		}
-		f := TransitionFlag{Defined: true}
-		m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
-		m.bound.Flags.CF.Value, m.bound.Flags.ZF.Value = m.state.flags[flagCarry], m.state.flags[flagZero]
-		if i.Op == x86asm.TEST {
-			m.bound.Flags.OF.Value = m.falsity
-			m.bound.Flags.SF.Value = m.state.flags[flagLess]
-			m.bound.Flags.AF = TransitionFlag{}
-		}
-		return m.err
+		return m.compareOrTest(i, size)
 	}
 	if i.Op == x86asm.MOV {
 		if mem, ok := i.Args[0].(x86asm.Mem); ok {
@@ -685,7 +706,7 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 			if err != nil {
 				return err
 			}
-			v := m.load(off, i.MemBytes)
+			v := m.load(off, i.MemBytes, FrameRead)
 			m.write(&m.state, a, v.Value)
 			m.pointers[a.reg] = v.Pointer
 			return m.err

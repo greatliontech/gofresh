@@ -28,7 +28,7 @@ func withPayload(d Descriptor, immediate uint64, displacement int64) Intent {
 		i.Immediate = uint64(int64(int32(immediate)))
 	case SUB83, ADD83, AND83, CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
-	case MOVC6, MOVB0:
+	case MOVC6, MOVB0, TESTF6, TESTA8:
 		i.Immediate = uint64(uint8(immediate))
 	case JMPEB, JccShort:
 		i.SignedDisp = int64(int8(displacement))
@@ -85,7 +85,7 @@ func assertIntegerPayloads(t testing.TB, b []byte, d Decoded) {
 		immWidth = 4
 	case SUB83, ADD83, AND83, CMP83:
 		immWidth = 1
-	case MOVC6, MOVB0:
+	case MOVC6, MOVB0, TESTF6, TESTA8:
 		immWidth, signed = 1, false
 	}
 	if immWidth != 0 {
@@ -138,7 +138,8 @@ func TestDescriptorPopulation(t *testing.T) {
 		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1, CPUID0FA2: 1,
 		MOV88: 10856, MOV8A: 10856, MOVC6: 1357, MOVB0: 136,
 		ADD83: 64, ADD81: 64, ADD05: 8, CALLE8: 1, PUSH50: 16, POP58: 16, RETC3: 1, SYSCALL0F05: 1,
-		CMP39: 1088, CMP3B: 1088, TEST85: 1088, CMP83: 136, CMP81: 136, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 10, JccNear: 10,
+		CMP39: 10568, CMP3B: 10568, TEST85: 1088, CMP83: 1321, CMP81: 1321, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 10, JccNear: 10,
+		LOCKCMPXCHG0FB1: 4288, SETcc0F90: 13210, TEST84: 1088, TESTF6: 136, TESTA8: 17, NOP90: 1, NOP6690: 1,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
 	// bases have 7+8+8 modes times four scales, with X=0 only.
@@ -178,7 +179,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 54894 || len(counts) != len(want) {
+	if len(seen) != 94965 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {
@@ -244,7 +245,7 @@ func TestRawModRMPopulation(t *testing.T) {
 		prefixes = append(prefixes, rex)
 	}
 	for _, rex := range prefixes {
-		for _, op := range []byte{0x88, 0x89, 0x8a, 0x8b, 0x8d, 0xc6, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7} {
+		for _, op := range []byte{0x88, 0x89, 0x8a, 0x8b, 0x8d, 0xc6, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7, 0x84, 0xf6} {
 			for m := 0; m < 256; m++ {
 				mode, selector, rm := m/64, m/8%8, m%8
 				hasSIB := mode < 3 && rm == 4
@@ -264,13 +265,13 @@ func TestRawModRMPopulation(t *testing.T) {
 					if op == 0x8d && (mode == 3 || rex&8 == 0) {
 						valid = false
 					}
-					if (op == 0xc7 || op == 0xc6 || op == 0xf7) && selector != 0 {
+					if (op == 0xc7 || op == 0xc6 || op == 0xf7 || op == 0xf6) && selector != 0 {
 						valid = false
 					}
-					if (op == 0x83 || op == 0x81) && (mode != 3 || selector != 0 && selector != 4 && selector != 5 && selector != 7 || selector != 7 && rex&8 == 0) {
+					if (op == 0x83 || op == 0x81) && (mode != 3 && selector != 7 || selector != 0 && selector != 4 && selector != 5 && selector != 7 || selector != 7 && rex&8 == 0) {
 						valid = false
 					}
-					if (op == 0x39 || op == 0x3b || op == 0x85 || op == 0xf7) && mode != 3 {
+					if (op == 0x85 || op == 0xf7 || op == 0x84 || op == 0xf6) && mode != 3 {
 						valid = false
 					}
 					b := []byte{}
@@ -305,7 +306,7 @@ func TestRawModRMPopulation(t *testing.T) {
 					if mode == 2 || mode == 0 && rm == 5 {
 						length += 4
 					}
-					if op == 0x83 || op == 0xc6 {
+					if op == 0x83 || op == 0xc6 || op == 0xf6 {
 						length++
 					}
 					if op == 0xc7 || op == 0x81 || op == 0xf7 {
@@ -323,7 +324,7 @@ func TestRawModRMPopulation(t *testing.T) {
 			}
 		}
 	}
-	if trials != 1409096 || len(accepted) != 53258 {
+	if trials != 1625880 || len(accepted) != 75812 {
 		t.Fatalf("raw trials %d positives %d", trials, len(accepted))
 	}
 	for d := range Descriptors {
@@ -331,7 +332,7 @@ func TestRawModRMPopulation(t *testing.T) {
 			continue
 		} // The independent FS-prefix population is below.
 		switch d.Encoding.Form {
-		case MOV89, MOV8B, MOVC7, LEA8D, SUB83, SUB81, ADD83, ADD81, AND83, AND81, MOV88, MOV8A, MOVC6, CMP39, CMP3B, TEST85, CMP83, CMP81, TESTF7:
+		case MOV89, MOV8B, MOVC7, LEA8D, SUB83, SUB81, ADD83, ADD81, AND83, AND81, MOV88, MOV8A, MOVC6, CMP39, CMP3B, TEST85, CMP83, CMP81, TESTF7, TEST84, TESTF6:
 			b, err := Encode(d.Intent, d.Encoding)
 			if err != nil || !accepted[string(b)] {
 				t.Fatalf("descriptor not in independent raw population: %+v, %x, %v", d, b, err)
@@ -342,7 +343,7 @@ func TestRawModRMPopulation(t *testing.T) {
 	if len(accepted) != 0 {
 		t.Fatalf("%d raw admitted encodings missing from descriptors", len(accepted))
 	}
-	t.Logf("%d raw ModRM/SIB trials; 53,258 accepted structural spellings", trials)
+	t.Logf("%d raw ModRM/SIB trials; 75,812 accepted structural spellings", trials)
 }
 
 func TestRawFSPopulation(t *testing.T) {

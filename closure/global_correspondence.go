@@ -12,7 +12,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalOperandRules = "gofresh/global-operand-correspondence@1;" + regionRules + ";" + nativeproof.TransitionRules
+const globalOperandRules = "gofresh/global-operand-correspondence@2;" + regionRules + ";" + nativeproof.TransitionRules
 
 // globalRepresentation is an untrusted, scope-local witness, not compiler object
 // placement or an authoritative types.Var-to-address map. Its source/image owners
@@ -36,8 +36,8 @@ type globalImageBinding struct {
 // eight native bytes as that global's uint64 value. Proving each endpoint over
 // independently arbitrary prior states is stronger than this paired antecedent.
 //
-// The representation remains fixed within this certificate. A future consumer
-// must check it at its actual uses or establish a transporting interface. It is
+// The representation remains fixed within this certificate. Consumers must
+// check it at their actual uses or establish a transporting interface. It is
 // not startup state, an ELF-root path, or a whole-source implementation grant.
 type globalOperandCorrespondence struct {
 	rules          string
@@ -47,21 +47,54 @@ type globalOperandCorrespondence struct {
 	initial        [2]br.Term
 	equalities     []br.Witness
 	open           computationCorrespondenceObligations
+	work, limit    int
+}
+
+type globalCorrespondenceLimits struct{ work int }
+
+// This account spans equality construction and all later source/native
+// continuations. Subordinate engines retain their own structural limits too.
+type correspondenceContext struct {
+	context.Context
+	work, limit int
+}
+
+func (c *correspondenceContext) Err() error {
+	if err := c.Context.Err(); err != nil {
+		return err
+	}
+	if c.work >= c.limit {
+		return fmt.Errorf("global correspondence: cumulative proof work exhausted")
+	}
+	c.work++
+	return nil
 }
 
 // checkGlobalOperandCorrespondence consumes opaque independently derived endpoints
 // and checks their effect/frame and actual operand relation. There is deliberately
 // no expected-value input. Source objects remain under their immutable owner.
-func checkGlobalOperandCorrespondence(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, image *nativeproof.Image, entry, cut uint64, prefix *sourceOperandPrefix, native nativeproof.TransitionCertificate, rho globalRepresentation) (*globalOperandCorrespondence, error) {
+func checkGlobalOperandCorrespondence(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, image *nativeproof.Image, entry, cut uint64, prefix *sourceOperandPrefix, native nativeproof.TransitionCertificate, rho globalRepresentation, options ...globalCorrespondenceLimits) (*globalOperandCorrespondence, error) {
 	fail := func(s string) (*globalOperandCorrespondence, error) {
 		return nil, fmt.Errorf("global operand correspondence: %s", s)
 	}
 	if ctx == nil || image == nil || rho.image == nil || source.prog == nil || rho.source != source.prog || root == nil || prefix == nil || prefix.region == nil || prefix.region.packet == nil {
 		return fail("missing or foreign source/image owner")
 	}
+	limit := 2_000_000
+	if len(options) > 1 {
+		return fail("more than one proof budget")
+	}
+	if len(options) == 1 {
+		limit = options[0].work
+	}
+	if limit < 1 || limit > 20_000_000 {
+		return fail("invalid proof work budget")
+	}
 	// Freeze containers before context callbacks can replace a caller's image.
 	ownedImage, representationImage := *image, *rho.image
 	rho.image = &representationImage
+	meter := &correspondenceContext{Context: ctx, limit: limit}
+	ctx = meter
 	packet := prefix.region.packet
 	if packet.rules != regionRules || packet.input.owner != source.prog.Prog || packet.input.root != root || prefix.region.root.function != root || prefix.call != call || packet.prefix == nil || len(packet.observations) != 1 || len(prefix.operands) != 3 {
 		return fail("source prefix scope/owner differs")
@@ -243,6 +276,7 @@ func checkGlobalOperandCorrespondence(ctx context.Context, source computationSou
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	proof.work, proof.limit = meter.work, meter.limit
 	return proof, nil
 }
 

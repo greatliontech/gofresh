@@ -13,8 +13,10 @@ type sourceRegion struct {
 }
 
 type sourceRegionCall struct {
-	call  *regionCallProof
-	bound selectedSourceCallable
+	call        *regionCallProof
+	bound       selectedSourceCallable
+	declaration selectedSourceDeclaration
+	reference   *assemblyReference
 }
 
 func checkSourceRegion(ctx context.Context, source computationSource, input regionInput, proposal *regionProposal, sourceLimits selectedSourceLimits, limits regionLimits) (*sourceRegion, error) {
@@ -61,6 +63,17 @@ func (b *selectedSourceBinder) bindRegionCalls(packet *checkedRegion) ([]sourceR
 		}
 		if call == nil {
 			return nil, regionError("checked region has an absent call dependency")
+		}
+		if call.reference != nil {
+			decl, err := b.bindDeclaration(call.target)
+			if err != nil {
+				return nil, err
+			}
+			if err := call.reference.boundTo(b.source, call.target); err != nil {
+				return nil, err
+			}
+			calls = append(calls, sourceRegionCall{call: call, declaration: decl, reference: call.reference})
+			continue
 		}
 		bound, err := b.bindCallable(call.target)
 		if err != nil {

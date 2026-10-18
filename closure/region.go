@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@6"
+const regionRules = "gofresh/source-region-transport@7"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -156,6 +156,11 @@ type checkedRegion struct {
 	// Present only for the opt-in straight-line operand-prefix judgment. These
 	// are checked transfer events, never inferred from equal endpoint heaps.
 	prefix *regionPrefixEffects
+	// Optional complete finite scalar-effect coverage. Its events are produced
+	// only by checked transfers, not by the proposing worklist.
+	trace    *regionEffectTrace
+	usage    regionMeter
+	contexts map[regionInvocation]regionContextFacts
 }
 
 // openObligations is deliberately not a single "closed" bit. The assembly must
@@ -256,12 +261,19 @@ func regionCaptureMeter(input regionInput, proposal *regionProposal, m *regionMe
 			return regionInput{}, nil, regionError("nil call proof")
 		}
 		copy := *call
-		if len(copy.invocation.path) > limits.depth*96 {
+		if len(copy.invocation.path) > limits.depth*96 || len(call.arguments) > limits.nodes {
 			return regionInput{}, nil, regionError("call context budget exhausted")
 		}
 		copy.initial, err = m.copyState(call.initial)
 		if err != nil {
 			return regionInput{}, nil, err
+		}
+		copy.arguments = slices.Clone(call.arguments)
+		for i, argument := range call.arguments {
+			copy.arguments[i], err = m.copyValue(argument, 0)
+			if err != nil {
+				return regionInput{}, nil, err
+			}
 		}
 		if len(call.entries) > limits.nodes-m.nodes {
 			return regionInput{}, nil, regionError("callee node budget exhausted")

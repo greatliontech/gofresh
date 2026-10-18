@@ -45,7 +45,7 @@ func (r *stateReference) referenceStack(t testing.TB, i to.Intent, index int, ne
 			r.memory[k] = b
 			r.frame[k] = true
 		}
-		r.accesses = append(r.accesses, stateAccess{instruction: index, write: true, off: off, width: 8, context: r.context})
+		r.accesses = append(r.accesses, stateAccess{instruction: index, write: true, off: off, width: 8, context: r.context, value: value})
 		r.regs[4] = sp
 		r.ptrs[4].off -= 8
 		r.written[4] = true
@@ -64,7 +64,7 @@ func (r *stateReference) referenceStack(t testing.TB, i to.Intent, index int, ne
 			p = statePointer{}
 		}
 	}
-	r.accesses = append(r.accesses, stateAccess{instruction: index, off: off, width: 8, context: r.context, returnRead: i.Operation == to.Return})
+	r.accesses = append(r.accesses, stateAccess{instruction: index, off: off, width: 8, context: r.context, returnRead: i.Operation == to.Return, value: value})
 	r.regs[4] += 8
 	r.ptrs[4].off += 8
 	r.written[4] = true
@@ -134,7 +134,7 @@ func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 				for _, k := range x.edges[j] {
 					next = append(next, referenceOccurrence{o.context, k})
 				}
-				if i.Operation == to.Syscall || i.Operation == to.Clear32 {
+				if to.RequiresExpansion(i) {
 					p.Expansions = append(p.Expansions, TransitionExpansion{Context: o.context, PC: x.pcs[j]})
 				}
 			}
@@ -172,7 +172,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 		}
 		r.context = context
 		want = append(want, callEvent{pc: x.pcs[j], context: context, kind: "fetch", width: len(x.encoded[j])})
-		a, q, s := len(r.accesses), len(r.queries), len(r.syscalls)
+		a, firstPrimitive := len(r.accesses), len(r.primitives)
 		r.referenceExec(t, i, j, x.pcs[j]+uint64(len(x.encoded[j])))
 		for _, v := range r.accesses[a:] {
 			kind := "read"
@@ -184,11 +184,15 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 			}
 			want = append(want, callEvent{x.pcs[j], context, kind, v.off, v.width})
 		}
-		if len(r.queries) > q {
-			want = append(want, callEvent{pc: x.pcs[j], context: context, kind: "query"})
-		}
-		if len(r.syscalls) > s {
-			want = append(want, callEvent{pc: x.pcs[j], context: context, kind: "syscall"}, callEvent{pc: x.pcs[j], context: context, kind: "abstraction"})
+		for _, event := range r.primitives[firstPrimitive:] {
+			switch event.(type) {
+			case stateQuery:
+				want = append(want, callEvent{pc: x.pcs[j], context: context, kind: "query"})
+			case stateSyscall:
+				want = append(want, callEvent{pc: x.pcs[j], context: context, kind: "syscall"}, callEvent{pc: x.pcs[j], context: context, kind: "abstraction"})
+			default:
+				t.Fatal("unsupported call/TLS reference primitive")
+			}
 		}
 		switch i.Operation {
 		case to.Call:
@@ -242,11 +246,11 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 		guards[k] = i.Guard
 	}
 	queries := map[key]stateQuery{}
-	for _, q := range r.queries {
+	for q := range statePrimitivesOf[stateQuery](r) {
 		queries[key{x.pcs[q.instruction], q.context}] = q
 	}
 	syscalls := map[key]stateSyscall{}
-	for _, q := range r.syscalls {
+	for q := range statePrimitivesOf[stateSyscall](r) {
 		syscalls[key{x.pcs[q.instruction], q.context}] = q
 	}
 	abstractions := map[key]TransitionAbstraction{}
@@ -480,10 +484,10 @@ func assertCallTLSState(t testing.TB, c TransitionCertificate, r, initial stateR
 			t.Fatal("FS state differs")
 		}
 		pointer(b.Thread.FS.Pointer, r.fsp)
-		if len(r.syscalls) > 0 && !b.Thread.ContextChanged {
-			t.Fatal("syscall context falsely preserved")
-		}
-		for _, q := range r.syscalls {
+		for q := range statePrimitivesOf[stateSyscall](r) {
+			if !b.Thread.ContextChanged {
+				t.Fatal("syscall context falsely preserved")
+			}
 			if q.valid && b.Thread.SelectorPreserved {
 				t.Fatal("FS selector falsely preserved")
 			}

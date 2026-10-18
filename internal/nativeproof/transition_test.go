@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
-	"reflect"
 	"testing"
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
@@ -187,7 +186,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 					for j := range bytes {
 						bytes[j] = memory[p+uint64(j)]
 					}
-					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameRead, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}})
+					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameRead, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(binary.LittleEndian.Uint64(bytes[:]), 64)})
 					return binary.LittleEndian.Uint64(bytes[:])
 				default:
 					t.Fatalf("oracle operand %v", arg)
@@ -206,7 +205,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 					for j, x := range bytes {
 						memory[p+uint64(j)] = x
 					}
-					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameWrite, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}})
+					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameWrite, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(v, 64)})
 				} else {
 					r := i.Args[0].(x86asm.Reg)
 					if r >= x86asm.EAX && r <= x86asm.R15L {
@@ -230,9 +229,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 			}
 			pc = next
 		}
-		if !reflect.DeepEqual(accesses, b.Accesses) {
-			t.Fatalf("access sequence differs: %v != %v", accesses, b.Accesses)
-		}
+		assertConcreteAccesses(t, b.Accesses, accesses, values)
 		for r, v := range b.Registers {
 			if got := evalRelationTerm(t, v.Value, values, rng.Uint64()); got != regs[r] {
 				t.Fatalf("register %d S=%#x: got %#x want %#x", r, s, got, regs[r])

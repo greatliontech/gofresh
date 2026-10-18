@@ -8,7 +8,7 @@ import (
 
 func TestExecutedOnlyRefusals(t *testing.T) {
 	for _, text := range []string{
-		"90", "4890", "66e800000000", "66c3", "c20000", "eb", "e9000000",
+		"4890", "66e800000000", "66c3", "c20000", "eb", "e9000000",
 		"7800", "0f8800000000", "ffe0", "48ffe0", "488dca",
 		"488b042500000000", "498b042500000000", // absent SIB base, even with B.
 		"4b8b0424", "488b0400", "4b8bb401000080", // X selects R12 / explicit index.
@@ -52,6 +52,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 		b := append([]byte{byte(first)}, make([]byte, 14)...)
 		valid := first >= 0xb0 && first <= 0xbf || first == 0xeb || first == 0xe9 || first >= 0x72 && first <= 0x77 || first >= 0x7c && first <= 0x7f || first == 0x3d || first == 0xa9 || first == 0x88 || first == 0x89 || first == 0x8a || first == 0x8b || first == 0xc6 || first == 0xc7
 		valid = valid || first == 0xe8 || first == 0xc3 || first >= 0x50 && first <= 0x5f
+		valid = valid || first == 0x39 || first == 0x3b || first == 0xa8 || first == 0x90
 		_, err := Parse(b, 1<<32)
 		if (err == nil) != valid {
 			t.Fatalf("first byte %x accepted=%v want %v", first, err == nil, valid)
@@ -64,6 +65,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 			// claim that every mnemonic's ModRM c0 must be accepted.
 			b := append([]byte{byte(rex), byte(op), 0xc0}, make([]byte, 12)...)
 			valid := op == 0x89 || op == 0x8b || op == 0xc7 || op == 0x39 || op == 0x3b || op == 0x85 || op == 0xf7 || op == 0x3d || op == 0xa9 || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
+			valid = valid || op == 0x84 || op == 0xf6 || op == 0xa8
 			if rex == 0x41 {
 				valid = valid || op >= 0xb8 && op <= 0xbf || op >= 0x50 && op <= 0x5f
 			}

@@ -168,6 +168,11 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			return err
 		}
 	}
+	for _, a := range b.Accesses {
+		if err := importRoot(a.Value); err != nil {
+			return err
+		}
+	}
 	for _, effect := range b.PrimitiveEffects {
 		// The opaque predecessor was constructed under this complete rule identity.
 		// Import every dependency, including results absent from current state.
@@ -177,6 +182,8 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			roots = []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX}
 		case ArchSetFSEffect:
 			roots = []br.Term{e.Number, e.Operation, e.Base, e.Valid, e.Result, e.BeforeFS, e.AfterFS}
+		case LockedCompareExchange64Effect:
+			roots = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}
 		default:
 			return refuse(m.pc, "transition-predecessor", "unknown retained primitive")
 		}

@@ -1,0 +1,114 @@
+package transitionoracle
+
+import "fmt"
+
+// New forms reuse only the encoder's addressing spelling, not the independent
+// parser or any native decoder. The original intent is checked before conversion.
+func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
+	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid atomic/predicate intent: %+v / %+v", i, e) }
+	if i.Operation == NoOp {
+		if i != (Intent{Operation: NoOp}) || e != (Encoding{Form: e.Form}) {
+			return bad()
+		}
+		if e.Form == NOP90 {
+			return []byte{0x90}, nil
+		}
+		if e.Form == NOP6690 {
+			return []byte{0x66, 0x90}, nil
+		}
+		return bad()
+	}
+	if i.FS {
+		return bad()
+	}
+	original := i
+	form := e.Form
+	opcode, group, twoByte, locked, dropImmediate := byte(0), byte(0), false, false, false
+	switch i.Operation {
+	case LockedCompareExchange:
+		if i.Width != 0 || i.Dst != 0 || i.HighDst || i.HighSrc || i.Condition != 0 || i.Immediate != 0 || form != LOCKCMPXCHG0FB1 {
+			return bad()
+		}
+		i.Operation, e.Form, opcode, twoByte, locked = Store, MOV89, 0xb1, true, true
+	case SetRegister, SetMemory:
+		if i.Width != 8 || i.Src != 0 || i.HighSrc || i.Immediate != 0 || form != SETcc0F90 || !(i.Condition >= 2 && i.Condition <= 7 || i.Condition >= 12 && i.Condition <= 15) {
+			return bad()
+		}
+		i.Operation = MoveImmediate
+		if original.Operation == SetMemory {
+			i.Operation = StoreImmediate
+		}
+		i.Condition, e.Form, opcode, twoByte, dropImmediate = 0, MOVC6, 0x90+i.Condition, true, true
+	case CompareMemory, CompareFromMemory:
+		if i.Width != 0 && i.Width != 32 || i.Condition != 0 {
+			return bad()
+		}
+		if i.Operation == CompareMemory && form == CMP39 {
+			i.Operation, e.Form, opcode = Store, MOV89, 0x39
+		} else if i.Operation == CompareFromMemory && form == CMP3B {
+			i.Operation, e.Form, opcode = Load, MOV8B, 0x3b
+		} else {
+			return bad()
+		}
+	case CompareMemoryImmediate:
+		if i.Width != 0 && i.Width != 32 || i.Condition != 0 || form != CMP81 && form != CMP83 {
+			return bad()
+		}
+		if form == CMP83 {
+			v := uint64(int64(int8(i.Immediate)))
+			if i.Width == 32 {
+				v &= 0xffffffff
+			}
+			if v != i.Immediate {
+				return bad()
+			}
+		}
+		i.Operation, e.Form, opcode, group = StoreImmediate, MOVC7, 0x81, 7
+	case Test, TestImmediate:
+		if i.Width != 8 || i.Condition != 0 {
+			return bad()
+		}
+		if i.Operation == Test && form == TEST84 {
+			i.Operation, e.Form, opcode = MoveRegister, MOV88, 0x84
+		} else if i.Operation == TestImmediate && form == TESTF6 {
+			i.Operation, e.Form, opcode = MoveImmediate, MOVC6, 0xf6
+		} else if i.Operation == TestImmediate && form == TESTA8 {
+			if i.Dst != 0 || i.Src != 0 || i.Base != 0 || i.HighDst || i.HighSrc || i.RIP || i.SignedDisp != 0 || i.Immediate > 255 || e.DispBytes != 0 || e.SIB || e.Scale != 0 || e.REX != 0 && (e.REX < 0x40 || e.REX > 0x4f) {
+				return bad()
+			}
+			b := []byte{}
+			if e.REX != 0 {
+				b = append(b, e.REX)
+			}
+			return append(b, 0xa8, byte(i.Immediate)), nil
+		} else {
+			return bad()
+		}
+	default:
+		return bad()
+	}
+	b, err := encodeExtended(i, e)
+	if err != nil {
+		return nil, err
+	}
+	at := 0
+	if e.REX != 0 {
+		at = 1
+	}
+	b[at] = opcode
+	b[at+1] |= group << 3
+	if original.Operation == CompareMemoryImmediate && form == CMP83 {
+		b[at] = 0x83
+		b = append(b[:len(b)-4], byte(original.Immediate))
+	}
+	if dropImmediate {
+		b = b[:len(b)-1]
+	}
+	if twoByte {
+		b = append(b[:at], append([]byte{0x0f}, b[at:]...)...)
+	}
+	if locked {
+		b = append([]byte{0xf0}, b...)
+	}
+	return b, nil
+}

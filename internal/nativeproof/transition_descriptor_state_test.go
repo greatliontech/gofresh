@@ -13,6 +13,10 @@ import (
 func descriptorState(t testing.TB, d to.Descriptor, immediate uint64, disp int32, raw []byte) {
 	t.Helper()
 	i := descriptorPayload(d, immediate, disp)
+	if i.Operation >= to.LockedCompareExchange || i.Width == 8 && (i.Operation == to.Test || i.Operation == to.TestImmediate) {
+		atomicDescriptorState(t, d, i, raw)
+		return
+	}
 	if i.FS || i.Operation == to.Call || i.Operation == to.Return || i.Operation == to.Push || i.Operation == to.Pop || i.Operation == to.Syscall {
 		callTLSDescriptorState(t, d, i, raw)
 		return
@@ -86,7 +90,7 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 		descriptorState(t, d, 0xfedcba9876543280, -0x12345, raw)
 		count++
 	}
-	if count != 54894 {
+	if count != 94965 {
 		t.Fatal("incomplete semantic descriptor population", count)
 	}
 	for value := uint64(0); value < 256; value++ {
@@ -100,9 +104,14 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 
 func FuzzTransitionDescriptorState(f *testing.F) {
 	descriptors := slices.Collect(to.Descriptors)
+	newForms := map[to.Form]bool{}
 	for index, d := range descriptors {
 		if d.Intent.Operation == to.Clear32 {
 			f.Add(uint32(index), ^uint64(0), int32(0), []byte{255, 128, 1, 0})
+		}
+		if (d.Intent.Operation >= to.LockedCompareExchange || d.Intent.Width == 8 && (d.Intent.Operation == to.Test || d.Intent.Operation == to.TestImmediate)) && !newForms[d.Encoding.Form] {
+			newForms[d.Encoding.Form] = true
+			f.Add(uint32(index), uint64(0x80000000ffffffff), int32(-16), []byte{255, 128, 1, 0})
 		}
 	}
 	for _, index := range []uint32{0, 17, 31, 255, 8192, 32768, 53418} {

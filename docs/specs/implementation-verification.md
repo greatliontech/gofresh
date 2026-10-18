@@ -318,6 +318,38 @@ their names or versions confer no authority. A layer-visible exception handler o
 additional ordinary-memory effect needs its own checked composition. The model does
 not establish actual process applicability or observe any CPU response.
 
+An ordinary x86-64 locked 64-bit memory compare/exchange is an architectural
+read/modify/write occurrence. It reads the current eight destination bytes and
+compares their unsigned bit pattern with incoming RAX. Equality writes the
+incoming 64-bit source-register value to the destination and leaves RAX unchanged;
+inequality writes the read value back to the destination and replaces RAX with
+that value. The 64-bit subtraction of the original destination from incoming RAX
+defines CF, PF, AF, ZF, SF and OF in both arms; other flags remain unchanged. The
+failure arm retains its write cycle and write-permission obligation even though
+the destination bytes are unchanged.
+The lock prefix belongs to that instruction, not a separate executed operation.
+The occurrence retains its indivisible memory operation and architectural locked
+ordering with respect to memory operations; it is not reduced to an ordinary
+conditional store. An isolated-prefix theorem records this ordering without
+establishing a concurrent library's history, language-level synchronization,
+global execution schedule or timing property.
+
+Applicability requires the exact supported memory form, full-width canonical
+nonwrapping extent, read and write permissions, and ordinary coherent RAM under
+the retained mapping, alias and interference conditions. Alignment and applicable
+lock-fault controls must establish the ordinary successor, including split/bus-lock
+and transactional restrictions where relevant; assuming that the operation
+completed normally is insufficient. A register destination, unsupported prefix,
+width or address form gains no locked-memory semantics. Missing applicability
+refuses an executed occurrence. Every read/write and ordering occurrence survives
+later result overwrites and composition. Byte condition-code stores write exactly
+zero or one according to their actual defined flag predicate, change no flags,
+and write only their selected byte; other register bits or memory bytes remain
+as derived, not implicitly zeroed. A byte TEST reads precisely its operand bytes:
+their bitwise conjunction sets SF, ZF and PF, clears CF and OF, leaves AF undefined
+and preserves other flags without writing its operands. Wider tests require
+their wider incoming-bit facts independently.
+
 The ordinary Linux x86-64 `ARCH_SET_FS` primitive relates a decoded native
 `SYSCALL` occurrence to the executing thread's effective FS base. Its scope
 identifies native 64-bit syscall dispatch: the low 32 bits of RAX select syscall
@@ -461,11 +493,15 @@ entry-to-cut transition MUST satisfy these obligations:
   interpreting the target, pushing a return word or inventing an after-call
   state. Expansion choices are untrusted search choices, not premises; an
   expanded callee may itself contain independently excluded boundaries.
-  The same choice may leave register self-XOR as a structural boundary rather
-  than expand its admitted transfer. Its complete incoming guard must then be
-  proved false; admitting an instruction's semantics does not force discovery
-  into an independently excluded arm's successors. Selecting expansion still
-  requires the actual supported operand form and complete successor coverage.
+  The same choice may leave register self-XOR, a locked read/modify/write, a
+  condition-code byte store, a byte TEST, a memory CMP or a NOP as a structural
+  boundary rather than expand its admitted transfer. Operand-form selection
+  preserves automatic transfer of the previously admitted register CMP and
+  register/immediate TEST at 32 or 64 bits. A structural boundary's complete
+  incoming guard must be proved false; admitting an instruction's semantics does
+  not force discovery into an independently excluded arm's successors. Selecting
+  expansion still requires the actual supported operand form and complete successor
+  coverage.
   Invalid bytes at the selected boundary remain a refusal, and cancellation
   or budget exhaustion cannot select a successful fallback boundary.
   Truncation, unavailable bytes,
@@ -698,6 +734,169 @@ source/native relation MUST satisfy these obligations:
   satisfies the relation; uniqueness is not a premise. Whole-source actual-use
   coverage and reachability of a conditional native region remain separate proofs.
 
+## Selected assembly call references
+
+A selected assembly reference supplies the source-side meaning of a bodyless
+typed call through its selected package's assembly interface. It is not evidence
+that an out-of-line copy was emitted, linked, reached or used instead of an
+intrinsic. Actual native instances retain their separate correspondence proof.
+
+**REQ-impl-assembly-reference** (invariant): Substitution of a selected assembly
+reference at a source call MUST satisfy these obligations:
+
+- **owned-selection** — The exact typed declaration, signature, package identity
+  and directives, selected assembly membership and bytes, transitive include
+  bytes and resolution, preprocessor state, assembler options and relevant build
+  configuration belong to one immutable source/build owner. A filename inventory
+  is insufficient. Resolution includes search precedence and evidence excluding
+  earlier shadowing inputs, including generated include namespaces; an unavailable
+  earlier search entry cannot be assumed empty. Generated content requires its
+  own derivation or owned selected bytes. Complete preprocessing and definition
+  boundaries must be checked even when only one body's instruction semantics
+  are needed. Unsupported syntax capable of changing selection, definitions or
+  the claimed body, and competing opaque providers, prevent the binding.
+- **current-action-acquisition** — A current assembly reference may acquire its
+  inputs from a fresh compilation action bound to the same immutable typed-source
+  selection. That selection retains the requested roots and package instances,
+  including test and profile variants, directory, complete effective environment,
+  toolchain, build options and additional inputs. Actual compiler source membership,
+  package/import bindings and effective options must agree with that owner;
+  matching a package name alone is insufficient. The acquisition observes the
+  actual final assembler invocation at its process boundary: tool, working
+  directory, source operands, qualified package, ordered options, include paths,
+  macro definitions and response-file inputs. All selected assembly providers
+  must be covered. Diagnostic command listings and preliminary symbol/ABI scans
+  can locate actions but cannot establish their execution or final inputs. In
+  particular, a preliminary scan's empty generated header cannot stand for the
+  final assembler's header.
+
+  Capture occurs while the action's real namespace exists. Independently checked
+  preprocessing of every selected provider determines the complete include read
+  set, selected bytes and preceding failed lookups. Under the ordinary Go
+  assembler interface, relative includes first try the assembler's working
+  directory, then its top-level source directory, then the ordered include
+  directories; nesting does not implicitly add the containing header's directory.
+  The action directory's precedence over toolchain includes is retained. No
+  generated directory is presumed empty or limited to familiar filenames.
+  Capture establishes agreeing path/content and lookup observations and protects
+  them through that action's input-use interval. Relevant namespace and content
+  mutations, including creation of an earlier candidate, invalidate acquisition;
+  incomplete mutation observation supplies no protection. Source/build exclusion
+  and mutation-and-restore residuals remain explicit under
+  REQ-fresh-coherent-view and REQ-fresh-producer-view. Transient inputs are copied
+  and validated before their namespace is released; subsequent cleanup supplies
+  neither a missing observation nor evidence of an earlier absence.
+
+  An execution-forcing acquisition may change cache-execution policy and its own
+  output destination, while preserving source selection and all ordinary
+  compilation options, including optimization, instrumentation, profile selection
+  and per-package assembler/compiler flags. An interposed capture boundary must
+  transparently forward the real tool's arguments, environment, working directory,
+  streams, version queries and exit disposition. Unsupported preexisting
+  interposition is refused rather than silently replaced. A cache hit without
+  the required final actions establishes no action evidence. Missing provider
+  actions, disagreement with the typed owner, drift, incomplete input capture,
+  cancellation or exhausted bounds publishes no packet. This is acquisition of
+  current reference inputs, not observation of a historical compilation. Its
+  newly built output cannot replace the independently owned native image or
+  establish correspondence by output equality. No public build/tracing protocol
+  or helper execution on ordinary result-cache hits follows from this facility.
+- **operational-binding** — The checker applies an identified Go assembly/source
+  interface under REQ-impl-premise-boundary to the actual declaration and complete
+  provider scope. Package qualification, symbol escaping, visibility, declaration
+  directives, definition ABI and provider uniqueness determine the reference;
+  matching a proposed symbol string is insufficient. For the ordinary package
+  interface, a leading middle-dot assembly name denotes the current package's
+  qualified symbol, an unannotated external `TEXT` definition uses ABI0, and its
+  definition supplies that bodyless declaration's reference only when the resolved
+  identity and typed interface agree. File-local definitions do not silently
+  provide external declarations. Explicit redirects, aliases, duplicate/weak
+  definitions and foreign or opaque inputs that could compete must be resolved
+  under the same interface or refused. This reference's provider scope is the
+  selected package's complete compilation unit: its typed definitions and linkage
+  directives, all preprocessed assembly definitions and other contributing inputs
+  are checked at the resolved symbol/ABI key. An assembler-generated definition
+  inventory may propose that key, but the checker reconstructs it from owned
+  inputs. External link candidates are not assumed absent; a local reference
+  binding makes no claim about the final linker's inclusion or choice of an
+  out-of-line implementation.
+  A replacement or redirection affecting the actual native instance must still
+  satisfy its complete extensional correspondence.
+
+  The supported one-argument `//go:linkname local` keeps the default qualified
+  object-symbol identity and permits linkname access; `//go:linknamestd local`
+  keeps that same identity while restricting such access to standard-library
+  references. These are binding/access directives, not behavioral summaries.
+  Their actual local declaration and directive-file `unsafe` import must be
+  checked, with duplicate, malformed or unsupported forms refused. A two-argument
+  form redirects identity and cannot be ignored as if it were the one-argument
+  form. A `//go:noescape` directive records a compiler-facing obligation; the
+  reference's escape/frame claim must be proved from its body. The interface
+  defines these naming and ABI operations, not arbitrary metadata truth or
+  correctness of selected library code. Compiler/assembler implementation source
+  can locate the interface's definitions; reading it supplies no implementation
+  theorem or approval exemption.
+- **body-and-interface** — Independently checked interpretation of the owned
+  preprocessed body derives its complete argument/result, control, memory,
+  ordering, escape and exceptional-outcome relation under an identified assembly
+  language and ISA. Actual signature widths, alignment and ABI layout determine
+  stack and result locations; operand names or comments do not. Flags, local-frame
+  size, implicit prologue/epilogue, pseudo-operations and complete return behavior
+  are accounted for. In the ordinary amd64 ABI0 interface, a zero-local-frame
+  leaf with the checked `NOSPLIT` flag has no stack-check or frame-allocation
+  prologue; its argument base is eight bytes above entry RSP. This conclusion
+  requires the complete body and effective flags, not the token `NOSPLIT` alone.
+  Unsupported instrumentation, frame transformations or pseudo-operations refuse.
+  Assembly-source instructions may share an instruction-transfer kernel with
+  decoded native instructions through checked normalization, retaining their
+  different input authority. Manufactured instruction bytes cannot become
+  observed executable bytes or an image-owned certificate by relabeling.
+- **reference-frame** — Typed arguments are marshalled by the checked ABI
+  relation into reference-private storage, and results are decoded from their
+  complete declared representation. Unspecified bytes and scratch state remain
+  arbitrary. Private storage has established extent, permissions, lifetime,
+  disjointness from represented source storage and protected continuation, and
+  nonescaping ownership; a return must read the preserved return word and satisfy
+  the reference continuation. Its complete accesses and effects remain in the
+  reference derivation. Hiding administrative reference accesses in the source
+  projection requires the checked disjointness, nonescape and preservation
+  relation. The private frame is a specification device, not an assertion that
+  the actual inline implementation allocated that frame, nor permission to add
+  storage to an existing native transition. Reads/writes of represented storage,
+  including failed compare/exchange writeback, and ordering effects cannot be
+  hidden with the private frame.
+- **checked-substitution** — The source-region checker applies the derived
+  relation at the exact retained call occurrence, selected callee, evaluated
+  arguments, pointer provenance, incoming heap and call context. It independently
+  establishes every precondition and transfers the complete relevant successor
+  state, return value, frame and effect relation. Callee names and preapproved
+  assembly bodies select no transfer rule. The reference theorem covers all
+  admissible arguments and referenced-memory values; a compare/exchange reference
+  includes independent current, comparison and replacement values and both
+  outcomes. Constant specialization at a particular call requires checked
+  inference. Using this reference in source/native correspondence additionally
+  requires independently checking the actual optimized native region against
+  this source computation with the fixed representation, every feasible
+  path and exceptional arm accounted for, and each claimed memory/operand use
+  justified. A changed source assembly body requires re-derivation; semantic
+  disagreement within the admitted source/native scope defeats correspondence
+  even if compiler substitution leaves native bytes unchanged. Intrinsic tables
+  or compiler reports can suggest candidates, not establish equality. Reference,
+  source-region and native-continuation evidence retain their original owners,
+  entry authority, current states, complete dependencies and cumulative resource
+  accounts. Cancellation or exhausted bounds publishes no partial proof. This
+  reference supplies no ordinary runtime discharge, whole-function coverage,
+  executable-root reachability or historical execution authority.
+
+The ordinary interface is described by the Go assembly guide (`doc/asm.html`)
+and compiler directive documentation (`src/cmd/compile/doc.go`). Interface
+definition locators include `cmd/asm/internal/asm/parse.go` (qualification and
+definition ABI), `cmd/asm/internal/lex/input.go` and `cmd/go/internal/work/gc.go`
+(preprocessing and include selection), `cmd/compile/internal/noder/noder.go` and
+`writer.go` (linkname directives), `cmd/compile/internal/ssagen/abi.go` (definition
+ABI association), and `cmd/link/internal/loader/loader.go` (linkname access).
+These are locators within the selected toolchain, not approved paths or versions.
+
 ## Conditional descriptor and callback transfer
 
 **REQ-impl-callback-transfer** (invariant): A conditional readonly-descriptor or
@@ -806,6 +1005,14 @@ contracts:
   reachable heap or completion of the invoked work. Goroutine and deferred calls
   retain their own execution, continuation and exceptional effects; concurrency
   or delayed mutation cannot disappear into a value-transport fact.
+  A bodyless call may instead consume the checked selected-assembly relation of
+  REQ-impl-assembly-reference at that exact occurrence and context. The relation
+  supplies its derived result and complete relevant heap/effects, never an
+  expected return or caller-authored preserved-state summary. Continuing a checked
+  region retains its current source state and the original source owner, entry,
+  call contexts and resource account; copying a heap projection cannot establish
+  a successor or restart the proof budget. Independently proved false guards may
+  exclude throwing or other opaque arms without granting them call semantics.
 - **conditional-composition** — A local positive may relate registration
   construction to an actual consuming operand while retaining explicit imported
   initialization, intervening-frame, concurrency, callee, native and harness

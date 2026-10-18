@@ -57,7 +57,7 @@ func (m *transitionChecker) graphPrefix(cut uint64, prefix bool) (*graph, error)
 			return decodedInstruction{boundary: boundaryCut, size: uint8(i.Len)}, nil
 		}
 		_, expand := choices[p]
-		optional := i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL || i.Op == x86asm.XOR
+		optional := TransitionExpansionRequired(i)
 		if expand && !optional {
 			return decodedInstruction{}, refuse(p.pc, "transition-expansion", "expansion is not an optional transfer")
 		}
@@ -201,7 +201,7 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 	if err != nil {
 		return err
 	}
-	v := m.load(off, 8)
+	v := m.load(off, 8, kind)
 	p, err := m.advance(sp, 8)
 	if err != nil {
 		return err

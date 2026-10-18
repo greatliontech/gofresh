@@ -157,6 +157,7 @@ func computationRefusal(fn *ssa.Function, at token.Pos, premise string) error {
 type computationSource struct {
 	prog  *program
 	metas []listPkg
+	owner *selectedSourceOwner
 }
 
 func computationPackageInputs(m listPkg, subjectPackage string) error {

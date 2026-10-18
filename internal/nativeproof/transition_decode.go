@@ -5,6 +5,32 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
+// TransitionExpansionRequired reports whether discovery requires an explicit
+// occurrence-qualified search choice before following this decoded instruction.
+// It grants no execution semantics: the selected encoding and operand form must
+// still pass validation. Without expansion, the complete incoming guard must be
+// independently proved false. Register CMP and nonbyte TEST retain their ordinary
+// discovery behavior; memory CMP and byte TEST are distinct operand families.
+func TransitionExpansionRequired(i x86asm.Inst) bool {
+	if i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL || i.Op == x86asm.XOR || i.Op == x86asm.CMPXCHG || isTransitionSet(i.Op) || i.Op == x86asm.NOP {
+		return true
+	}
+	if i.Op == x86asm.CMP {
+		for _, arg := range i.Args {
+			if _, memory := arg.(x86asm.Mem); memory {
+				return true
+			}
+		}
+	}
+	if i.Op == x86asm.TEST {
+		if reg, ok := i.Args[0].(x86asm.Reg); ok {
+			a, valid := register(reg)
+			return valid && a.width == 8
+		}
+	}
+	return false
+}
+
 func fullRegister(arg x86asm.Arg) (alias, bool) {
 	r, ok := arg.(x86asm.Reg)
 	a, valid := register(r)
@@ -27,7 +53,17 @@ func transitionEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 	if err != nil {
 		return i, nil, err
 	}
-	if len(b) > 0 && b[0] == 0x64 {
+	if len(b) >= 5 && b[0] == 0xf0 {
+		// LOCK belongs to this exact REX.W memory CMPXCHG, not a separate step.
+		if i.Op != x86asm.CMPXCHG || b[1] < 0x48 || b[1] > 0x4f || b[2] != 0x0f || b[3] != 0xb1 {
+			return i, nil, refuse(pc, "transition-form", "unsupported locked instruction")
+		}
+		copy := i
+		copy.Prefix = x86asm.Prefixes{x86asm.Prefix(b[1])}
+		if err := legalScalarPrefixes(pc, b[1:], copy, false); err != nil {
+			return i, nil, err
+		}
+	} else if len(b) > 0 && b[0] == 0x64 {
 		if i.Op != x86asm.MOV || i.Mode != 64 || i.AddrSize != 64 {
 			return i, nil, refuse(pc, "transition-form", "FS prefix requires an admitted long-mode MOV")
 		}
@@ -73,6 +109,38 @@ func transitionEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 // arithmetic; operand widths are the actual register aliases, never a mnemonic.
 func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 	bad := func() error { return refuse(pc, "transition-form", "unsupported transition encoding or operand form") }
+	if i.Op == x86asm.NOP {
+		if len(b) == 1 && b[0] == 0x90 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90 {
+			return nil
+		}
+		return bad()
+	}
+	if i.Op == x86asm.CMPXCHG {
+		mem, ok := i.Args[0].(x86asm.Mem)
+		_, source := fullRegister(i.Args[1])
+		if len(b) < 5 || b[0] != 0xf0 || b[1] < 0x48 || b[1] > 0x4f || b[2] != 0x0f || b[3] != 0xb1 || b[4]&0xc0 == 0xc0 || !ok || !source || mem.Segment != 0 || !transitionMemory(mem) || i.MemBytes != 8 || i.DataSize != 64 {
+			return bad()
+		}
+		return nil
+	}
+	if isTransitionSet(i.Op) {
+		at := 0
+		if len(b) != 0 && b[0] >= 0x40 && b[0] <= 0x4f {
+			at++
+		}
+		if len(b) < at+3 || b[at] != 0x0f || b[at+1]&0xf0 != 0x90 || b[at+2]&0x38 != 0 || i.Args[1] != nil {
+			return bad()
+		}
+		if r, ok := i.Args[0].(x86asm.Reg); ok {
+			a, valid := register(r)
+			if !valid || a.width != 8 {
+				return bad()
+			}
+		} else if mem, ok := i.Args[0].(x86asm.Mem); !ok || mem.Segment != 0 || !transitionMemory(mem) || i.MemBytes != 1 {
+			return bad()
+		}
+		return nil
+	}
 	if i.Op == x86asm.SYSCALL {
 		if len(b) != 2 || b[0] != 0x0f || b[1] != 0x05 || i.Args != (x86asm.Args{}) {
 			return bad()
@@ -149,6 +217,9 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		return ok && valid && a.width == width
 	}
 	w := i.DataSize
+	if i.Op == x86asm.TEST && (op == 0x84 || op == 0xf6 || op == 0xa8) {
+		w = 8
+	}
 	if i.Op == x86asm.MOV {
 		if op == 0x88 || op == 0x8a || op == 0xc6 || op >= 0xb0 && op <= 0xb7 {
 			w = 8
@@ -197,7 +268,11 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		}
 		return nil
 	}
-	if w != 32 && w != 64 || !reg(i.Args[0], w) {
+	memory := func(arg x86asm.Arg) bool {
+		mem, ok := arg.(x86asm.Mem)
+		return ok && mem.Segment == 0 && transitionMemory(mem) && i.MemBytes == w/8
+	}
+	if w != 32 && w != 64 && !(w == 8 && i.Op == x86asm.TEST) || !(reg(i.Args[0], w) || i.Op == x86asm.CMP && memory(i.Args[0])) {
 		return bad()
 	}
 	if i.Op == x86asm.LEA {
@@ -221,8 +296,8 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 	if (i.Op == x86asm.SUB || i.Op == x86asm.ADD || i.Op == x86asm.AND) && w != 64 {
 		return bad()
 	}
-	if reg(i.Args[1], w) {
-		if !(i.Op == x86asm.CMP && (op == 0x39 || op == 0x3b) || i.Op == x86asm.TEST && op == 0x85) {
+	if reg(i.Args[1], w) || i.Op == x86asm.CMP && memory(i.Args[1]) {
+		if !(i.Op == x86asm.CMP && (op == 0x39 || op == 0x3b) || i.Op == x86asm.TEST && (op == 0x85 || op == 0x84)) {
 			return bad()
 		}
 		return nil
@@ -235,6 +310,9 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 	switch i.Op {
 	case x86asm.TEST:
 		group, accumulator = 0, 0xa9
+		if w == 8 {
+			accumulator = 0xa8
+		}
 	case x86asm.SUB:
 		group, accumulator = 5, 0x2d
 	case x86asm.ADD:
@@ -243,12 +321,20 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		group, accumulator = 4, 0x25
 	}
 	switch {
+	case op == 0xf6 && i.Op == x86asm.TEST:
+		if len(b) != at+3 || b[at+1]&0xc0 != 0xc0 || b[at+1]&0x38 != 0 || uint8(imm) != b[at+2] {
+			return bad()
+		}
+	case op == 0xa8 && i.Op == x86asm.TEST:
+		if i.Args[0] != x86asm.AL || len(b) != at+2 || uint8(imm) != b[at+1] {
+			return bad()
+		}
 	case op == 0x83 && i.Op != x86asm.TEST:
-		if len(b) != at+3 || b[at+1]&0xc0 != 0xc0 || (b[at+1]>>3)&7 != group || int64(imm) != int64(int8(b[at+2])) {
+		if len(b) < at+3 || !memory(i.Args[0]) && len(b) != at+3 || (b[at+1]>>3)&7 != group || int64(imm) != int64(int8(b[len(b)-1])) {
 			return bad()
 		}
 	case op == 0x81 && i.Op != x86asm.TEST || op == 0xf7 && i.Op == x86asm.TEST:
-		if len(b) != at+6 || b[at+1]&0xc0 != 0xc0 || (b[at+1]>>3)&7 != group || int64(imm) != int64(int32(binary.LittleEndian.Uint32(b[at+2:]))) {
+		if len(b) < at+6 || !memory(i.Args[0]) && len(b) != at+6 || (b[at+1]>>3)&7 != group || int64(imm) != int64(int32(binary.LittleEndian.Uint32(b[len(b)-4:]))) {
 			return bad()
 		}
 	case op == accumulator:
@@ -277,7 +363,7 @@ func decodeTransition(im *Image, pc, cut uint64) (decodedInstruction, error) {
 	if err := validateTransitionForm(pc, i, b); err != nil {
 		return decodedInstruction{}, err
 	}
-	if i.Op == x86asm.JMP || condition(i.Op) != 0 {
+	if i.Op == x86asm.JMP || condition(i.Op) != 0 && !isTransitionSet(i.Op) {
 		return decodeControl(pc, i, b)
 	}
 	if i.Op == x86asm.RET {

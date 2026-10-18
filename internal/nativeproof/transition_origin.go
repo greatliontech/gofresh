@@ -58,6 +58,9 @@ func (m *transitionChecker) validate() error {
 	if c.CPUID != "" && c.CPUID != CPUIDModel {
 		return refuse(m.pc, "transition-primitive-model", "unsupported CPUID model")
 	}
+	if c.Locked64 != "" && c.Locked64 != Locked64Model {
+		return refuse(m.pc, "transition-primitive-model", "unsupported locked-memory model")
+	}
 	if c.Machine != MachineModel || !c.InstructionMapping || !c.EntryState || !c.IsolatedExecution || !c.MemoryMapping || !c.NoHiddenAliases || !c.UnalignedAccess {
 		return refuse(m.pc, "transition-premises", "machine, entry, mapping, alias, alignment and interference premises are required")
 	}

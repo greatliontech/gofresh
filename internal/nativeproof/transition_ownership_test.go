@@ -44,9 +44,10 @@ func TestTransitionOwnershipAndCancellation(t *testing.T) {
 			t.Fatalf("owner callback %d: %v", at, err)
 		}
 		b, _ := got.Bound()
-		if !sameImage(got.checked.image, im) || b.ImageDigest != baseline.ImageDigest || !reflect.DeepEqual(b.Accesses, baseline.Accesses) || !reflect.DeepEqual(b.Interface, baseline.Interface) {
+		if !sameImage(got.checked.image, im) || b.ImageDigest != baseline.ImageDigest || !reflect.DeepEqual(b.Interface, baseline.Interface) {
 			t.Fatal("input mutation crossed owned boundary", at)
 		}
+		assertTransitionAlpha(t, c, got)
 		cancelCtx, cancel := context.WithCancel(t.Context())
 		stop := &imageCallbackContext{Context: cancelCtx, onErr: func(n int) {
 			if n == at {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"iter"
 	"math/big"
 	"math/bits"
 	"math/rand/v2"
@@ -50,6 +51,14 @@ type stateAccess struct {
 	width       int
 	context     string
 	returnRead  bool
+	value       uint64
+}
+
+type stateRMW struct {
+	instruction, readAccess                          int
+	before, compare, replacement, after, accumulator uint64
+	success                                          bool
+	context                                          string
 }
 
 type stateQuery struct {
@@ -68,6 +77,7 @@ type stateReference struct {
 	initialized map[stateLocation]bool
 	words       map[int64]uint64
 	written     [16]bool
+	writtenBits Masks
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
 	flags        [6]bool
 	writer       to.Operation
@@ -75,12 +85,11 @@ type stateReference struct {
 	frame        map[stateLocation]bool
 	loads        []interfaceMapping
 	outcomes     [][4]uint32
-	queries      []stateQuery
+	primitives   []statePrimitive
 	fs           uint64
 	fsp          statePointer
 	flagExtra    uint64
 	context      string
-	syscalls     []stateSyscall
 	returnTarget uint64
 	addressBits  int
 }
@@ -91,6 +100,24 @@ type stateSyscall struct {
 	number, option, base, before, after, result, r11 uint64
 	valid                                            bool
 	predicates                                       [3]bool
+}
+
+// One ordered stream records every reference primitive at execution time. A
+// kind-filtered view may build lookup maps, but never supplies an order oracle.
+type statePrimitive interface{ statePrimitive() }
+
+func (stateQuery) statePrimitive()   {}
+func (stateRMW) statePrimitive()     {}
+func (stateSyscall) statePrimitive() {}
+
+func statePrimitivesOf[T statePrimitive](r stateReference) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, event := range r.primitives {
+			if v, ok := event.(T); ok && !yield(v) {
+				return
+			}
+		}
+	}
 }
 
 func stateFace(modulus, residue uint64) TransitionInterface {
@@ -250,8 +277,7 @@ func (r stateReference) clone() stateReference {
 		r.frame[off] = v
 	}
 	r.accesses = slices.Clone(r.accesses)
-	r.queries = slices.Clone(r.queries)
-	r.syscalls = slices.Clone(r.syscalls)
+	r.primitives = slices.Clone(r.primitives)
 	r.outcomes = slices.Clone(r.outcomes)
 	return r
 }
@@ -260,10 +286,11 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 	t.Helper()
 	if i.Operation == to.Clear32 {
 		r.regs[i.Dst], r.ptrs[i.Dst], r.written[i.Dst] = 0, statePointer{}, true
+		r.writtenBits[i.Dst] = ^uint64(0)
 		r.flags, r.writer = [6]bool{false, true, false, false, false, true}, to.Clear32
 		return
 	}
-	if i.Operation == to.Jump || i.Operation == to.Branch {
+	if i.Operation == to.Jump || i.Operation == to.Branch || i.Operation == to.NoOp {
 		return
 	}
 	if i.Operation == to.Call || i.Operation == to.Push || i.Operation == to.Pop || i.Operation == to.Return {
@@ -299,7 +326,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 				q.r11 |= uint64(1) << bit
 			}
 		}
-		r.syscalls = append(r.syscalls, q)
+		r.primitives = append(r.primitives, q)
 		for j, reg := range []int{0, 1, 11} {
 			r.regs[reg] = []uint64{q.result, nextPC[0], q.r11}[j]
 			r.ptrs[reg] = statePointer{}
@@ -323,6 +350,15 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 	}
 	write := func(reg uint8, high bool, value uint64) {
 		r.written[reg], r.ptrs[reg] = true, statePointer{}
+		if width == 8 {
+			shift := 0
+			if high {
+				shift = 8
+			}
+			r.writtenBits[reg] |= uint64(255) << shift
+		} else {
+			r.writtenBits[reg] = ^uint64(0)
+		}
 		switch width {
 		case 8:
 			shift := 0
@@ -336,14 +372,25 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 			r.regs[reg] = value
 		}
 	}
+	if i.Operation == to.SetRegister {
+		v := uint64(0)
+		if dagCondition(t, i.Condition, r.flags) {
+			v = 1
+		}
+		write(i.Dst, i.HighDst, v)
+		return
+	}
 	if i.Operation == to.Compare || i.Operation == to.CompareImmediate || i.Operation == to.Test || i.Operation == to.TestImmediate {
-		x, y := read(i.Dst, false), i.Immediate
+		x, y := read(i.Dst, i.HighDst), i.Immediate
 		if i.Operation == to.Compare || i.Operation == to.Test {
-			y = read(i.Src, false)
+			y = read(i.Src, i.HighSrc)
 		}
 		z := x - y
 		if width == 32 {
 			z = uint64(uint32(z))
+		}
+		if width == 8 {
+			z = uint64(uint8(z))
 		}
 		sign := uint64(1) << (width - 1)
 		r.flags = [6]bool{x < y, z == 0, (x^y)&(x^z)&sign != 0, z&sign != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
@@ -356,12 +403,17 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 	}
 	if i.Operation == to.CPUID {
 		q := stateQuery{instruction: index, leaf: uint32(r.regs[0]), subleaf: uint32(r.regs[1]), context: r.context}
-		if len(r.queries) < len(r.outcomes) {
-			q.results = r.outcomes[len(r.queries)]
+		queryIndex := 0
+		for range statePrimitivesOf[stateQuery](*r) {
+			queryIndex++
 		}
-		r.queries = append(r.queries, q)
+		if queryIndex < len(r.outcomes) {
+			q.results = r.outcomes[queryIndex]
+		}
+		r.primitives = append(r.primitives, q)
 		for slot, reg := range []int{0, 3, 1, 2} {
 			r.regs[reg], r.ptrs[reg], r.written[reg] = uint64(q.results[slot]), statePointer{}, true
+			r.writtenBits[reg] = ^uint64(0)
 		}
 		return
 	}
@@ -400,6 +452,58 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		r.accesses = append(r.accesses, stateAccess{instruction: index, write: write, off: off, width: width / 8, context: r.context})
 		return off
 	}
+	if i.Operation == to.LockedCompareExchange || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate {
+		off := access(false)
+		var current uint64
+		for lane := 0; lane < width/8; lane++ {
+			current |= uint64(r.memory[off.add(int64(lane))].value) << (8 * lane)
+		}
+		r.accesses[len(r.accesses)-1].value = current
+		x, y := current, i.Immediate
+		if i.Operation == to.CompareMemory {
+			y = read(i.Src, false)
+		}
+		if i.Operation == to.CompareFromMemory {
+			x, y = read(i.Dst, false), current
+		}
+		if i.Operation == to.LockedCompareExchange {
+			x, y = r.regs[0], current
+		}
+		z := x - y
+		if width == 32 {
+			z = uint64(uint32(z))
+		}
+		sign := uint64(1) << (width - 1)
+		r.flags = [6]bool{x < y, z == 0, (x^y)&(x^z)&sign != 0, z&sign != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
+		r.writer = i.Operation
+		if i.Operation != to.LockedCompareExchange {
+			return
+		}
+		q := stateRMW{instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, compare: x, replacement: r.regs[i.Src], after: current, accumulator: current, success: x == current}
+		if q.success {
+			q.after, q.accumulator = q.replacement, x
+		}
+		access(true)
+		r.accesses[len(r.accesses)-1].value = q.after
+		for lane := 0; lane < 8; lane++ {
+			r.memory[off.add(int64(lane))] = stateByte{value: byte(q.after >> (8 * lane))}
+			r.frame[off.add(int64(lane))] = true
+		}
+		r.regs[0], r.ptrs[0], r.written[0], r.writtenBits[0] = q.accumulator, statePointer{}, true, ^uint64(0)
+		r.primitives = append(r.primitives, q)
+		return
+	}
+	if i.Operation == to.SetMemory {
+		off := access(true)
+		v := byte(0)
+		if dagCondition(t, i.Condition, r.flags) {
+			v = 1
+		}
+		r.accesses[len(r.accesses)-1].value = uint64(v)
+		r.memory[off] = stateByte{value: v}
+		r.frame[off] = true
+		return
+	}
 	if i.Operation == to.Store || i.Operation == to.StoreImmediate {
 		off := access(true)
 		value, ptr := i.Immediate, statePointer{}
@@ -409,6 +513,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		if width != 64 {
 			ptr = statePointer{}
 		}
+		r.accesses[len(r.accesses)-1].value = value
 		for lane := uint8(0); lane < uint8(width/8); lane++ {
 			b := stateByte{value: byte(value >> (8 * lane)), ptr: ptr}
 			if ptr.valid {
@@ -420,6 +525,9 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		return
 	}
 	r.written[i.Dst] = true
+	if width != 8 {
+		r.writtenBits[i.Dst] = ^uint64(0)
+	}
 	switch i.Operation {
 	case to.MoveRegister:
 		if width == 64 {
@@ -461,6 +569,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 				p = statePointer{}
 			}
 		}
+		r.accesses[len(r.accesses)-1].value = value
 		if width == 64 {
 			r.regs[i.Dst], r.ptrs[i.Dst] = value, p
 		} else {
@@ -919,7 +1028,7 @@ func (x stateLayout) proposal(cut int) TransitionProposal {
 		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j < cut {
 			n.Successors = []uint64{x.pcs[j+1]}
-			if x.intents[j].Operation == to.Clear32 {
+			if to.RequiresExpansion(x.intents[j]) {
 				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
 			}
 		}
@@ -1029,7 +1138,10 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 				frame[a.off.add(k)] = true
 			}
 		}
-		if b.Accesses[j] != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) {
+		got := b.Accesses[j]
+		value := got.Value
+		got.Value = br.Term{}
+		if got != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) || value.Sort() != br.Bits(a.width*8) || stateEval(t, value, values) != a.value {
 			t.Fatal("ordered access differs", j, b.Accesses[j], a)
 		}
 	}
@@ -1069,6 +1181,9 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		preserved := ^uint64(0)
 		if want.written[j] {
 			preserved = 0
+			if want.writtenBits[j] != 0 {
+				preserved = ^want.writtenBits[j]
+			}
 		}
 		if b.Preserved[j] != preserved {
 			t.Fatal("exact preservation mask differs", j, b.Preserved[j], preserved)
@@ -1097,7 +1212,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
-		defined := want.writer != to.And && want.writer != to.Clear32 || j != 4
+		defined := want.writer != to.And && want.writer != to.Clear32 && want.writer != to.Test && want.writer != to.TestImmediate || j != 4
 		if f.Preserved != (want.writer == 0) || f.Defined != defined || !defined && f.Value.Valid() {
 			t.Fatal("arithmetic flag defined/preserved/value status differs", j, f)
 		}

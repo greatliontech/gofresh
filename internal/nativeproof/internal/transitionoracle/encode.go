@@ -10,6 +10,9 @@ import (
 // Branch displacements are already relative to the eventual instruction end;
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
+	if i.Operation >= LockedCompareExchange || i.Width == 8 && (i.Operation == Test || i.Operation == TestImmediate) {
+		return encodeAtomic(i, e)
+	}
 	if i.Operation == Clear32 {
 		if i.Dst > 15 || i != (Intent{Operation: Clear32, Dst: i.Dst}) || e.DispBytes != 0 || e.SIB || e.Scale != 0 || e.Form != XOR31 && e.Form != XOR33 || e.REX != 0 && (e.REX < 0x40 || e.REX > 0x47) || (e.REX&1) != i.Dst/8 || (e.REX>>2)&1 != i.Dst/8 {
 			return nil, fmt.Errorf("invalid self-XOR intent/encoding")

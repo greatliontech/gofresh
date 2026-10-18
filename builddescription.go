@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/buildflags"
 )
 
 // completeBuildEnvironment supplements the ordinary build guard's flag/input
@@ -97,7 +98,7 @@ func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot,
 }
 
 func normalizedGCCFlags(text string) ([]string, error) {
-	flags, err := goQuotedFields(text)
+	flags, err := buildflags.Fields(text)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: GOGCCFLAGS: %w", err)
 	}
@@ -116,32 +117,4 @@ func normalizedGCCFlags(text string) ([]string, error) {
 		}
 	}
 	return flags, nil
-}
-
-// goQuotedFields follows cmd/internal/quoted's argument form: quotes delimit a
-// whole leading field, bytes inside are not escaped, and interior quotes are
-// literal. GOGCCFLAGS is emitted with that package's Join, never shell grammar.
-func goQuotedFields(text string) ([]string, error) {
-	var fields []string
-	for {
-		text = strings.TrimLeft(text, " \t\r\n")
-		if text == "" {
-			return fields, nil
-		}
-		if quote := text[0]; quote == '\'' || quote == '"' {
-			end := strings.IndexByte(text[1:], quote)
-			if end < 0 {
-				return nil, fmt.Errorf("unterminated %c field", quote)
-			}
-			fields = append(fields, text[1:1+end])
-			text = text[2+end:]
-		} else {
-			end := strings.IndexAny(text, " \t\r\n")
-			if end < 0 {
-				return append(fields, text), nil
-			}
-			fields = append(fields, text[:end])
-			text = text[end:]
-		}
-	}
 }

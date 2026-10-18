@@ -28,6 +28,8 @@ type sourceOperandPrefix struct {
 	callee   selectedSourceDeclaration
 	call     *ssa.Call
 	operands []regionValue
+	prior    *sourceOperandPrefix
+	binder   *selectedSourceBinder
 }
 
 // checkSourceOperandPrefix owns the complete selected root but checks execution
@@ -50,15 +52,29 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	in := regionInput{owner: root.Prog, root: root, entry: regionPoint{root.Blocks[0], 0},
 		use:      regionUse{at: regionPoint{root.Blocks[0], at}, operand: call.Call.Args[0]},
 		premises: []string{"immutable selected typed owner; isolated prefix; ordinary live typed global storage; omitted native prefix and actual use remain open"}}
-	p, err := proposeRegion(ctx, in, limits.region)
+	meter := &regionMeter{ctx: ctx, limits: limits.region}
+	in, _, err := regionCaptureMeter(in, nil, meter)
 	if err != nil {
 		return nil, err
 	}
-	in, p, err = regionCapture(in, p, limits.region)
+	newKernel := func(input regionInput) (*regionKernel, error) {
+		session := newRegionCallSession(ctx, input, limits.region)
+		session.meter = meter
+		return newRegionContextKernel(input, session, regionInvocation{}, false)
+	}
+	proposer, err := newKernel(in)
 	if err != nil {
 		return nil, err
 	}
-	k, err := newRegionKernel(ctx, in, limits.region)
+	p, err := proposeRegionKernel(proposer)
+	if err != nil {
+		return nil, err
+	}
+	in, p, err = regionCaptureMeter(in, p, meter)
+	if err != nil {
+		return nil, err
+	}
+	k, err := newKernel(in)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +112,9 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands}, nil
+	packet.usage = *meter
+	packet.usage.ctx = nil
+	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands, binder: b}, nil
 }
 
 // prefixTransfer records operands from the same pre-state that transfer consumes.
@@ -121,15 +139,12 @@ func (k *regionKernel) prefixTransfer(s regionState, ins ssa.Instruction) error 
 		return regionError("operand prefix has an intervening operation or call")
 	}
 	p := k.value(s, address)
-	g, ok := p.location.object.site.(*ssa.Global)
-	if p.kind != regionPointer || p.location.object.kind != regionGlobal || len(p.location.path) != 0 || !ok || !k.owns(g) || g.Pkg != k.input.root.Pkg || !types.Identical(k.objectType(p.location.object), types.Typ[types.Uint64]) {
-		return regionError("operand prefix access is not exact uint64 global storage")
+	g, err := k.effectGlobal(p)
+	if err != nil {
+		return err
 	}
-	// This finite grammar keeps storage declarations in the selected root's
-	// package, whose complete syntax/type binding is retained by sourceRegion.
-	obj, ok := g.Object().(*types.Var)
-	if !ok || obj.Pkg() != g.Pkg.Pkg || obj.Parent() != g.Pkg.Pkg.Scope() || obj.Parent().Lookup(obj.Name()) != obj {
-		return regionError("operand prefix global has no selected typed declaration")
+	if g.Pkg != k.input.root.Pkg {
+		return regionError("operand prefix access is not exact uint64 global storage")
 	}
 	e.global = g
 	if !e.write {
