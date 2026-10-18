@@ -271,6 +271,7 @@ func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 	typ := reflect.TypeFor[checkedTransition]()
 	want := map[string]reflect.Type{"image": reflect.TypeFor[*Image](), "bound": reflect.TypeFor[TransitionBound](), "limits": reflect.TypeFor[TransitionLimits](), "work": reflect.TypeFor[int](), "flags": reflect.TypeFor[[flagCount]br.Term]()}
 	want["exclusions"], want["coverageGuard"] = reflect.TypeFor[[]br.Witness](), reflect.TypeFor[br.Term]()
+	want["justifications"] = reflect.TypeFor[[]br.Witness]()
 	for j := 0; j < typ.NumField(); j++ {
 		f := typ.Field(j)
 		if want[f.Name] != f.Type {

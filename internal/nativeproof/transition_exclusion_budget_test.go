@@ -129,7 +129,9 @@ func TestTransitionExclusionProofNodeAndStorageBudgets(t *testing.T) {
 	// their types/count, not sampled from a failing checker or its spent counter.
 	stateBytes := int(unsafe.Sizeof(transitionNodeState{})) + 1024 + 64*(2*int(unsafe.Sizeof(TransitionLocation{})+unsafe.Sizeof(TransitionByte{}))+64)
 	inputNodes, _ := exclusionTermInventory(guard, falsity)
-	occupied := 2*stateBytes + 8*len(p.Nodes)
+	// Full and reconstructed two-node prefix graphs coexist; root contexts
+	// have no path bytes, and each occurrence reserves 2048 metadata bytes.
+	occupied := 2*stateBytes + 8*len(p.Nodes) + 2048*(len(p.Nodes)+2)
 	storage := occupied + 4096*(inputNodes-1)
 	_, low, full = exclusionBudgetFixture(t, TransitionLimits{LiveStateBytes: storage})
 	c, err = CheckTransitionContinuation(t.Context(), low, full)

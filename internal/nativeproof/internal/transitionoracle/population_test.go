@@ -24,15 +24,15 @@ func withPayload(d Descriptor, immediate uint64, displacement int64) Intent {
 		i.Immediate = immediate
 	case MOVB8Imm32:
 		i.Immediate = uint64(uint32(immediate))
-	case MOVC7, SUB81, SUB2D, AND81, AND25, CMP81, CMP3D, TESTF7, TESTA9:
+	case MOVC7, SUB81, SUB2D, ADD81, ADD05, AND81, AND25, CMP81, CMP3D, TESTF7, TESTA9:
 		i.Immediate = uint64(int64(int32(immediate)))
-	case SUB83, AND83, CMP83:
+	case SUB83, ADD83, AND83, CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
 	case MOVC6, MOVB0:
 		i.Immediate = uint64(uint8(immediate))
 	case JMPEB, JccShort:
 		i.SignedDisp = int64(int8(displacement))
-	case JMPE9, JccNear:
+	case JMPE9, JccNear, CALLE8:
 		i.SignedDisp = int64(int32(displacement))
 	}
 	if i.Width == 32 {
@@ -60,7 +60,7 @@ func roundTrip(t testing.TB, i Intent, e Encoding) []byte {
 	if d.Next != 1<<32+uint64(len(b)) {
 		t.Fatalf("next: %+v", d)
 	}
-	if i.Operation == Jump || i.Operation == Branch {
+	if i.Operation == Jump || i.Operation == Branch || i.Operation == Call {
 		assertTarget(t, d, 1<<32)
 	} else if d.Target != 0 {
 		t.Fatal("nonbranch target")
@@ -81,9 +81,9 @@ func assertIntegerPayloads(t testing.TB, b []byte, d Decoded) {
 		immWidth, signed = 8, false
 	case MOVB8Imm32:
 		immWidth, signed = 4, false
-	case MOVC7, SUB81, SUB2D, AND81, AND25, CMP81, CMP3D, TESTF7, TESTA9:
+	case MOVC7, SUB81, SUB2D, ADD81, ADD05, AND81, AND25, CMP81, CMP3D, TESTF7, TESTA9:
 		immWidth = 4
-	case SUB83, AND83, CMP83:
+	case SUB83, ADD83, AND83, CMP83:
 		immWidth = 1
 	case MOVC6, MOVB0:
 		immWidth, signed = 1, false
@@ -106,7 +106,7 @@ func assertIntegerPayloads(t testing.TB, b []byte, d Decoded) {
 	if d.Encoding.Form == JMPEB || d.Encoding.Form == JccShort {
 		dispWidth = 1
 	}
-	if d.Encoding.Form == JMPE9 || d.Encoding.Form == JccNear {
+	if d.Encoding.Form == JMPE9 || d.Encoding.Form == JccNear || d.Encoding.Form == CALLE8 {
 		dispWidth = 4
 	}
 	if dispWidth != 0 {
@@ -132,10 +132,11 @@ func literalInteger(little []byte, signed bool) *big.Int {
 
 func TestDescriptorPopulation(t *testing.T) {
 	want := map[Form]int{
-		MOV89: 10568, MOV8B: 10568, MOVB8Imm64: 64, MOVB8Imm32: 16,
-		MOVC7: 1321, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
+		MOV89: 10856, MOV8B: 10856, MOVB8Imm64: 64, MOVB8Imm32: 16,
+		MOVC7: 1357, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
 		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1, CPUID0FA2: 1,
-		MOV88: 10568, MOV8A: 10568, MOVC6: 1321, MOVB0: 136,
+		MOV88: 10856, MOV8A: 10856, MOVC6: 1357, MOVB0: 136,
+		ADD83: 64, ADD81: 64, ADD05: 8, CALLE8: 1, PUSH50: 16, POP58: 16, RETC3: 1, SYSCALL0F05: 1,
 		CMP39: 1088, CMP3B: 1088, TEST85: 1088, CMP83: 136, CMP81: 136, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 10, JccNear: 10,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
@@ -176,7 +177,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 53419 || len(counts) != len(want) {
+	if len(seen) != 54814 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {
@@ -265,7 +266,7 @@ func TestRawModRMPopulation(t *testing.T) {
 					if (op == 0xc7 || op == 0xc6 || op == 0xf7) && selector != 0 {
 						valid = false
 					}
-					if (op == 0x83 || op == 0x81) && (mode != 3 || selector != 4 && selector != 5 && selector != 7 || selector != 7 && rex&8 == 0) {
+					if (op == 0x83 || op == 0x81) && (mode != 3 || selector != 0 && selector != 4 && selector != 5 && selector != 7 || selector != 7 && rex&8 == 0) {
 						valid = false
 					}
 					if (op == 0x39 || op == 0x3b || op == 0x85 || op == 0xf7) && mode != 3 {
@@ -321,12 +322,15 @@ func TestRawModRMPopulation(t *testing.T) {
 			}
 		}
 	}
-	if trials != 1409096 || len(accepted) != 53130 {
+	if trials != 1409096 || len(accepted) != 53258 {
 		t.Fatalf("raw trials %d positives %d", trials, len(accepted))
 	}
 	for d := range Descriptors {
+		if d.Intent.FS {
+			continue
+		} // The independent FS-prefix population is below.
 		switch d.Encoding.Form {
-		case MOV89, MOV8B, MOVC7, LEA8D, SUB83, SUB81, AND83, AND81, MOV88, MOV8A, MOVC6, CMP39, CMP3B, TEST85, CMP83, CMP81, TESTF7:
+		case MOV89, MOV8B, MOVC7, LEA8D, SUB83, SUB81, ADD83, ADD81, AND83, AND81, MOV88, MOV8A, MOVC6, CMP39, CMP3B, TEST85, CMP83, CMP81, TESTF7:
 			b, err := Encode(d.Intent, d.Encoding)
 			if err != nil || !accepted[string(b)] {
 				t.Fatalf("descriptor not in independent raw population: %+v, %x, %v", d, b, err)
@@ -337,5 +341,83 @@ func TestRawModRMPopulation(t *testing.T) {
 	if len(accepted) != 0 {
 		t.Fatalf("%d raw admitted encodings missing from descriptors", len(accepted))
 	}
-	t.Logf("%d raw ModRM/SIB trials; 53,130 accepted structural spellings", trials)
+	t.Logf("%d raw ModRM/SIB trials; 53,258 accepted structural spellings", trials)
+}
+
+func TestRawFSPopulation(t *testing.T) {
+	accepted := map[string]bool{}
+	prefixes := []int{0}
+	for rex := 0x40; rex <= 0x4f; rex++ {
+		prefixes = append(prefixes, rex)
+	}
+	for _, rex := range prefixes {
+		for _, op := range []byte{0x88, 0x89, 0x8a, 0x8b, 0xc6, 0xc7} {
+			for modrm := 0; modrm < 256; modrm++ {
+				mode, selector, rm := modrm/64, modrm/8%8, modrm%8
+				count := 1
+				if mode != 3 && rm == 4 {
+					count = 256
+				}
+				for sib := 0; sib < count; sib++ {
+					valid := mode == 0 && rm == 4 && sib%8 == 5 && sib/8%8 == 4 && rex&2 == 0
+					if (op == 0xc6 || op == 0xc7) && selector != 0 {
+						valid = false
+					}
+					b := []byte{0x64}
+					if rex != 0 {
+						b = append(b, byte(rex))
+					}
+					b = append(b, op, byte(modrm))
+					if count == 256 {
+						b = append(b, byte(sib))
+					}
+					b = append(b, make([]byte, 12)...)
+					d, err := Parse(b, 1<<32)
+					if (err == nil) != valid {
+						t.Fatalf("FS raw %x accepted=%v want %v", b, err == nil, valid)
+					}
+					if !valid {
+						if d != (Decoded{}) {
+							t.Fatal("partial FS refusal")
+						}
+						continue
+					}
+					length := 8
+					if rex != 0 {
+						length++
+					}
+					if op == 0xc6 {
+						length++
+					}
+					if op == 0xc7 {
+						length += 4
+					}
+					if d.Length != length {
+						t.Fatal("FS extent", d, length)
+					}
+					raw, err := Encode(d.Intent, d.Encoding)
+					if err != nil || !bytes.Equal(raw, b[:length]) {
+						t.Fatal("FS spelling lost", err)
+					}
+					accepted[string(raw)] = true
+				}
+			}
+		}
+	}
+	if len(accepted) != 1224 {
+		t.Fatal("FS structural population", len(accepted))
+	}
+	for d := range Descriptors {
+		if !d.Intent.FS {
+			continue
+		}
+		b, err := Encode(d.Intent, d.Encoding)
+		if err != nil || !accepted[string(b)] {
+			t.Fatal("missing FS descriptor", d, err)
+		}
+		delete(accepted, string(b))
+	}
+	if len(accepted) != 0 {
+		t.Fatal("raw FS admission absent from descriptors")
+	}
 }

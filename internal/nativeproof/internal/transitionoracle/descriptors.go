@@ -13,6 +13,69 @@ type Descriptor struct {
 // out. This semantic enumerator calls neither the encoder nor the byte parser.
 func Descriptors(yield func(Descriptor) bool) {
 	emit := func(i Intent, e Encoding) bool { return yield(Descriptor{i, e}) }
+	for _, d := range []Descriptor{{Intent{Operation: Call}, Encoding{Form: CALLE8}}, {Intent{Operation: Return}, Encoding{Form: RETC3}}, {Intent{Operation: Syscall}, Encoding{Form: SYSCALL0F05}}} {
+		if !yield(d) {
+			return
+		}
+	}
+	for reg := uint8(0); reg < 16; reg++ {
+		rex := byte(0)
+		if reg >= 8 {
+			rex = 0x41
+		}
+		if !emit(Intent{Operation: Push, Dst: reg}, Encoding{Form: PUSH50, REX: rex}) || !emit(Intent{Operation: Pop, Dst: reg}, Encoding{Form: POP58, REX: rex}) {
+			return
+		}
+	}
+	for rex := byte(0x48); rex <= 0x4f; rex++ {
+		if !emit(Intent{Operation: Add}, Encoding{Form: ADD05, REX: rex}) {
+			return
+		}
+		for low := uint8(0); low < 8; low++ {
+			for _, form := range []Form{ADD83, ADD81} {
+				if !emit(Intent{Operation: Add, Dst: low + 8*(rex&1)}, Encoding{Form: form, REX: rex}) {
+					return
+				}
+			}
+		}
+	}
+	for _, rex := range []byte{0, 0x40, 0x41, 0x44, 0x45, 0x48, 0x49, 0x4c, 0x4d} {
+		for _, form := range []Form{MOV89, MOV8B, MOV88, MOV8A, MOVC7, MOVC6} {
+			width := uint8(32)
+			if rex&8 != 0 {
+				width = 0
+			}
+			if form == MOV88 || form == MOV8A || form == MOVC6 {
+				width = 8
+			}
+			regs := uint8(8)
+			if form == MOVC7 || form == MOVC6 {
+				regs = 1
+			}
+			for low := uint8(0); low < regs; low++ {
+				for scale := uint8(0); scale < 4; scale++ {
+					i := Intent{Operation: StoreImmediate, FS: true, Width: width}
+					reg := low + 8*((rex>>2)&1)
+					if form == MOV89 || form == MOV88 {
+						i.Operation, i.Src = Store, reg
+					}
+					if form == MOV8B || form == MOV8A {
+						i.Operation, i.Dst = Load, reg
+					}
+					if width == 8 && rex == 0 && low >= 4 {
+						if i.Operation == Load {
+							i.Dst, i.HighDst = low-4, true
+						} else {
+							i.Src, i.HighSrc = low-4, true
+						}
+					}
+					if !emit(i, Encoding{Form: form, REX: rex, DispBytes: 4, SIB: true, Scale: scale}) {
+						return
+					}
+				}
+			}
+		}
+	}
 	if !emit(Intent{Operation: CPUID}, Encoding{Form: CPUID0FA2}) {
 		return
 	}

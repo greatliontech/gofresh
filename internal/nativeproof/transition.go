@@ -22,6 +22,11 @@ type transitionChecker struct {
 	memory                     map[TransitionLocation]TransitionByte
 	liveStateBytes, stateBytes int
 	exclusions                 []br.Witness
+	justifications             []br.Witness
+	activation                 string
+	expansions                 []TransitionExpansion
+	frames                     []TransitionFrame
+	thread                     TransitionThread
 }
 
 func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
@@ -65,53 +70,38 @@ func newTransitionChecker(ctx context.Context, im *Image, l TransitionLimits, wo
 	return m, nil
 }
 
-func (m *transitionChecker) graph(cut uint64) (*graph, error) {
-	g, err := decodeGraphUsing(&relationContext{Context: m.ctx, meter: m.valueBuilder}, m.im.entry, m.limits.Instructions, func(pc uint64) (decodedInstruction, error) {
-		m.pc = pc
-		return decodeTransitionBoundary(m.im, pc, cut)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if idx, ok := g.byPC[cut]; !ok || g.nodes[idx].boundary != boundaryCut {
-		return nil, refuse(cut, "transition-cut", "cut is not a reachable decoded boundary")
-	}
-	// Syntactic closure permits the declared cut and candidate unsupported
-	// terminals. Neither discovery nor scheduling supplies their false proofs.
-	for _, n := range g.nodes {
-		if !m.tick() {
-			return nil, m.err
-		}
-		if n.boundary != boundaryCut && n.boundary != boundaryUnsupported && n.count == 0 {
-			return nil, refuse(n.pc, "transition-cut", "unclosed prefix path")
-		}
-	}
-	return g, nil
-}
-
 // ProposeTransition discovers candidate coverage from the ELF-declared entry.
 // Its cut is only a proposed locator; no instruction count or symbol extent is
 // a successful endpoint. CheckTransition independently reconstructs all bytes.
-func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits) (TransitionProposal, error) {
+// Numeric cuts select the first hit and require a unique activation in the
+// stopped graph. Unselected calls remain structural terminals, with no target
+// inspection. Expansion choices select search only; their use is checked later.
+func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
 	im = im.snapshot()
 	l, err := transitionLimits(limits)
 	if err != nil {
 		return TransitionProposal{}, refuse(0, "transition-budget", err.Error())
 	}
-	m, err := newTransitionChecker(ctx, im, l, 0)
+	work := 0
+	p, err := captureTransitionProposal(TransitionProposal{Expansions: expansions}, l, &work)
 	if err != nil {
 		return TransitionProposal{}, err
 	}
+	m, err := newTransitionChecker(ctx, im, l, work)
+	if err != nil {
+		return TransitionProposal{}, err
+	}
+	m.expansions = p.Expansions
 	g, err := m.graph(cut)
 	if err != nil {
 		return TransitionProposal{}, err
 	}
-	p := TransitionProposal{ImageDigest: im.digest, Entry: im.entry, Cut: cut}
+	p.ImageDigest, p.Entry, p.Cut = im.digest, im.entry, cut
 	for _, ins := range g.nodes {
 		if !m.tick() {
 			return TransitionProposal{}, m.err
 		}
-		n := Node{PC: ins.pc, Size: ins.size}
+		n := Node{PC: ins.pc, Size: ins.size, Context: ins.context}
 		for _, next := range ins.next[:ins.count] {
 			n.Successors = append(n.Successors, g.nodes[next].pc)
 		}
@@ -154,7 +144,8 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 		return TransitionCertificate{}, refuse(im.entry, "transition-proposal", "image or ELF entry differs")
 	}
 	m.face = face
-	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: im.entry, Interface: face}
+	m.expansions = proposal.Expansions
+	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: im.entry, Interface: face, Expansions: append([]TransitionExpansion(nil), proposal.Expansions...)}
 	if err := m.validate(); err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -163,7 +154,7 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 		return TransitionCertificate{}, err
 	}
 	bounded := &relationContext{Context: ctx, meter: m.valueBuilder}
-	if err := checkInventory(bounded, g, proposal.Nodes, "transition-proposal"); err != nil {
+	if err := checkContextInventory(bounded, g, proposal.Nodes, "transition-proposal", true); err != nil {
 		return TransitionCertificate{}, err
 	}
 	if err := m.initial(); err != nil {
@@ -200,6 +191,7 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if proposal.Entry != prior.bound.Entry || proposal.ImageDigest != prior.bound.ImageDigest {
 		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or ELF entry differs")
 	}
+	m.expansions = proposal.Expansions
 	if proposal.Cut == prior.bound.Boundary.PC {
 		return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "cut must advance beyond predecessor")
 	}
@@ -215,7 +207,7 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
-	if err := checkInventory(&relationContext{Context: ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal"); err != nil {
+	if err := checkContextInventory(&relationContext{Context: ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal", true); err != nil {
 		return TransitionCertificate{}, err
 	}
 	start, err := m.continuationStart(g, prior)
@@ -225,6 +217,7 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if err := m.inherit(prior); err != nil {
 		return TransitionCertificate{}, err
 	}
+	m.bound.Expansions = append([]TransitionExpansion(nil), proposal.Expansions...)
 	return m.finish(g, start)
 }
 
@@ -241,8 +234,9 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	for _, idx := range g.order[start:] {
 		ins := g.nodes[idx]
 		m.pc = ins.pc
+		m.activation = ins.context
 		if !m.tick() {
-			return TransitionCertificate{}, g.failure(ins.pc, m.err)
+			return TransitionCertificate{}, g.failureAt(ins.point(), m.err)
 		}
 		s := states[idx]
 		states[idx] = nil
@@ -253,9 +247,9 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		if ins.boundary == boundaryCut {
 			i, bytes, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
-				return TransitionCertificate{}, g.failure(ins.pc, err)
+				return TransitionCertificate{}, g.failureAt(ins.point(), err)
 			}
-			m.bound.Boundary = CutBoundary{PC: ins.pc, Instruction: i, Bytes: append([]byte(nil), bytes...)}
+			m.bound.Boundary = CutBoundary{PC: ins.pc, Context: ins.context, Instruction: i, Bytes: append([]byte(nil), bytes...)}
 			m.bound.CutGuard = m.state.path
 			cutState = m.takeState()
 			continue
@@ -263,16 +257,16 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		if ins.boundary == boundaryUnsupported {
 			w, err := m.proveFalseGuard(m.state.path)
 			if err != nil {
-				return TransitionCertificate{}, g.failure(ins.pc, err)
+				return TransitionCertificate{}, g.failureAt(ins.point(), err)
 			}
 			i, raw, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
-				return TransitionCertificate{}, g.failure(ins.pc, err)
+				return TransitionCertificate{}, g.failureAt(ins.point(), err)
 			}
 			if err := m.reserveExclusion(); err != nil {
 				return TransitionCertificate{}, err
 			}
-			b := ExcludedBoundary{CutBoundary{PC: ins.pc, Instruction: i, Bytes: append([]byte(nil), raw...)}, m.state.path}
+			b := ExcludedBoundary{CutBoundary{PC: ins.pc, Context: ins.context, Instruction: i, Bytes: append([]byte(nil), raw...)}, m.state.path}
 			m.bound.ExcludedBoundaries = append(m.bound.ExcludedBoundaries, b)
 			m.exclusions = append(m.exclusions, w)
 			m.memory = nil
@@ -284,10 +278,10 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		// transfers even if a stronger solver might prove them impossible.
 		if !literalBool(guard, 0) {
 			if err := m.step(ins.inst, ins.size); err != nil {
-				return TransitionCertificate{}, g.failure(ins.pc, err)
+				return TransitionCertificate{}, g.failureAt(ins.point(), err)
 			}
 		}
-		m.bound.Instructions = append(m.bound.Instructions, GuardedInstruction{Span{ins.pc, ins.pc + uint64(ins.size)}, guard})
+		m.bound.Instructions = append(m.bound.Instructions, GuardedInstruction{Span: Span{ins.pc, ins.pc + uint64(ins.size)}, Guard: guard, Context: ins.context})
 		s = m.takeState()
 		var predicate br.Term
 		if ins.count == 2 {
@@ -311,13 +305,21 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 			m.mergeState(&states[next], incoming)
 		}
 		if m.err != nil {
-			return TransitionCertificate{}, g.failure(ins.pc, m.err)
+			return TransitionCertificate{}, g.failureAt(ins.point(), m.err)
 		}
 	}
 	if cutState == nil {
 		return TransitionCertificate{}, refuse(m.pc, "transition-cut", "missing cut state")
 	}
 	m.installState(cutState)
+	m.pc, m.activation = m.bound.Boundary.PC, m.bound.Boundary.Context
+	m.bound.Thread = m.thread
+	for range m.frames {
+		if !m.tick() {
+			return TransitionCertificate{}, m.err
+		}
+	}
+	m.bound.Frames = append([]TransitionFrame(nil), m.frames...)
 	for r := range m.state.regs {
 		if !m.tick() {
 			return TransitionCertificate{}, m.err
@@ -326,7 +328,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	}
 	m.bound.Memory = m.projectMemory()
 	if !m.tick() {
-		return TransitionCertificate{}, g.failure(m.pc, m.err)
+		return TransitionCertificate{}, g.failureAt(programPoint{m.pc, m.activation}, m.err)
 	}
 	// Complete-cut induction, rather than propositional normalization: the root
 	// condition is true (or the predecessor's exact proved-total cut condition).
@@ -335,7 +337,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	// once. All terminals other than this cut have checked false incoming guards.
 	// Thus every admitted valuation contributes to this exact CutGuard. No graph
 	// closure assertion substitutes a literal true or discards a transfer.
-	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags, exclusions: m.exclusions, coverageGuard: m.bound.CutGuard}}, nil
+	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags, exclusions: m.exclusions, justifications: m.justifications, coverageGuard: m.bound.CutGuard}}, nil
 }
 
 func (m *transitionChecker) projectMemory() []TransitionByte {
@@ -390,6 +392,10 @@ func (m *transitionChecker) initial() error {
 	m.bound.InitialPredicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
 	m.bound.Origin = m.state.regs[RSP]
 	m.bound.InitialRegisters = m.state.regs
+	if m.face.Conditions.Syscall != "" {
+		m.bound.InitialFS = m.scratch(br.Bits(64))
+		m.thread = TransitionThread{FS: TransitionValue{Value: m.bound.InitialFS}, SelectorPreserved: true}
+	}
 	m.pointers[RSP] = OriginPointer{Origin: m.bound.Origin}
 	f := TransitionFlag{Preserved: true, Defined: true}
 	m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
@@ -488,7 +494,9 @@ func (m *transitionChecker) ripPointer(disp int64, size uint8) (TransitionPointe
 func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, size uint8) (TransitionLocation, error) {
 	var p TransitionPointer
 	var err error
-	if mem.Base == x86asm.RIP {
+	if mem.Segment == x86asm.FS {
+		p, err = m.advance(m.thread.FS.Pointer, mem.Disp)
+	} else if mem.Base == x86asm.RIP {
 		p, err = m.ripPointer(mem.Disp, size)
 	} else {
 		base, _ := fullRegister(mem.Base)
@@ -497,6 +505,10 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, 
 	if err != nil {
 		return TransitionLocation{}, err
 	}
+	return m.accessPointer(p, kind, width)
+}
+
+func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, width int) (TransitionLocation, error) {
 	if image, ok := p.(ImagePointer); ok {
 		end, valid := plus(image.Address, uint64(width))
 		if !valid || end > m.im.loads[image.load].end || end > 1<<47 {
@@ -509,10 +521,13 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, 
 			return TransitionLocation{}, refuse(m.pc, "transition-permission", "full image access lacks declared permission")
 		}
 		span := RelativeSpan{int64(image.Address), int64(end)}
-		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Kind: kind, Bytes: span, Image: true})
+		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: span, Image: true})
 		return TransitionLocation{Image: true, Offset: int64(image.Address)}, nil
 	}
-	stack := p.(OriginPointer)
+	stack, valid := p.(OriginPointer)
+	if !valid || stack.Origin != m.bound.Origin {
+		return TransitionLocation{}, refuse(m.pc, "transition-provenance", "access lacks current memory provenance")
+	}
 	end, ok := signedPlus(stack.Offset, int64(width))
 	if !ok {
 		return TransitionLocation{}, refuse(m.pc, "transition-origin", "access offset overflow")
@@ -527,7 +542,7 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, 
 		}
 		return TransitionLocation{}, refuse(m.pc, "transition-permission", "full access lacks declared permission")
 	}
-	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Kind: kind, Bytes: span})
+	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: span})
 	return TransitionLocation{Offset: stack.Offset}, nil
 }
 
@@ -567,6 +582,12 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if i.Op == x86asm.CALL || i.Op == x86asm.PUSH || i.Op == x86asm.POP || i.Op == x86asm.RET {
+		return m.stackStep(i, size)
+	}
+	if i.Op == x86asm.SYSCALL {
+		return m.archSetFS(size)
+	}
 	if i.Op == x86asm.CPUID {
 		return m.cpuid()
 	}
@@ -651,8 +672,11 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 				return err
 			}
 		}
-	case x86asm.SUB:
-		delta := -int64(i.Args[1].(x86asm.Imm)) // checked signed imm8/imm32, never MinInt64
+	case x86asm.SUB, x86asm.ADD:
+		delta := int64(i.Args[1].(x86asm.Imm))
+		if i.Op == x86asm.SUB {
+			delta = -delta
+		} // checked signed imm8/imm32
 		if m.pointers[a.reg] != nil {
 			var err error
 			p, err = m.advance(m.pointers[a.reg], delta)

@@ -5,7 +5,7 @@
 // transition consumer can establish its pointer or mask side conditions.
 //
 // This is an executed-only grammar, NOT the grammar of an unexecuted cut. NOP,
-// CALL, RET, unsupported conditional branches and vector instructions can be legitimate cut
+// unsupported conditional branches and vector instructions can be legitimate cut
 // evidence even though Parse refuses them. Never use this package to narrow cut
 // admission. Its tests alone establish none of the transition theorem's coverage,
 // state-transfer, provenance or composition obligations.
@@ -17,7 +17,10 @@
 // or zero-extend 32 bits. CMP/TEST admit register/immediate 32/64-bit forms;
 // conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
 // operand-free 0f a2, without prefixes. RIP-relative LEA and data accesses use
-// next IP. Legacy prefixes, indexed/absent bases and other widths remain outside
+// next IP. Direct CALL uses signed rel32, near RET reads the actual return word,
+// PUSH/POP admit the canonical 64-bit register forms, and SYSCALL is exact 0f05.
+// FS-prefixed MOV admits displacement-only signed disp32 with no index. Other
+// legacy prefixes, indexed/absent bases and other widths remain outside
 // this executed grammar. REX.W has no width effect on explicitly byte opcodes.
 //
 // Intent exists before encoding. Encode and Parse deliberately use different
@@ -47,6 +50,12 @@ const (
 	Test
 	TestImmediate
 	Branch
+	Add
+	Call
+	Push
+	Pop
+	Return
+	Syscall
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -68,6 +77,7 @@ type Intent struct {
 	RIP              bool
 	HighDst, HighSrc bool  // AH/CH/DH/BH, with Dst/Src in 0..3.
 	Condition        uint8 // Intel condition field, only 2..7 and 12..15.
+	FS               bool  // Displacement-only FS memory; Base, RIP and index are absent.
 }
 
 // Form selects an opcode spelling. Memory/register direction is determined by
@@ -104,6 +114,14 @@ const (
 	MOV8A
 	MOVC6
 	MOVB0
+	ADD83
+	ADD81
+	ADD05
+	CALLE8
+	PUSH50
+	POP58
+	RETC3
+	SYSCALL0F05
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

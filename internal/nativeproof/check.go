@@ -38,27 +38,35 @@ func Check(ctx context.Context, im *Image, entry uint64, face Interface, p Propo
 // checkInventory validates complete proposed instruction/edge inventories for
 // every graph domain. Semantic transfer never consumes proposed successors.
 func checkInventory(ctx context.Context, g *graph, nodes []Node, premise string) error {
+	return checkContextInventory(ctx, g, nodes, premise, false)
+}
+
+func checkContextInventory(ctx context.Context, g *graph, nodes []Node, premise string, transitions bool) error {
 	// Zero means missing; otherwise the slot identifies the caller's node plus
 	// one. Proposal order is independent of discovery and topological order.
 	proposed := make([]int, len(g.nodes))
-	var extra map[uint64]struct{}
+	var extra map[programPoint]struct{}
 	for j, n := range nodes {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		index, exists := g.byPC[n.PC]
+		if !transitions && n.Context != "" {
+			return refuse(n.PC, premise, "call-free inventory carries an activation context")
+		}
+		key := programPoint{n.PC, n.Context}
+		index, exists := g.byPoint[key]
 		if !exists {
-			if _, duplicate := extra[n.PC]; duplicate {
-				return g.failure(n.PC, refuse(n.PC, premise, "duplicate instruction start"))
+			if _, duplicate := extra[key]; duplicate {
+				return g.failureAt(key, refuse(n.PC, premise, "duplicate instruction start"))
 			}
 			if extra == nil {
-				extra = make(map[uint64]struct{})
+				extra = make(map[programPoint]struct{})
 			}
-			extra[n.PC] = struct{}{}
+			extra[key] = struct{}{}
 			continue
 		}
 		if proposed[index] != 0 {
-			return g.failure(n.PC, refuse(n.PC, premise, "duplicate instruction start"))
+			return g.failureAt(key, refuse(n.PC, premise, "duplicate instruction start"))
 		}
 		proposed[index] = j + 1
 	}
@@ -69,15 +77,15 @@ func checkInventory(ctx context.Context, g *graph, nodes []Node, premise string)
 		ins := &g.nodes[index]
 		pc := ins.pc
 		if proposed[index] == 0 {
-			return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
+			return g.failureAt(ins.point(), refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 		}
 		n := nodes[proposed[index]-1]
 		if n.Size != ins.size || len(n.Successors) != int(ins.count) {
-			return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
+			return g.failureAt(ins.point(), refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 		}
 		for edge, next := range ins.next[:ins.count] {
 			if n.Successors[edge] != g.nodes[next].pc {
-				return g.failure(pc, refuse(pc, premise, "omitted or inconsistent instruction/edge"))
+				return g.failureAt(ins.point(), refuse(pc, premise, "omitted or inconsistent instruction/edge"))
 			}
 		}
 	}

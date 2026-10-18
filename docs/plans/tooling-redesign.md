@@ -328,7 +328,7 @@
                           - [x] 5.1w.2b.3b.2a.2.2.2.2.6.3 Recheck initialized
                             image reads and the selected decision from the root, excluding
                             only the proved-dead call arm and stopping before the live TLS call.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.7 Compose generic checked
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.7 Compose generic checked
                           direct-call/frame/return transitions with per-thread syscall
                           effects and segment-relative byte-memory access. Retain actual
                           return words, activation/thread context, complete state/effect

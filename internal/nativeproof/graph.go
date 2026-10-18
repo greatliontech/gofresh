@@ -10,6 +10,7 @@ import (
 )
 
 type instruction struct {
+	context  string
 	boundary boundaryKind
 	pc       uint64
 	inst     operation
@@ -39,12 +40,20 @@ type decodedInstruction struct {
 	targets  [2]uint64
 	count    uint8
 	size     uint8
+	contexts [2]string
 }
 
+type programPoint struct {
+	pc      uint64
+	context string
+}
+
+func (i instruction) point() programPoint { return programPoint{i.pc, i.context} }
+
 type graph struct {
-	nodes []instruction
-	byPC  map[uint64]int
-	order []int
+	nodes   []instruction
+	byPoint map[programPoint]int
+	order   []int
 }
 
 // A cut is decoded but unexecuted. It is never a return instruction or evidence
@@ -59,12 +68,16 @@ const (
 )
 
 func (g *graph) failure(pc uint64, err error) error {
+	return g.failureAt(programPoint{pc: pc}, err)
+}
+
+func (g *graph) failureAt(point programPoint, err error) error {
 	r, ok := err.(*Refusal)
 	if !ok {
 		return err
 	}
-	path := []uint64{pc}
-	if index, ok := g.byPC[pc]; ok {
+	path := []uint64{point.pc}
+	if index, ok := g.byPoint[point]; ok {
 		for parent := g.nodes[index].parent; parent >= 0; parent = g.nodes[parent].parent {
 			path = append(path, g.nodes[parent].pc)
 		}
@@ -118,26 +131,37 @@ func decodeGraphLimited(ctx context.Context, im *Image, entry uint64, limit int)
 // All native domains share instruction occupancy, successor closure and acyclic
 // scheduling. A domain's decoder supplies forms, never an asserted edge list.
 func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne func(uint64) (decodedInstruction, error)) (*graph, error) {
+	return decodeOccurrenceGraph(ctx, entry, limit, func(p programPoint) (decodedInstruction, error) {
+		return decodeOne(p.pc)
+	})
+}
+
+// Code occupancy is image-wide; execution membership is activation-qualified.
+// A repeated instruction must have the same extent, but its control context and
+// boundary disposition may differ. All domains use this closure/scheduling kernel.
+func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeOne func(programPoint) (decodedInstruction, error)) (*graph, error) {
 	// Decode the root before allocating graph storage: an unsupported entry has
 	// no discovered graph, and its refusal already carries the entry-only path.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	first, err := decodeOne(entry)
+	first, err := decodeOne(programPoint{pc: entry})
 	if err != nil {
 		return nil, err
 	}
 	g := &graph{
-		nodes: make([]instruction, 1, 1+int(first.count)),
-		byPC:  map[uint64]int{entry: 0},
+		nodes:   make([]instruction, 1, 1+int(first.count)),
+		byPoint: map[programPoint]int{{pc: entry}: 0},
 	}
 	g.nodes[0] = instruction{pc: entry, parent: -1}
 	// Discovery order is the queue; membership and parent ownership are recorded
 	// once when a target first receives its index. Occupancy is a different fact:
 	// it records decoded byte extents, including instruction interiors.
 	occupied := make(map[uint64]uint64)
+	extents := make(map[uint64]uint8)
 	for at := 0; at < len(g.nodes); at++ {
 		pc := g.nodes[at].pc
+		point := g.nodes[at].point()
 		var ins decodedInstruction
 		if at != 0 {
 			if err := ctx.Err(); err != nil {
@@ -145,19 +169,23 @@ func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne fu
 			}
 		}
 		if owner, ok := occupied[pc]; ok && owner != pc {
-			return nil, g.failure(pc, refuse(pc, "instruction-overlap", fmt.Sprintf("target enters instruction at %#x", owner)))
+			return nil, g.failureAt(point, refuse(pc, "instruction-overlap", fmt.Sprintf("target enters instruction at %#x", owner)))
 		}
 		if at == 0 {
 			ins = first
 		} else {
-			ins, err = decodeOne(pc)
+			ins, err = decodeOne(point)
 			if err != nil {
-				return nil, g.failure(pc, err)
+				return nil, g.failureAt(point, err)
 			}
 		}
+		if old, ok := extents[pc]; ok && old != ins.size {
+			return nil, g.failureAt(point, refuse(pc, "instruction-overlap", "activation decode extent differs"))
+		}
+		extents[pc] = ins.size
 		for off := uint64(0); off < uint64(ins.size); off++ {
 			if owner, ok := occupied[pc+off]; ok && owner != pc {
-				return nil, g.failure(pc, refuse(pc, "instruction-overlap", fmt.Sprintf("instruction intersects start %#x", owner)))
+				return nil, g.failureAt(point, refuse(pc, "instruction-overlap", fmt.Sprintf("instruction intersects start %#x", owner)))
 			}
 			occupied[pc+off] = pc
 		}
@@ -166,14 +194,15 @@ func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne fu
 		g.nodes[at].count = ins.count
 		g.nodes[at].size = ins.size
 		for edge, target := range ins.targets[:ins.count] {
-			next, exists := g.byPC[target]
+			key := programPoint{target, ins.contexts[edge]}
+			next, exists := g.byPoint[key]
 			if !exists {
 				if limit > 0 && len(g.nodes) >= limit {
-					return nil, g.failure(pc, refuse(pc, "relation-budget", "instruction graph budget"))
+					return nil, g.failureAt(point, refuse(pc, "relation-budget", "instruction graph budget"))
 				}
 				next = len(g.nodes)
-				g.byPC[target] = next
-				g.nodes = append(g.nodes, instruction{pc: target, parent: at})
+				g.byPoint[key] = next
+				g.nodes = append(g.nodes, instruction{pc: target, context: key.context, parent: at})
 			}
 			// Appending can move the node slice. Resolve through its current base
 			// rather than keeping a node pointer across discovery of a successor.
@@ -209,7 +238,7 @@ func decodeGraphUsing(ctx context.Context, entry uint64, limit int, decodeOne fu
 		for _, ins := range g.nodes {
 			if ins.indegree != 0 {
 				pc := ins.pc
-				return nil, g.failure(pc, refuse(pc, "acyclic-control", "reachable cycle is unsupported"))
+				return nil, g.failureAt(ins.point(), refuse(pc, "acyclic-control", "reachable cycle is unsupported"))
 			}
 		}
 	}

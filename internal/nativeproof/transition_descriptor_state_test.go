@@ -13,6 +13,10 @@ import (
 func descriptorState(t testing.TB, d to.Descriptor, immediate uint64, disp int32, raw []byte) {
 	t.Helper()
 	i := descriptorPayload(d, immediate, disp)
+	if i.FS || i.Operation == to.Call || i.Operation == to.Return || i.Operation == to.Push || i.Operation == to.Pop || i.Operation == to.Syscall {
+		callTLSDescriptorState(t, d, i, raw)
+		return
+	}
 	face := stateFace(16, 0)
 	face.Regions = nil
 	face.Words = nil
@@ -37,7 +41,7 @@ func descriptorState(t testing.TB, d to.Descriptor, immediate uint64, disp int32
 	if i.Operation == to.LEA {
 		deliver(i.Base)
 	}
-	if i.Operation == to.And || i.Operation == to.Subtract {
+	if i.Operation == to.And || i.Operation == to.Subtract || i.Operation == to.Add {
 		deliver(i.Dst)
 		// Alignment predicates constrain this operation's admissible semantic
 		// payload, independently of the encoding population's arbitrary bits.
@@ -82,7 +86,7 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 		descriptorState(t, d, 0xfedcba9876543280, -0x12345, raw)
 		count++
 	}
-	if count != 53419 {
+	if count != 54814 {
 		t.Fatal("incomplete semantic descriptor population", count)
 	}
 	for value := uint64(0); value < 256; value++ {

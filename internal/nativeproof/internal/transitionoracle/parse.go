@@ -13,6 +13,10 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 	d := Decoded{}
 	fail := func(why string) (Decoded, error) { return Decoded{}, fmt.Errorf("executed instruction: %s", why) }
 	first := r.unsigned(1)
+	fs := first == 0x64
+	if fs {
+		first = r.unsigned(1)
+	}
 	op := first
 	if first >= 0x40 && first <= 0x4f {
 		d.Encoding.REX = byte(first)
@@ -24,11 +28,25 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		width = 64
 	}
 	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 12 && n <= 15 }
-	if rex == 0 && op == 0x0f {
+	if !fs && rex == 0 && (op == 0xe8 || op == 0xc3) {
+		if op == 0xe8 {
+			d.Intent.Operation, d.Encoding.Form, d.Intent.SignedDisp = Call, CALLE8, r.signed(4)
+		} else {
+			d.Intent.Operation, d.Encoding.Form = Return, RETC3
+		}
+	} else if !fs && (rex == 0 || rex == 0x41) && op >= 0x50 && op <= 0x5f {
+		d.Intent.Operation, d.Encoding.Form = Push, PUSH50
+		if op >= 0x58 {
+			d.Intent.Operation, d.Encoding.Form = Pop, POP58
+		}
+		d.Intent.Dst = uint8(op%8) + 8*(rex&1)
+	} else if rex == 0 && op == 0x0f && !fs {
 		second := r.unsigned(1)
 		if second >= 0x80 && second <= 0x8f && cc(second-0x80) {
 			d.Intent.Operation, d.Intent.Condition, d.Encoding.Form = Branch, uint8(second-0x80), JccNear
 			d.Intent.SignedDisp = r.signed(4)
+		} else if second == 0x05 {
+			d.Intent.Operation, d.Encoding.Form = Syscall, SYSCALL0F05
 		} else if second != 0xa2 {
 			return fail("unsupported two-byte opcode")
 		} else {
@@ -68,8 +86,11 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 			return fail("immediate MOV prefix")
 		}
 	} else {
-		if op == 0x2d || op == 0x25 || op == 0x3d || op == 0xa9 {
+		if op == 0x05 || op == 0x2d || op == 0x25 || op == 0x3d || op == 0xa9 {
 			d.Intent.Operation, d.Encoding.Form = Subtract, SUB2D
+			if op == 0x05 {
+				d.Intent.Operation, d.Encoding.Form = Add, ADD05
+			}
 			if op == 0x25 {
 				d.Intent.Operation, d.Encoding.Form = And, AND25
 			}
@@ -80,7 +101,7 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				d.Intent.Operation, d.Encoding.Form = TestImmediate, TESTA9
 			}
 			if width != 64 {
-				if op == 0x2d || op == 0x25 {
+				if op == 0x05 || op == 0x2d || op == 0x25 {
 					return fail("narrow arithmetic outside grammar")
 				}
 				d.Intent.Width = width
@@ -124,14 +145,17 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				}
 				// mod=00 base=101 is absent/RIP-relative regardless of REX.B.
 				if mode == 0 && base == 5 && !rip {
-					return fail("address without GPR base")
+					if !fs {
+						return fail("address without GPR base")
+					}
+					d.Intent.FS, d.Encoding.DispBytes, d.Intent.SignedDisp = true, 4, r.signed(4)
 				}
 				if rip {
 					d.Encoding.DispBytes, d.Intent.SignedDisp = 4, r.signed(4)
 					if op != 0x8d {
 						d.Intent.RIP = true
 					}
-				} else {
+				} else if !d.Intent.FS {
 					d.Intent.Base = uint8(base)
 					if rex&1 != 0 {
 						d.Intent.Base += 8
@@ -211,12 +235,15 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 					d.Intent.Immediate &= 0xffffffff
 				}
 			case 0x83, 0x81:
-				if memory || (selector != 4 && selector != 5 && selector != 7) || selector != 7 && width != 64 {
+				if memory || (selector != 0 && selector != 4 && selector != 5 && selector != 7) || selector != 7 && width != 64 {
 					return fail("arithmetic operand or opcode extension")
 				}
 				d.Intent.Dst = operandRM
 				immWidth := 4
 				d.Intent.Operation, d.Encoding.Form = Subtract, SUB81
+				if selector == 0 {
+					d.Intent.Operation, d.Encoding.Form = Add, ADD81
+				}
 				if selector == 4 {
 					d.Intent.Operation, d.Encoding.Form = And, AND81
 				}
@@ -226,6 +253,9 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				if op == 0x83 {
 					immWidth = 1
 					d.Encoding.Form = SUB83
+					if selector == 0 {
+						d.Encoding.Form = ADD83
+					}
 					if selector == 4 {
 						d.Encoding.Form = AND83
 					}
@@ -253,12 +283,15 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 	if r.err {
 		return fail("truncated bytes")
 	}
+	if fs && (!d.Intent.FS || d.Intent.Operation != Load && d.Intent.Operation != Store && d.Intent.Operation != StoreImmediate) {
+		return fail("unsupported FS form")
+	}
 	d.Length = r.pos
 	if pc > ^uint64(0)-uint64(d.Length) {
 		return fail("instruction end wraps")
 	}
 	d.Next = pc + uint64(d.Length)
-	if d.Intent.Operation == Jump || d.Intent.Operation == Branch {
+	if d.Intent.Operation == Jump || d.Intent.Operation == Branch || d.Intent.Operation == Call {
 		delta := d.Intent.SignedDisp
 		if delta < 0 {
 			magnitude := uint64(-delta) // only signed 8/32-bit offsets occur here.

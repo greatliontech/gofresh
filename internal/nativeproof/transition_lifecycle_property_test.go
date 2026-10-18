@@ -10,6 +10,7 @@ import (
 
 func lifecycleProposal(p TransitionProposal) TransitionProposal {
 	p.Nodes = append([]Node(nil), p.Nodes...)
+	p.Expansions = slices.Clone(p.Expansions)
 	for i := range p.Nodes {
 		p.Nodes[i].Successors = append([]uint64(nil), p.Nodes[i].Successors...)
 	}
@@ -48,6 +49,9 @@ func lifecycleSnapshot(b TransitionBound) TransitionBound {
 	b.Instructions = slices.Clone(b.Instructions)
 	b.Accesses = slices.Clone(b.Accesses)
 	b.PrimitiveEffects = slices.Clone(b.PrimitiveEffects)
+	b.Frames = slices.Clone(b.Frames)
+	b.Abstractions = slices.Clone(b.Abstractions)
+	b.Expansions = slices.Clone(b.Expansions)
 	b.Boundary.Bytes = slices.Clone(b.Boundary.Bytes)
 	b.ExcludedBoundaries = slices.Clone(b.ExcludedBoundaries)
 	for j := range b.ExcludedBoundaries {

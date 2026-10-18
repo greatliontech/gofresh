@@ -186,4 +186,5 @@ func checkOptimizedInitialized(t testing.TB, im *Image, face TransitionInterface
 	c, err := CheckTransition(t.Context(), im, unknown, p, TransitionLimits{})
 	transitionRefused(t, c, err)
 	t.Logf("initialized root %#x -> unexecuted live CALL %#x; excluded CALL %#x under checked false BOOL guard; loader/process/source applicability remains conditional", im.entry, p.Cut, dead)
+	checkOptimizedCallTLS(t, im, face, x, p.Cut)
 }

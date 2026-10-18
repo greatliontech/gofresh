@@ -9,7 +9,7 @@ func (m *transitionChecker) cpuid() error {
 	// Capture both selectors before any destination changes. Outcomes belong to
 	// this verified occurrence, never the entry scratch namespace (which remains
 	// closed on continuation). No caller supplies values or outcome identities.
-	e := CPUIDEffect{PC: m.pc, Leaf: m.extract(m.state.regs[RAX], 0, 32), Subleaf: m.extract(m.state.regs[RCX], 0, 32)}
+	e := CPUIDEffect{PC: m.pc, Context: m.activation, Leaf: m.extract(m.state.regs[RAX], 0, 32), Subleaf: m.extract(m.state.regs[RCX], 0, 32)}
 	scope := br.NewScope()
 	for slot, result := range []*br.Term{&e.ResultsEAX, &e.ResultsEBX, &e.ResultsECX, &e.ResultsEDX} {
 		if !m.tick() {

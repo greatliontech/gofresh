@@ -176,7 +176,8 @@ func TestTransitionGuardedLiveStateAccounting(t *testing.T) {
 			low = mid + 1
 		}
 	}
-	room := low + 8*(len(x.pcs)-1)
+	// Each additional occurrence owns 2048 metadata bytes and one state slot.
+	room := low + (2048+8)*(len(x.pcs)-1)
 	p := x.proposal(len(ops) * 2)
 	c, err := CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room})
 	transitionRefused(t, c, err)
@@ -186,7 +187,7 @@ func TestTransitionGuardedLiveStateAccounting(t *testing.T) {
 	}
 	// Two live states suffice irrespective of how many earlier joins were
 	// consumed. Holding every historical state would exhaust this allowance.
-	c, err = CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room + low})
+	c, err = CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room + low - 2048 - 8})
 	if err != nil {
 		t.Fatal("consumed node state was retained", err)
 	}

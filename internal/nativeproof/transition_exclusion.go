@@ -6,6 +6,26 @@ import (
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 )
 
+// tryFalse distinguishes an incomplete proof search from exhausted/cancelled
+// work. Only the former can leave precision unknown; no resource failure falls
+// back to an accepted abstraction or boundary. Successful transfer side proofs
+// remain owned dependencies alongside structural exclusions.
+func (m *transitionChecker) tryFalse(t br.Term) (bool, error) {
+	w, err := m.proveFalseGuard(t)
+	if err == nil {
+		if err := m.reserveExclusion(); err != nil {
+			return false, err
+		}
+		m.justifications = append(m.justifications, w)
+		return true, nil
+	}
+	var r *Refusal
+	if errors.As(err, &r) && r.Premise == "transition-guard" && m.err == nil {
+		return false, nil
+	}
+	return false, err
+}
+
 // proveFalseGuard submits the independently derived BOOL root, never a proposed guard.
 // Both search and checking tick the root's cumulative meter. Their temporary
 // graphs/certificates have conservative aggregate storage allowances; imported

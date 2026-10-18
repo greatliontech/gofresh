@@ -117,7 +117,11 @@ machine state, faults, memory behavior and nondeterminism. Primitive external
 effects retain their possible inputs, outputs, failures and partial effects;
 a syscall relation alone does not establish that its outcomes follow from a
 guarded value. That stronger relation requires its own checked argument and
-execution premises. An operation cannot become a primitive merely by being
+execution premises. This does not require inventing outcomes absent from the
+identified primitive: an exact argument/outcome relation may establish a unique
+result once its argument and applicability conditions are checked. Success is
+then a derived consequence, not an additional entry assumption or a rule for
+arbitrary syscalls. An operation cannot become a primitive merely by being
 named, hashed or given a handwritten summary. A library or runtime routine,
 syscall wrapper, hook or compiler-specific intrinsic with behavior beyond the
 language premise requires its own checked implementation derivation. An explicit
@@ -275,9 +279,10 @@ checked primitive effects. Such outcomes are quantified possibilities, not
 observations or replacement entry inputs. Their executed occurrences, selector
 relations, identified semantics and applicability conditions remain explicit.
 
-In an acyclic branching scope, instruction occurrences carry derived reach
-conditions. Accesses and primitive effects inherit their instruction's condition;
-filtering the retained order by those conditions gives the executed trace.
+In an acyclic branching scope of dynamic activations, instruction occurrences
+carry derived reach conditions. Accesses and primitive effects inherit their
+instruction's condition; filtering the retained order by those conditions gives
+the executed trace.
 Listing a conditional occurrence does not assert that every execution performs it.
 An optional primitive outcome has meaning only under that occurrence's condition.
 Names reserved for inactive outcomes are mathematical totalizations, not produced
@@ -312,6 +317,75 @@ mechanisms below the identified layer may include microcode or transparent VM ex
 their names or versions confer no authority. A layer-visible exception handler or
 additional ordinary-memory effect needs its own checked composition. The model does
 not establish actual process applicability or observe any CPU response.
+
+The ordinary Linux x86-64 `ARCH_SET_FS` primitive relates a decoded native
+`SYSCALL` occurrence to the executing thread's effective FS base. Its scope
+identifies native 64-bit syscall dispatch: the low 32 bits of RAX select syscall
+158, the low 32 bits of RDI select operation `0x1002`, and RSI carries the unsigned
+64-bit base. It identifies the applicable user-address ceiling and conventional
+architectural SYSCALL entry with SYSRET/IRET user return; alternative entry
+mechanisms require their own relation. Compatibility or x32 dispatch, unsupported
+selectors and unavailable applicability do not acquire this relation. User-mode
+FSGSBASE availability is not a prerequisite for this operating-system operation.
+The scope excludes behavior-changing seccomp, ptrace, syscall-user-dispatch,
+probe and signal interposition over the occurrence and any interval relying on
+the established thread state. Transparent scheduling and virtual-machine handling
+that preserve the exposed state are permitted. Debug, exceptional return and
+other machine-context conditions must be covered or explicitly excluded under
+the machine model; a premise that the syscall succeeded is not applicability.
+Other entry/return work, including restartable-sequence handling, is admitted
+only if it preserves the stated exposed-state relation or has its own checked
+composition.
+
+For the unsigned scalar base argument below the applicable `TASK_SIZE_MAX`, the
+operation returns raw RAX zero and establishes that base as the current thread's
+effective FS base. It neither dereferences that argument nor allocates user
+storage, and has no allocation, user-memory-access or interruptible-wait failure
+in this arm. An argument at or above the ceiling returns raw `-EPERM` and leaves
+the effective FS base unchanged. These are the permitted operation outcomes
+under the stated applicability, not libc's return/errno convention or arbitrary
+64-bit responses. The ceiling is part of the identified configuration; for the
+ordinary 4-KiB, 48- and 57-bit address configurations it is respectively
+`2^47 - 4096` and `2^56 - 4096`. Argument validity alone establishes neither
+mapping nor permission for a later access through the base.
+
+The composed syscall entry/return relation retains the decoded next instruction
+address in RCX and the incoming architectural RFLAGS with RF cleared in R11.
+Under an ordinary 64-bit user-return context with valid architectural flag bits
+and no virtual-8086, nested-task or single-step return condition, returned RFLAGS
+are those saved flags with the architectural reserved-bit normalization; in
+particular carry, zero, sign, overflow, parity, auxiliary carry and direction
+are preserved, and RF is cleared. General-purpose registers other than RAX,
+RCX and R11, including RSP, are preserved. Control returns to the decoded
+successor in the same thread's 64-bit user mode with the native user CS/SS of
+the identified entry/return configuration, not arbitrary incoming selectors
+assumed preserved. Ordinary user byte-memory is
+unchanged by this operation; its kernel/thread-state effect is retained
+separately. These conclusions concern the complete applicable entry/dispatch/
+return primitive, not the hardware `SYSCALL` instruction alone.
+
+An effective FS base is distinct from an FS selector or a kernel bookkeeping
+field. The primitive permits implementations using a segment descriptor or a
+base-register update; success asserts neither a zero selector nor equality of a
+particular kernel field to the base. Selector or other context outputs not fixed
+by the identified relation remain constrained only by that relation, with checked
+occurrence origins for genuinely unspecified values. They are not silently
+preserved, reset to zero or inferred from a projected output's absence. Failure
+retains the prior FS state. Neither arm changes another thread's FS state or
+establishes a language-level TLS object.
+
+The interface is described by [arch_prctl(2)](https://man7.org/linux/man-pages/man2/arch_prctl.2.html).
+Source locators for the operation and its composition include Linux
+[process_64.c](https://github.com/torvalds/linux/blob/v6.18/arch/x86/kernel/process_64.c),
+[page_64.h](https://github.com/torvalds/linux/blob/v6.18/arch/x86/include/asm/page_64.h),
+[fsgsbase.h](https://github.com/torvalds/linux/blob/v6.18/arch/x86/include/asm/fsgsbase.h),
+[entry_64.S](https://github.com/torvalds/linux/blob/v6.18/arch/x86/entry/entry_64.S),
+[syscall_64.c](https://github.com/torvalds/linux/blob/v6.18/arch/x86/entry/syscall_64.c)
+and [syscall-common.c](https://github.com/torvalds/linux/blob/v6.18/kernel/entry/syscall-common.c).
+The [descriptor-backed path](https://github.com/torvalds/linux/blob/v4.4/arch/x86/kernel/process_64.c)
+also illustrates why effective base and selector are distinct. These locate
+semantic definitions, not approved kernel versions or evidence that an actual
+execution satisfies the primitive's applicability conditions.
 
 A restricted static-ELF root-loading relation may refine declared image storage.
 It is a partial relation over the same owned ELF64 little-endian x86-64 image,
@@ -353,6 +427,10 @@ entry-to-cut transition MUST satisfy these obligations:
   their authority are retained separately from derived outputs; an expected output
   is not an input premise. Retained entry-flag predicates have explicit
   architectural meanings and unchanged identities across later overwrites.
+  The scope retains active call/return context and any per-thread machine state
+  needed by its transfers. Unspecified entry FS state remains arbitrary; an
+  expected TLS base, a caller-supplied TLS heap or an assumed syscall result
+  cannot replace a derivation from the actual incoming state.
   The image, instruction and machine applicability
   obligations of REQ-impl-native-entry remain required.
 - **complete-cut** — The checker reconstructs bound instruction bytes and every
@@ -360,13 +438,25 @@ entry-to-cut transition MUST satisfy these obligations:
   cut as a reachable instruction boundary and retains its decoded instruction
   separately as unexecuted boundary evidence. Every execution from an admissible
   entry state reaches that cut; cycles require a checked finite-progress argument
-  or refusal. A structurally decoded boundary without an admitted transfer may
+  or refusal. A numeric cut selects the first encounter with that address and
+  requires one activation context in the stopped scope. Ambiguous contexts and
+  continuation to a later occurrence of the same numeric cut refuse; a future
+  explicit occurrence locator must retain the same complete-cut obligations.
+  A structurally decoded boundary without an admitted transfer may
   terminate discovery only when an independently checked proof establishes that
   its complete incoming execution condition is false for every admissible state.
   Evidence retains that boundary's bytes, extent, incoming control dependencies
   and exclusion proof. This grants no execution, effect, target, return or
   continuation semantics for the excluded operation. Without that proof,
-  unsupported or unresolved transfers refuse. Truncation, unavailable bytes,
+  unsupported or unresolved transfers refuse. A proposal may select a direct
+  call as such a boundary instead of supplying an admitted callee transfer.
+  The checker then proves its full incoming occurrence guard false without
+  interpreting the target, pushing a return word or inventing an after-call
+  state. Expansion choices are untrusted search choices, not premises; an
+  expanded callee may itself contain independently excluded boundaries.
+  Invalid bytes at the selected boundary remain a refusal, and cancellation
+  or budget exhaustion cannot select a successful fallback boundary.
+  Truncation, unavailable bytes,
   incompatible decoding, cancellation and exhausted exploration never establish
   an endpoint. A fault
   or unsupported transfer before the cut cannot be hidden by assuming normal
@@ -380,6 +470,16 @@ entry-to-cut transition MUST satisfy these obligations:
   Graph closure alone cannot justify replacing a derived reach expression with
   true or excluding an arm. An excluded transfer requires independently checked
   impossibility under the retained premises; unresolved paths remain required.
+  A direct call's target and return address derive from its actual encoding and
+  checked instruction extent, including displacement extension and address
+  arithmetic. Coverage enters that target under the current state and active
+  continuation; a call is not a fallthrough with an arbitrary result. A return
+  reads the actual current return word and establishes its executable target,
+  instruction boundary and compatibility with the active continuation. An
+  expected return label alone cannot establish return-word integrity or restore
+  the caller's state. Relevant protected-return mechanisms, faults and context
+  changes remain machine obligations. A root return lacking a checked continuation
+  cannot substitute for reaching the common cut.
 - **symbolic-origins** — An address origin is universally quantified over its
   declared bounds, congruence and memory predicates, not a sampled runtime address.
   Pointer provenance identifies the origin and checked byte offset and agrees with
@@ -392,6 +492,13 @@ entry-to-cut transition MUST satisfy these obligations:
   represented but cannot authorize a read. Pointer-word provenance survives a
   memory round trip only through its complete correctly ordered bytes; partial or
   overlapping writes invalidate affected provenance.
+  Segment-relative addressing uses the applicable thread's effective base and
+  exact address-size, displacement and full-width operand semantics. It resolves
+  into the same owned byte-memory as ordinary addressing, with canonical,
+  nonwrapping extents and existing permissions. A checked base-setting primitive
+  may transport provenance only from its actual argument through its established
+  state relation. Equal scalar addresses do not create provenance, a separate TLS
+  heap, new storage or new permissions; unsupported resolution refuses the access.
 - **state-and-effects** — The checker derives the claimed register, flag and
   byte-memory relations from exact operand forms and execution order. Instruction
   fetch and every data access remain accounted for, including writes whose final
@@ -416,6 +523,16 @@ entry-to-cut transition MUST satisfy these obligations:
   guard/value correlations; pointer, preservation and definedness claims must hold
   on every contributing path. Inactive outcome names cannot affect the filtered
   executed trace or the final state.
+  Calls, pushes, pops, returns and explicit stack adjustments derive their exact
+  stack-pointer, byte-memory, flag and register effects, including implicit return
+  stores and loads. Adjusting the stack pointer grants no storage, initialization
+  or access permission. Every accessed slot must be admitted by the root memory
+  relation; additional requirements need a fresh root judgment, never strengthened
+  inherited permissions. Restoring the stack pointer or returning from a call
+  neither rolls back writes nor erases accesses or primitive effects. A per-thread
+  effect survives result-register overwrites and ordinary call return. Later
+  context changes require a checked preservation or replacement relation before
+  using that state; equal program counters cannot establish thread identity.
 - **independent-evidence** — Candidate endpoints, instruction inventories and
   state relations are proposals. The checker validates their coverage, transfers,
   origin side conditions and dependencies independently of proposed conclusions.
@@ -423,21 +540,35 @@ entry-to-cut transition MUST satisfy these obligations:
   unclosed obligation yield no transition certificate. Evidence retains owned
   inputs and all image, interface, origin, rule and subordinate dependencies under
   REQ-impl-derivation-reuse; copying a projection grants no authority.
+  A scalar-call conclusion or a read/write frame bound alone is insufficient to
+  supply a complete symbolic successor state. Using such subordinate evidence
+  requires a checked relation covering every state component and ordered effect
+  that the continuation consumes; an adapter cannot invent that authority.
 - **conditional-composition** — A successor transition starts at the checked cut
-  under the same bound image and compatible origin, state, memory and machine
-  premises. The cut instruction belongs to that successor's executed scope.
+  under the same bound image and compatible origin, state, memory, activation,
+  thread and machine premises. The cut instruction belongs to that successor's
+  executed scope. A newly required primitive or context premise must follow from
+  the predecessor's retained conditions or be established by a fresh root
+  judgment; continuation cannot strengthen them silently.
   Composition preserves original entry variables, prior primitive-outcome
   identities and the complete ordered effect dependencies. New occurrences have
   distinct outcome identities; neither a replacement entry state nor an unbound
   additional input can stand in for a checked primitive effect.
   The predecessor's cut must be a common boundary of every path being extended.
   Reconstructed prefix and suffix coverage exclude bypass, overlapping instruction
-  decoding and re-entry into an executed prefix. Initial predicate identities,
-  occurrence guards and the final reach expression remain retained dependencies;
-  continuation does not restart reachability at an invented true condition or
-  reset resource allowances per path. Checked exclusions retain their original
-  boundary and guard dependencies; continuation neither reapplies initial image
-  values nor turns an excluded operation into a fictional executed continuation.
+  decoding and unaccounted re-entry into an executed prefix. Repeated execution of
+  the same instruction in distinct activations requires distinct checked dynamic
+  occurrences, including their primitive-outcome origins, or explicit refusal;
+  a program-counter-only identity cannot collapse them. Active return contexts
+  survive cuts and compose only through compatible joins; differing contexts
+  must retain their path association or refuse, never select one silently.
+  Initial predicate identities, occurrence guards and the final reach expression
+  remain retained dependencies; continuation does not restart reachability at an
+  invented true condition or
+  reset resource allowances per path, call, return or continuation. Checked
+  exclusions retain their original boundary and guard dependencies; continuation
+  neither reapplies initial image values nor turns an excluded operation into a
+  fictional executed continuation.
   Origin names, matching output bytes or digests cannot replace this relation.
   The transition remains distinct from normal-return, complete-function,
   source-startup and completed-bootstrap evidence. Applying it to an ordinary
@@ -678,11 +809,12 @@ equality of memory before and after execution.
   entry states and are preserved on every edge, including backedges. Finite unrolling,
   unclosed invariants, unsupported effects, exhausted bounds or cancellation
   provide no accepted prefix of a frame theorem.
-- **calls-and-primitives** — Each call composes a separately checked callee frame
-  at the actual target, arguments, context and continuation under
-  REQ-impl-callback-transfer. Callee writes, escapes, callbacks and exceptional
-  effects remain accounted for as required by REQ-impl-region-transport; an
-  arbitrary return value is no substitute. Primitive external effects use only
+- **calls-and-primitives** — Each call derives its frame by checked execution of
+  the callee or composes a separately checked callee frame at the actual target,
+  arguments, context and continuation under REQ-impl-callback-transfer and, when
+  supplying an entry-to-cut state, REQ-impl-native-transition. Callee writes,
+  escapes, callbacks and exceptional effects remain accounted for as required by
+  REQ-impl-region-transport; an arbitrary return value is no substitute. Primitive external effects use only
   identified instruction-set or operating-system semantics under
   REQ-impl-premise-boundary, with exact argument and applicability preconditions.
   A syscall relation retains its reads, writes, partial effects, failures and

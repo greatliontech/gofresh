@@ -86,7 +86,12 @@
 // The transition grammar admits byte/32/64-bit MOV (including base/displacement
 // and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
 // AND, nonwriting 32/64-bit CMP/TEST and the ten direct conditions over CF, ZF and
-// SF!=OF, alongside relative JMP/fallthrough. Exact unprefixed CPUID requires the optional
+// SF!=OF, alongside relative JMP/fallthrough, constant ADD, direct near CALL,
+// register PUSH/POP and near RET. Stack operations use the same current bytes;
+// CALL stores the actual decoded continuation and RET proves equality of its
+// current readable return word to that active context. PUSH/POP of RSP retain
+// architectural ordering. Restored RSP does not roll back writes or effects.
+// Exact unprefixed CPUID requires the optional
 // CPUIDModel architectural-step condition. Each checked occurrence introduces
 // four independent BV32 outcomes in a fresh private scope, zero-extends their
 // register writes and destroys destination provenance. An ordered value-form
@@ -97,7 +102,9 @@
 // Narrow register writes clear pointer provenance; partial memory overwrites
 // clear affected pointer lanes even when the scalar bytes agree. One instruction
 // occurrence owns each reach guard; accesses and primitive effects inherit it by
-// PC. Filtering the deterministic topological order gives the actual trace. An
+// activation and PC. Identical image bytes may execute in separate activations;
+// their guards and outcome scopes never collapse. Call-free domains accept only
+// root-context inventories. Filtering the deterministic topological order gives the actual trace. An
 // inactive query's arbitrary outcome totalizations cannot affect that trace or
 // the merged state. Registers, private predicates and every declared byte merge
 // by guarded ITE; provenance survives only identical facts on all contributing
@@ -113,6 +120,35 @@
 // may be unprojected, never invented or mistaken for preservation. No normal
 // return, source storage, process-argument meaning, completed bootstrap or public
 // runtime authority follows from this conditional state relation.
+//
+// ProposeTransition's optional occurrence-qualified expansion choices are
+// untrusted search input. By default CALL and SYSCALL remain structural terminals,
+// accepted only with an independent proof that the complete incoming guard is
+// false. An excluded CALL has no push, target inspection or invented continuation;
+// even an unmapped or cyclic target is outside that excluded scope. An expanded
+// callee may contain its own independently excluded boundaries. Unused, duplicate
+// or wrong-operation choices refuse. No budget/cancellation failure substitutes
+// a successful boundary. A numeric cut means first hit, with exactly one
+// activation context in the stopped graph; ambiguous contexts and advancing to a
+// later occurrence of the same numeric cut are unsupported. The resolved context
+// is retained, so later explicit occurrence selection can preserve this theorem.
+//
+// LinuxAMD64SyscallModel and its explicit 48/57-bit address configuration admit
+// the ordinary native ARCH_SET_FS relation. Actual low RAX/RDI selectors must be
+// checked; valid unsigned RSI establishes zero and the effective FS base, while
+// an invalid base yields raw -EPERM without changing FS. Unknown validity retains
+// both outcomes. Pointer/value agreement and checked origin bounds may establish
+// that the whole argument range is valid. This supplies neither mapping nor a
+// pointer from an equal scalar. FS displacement-only MOV accesses resolve through
+// argument-derived provenance into the existing byte map, with full-width,
+// canonical arithmetic and existing permissions. The arbitrary initial FS input
+// supplies no TLS heap. Syscall effects survive overwrites and returns.
+// RCX is the decoded next IP and the three status predicates are preserved.
+// R11's unprojected deterministic saved flags have a distinct occurrence-scoped
+// analysis abstraction: all actual values are included, with no claimed Linux
+// nondeterminism or fabricated entry flags. Context changes invalidate blanket
+// preservation; no zero FS selector is asserted. Actual executor applicability,
+// source-storage correspondence and ordinary runtime reuse remain separate.
 //
 // Root image footprints select absolute bytes in the owned PT_LOAD mappings;
 // permissions and backing-alias checks share the frame domain's mapping policy.

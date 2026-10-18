@@ -10,6 +10,9 @@ import (
 // Branch displacements are already relative to the eventual instruction end;
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
+	if i.FS || i.Operation >= Add {
+		return encodeCallTLS(i, e)
+	}
 	if i.Width != 0 || i.RIP || i.HighDst || i.HighSrc || i.Condition != 0 || i.Operation >= Compare {
 		return encodeExtended(i, e)
 	}

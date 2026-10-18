@@ -17,6 +17,13 @@ func TestLiteralEncodings(t *testing.T) {
 		i         Intent
 		e         Encoding
 	}{
+		{"call-rel32", "e8f8ffffff", Intent{Operation: Call, SignedDisp: -8}, Encoding{Form: CALLE8}},
+		{"push-rsp", "54", Intent{Operation: Push, Dst: 4}, Encoding{Form: PUSH50}},
+		{"pop-r12", "415c", Intent{Operation: Pop, Dst: 12}, Encoding{Form: POP58, REX: 0x41}},
+		{"ret", "c3", Intent{Operation: Return}, Encoding{Form: RETC3}},
+		{"syscall", "0f05", Intent{Operation: Syscall}, Encoding{Form: SYSCALL0F05}},
+		{"add-rdi", "4883c708", Intent{Operation: Add, Dst: 7, Immediate: 8}, Encoding{Form: ADD83, REX: 0x48}},
+		{"fs-store", "6448c70425f8ffffff23010000", Intent{Operation: StoreImmediate, FS: true, SignedDisp: -8, Immediate: 0x123}, Encoding{Form: MOVC7, REX: 0x48, SIB: true, DispBytes: 4}},
 		{"cpuid", "0fa2", Intent{Operation: CPUID}, Encoding{Form: CPUID0FA2}},
 		{"mov89", "4889d8", Intent{Operation: MoveRegister, Dst: 0, Src: 3}, Encoding{Form: MOV89, REX: 0x48}},
 		{"mov8b", "4f8bc1", Intent{Operation: MoveRegister, Dst: 8, Src: 9}, Encoding{Form: MOV8B, REX: 0x4f}},

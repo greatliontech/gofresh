@@ -73,6 +73,10 @@ type Node struct {
 	PC         uint64
 	Size       uint8
 	Successors []uint64
+	// Context is the transition activation path. Empty denotes the root.
+	// Call-free proof domains reject nonempty contexts. Successor contexts are
+	// independently derived from the decoded transfer, never supplied as authority.
+	Context string
 }
 
 // Proposal carries no authority. Its interface must exactly match the separately

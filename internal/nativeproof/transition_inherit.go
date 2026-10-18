@@ -15,20 +15,26 @@ func transitionCopyWork(work *int, limit int, counts ...int) error {
 }
 
 func captureTransitionProposal(p TransitionProposal, l TransitionLimits, work *int) (TransitionProposal, error) {
-	if len(p.Nodes) > l.Instructions {
+	if len(p.Nodes) > l.Instructions || len(p.Expansions) > l.Instructions {
 		return TransitionProposal{}, refuse(0, "transition-budget", "input inventory exceeds limits")
 	}
-	if err := transitionCopyWork(work, l.Work, len(p.Nodes)); err != nil {
+	if err := transitionCopyWork(work, l.Work, len(p.Nodes), len(p.Expansions)); err != nil {
 		return TransitionProposal{}, err
 	}
 	for _, n := range p.Nodes {
 		if len(n.Successors) > 2 {
 			return TransitionProposal{}, refuse(n.PC, "transition-proposal", "unsupported successor count")
 		}
-		if err := transitionCopyWork(work, l.Work, len(n.Successors)); err != nil {
+		if err := transitionCopyWork(work, l.Work, len(n.Successors), len(n.Context)); err != nil {
 			return TransitionProposal{}, err
 		}
 	}
+	for _, e := range p.Expansions {
+		if err := transitionCopyWork(work, l.Work, len(e.Context)); err != nil {
+			return TransitionProposal{}, err
+		}
+	}
+	p.Expansions = append([]TransitionExpansion(nil), p.Expansions...)
 	p.Nodes = append([]Node(nil), p.Nodes...)
 	for j := range p.Nodes {
 		p.Nodes[j].Successors = append([]uint64(nil), p.Nodes[j].Successors...)
@@ -57,14 +63,25 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	// Charge every element copied into the successor's proof, including the
 	// immutable root projections. Only expression nodes and image bytes share
 	// immutable ownership; no predecessor container or construction arena survives.
-	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Boundary.Bytes), 16} {
+	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Boundary.Bytes), len(b.Frames), len(b.Expansions), len(b.Abstractions), len(prior.justifications), 16} {
 		for range n {
 			if !m.tick() {
 				return m.err
 			}
 		}
 	}
+	for _, frame := range b.Frames {
+		if err := transitionCopyWork(&m.work, m.limits.Work, len(frame.Context)); err != nil {
+			return err
+		}
+	}
+	for _, e := range b.Expansions {
+		if err := transitionCopyWork(&m.work, m.limits.Work, len(e.Context)); err != nil {
+			return err
+		}
+	}
 	m.bound = cloneTransitionBound(b)
+	m.frames, m.thread = m.bound.Frames, m.bound.Thread
 	m.face = m.bound.Interface
 	m.lo, m.hi, _ = originRange(m.face.Origin)
 	m.builder = br.NewBuilder(m.limits.Nodes)
@@ -73,6 +90,41 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			return nil // absent provenance or an intentionally unprojected flag
 		}
 		return m.importTerm(t)
+	}
+	for _, e := range prior.justifications {
+		if err := m.reserveExclusion(); err != nil {
+			return err
+		}
+		left, right := e.Roots()
+		if !e.Valid() || !literalBool(right, 0) {
+			return refuse(m.pc, "transition-predecessor", "invalid retained side-condition proof")
+		}
+		for _, root := range []br.Term{left, right} {
+			if err := importRoot(root); err != nil {
+				return err
+			}
+		}
+		m.justifications = append(m.justifications, e)
+	}
+	for _, root := range []br.Term{b.InitialFS, b.Thread.FS.Value} {
+		if err := importRoot(root); err != nil {
+			return err
+		}
+	}
+	for _, frame := range b.Frames {
+		if err := importRoot(frame.Slot.Origin); err != nil {
+			return err
+		}
+	}
+	for _, a := range b.Abstractions {
+		if !m.tick() {
+			return m.err
+		}
+		for _, root := range []br.Term{a.Value, a.Predicates.CF, a.Predicates.ZF, a.Predicates.SFXorOF} {
+			if err := importRoot(root); err != nil {
+				return err
+			}
+		}
 	}
 	for j, e := range prior.exclusions {
 		if !m.tick() {
@@ -119,8 +171,16 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	for _, effect := range b.PrimitiveEffects {
 		// The opaque predecessor was constructed under this complete rule identity.
 		// Import every dependency, including results absent from current state.
-		e := effect.(CPUIDEffect)
-		for _, root := range []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX} {
+		var roots []br.Term
+		switch e := effect.(type) {
+		case CPUIDEffect:
+			roots = []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX}
+		case ArchSetFSEffect:
+			roots = []br.Term{e.Number, e.Operation, e.Base, e.Valid, e.Result, e.BeforeFS, e.AfterFS}
+		default:
+			return refuse(m.pc, "transition-predecessor", "unknown retained primitive")
+		}
+		for _, root := range roots {
 			if err := importRoot(root); err != nil {
 				return err
 			}

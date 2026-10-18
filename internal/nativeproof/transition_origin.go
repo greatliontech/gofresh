@@ -52,6 +52,9 @@ func (m *transitionChecker) validate() error {
 		return err
 	}
 	c := m.face.Conditions
+	if c.Syscall != "" && c.Syscall != LinuxAMD64SyscallModel || c.Syscall == "" && c.UserAddressBits != 0 || c.Syscall != "" && c.UserAddressBits != 48 && c.UserAddressBits != 57 {
+		return refuse(m.pc, "transition-primitive-model", "unsupported syscall ABI/address-ceiling configuration")
+	}
 	if c.CPUID != "" && c.CPUID != CPUIDModel {
 		return refuse(m.pc, "transition-primitive-model", "unsupported CPUID model")
 	}
@@ -190,7 +193,7 @@ func (m *transitionChecker) permission(s RelativeSpan, kind AccessKind) bool {
 			return false
 		}
 		if s.Start >= r.Bytes.Start && s.End <= r.Bytes.End {
-			return kind == FrameWrite && r.Writable || kind == FrameRead && r.Readable
+			return kind == FrameWrite && r.Writable || (kind == FrameRead || kind == FrameReturnRead) && r.Readable
 		}
 	}
 	return false
@@ -221,7 +224,7 @@ func (m *transitionChecker) imagePermission(span Span, kind AccessKind) bool {
 				return false
 			}
 			load := m.im.loads[index]
-			return kind == FrameRead && load.readable || kind == FrameWrite && load.writable && !load.executable
+			return (kind == FrameRead || kind == FrameReturnRead) && load.readable || kind == FrameWrite && load.writable && !load.executable
 		}
 	}
 	return false

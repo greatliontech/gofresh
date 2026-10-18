@@ -8,12 +8,12 @@ import (
 
 func TestExecutedOnlyRefusals(t *testing.T) {
 	for _, text := range []string{
-		"90", "4890", "e800000000", "c3", "c20000", "eb", "e9000000",
+		"90", "4890", "66e800000000", "66c3", "c20000", "eb", "e9000000",
 		"7800", "0f8800000000", "ffe0", "48ffe0", "488dca",
 		"488b042500000000", "498b042500000000", // absent SIB base, even with B.
 		"4b8b0424", "488b0400", "4b8bb401000080", // X selects R12 / explicit index.
 		"48830000", "48812000000000", // arithmetic memory is not executed here.
-		"48c7c800000000", "4883c000", "4881d800000000", // wrong groups.
+		"48c7c800000000", "4883c800", "4881d800000000", // wrong groups.
 		"6689c0", "668bc0", "664189c0", "40b800000000", "42b800000000",
 		"43b800000000", "44b800000000", "45b800000000", "46b800000000", "47b800000000",
 		"674888c0", "67488ac0", "c5f877", "c4e17877", "62f17c4858c0",
@@ -51,6 +51,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 	for first := 0; first < 256; first++ {
 		b := append([]byte{byte(first)}, make([]byte, 14)...)
 		valid := first >= 0xb0 && first <= 0xbf || first == 0xeb || first == 0xe9 || first >= 0x72 && first <= 0x77 || first >= 0x7c && first <= 0x7f || first == 0x3d || first == 0xa9 || first == 0x88 || first == 0x89 || first == 0x8a || first == 0x8b || first == 0xc6 || first == 0xc7
+		valid = valid || first == 0xe8 || first == 0xc3 || first >= 0x50 && first <= 0x5f
 		_, err := Parse(b, 1<<32)
 		if (err == nil) != valid {
 			t.Fatalf("first byte %x accepted=%v want %v", first, err == nil, valid)
@@ -64,10 +65,10 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 			b := append([]byte{byte(rex), byte(op), 0xc0}, make([]byte, 12)...)
 			valid := op == 0x89 || op == 0x8b || op == 0xc7 || op == 0x39 || op == 0x3b || op == 0x85 || op == 0xf7 || op == 0x3d || op == 0xa9 || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
 			if rex == 0x41 {
-				valid = valid || op >= 0xb8 && op <= 0xbf
+				valid = valid || op >= 0xb8 && op <= 0xbf || op >= 0x50 && op <= 0x5f
 			}
 			if rex >= 0x48 {
-				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d
+				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d || op == 0x05 || op == 0x81 || op == 0x83
 			} else {
 				valid = valid || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
 			}

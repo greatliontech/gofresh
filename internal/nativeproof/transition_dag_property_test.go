@@ -24,7 +24,8 @@ type dagOp struct {
 }
 type dagLayout struct {
 	stateLayout
-	edges [][]int
+	edges       [][]int
+	callReturns map[int]int
 }
 
 func dagArrange(t testing.TB, ops []dagOp, seed uint64) dagLayout {
@@ -76,7 +77,7 @@ func dagArrangePermutation(t testing.TB, ops []dagOp, permutation []int) dagLayo
 		if err != nil {
 			t.Fatal(err)
 		}
-		if i.Operation == to.Branch {
+		if i.Operation == to.Branch || i.Operation == to.Call {
 			i.SignedDisp = int64(testEntry) + int64(position[op.taken]) - int64(pc) - int64(len(b))
 		}
 		if op.address != 0 {
@@ -88,6 +89,12 @@ func dagArrangePermutation(t testing.TB, ops []dagOp, permutation []int) dagLayo
 		}
 		x.pcs[2*j], x.encoded[2*j], x.intents[2*j] = pc, b, i
 		x.edges[2*j] = []int{2*j + 1}
+		if i.Operation == to.Call {
+			x.edges[2*j] = []int{2 * op.taken}
+		}
+		if i.Operation == to.Return {
+			x.edges[2*j] = nil
+		}
 		if i.Operation == to.Branch {
 			x.edges[2*j] = append(x.edges[2*j], 2*op.taken)
 		}

@@ -48,12 +48,15 @@ type stateAccess struct {
 	write       bool
 	off         stateLocation
 	width       int
+	context     string
+	returnRead  bool
 }
 
 type stateQuery struct {
 	instruction   int
 	leaf, subleaf uint32
 	results       [4]uint32 // EAX, EBX, ECX, EDX, chosen before checking
+	context       string
 }
 
 type stateReference struct {
@@ -66,13 +69,28 @@ type stateReference struct {
 	words       map[int64]uint64
 	written     [16]bool
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
-	flags    [6]bool
-	writer   to.Operation
-	accesses []stateAccess
-	frame    map[stateLocation]bool
-	loads    []interfaceMapping
-	outcomes [][4]uint32
-	queries  []stateQuery
+	flags        [6]bool
+	writer       to.Operation
+	accesses     []stateAccess
+	frame        map[stateLocation]bool
+	loads        []interfaceMapping
+	outcomes     [][4]uint32
+	queries      []stateQuery
+	fs           uint64
+	fsp          statePointer
+	flagExtra    uint64
+	context      string
+	syscalls     []stateSyscall
+	returnTarget uint64
+	addressBits  int
+}
+
+type stateSyscall struct {
+	instruction                                      int
+	context                                          string
+	number, option, base, before, after, result, r11 uint64
+	valid                                            bool
+	predicates                                       [3]bool
 }
 
 func stateFace(modulus, residue uint64) TransitionInterface {
@@ -93,6 +111,9 @@ func stateFace(modulus, residue uint64) TransitionInterface {
 func stateInitial(face TransitionInterface, seed uint64) stateReference {
 	rng := rand.New(rand.NewPCG(seed, 0x5154415445))
 	r := stateReference{memory: map[stateLocation]stateByte{}, words: map[int64]uint64{}, frame: map[stateLocation]bool{}}
+	r.fs = seed*0x1234567 + 0x87654321
+	r.addressBits = face.Conditions.UserAddressBits
+	r.flagExtra = 0x202 | (seed&1)<<10
 	// This range is deliberately far from every synthetic image. It is selected
 	// from the interface, not from the checker's origin exclusions or outputs.
 	first := face.Origin.Min + (face.Origin.Residue+face.Origin.Modulus-face.Origin.Min%face.Origin.Modulus)%face.Origin.Modulus
@@ -203,6 +224,12 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 	}
 	// Each remaining 16-byte record independently supplies the full product of
 	// four uint32 outcomes. An absent tail selects zero, never checker output.
+	if face.Conditions.Syscall != "" {
+		r.fs = binary.LittleEndian.Uint64(read(8))
+		extra := read(1)[0]
+		r.flagExtra = 0x202 | uint64(extra&1)<<10 | uint64((extra>>1)&1)<<16 | uint64((extra>>2)&1)<<18 | uint64((extra>>3)&1)<<21
+		r.addressBits = face.Conditions.UserAddressBits
+	}
 	for len(data) != 0 {
 		var tuple [4]uint32
 		for j := range tuple {
@@ -224,6 +251,7 @@ func (r stateReference) clone() stateReference {
 	}
 	r.accesses = slices.Clone(r.accesses)
 	r.queries = slices.Clone(r.queries)
+	r.syscalls = slices.Clone(r.syscalls)
 	r.outcomes = slices.Clone(r.outcomes)
 	return r
 }
@@ -231,6 +259,47 @@ func (r stateReference) clone() stateReference {
 func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
 	if i.Operation == to.Jump || i.Operation == to.Branch {
+		return
+	}
+	if i.Operation == to.Call || i.Operation == to.Push || i.Operation == to.Pop || i.Operation == to.Return {
+		r.referenceStack(t, i, index, nextPC...)
+		return
+	}
+	if i.Operation == to.Syscall {
+		if len(nextPC) != 1 {
+			t.Fatal("syscall without independent next PC")
+		}
+		q := stateSyscall{instruction: index, context: r.context, number: uint64(uint32(r.regs[0])), option: uint64(uint32(r.regs[7])), base: r.regs[6], before: r.fs}
+		q.predicates = [3]bool{r.flags[0], r.flags[1], r.flags[3] != r.flags[2]}
+		if q.number != 158 || q.option != 0x1002 {
+			t.Fatal("invalid syscall in positive reference")
+		}
+		// The reference's ceiling is fixture-owned, not read from an effect.
+		ceiling := uint64(1)<<47 - 4096
+		if r.addressBits == 57 {
+			ceiling = uint64(1)<<56 - 4096
+		}
+		q.valid = q.base < ceiling
+		q.result = ^uint64(0)
+		if q.valid {
+			q.result = 0
+			r.fs = q.base
+			r.fsp = r.ptrs[6]
+		}
+		q.after = r.fs
+		q.r11 = r.flagExtra &^ uint64(1<<16)
+		r.flagExtra &^= uint64(1 << 16)
+		for j, bit := range []uint{0, 6, 11, 7, 4, 2} {
+			if r.flags[j] {
+				q.r11 |= uint64(1) << bit
+			}
+		}
+		r.syscalls = append(r.syscalls, q)
+		for j, reg := range []int{0, 1, 11} {
+			r.regs[reg] = []uint64{q.result, nextPC[0], q.r11}[j]
+			r.ptrs[reg] = statePointer{}
+			r.written[reg] = true
+		}
 		return
 	}
 	width := 64
@@ -281,7 +350,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		return
 	}
 	if i.Operation == to.CPUID {
-		q := stateQuery{instruction: index, leaf: uint32(r.regs[0]), subleaf: uint32(r.regs[1])}
+		q := stateQuery{instruction: index, leaf: uint32(r.regs[0]), subleaf: uint32(r.regs[1]), context: r.context}
 		if len(r.queries) < len(r.outcomes) {
 			q.results = r.outcomes[len(r.queries)]
 		}
@@ -292,6 +361,9 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		return
 	}
 	address := r.regs[i.Base] + uint64(i.SignedDisp)
+	if i.FS {
+		address = r.fs + uint64(i.SignedDisp)
+	}
 	if i.RIP {
 		if len(nextPC) != 1 {
 			t.Fatal("RIP memory needs independently encoded end")
@@ -301,6 +373,9 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 	access := func(write bool) stateLocation {
 		t.Helper()
 		p := r.ptrs[i.Base]
+		if i.FS {
+			p = r.fsp
+		}
 		if i.RIP {
 			p = statePointer{valid: true, image: true, off: int64(nextPC[0])}
 		}
@@ -317,7 +392,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 				t.Fatal("reference access outside declared bytes", off)
 			}
 		}
-		r.accesses = append(r.accesses, stateAccess{index, write, off, width / 8})
+		r.accesses = append(r.accesses, stateAccess{instruction: index, write: write, off: off, width: width / 8, context: r.context})
 		return off
 	}
 	if i.Operation == to.Store || i.Operation == to.StoreImmediate {
@@ -395,6 +470,15 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 			r.ptrs[i.Dst].off -= int64(y)
 		}
 		r.writer = to.Subtract
+	case to.Add:
+		x, y := r.regs[i.Dst], i.Immediate
+		z, carry := bits.Add64(x, y, 0)
+		r.regs[i.Dst] = z
+		r.flags = [6]bool{carry != 0, z == 0, ^(x^y)&(x^z)&(1<<63) != 0, z>>63 != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
+		if r.ptrs[i.Dst].valid {
+			r.ptrs[i.Dst].off += int64(y)
+		}
+		r.writer = to.Add
 	case to.And:
 		r.regs[i.Dst] &= i.Immediate
 		z := r.regs[i.Dst]
@@ -499,6 +583,11 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 	}
 	for j, x := range b.InitialRegisters {
 		variable(x, br.Bits(64), initial.regs[j])
+	}
+	if face.Conditions.Syscall != "" {
+		variable(b.InitialFS, br.Bits(64), initial.fs)
+	} else if b.InitialFS.Valid() {
+		t.Fatal("invented thread input")
 	}
 	if len(b.Words) != len(face.Words) {
 		t.Fatal("input word keyset differs")
@@ -1008,6 +1097,9 @@ func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	t.Helper()
 	if len(current.PrimitiveEffects) < len(original.PrimitiveEffects) || !slices.Equal(current.PrimitiveEffects[:len(original.PrimitiveEffects)], original.PrimitiveEffects) {
 		t.Fatal("continuation replaced prior primitive outcomes or selectors")
+	}
+	if original.InitialFS != current.InitialFS || len(current.Abstractions) < len(original.Abstractions) || !slices.Equal(current.Abstractions[:len(original.Abstractions)], original.Abstractions) {
+		t.Fatal("continuation replaced thread input or analysis abstraction origins")
 	}
 	if current.Origin != original.Origin || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||

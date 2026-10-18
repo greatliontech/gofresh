@@ -35,6 +35,9 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		return
 	}
 	count := uint8(1)
+	if want.Intent.Operation == to.Return {
+		count = 0
+	}
 	if want.Intent.Operation == to.Branch {
 		count = 2
 	}
@@ -64,10 +67,15 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		t.Helper()
 		m, ok := arg.(x86asm.Mem)
 		base := oracleRegisters64[i.Base]
+		segment := x86asm.Reg(0)
+		if i.FS {
+			base = 0
+			segment = x86asm.FS
+		}
 		if i.Operation == to.LEARIP || i.RIP {
 			base = x86asm.RIP
 		}
-		if !ok || m.Base != base || m.Index != 0 || m.Segment != 0 || m.Disp != i.SignedDisp {
+		if !ok || m.Base != base || m.Index != 0 || m.Segment != segment || m.Disp != i.SignedDisp {
 			t.Fatalf("address for %x: %+v, expected base=%d displacement=%d", code, arg, i.Base, i.SignedDisp)
 		}
 		// A no-index SIB's scale bits have no address effect; their spelling is
@@ -89,6 +97,30 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	}
 	op := x86asm.MOV
 	switch i.Operation {
+	case to.Syscall:
+		op = x86asm.SYSCALL
+		if args != ([2]x86asm.Arg{}) {
+			t.Fatal("SYSCALL explicit operands")
+		}
+	case to.Return:
+		op = x86asm.RET
+		if args != ([2]x86asm.Arg{}) {
+			t.Fatal("RET explicit operands")
+		}
+	case to.Push, to.Pop:
+		op = x86asm.PUSH
+		if i.Operation == to.Pop {
+			op = x86asm.POP
+		}
+		reg(args[0], i.Dst, false)
+		if args[1] != nil {
+			t.Fatal("stack extra operand")
+		}
+	case to.Call:
+		op = x86asm.CALL
+		if args[0] != x86asm.Rel(i.SignedDisp) || args[1] != nil || got.targets[0] != want.Target {
+			t.Fatal("CALL target/extent differs")
+		}
 	case to.CPUID:
 		op = x86asm.CPUID
 		if args != ([2]x86asm.Arg{}) {
@@ -113,10 +145,13 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		op = x86asm.LEA
 		reg(args[0], i.Dst, false)
 		mem(args[1])
-	case to.Subtract, to.And:
+	case to.Subtract, to.And, to.Add:
 		op = x86asm.SUB
 		if i.Operation == to.And {
 			op = x86asm.AND
+		}
+		if i.Operation == to.Add {
+			op = x86asm.ADD
 		}
 		reg(args[0], i.Dst, false)
 		imm(args[1], false)
@@ -144,7 +179,7 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	default:
 		t.Fatal("unhandled independent operation", i.Operation)
 	}
-	if got.inst.Op != op || i.Operation != to.Jump && got.targets[0] != want.Next {
+	if got.inst.Op != op || i.Operation != to.Jump && i.Operation != to.Call && i.Operation != to.Return && got.targets[0] != want.Next {
 		t.Fatalf("opcode/fallthrough for %x: %+v, expected %+v", code, got, want)
 	}
 }
@@ -156,9 +191,9 @@ func descriptorPayload(d to.Descriptor, immediate uint64, displacement int32) to
 		i.Immediate = immediate
 	case to.MOVB8Imm32:
 		i.Immediate = uint64(uint32(immediate))
-	case to.MOVC7, to.SUB81, to.SUB2D, to.AND81, to.AND25, to.CMP81, to.CMP3D, to.TESTF7, to.TESTA9:
+	case to.MOVC7, to.SUB81, to.SUB2D, to.ADD81, to.ADD05, to.AND81, to.AND25, to.CMP81, to.CMP3D, to.TESTF7, to.TESTA9:
 		i.Immediate = uint64(int64(int32(immediate)))
-	case to.SUB83, to.AND83, to.CMP83:
+	case to.SUB83, to.ADD83, to.AND83, to.CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
 	case to.MOVC6, to.MOVB0:
 		i.Immediate = uint64(uint8(immediate))
@@ -168,7 +203,7 @@ func descriptorPayload(d to.Descriptor, immediate uint64, displacement int32) to
 	}
 	if d.Encoding.DispBytes == 1 || d.Encoding.Form == to.JMPEB || d.Encoding.Form == to.JccShort {
 		i.SignedDisp = int64(int8(displacement))
-	} else if d.Encoding.DispBytes == 4 || d.Encoding.Form == to.JMPE9 || d.Encoding.Form == to.JccNear {
+	} else if d.Encoding.DispBytes == 4 || d.Encoding.Form == to.JMPE9 || d.Encoding.Form == to.JccNear || d.Encoding.Form == to.CALLE8 {
 		i.SignedDisp = int64(displacement)
 	}
 	return i
@@ -191,7 +226,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 53419 {
+	if count != 54814 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;
@@ -230,6 +265,9 @@ func FuzzTransitionExecutedEncoding(f *testing.F) {
 func FuzzTransitionExecutedRawAdmission(f *testing.F) {
 	f.Add([]byte{0x0f, 0xa2})
 	f.Add([]byte{0x66, 0x0f, 0xa2})
+	for _, code := range [][]byte{{0xe8, 0xf8, 0xff, 0xff, 0xff}, {0x54}, {0x5c}, {0x41, 0x5f}, {0xc3}, {0x0f, 0x05}, {0x64, 0x48, 0xc7, 0x04, 0x25, 0xf8, 0xff, 0xff, 0xff, 0x23, 1, 0, 0}, {0x64, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}, {0x48, 0x64, 0x8b, 0x04, 0x25, 0, 0, 0, 0}, {0x64, 0x67, 0x48, 0x8b, 0, 0, 0, 0}} {
+		f.Add(code)
+	}
 	for _, code := range [][]byte{{0x48, 0x89, 0xe0}, {0x48, 0x8d, 0x80, 0xf8, 0xff, 0xff, 0xff}, {0x48, 0x8b, 0x04, 0xe0}, {0x48, 0x83, 0xec, 0x28}, {0x41, 0xbd, 0, 0, 0, 0}, {0xc5, 0xf8, 0x77}, {0x48, 0x48, 0x89, 0xe0}, {0x4f, 0x8d, 0x3d, 0x80, 0xff, 0xff, 0xff}} {
 		f.Add(code)
 	}
